@@ -1,0 +1,112 @@
+<svg viewBox="0 0 400 600" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="400" height="600" fill="#001525" />
+  
+  <!-- Textured background effect -->
+  <filter id="noise" x="0%" y="0%" width="100%" height="100%">
+    <feTurbulence type="fractalNoise" baseFrequency="0.02" numOctaves="3" result="noise" />
+    <feDisplacementMap in="SourceGraphic" in2="noise" scale="5" />
+  </filter>
+  
+  <!-- Glow effect -->
+  <filter id="glow">
+    <feGaussianBlur stdDeviation="5" result="blur" />
+    <feComposite in="SourceGraphic" in2="blur" operator="over" />
+  </filter>
+  
+  <!-- Base textured background -->
+  <rect width="400" height="600" fill="#001525" filter="url(#noise)" opacity="0.5" />
+  
+  <!-- Object 1: Original flipped vertically (180 degrees) - placed in top position -->
+  <g transform="translate(0, 100)">
+    <g transform="translate(200, 150) scale(1, -1) translate(-200, -150)">
+      <!-- S-shaped arrow path with pointed arrow end -->
+      <g filter="url(#glow)">
+        <path d="M 240,100 
+                 C 180,100 120,140 120,200 
+                 C 120,260 180,300 240,300 
+                 L 240,300 
+                 L 220,320 
+                 L 270,300 
+                 L 220,280 
+                 L 240,300 
+                 C 190,300 140,270 140,200 
+                 C 140,130 190,120 240,120 
+                 L 240,120 
+                 L 260,140 
+                 L 210,120 
+                 L 260,100 
+                 Z" 
+              fill="#00e5ff" />
+      </g>
+      
+      <!-- Inner light effect -->
+      <g filter="url(#glow)" opacity="0.6">
+        <path d="M 237,105 
+                 C 182,105 125,142 125,200 
+                 C 125,258 182,295 237,295" 
+              stroke="#80f0ff" 
+              stroke-width="2" 
+              fill="none" />
+      </g>
+      
+      <!-- Brighter core -->
+      <g filter="url(#glow)">
+        <path d="M 237,110 
+                 C 186,110 130,144 130,200 
+                 C 130,256 186,290 237,290" 
+              stroke="#ffffff" 
+              stroke-width="1" 
+              fill="none" />
+      </g>
+    </g>
+  </g>
+  
+  <!-- Object 2: Original flipped horizontally (180 degrees) - placed to ensure full visibility -->
+  <g transform="translate(0, 180)">
+    <g transform="translate(200, 150) scale(-1, 1) translate(-200, -150)">
+      <!-- S-shaped arrow path with pointed arrow end -->
+      <g filter="url(#glow)">
+        <path d="M 240,100 
+                 C 180,100 120,140 120,200 
+                 C 120,260 180,300 240,300 
+                 L 240,300 
+                 L 220,320 
+                 L 270,300 
+                 L 220,280 
+                 L 240,300 
+                 C 190,300 140,270 140,200 
+                 C 140,130 190,120 240,120 
+                 L 240,120 
+                 L 260,140 
+                 L 210,120 
+                 L 260,100 
+                 Z" 
+              fill="#00e5ff" />
+      </g>
+      
+      <!-- Inner light effect -->
+      <g filter="url(#glow)" opacity="0.6">
+        <path d="M 237,105 
+                 C 182,105 125,142 125,200 
+                 C 125,258 182,295 237,295" 
+              stroke="#80f0ff" 
+              stroke-width="2" 
+              fill="none" />
+      </g>
+      
+      <!-- Brighter core -->
+      <g filter="url(#glow)">
+        <path d="M 237,110 
+                 C 186,110 130,144 130,200 
+                 C 130,256 186,290 237,290" 
+              stroke="#ffffff" 
+              stroke-width="1" 
+              fill="none" />
+      </g>
+    </g>
+  </g>
+  
+  <!-- Small logo mark in bottom right -->
+  <text x="360" y="580" font-family="Arial" font-size="12" fill="#555">Ø</text>
+</svg>
