@@ -49,12 +49,20 @@ class MotionDetector:
         self.recording_start_time = 0
         self.last_motion_time = 0
         self.frames_recorded = 0
+        self.recording_target_frames = int(RECORDING_DURATION * RECORDING_FPS)
+        self.current_video_path: Optional[str] = None
+        self.last_completed_video_path: Optional[str] = None
+        self.current_recording_reason: str = "motion"
+        self.last_completed_video_reason: str = "motion"
         self.motion_cooldown = MOTION_COOLDOWN
 
         # Zone and line based alert gating
         self.active_zones = DEFAULT_ACTIVE_ZONES.copy()
         self.entry_lines = DEFAULT_ENTRY_LINES.copy()
         self.entry_direction = DEFAULT_ENTRY_DIRECTION
+        self.night_bug_filter_enabled = True
+        self.night_bug_start_hour = 20
+        self.night_bug_end_hour = 6
 
         # Lightweight centroid tracking for line crossing
         self.tracks: Dict[int, Dict[str, Any]] = {}
@@ -81,13 +89,33 @@ class MotionDetector:
         if direction in ("outside_to_inside", "inside_to_outside", "both"):
             self.entry_direction = direction
 
+    def set_night_bug_filter(self, enabled: bool, start_hour: int, end_hour: int) -> None:
+        """Update night bug filter schedule settings."""
+        self.night_bug_filter_enabled = bool(enabled)
+        self.night_bug_start_hour = max(0, min(23, int(start_hour)))
+        self.night_bug_end_hour = max(0, min(23, int(end_hour)))
+
     def get_last_raw_frame(self) -> Optional[np.ndarray]:
         """Return the latest unannotated frame."""
         if self.last_raw_frame is None:
             return None
         return self.last_raw_frame.copy()
 
-    def start_recording(self, frame_size):
+    def consume_last_completed_video_path(self) -> Optional[str]:
+        """Return and clear the most recently completed recording path."""
+        path = self.last_completed_video_path
+        self.last_completed_video_path = None
+        return path
+
+    def consume_last_completed_recording(self) -> Tuple[Optional[str], str]:
+        """Return and clear completed recording path plus reason."""
+        path = self.last_completed_video_path
+        reason = self.last_completed_video_reason
+        self.last_completed_video_path = None
+        self.last_completed_video_reason = "motion"
+        return path, reason
+
+    def start_recording(self, frame_size, reason: str = "motion"):
         """
         Start recording a video clip.
 
@@ -113,6 +141,8 @@ class MotionDetector:
             self.recording = True
             self.recording_start_time = time.time()
             self.frames_recorded = 0
+            self.current_video_path = video_path
+            self.current_recording_reason = reason
 
             print(f"Started recording: {video_path}")
             return video_path
@@ -132,6 +162,11 @@ class MotionDetector:
             self.video_writer.release()
             self.video_writer = None
             self.recording = False
+            if self.current_video_path:
+                self.last_completed_video_path = self.current_video_path
+                self.last_completed_video_reason = self.current_recording_reason
+            self.current_video_path = None
+            self.current_recording_reason = "motion"
 
             duration = time.time() - self.recording_start_time
             print(
@@ -143,6 +178,8 @@ class MotionDetector:
             print(f"Error stopping recording: {e}")
             self.video_writer = None
             self.recording = False
+            self.current_video_path = None
+            self.current_recording_reason = "motion"
             return False
 
     def write_frame(self, frame):
@@ -162,9 +199,8 @@ class MotionDetector:
             self.video_writer.write(frame)
             self.frames_recorded += 1
 
-            # Check if recording duration has elapsed
-            current_time = time.time()
-            if (current_time - self.recording_start_time) >= RECORDING_DURATION:
+            # Stop based on target frame count so output clip duration is stable.
+            if self.frames_recorded >= self.recording_target_frames:
                 self.stop_recording()
 
             return True
@@ -344,12 +380,72 @@ class MotionDetector:
         if best_id is None:
             best_id = self.next_track_id
             self.next_track_id += 1
-            self.tracks[best_id] = {"centroid": centroid, "last_seen": time.time(), "line_sides": {}}
+            now = time.time()
+            self.tracks[best_id] = {
+                "centroid": centroid,
+                "previous_centroid": centroid,
+                "last_seen": now,
+                "created_at": now,
+                "line_sides": {},
+            }
             return best_id
 
+        previous = self.tracks[best_id]["centroid"]
+        self.tracks[best_id]["previous_centroid"] = previous
         self.tracks[best_id]["centroid"] = centroid
         self.tracks[best_id]["last_seen"] = time.time()
         return best_id
+
+    def _night_bug_filter_active(self) -> bool:
+        """Return True when night bug filter is enabled and schedule is active."""
+        if not self.night_bug_filter_enabled:
+            return False
+        now_hour = time.localtime().tm_hour
+        start = self.night_bug_start_hour
+        end = self.night_bug_end_hour
+        if start == end:
+            return True
+        if start < end:
+            return start <= now_hour < end
+        return now_hour >= start or now_hour < end
+
+    def _is_bug_like_motion(
+        self,
+        contour_area: float,
+        track_id: int,
+        centroid: Tuple[int, int],
+        frame_w: int,
+        frame_h: int,
+    ) -> bool:
+        """
+        Balanced nighttime insect suppression.
+
+        Treat motion as bug-like when most traits match:
+        tiny, short-lived, fast darting, and edge-near.
+        """
+        frame_area = float(max(1, frame_w * frame_h))
+        area_ratio = contour_area / frame_area
+        tiny = area_ratio < 0.004
+
+        track = self.tracks.get(track_id, {})
+        age_seconds = max(0.0, time.time() - float(track.get("created_at", time.time())))
+        short_lived = age_seconds < 1.4
+
+        prev = track.get("previous_centroid", centroid)
+        speed_px = float(np.hypot(centroid[0] - prev[0], centroid[1] - prev[1]))
+        fast = speed_px > 30.0
+
+        edge_margin_x = int(frame_w * 0.12)
+        edge_margin_y = int(frame_h * 0.12)
+        edge_near = (
+            centroid[0] <= edge_margin_x
+            or centroid[0] >= (frame_w - edge_margin_x)
+            or centroid[1] <= edge_margin_y
+            or centroid[1] >= (frame_h - edge_margin_y)
+        )
+
+        score = int(tiny) + int(short_lived) + int(fast) + int(edge_near)
+        return score >= 3
 
     def _line_crossed_for_track(
         self,
@@ -423,16 +519,27 @@ class MotionDetector:
             frame_h, frame_w = frame.shape[:2]
 
             for contour in contours:
-                if cv2.contourArea(contour) < self.min_contour_area:
+                contour_area = cv2.contourArea(contour)
+                if contour_area < self.min_contour_area:
                     continue
 
                 (x, y, w, h) = cv2.boundingRect(contour)
                 centroid = (x + w // 2, y + h // 2)
-                if not self._point_in_active_zone(centroid, frame_w, frame_h):
-                    continue
+                in_active_zone = self._point_in_active_zone(centroid, frame_w, frame_h)
 
                 track_id = self._assign_track(centroid)
+                if self._night_bug_filter_active() and self._is_bug_like_motion(
+                    contour_area,
+                    track_id,
+                    centroid,
+                    frame_w,
+                    frame_h,
+                ):
+                    continue
                 crossed_line = self._line_crossed_for_track(track_id, centroid, frame_w, frame_h)
+                should_trigger = in_active_zone or crossed_line
+                if not should_trigger:
+                    continue
 
                 motion_rects.append((x, y, w, h))
 
@@ -448,8 +555,7 @@ class MotionDetector:
                     2,
                 )
                 motion_detected = True
-                if crossed_line:
-                    gated_motion_detected = True
+                gated_motion_detected = True
 
             self._cleanup_old_tracks()
 

@@ -7,9 +7,24 @@ from __future__ import annotations
 from typing import List, Tuple
 
 import cv2
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import QDialog, QGridLayout, QLabel, QVBoxLayout
+from PySide6.QtWidgets import QDialog, QGridLayout, QLabel, QVBoxLayout, QPushButton, QWidget
+
+
+class ClickableLabel(QLabel):
+    """QLabel that emits a signal when clicked."""
+
+    clicked = Signal(int)
+
+    def __init__(self, index: int, text: str, parent=None):
+        super().__init__(text, parent)
+        self.index = index
+
+    def mousePressEvent(self, event):  # noqa: N802
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit(self.index)
+        super().mousePressEvent(event)
 
 
 class MultiViewWindow(QDialog):
@@ -22,24 +37,52 @@ class MultiViewWindow(QDialog):
         self.sources = sources
         self.captures = []
         self.labels: List[QLabel] = []
+        self.focused_index = None
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_streams)
 
         root = QVBoxLayout(self)
-        grid = QGridLayout()
-        root.addLayout(grid)
+        self.return_btn = QPushButton("Return to MultiView")
+        self.return_btn.clicked.connect(self.return_to_grid)
+        self.return_btn.hide()
+        root.addWidget(self.return_btn)
+
+        self.grid_widget = QWidget()
+        self.grid = QGridLayout(self.grid_widget)
+        root.addWidget(self.grid_widget)
+
+        self.focus_label = QLabel("No stream selected")
+        self.focus_label.setAlignment(Qt.AlignCenter)
+        self.focus_label.setStyleSheet("background-color: black; color: #00FFFF;")
+        self.focus_label.hide()
+        root.addWidget(self.focus_label)
 
         columns = 2
         for i, (name, source) in enumerate(self.sources):
-            label = QLabel(f"{name}\nConnecting...")
+            label = ClickableLabel(i, f"{name}\nConnecting...")
             label.setAlignment(Qt.AlignCenter)
             label.setStyleSheet("background-color: black; color: #00FFFF;")
             label.setMinimumSize(320, 240)
-            grid.addWidget(label, i // columns, i % columns)
+            label.clicked.connect(self.focus_stream)
+            self.grid.addWidget(label, i // columns, i % columns)
             self.labels.append(label)
             self.captures.append(cv2.VideoCapture(source))
 
         self.timer.start(120)
+
+    def focus_stream(self, index: int) -> None:
+        """Switch from grid mode to focused single-stream mode."""
+        self.focused_index = index
+        self.grid_widget.hide()
+        self.focus_label.show()
+        self.return_btn.show()
+
+    def return_to_grid(self) -> None:
+        """Return to multi-camera grid mode."""
+        self.focused_index = None
+        self.focus_label.hide()
+        self.return_btn.hide()
+        self.grid_widget.show()
 
     def update_streams(self) -> None:
         for i, cap in enumerate(self.captures):
@@ -53,14 +96,32 @@ class MultiViewWindow(QDialog):
 
             ok, frame = cap.read()
             if not ok or frame is None:
-                label.setText("No Frame")
+                if self.focused_index == i:
+                    self.focus_label.setText("No Frame")
+                else:
+                    label.setText("No Frame")
                 continue
 
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             h, w, ch = frame_rgb.shape
             q_image = QImage(frame_rgb.data, w, h, ch * w, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(q_image)
-            label.setPixmap(pixmap.scaled(label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            if self.focused_index == i:
+                self.focus_label.setPixmap(
+                    pixmap.scaled(
+                        self.focus_label.size(),
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation,
+                    )
+                )
+            elif self.focused_index is None:
+                label.setPixmap(
+                    pixmap.scaled(
+                        label.size(),
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation,
+                    )
+                )
 
     def closeEvent(self, event):
         self.timer.stop()

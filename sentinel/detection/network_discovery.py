@@ -25,12 +25,18 @@ class CameraEndpoint:
 class NetworkCameraDiscovery:
     """Discovers RTSP-capable cameras on the local subnet."""
 
-    COMMON_RTSP_PATHS = [
+    COMMON_RTSP_MAIN_PATHS = [
         "",
         "/h264/ch1/main/av_stream",
         "/Streaming/Channels/101",
         "/cam/realmonitor?channel=1&subtype=0",
         "/live/ch00_0",
+    ]
+    COMMON_RTSP_SUB_PATHS = [
+        "/h264/ch1/sub/av_stream",
+        "/Streaming/Channels/102",
+        "/cam/realmonitor?channel=1&subtype=1",
+        "/live/ch00_1",
     ]
     COMMON_PORTS = [554, 8554]
 
@@ -42,6 +48,7 @@ class NetworkCameraDiscovery:
         username: str = "",
         password: str = "",
         scan_limit: int = 80,
+        prefer_substream: bool = False,
     ) -> List[CameraEndpoint]:
         """Scan local subnet and return endpoints that provide a readable stream."""
         network = self._detect_local_network()
@@ -54,12 +61,17 @@ class NetworkCameraDiscovery:
 
         results: List[CameraEndpoint] = []
         for host in candidate_hosts:
-            rtsp_url = self._find_working_rtsp_url(host, username, password)
-            if rtsp_url:
+            endpoint = self._find_working_rtsp_endpoint(
+                host,
+                username,
+                password,
+                prefer_substream=prefer_substream,
+            )
+            if endpoint:
                 results.append(
                     CameraEndpoint(
-                        label=f"Network {host}",
-                        source=rtsp_url,
+                        label=endpoint["label"],
+                        source=endpoint["source"],
                         host=host,
                     )
                 )
@@ -98,16 +110,34 @@ class NetworkCameraDiscovery:
                     return True
         return False
 
-    def _find_working_rtsp_url(self, host: str, username: str, password: str) -> Optional[str]:
+    def _find_working_rtsp_endpoint(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        prefer_substream: bool = False,
+    ) -> Optional[dict]:
         auth = ""
         if username:
             auth = f"{username}:{password}@"
 
+        sub_patterns = tuple(
+            path for path in self.COMMON_RTSP_SUB_PATHS if path
+        )
+        ordered_paths = (
+            self.COMMON_RTSP_SUB_PATHS + self.COMMON_RTSP_MAIN_PATHS
+            if prefer_substream
+            else self.COMMON_RTSP_MAIN_PATHS + self.COMMON_RTSP_SUB_PATHS
+        )
         for port in self.COMMON_PORTS:
-            for path in self.COMMON_RTSP_PATHS:
+            for path in ordered_paths:
                 url = f"rtsp://{auth}{host}:{port}{path}"
                 if self._stream_is_readable(url):
-                    return url
+                    stream_kind = "Substream" if path in sub_patterns else "Main"
+                    return {
+                        "source": url,
+                        "label": f"Network {host} ({stream_kind})",
+                    }
         return None
 
     def _stream_is_readable(self, source: str) -> bool:

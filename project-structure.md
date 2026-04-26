@@ -2,46 +2,54 @@
 
 ```
 sentinel/
-├── main.py                     # Entry point (loads from modules)
-├── sentinel/                   # Main package
-│   ├── __init__.py             # Package initialization
-│   ├── app.py                  # Main application class
-│   ├── constants.py            # Configuration constants
-│   ├── detection/              # Motion detection module
+├── main.py                              # Desktop entry point
+├── readme.md                            # User documentation
+├── installation-guide.md                # Installation-focused guide
+├── project-structure.md                 # This file
+├── requirements.txt                     # Python dependencies
+├── settings.json                        # Runtime settings (generated/updated)
+├── captured_images/                     # Saved snapshots
+├── recorded_videos/                     # Saved recordings
+├── sentinel/
+│   ├── __init__.py
+│   ├── app.py                           # Wiring of app components
+│   ├── constants.py                     # App constants/defaults
+│   ├── audio/
 │   │   ├── __init__.py
-│   │   └── motion_detector.py  # Motion detection class
-│   ├── audio/                  # Audio module
+│   │   └── alert_system.py              # Piper/pyttsx3 alert engine
+│   ├── detection/
 │   │   ├── __init__.py
-│   │   └── alert_system.py     # Text-to-speech alert system
-│   ├── settings/               # Settings module
+│   │   ├── motion_detector.py           # Detection, zones/lines, recording logic
+│   │   └── network_discovery.py         # RTSP camera discovery
+│   ├── notifications/
 │   │   ├── __init__.py
-│   │   └── manager.py          # Settings management class
-│   └── ui/                     # User interface module
+│   │   └── telegram_notifier.py         # Telegram send/commands/pause/clip
+│   ├── settings/
+│   │   ├── __init__.py
+│   │   └── manager.py                   # Persistent settings layer
+│   └── ui/
 │       ├── __init__.py
-│       ├── main_window.py      # Main window class
-│       └── styles.py           # UI stylesheets
-├── requirements.txt            # Dependencies
-├── LICENSE                     # License file
-├── .gitignore                  # Git ignore file
-└── README.md                   # Project documentation
+│       ├── main_window.py               # Main control + feed window
+│       ├── multiview_window.py          # Multi-camera grid/focus view
+│       └── styles.py
 ```
 
 ## About This Structure
 
-This modular structure separates different components of the application:
+The project is organized by responsibility:
 
-1. **Constants**: Configuration values are stored in one place for easy adjustments
-2. **Detection**: Motion detection logic is isolated
-3. **Audio**: Text-to-speech functionality is separate
-4. **Settings**: Settings management has its own module
-5. **UI**: User interface code is organized separately
+- **`sentinel/detection/`**: motion detection, tracking, zones/lines, recording, network camera discovery
+- **`sentinel/notifications/`**: Telegram notifications + inbound command handling
+- **`sentinel/audio/`**: speech alert subsystem
+- **`sentinel/settings/`**: load/save user settings (`settings.json`)
+- **`sentinel/ui/`**: main window and multiview interfaces
 
-The main application class in `app.py` integrates these components. The entry point `main.py` remains simple.
+`main.py` remains a thin launcher, while `sentinel/app.py` composes the modules into the running desktop application.
 
 ## Benefits of This Structure
 
 - Each component can be tested individually
 - Easier to understand and maintain
-- More flexible for future enhancements
+- Flexible for feature growth (new notifiers/camera backends/UI pages)
 - Better separation of concerns
 - Makes collaboration easier

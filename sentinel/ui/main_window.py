@@ -35,6 +35,7 @@ from PySide6.QtGui import (
     QCloseEvent,
     QResizeEvent,
     QMouseEvent,
+    QKeyEvent,
 )
 from PySide6.QtCore import Qt, QTimer, QPoint
 
@@ -55,6 +56,7 @@ from sentinel.constants import (
 )
 from sentinel.detection import MotionDetector, NetworkCameraDiscovery
 from sentinel.audio import AudioAlertSystem
+from sentinel.notifications import TelegramNotifier
 from sentinel.settings import SettingsManager
 from sentinel.ui.multiview_window import MultiViewWindow
 
@@ -69,6 +71,7 @@ class MainWindow(QMainWindow):
         settings_manager: SettingsManager,
         motion_detector: MotionDetector,
         audio_system: AudioAlertSystem,
+        telegram_notifier: TelegramNotifier,
     ):
         super().__init__()
 
@@ -82,15 +85,23 @@ class MainWindow(QMainWindow):
         motion_detector.set_entry_direction(
             settings_manager.get("entry_direction", "outside_to_inside")
         )
+        motion_detector.set_night_bug_filter(
+            settings_manager.get("night_bug_filter_enabled", True),
+            settings_manager.get("night_bug_start_hour", 20),
+            settings_manager.get("night_bug_end_hour", 6),
+        )
 
         # Store component references
         self.settings_manager = settings_manager
         self.motion_detector = motion_detector
         self.audio_system = audio_system
+        self.telegram_notifier = telegram_notifier
         self.network_discovery = NetworkCameraDiscovery()
         self.camera_sources = {}
         self.discovered_network_sources = []
         self.multiview_window = None
+        self.pending_clip_request_chat_ids: List[str] = []
+        self.prefer_substream = self.settings_manager.get("prefer_substream", True)
         self.current_frame_size: Tuple[int, int] = (640, 480)
         self.last_display_pixmap_size: Tuple[int, int] = (1, 1)
         self.last_display_offset: Tuple[int, int] = (0, 0)
@@ -107,6 +118,7 @@ class MainWindow(QMainWindow):
         self.display_overlay_mode = self.settings_manager.get(
             "display_overlay_mode", DEFAULT_DISPLAY_OVERLAY_MODE
         )
+        self.is_main_fullscreen = False
 
         # Set up timer for camera feed updates
         self.timer = QTimer()
@@ -165,6 +177,7 @@ class MainWindow(QMainWindow):
         # Add control groups
         self.setup_camera_controls()
         self.setup_speech_controls()
+        self.setup_telegram_controls()
         self.setup_orientation_controls()
         self.setup_recording_controls()
         self.setup_motion_sensitivity_controls()
@@ -198,6 +211,41 @@ class MainWindow(QMainWindow):
         """)
         self.main_layout.addWidget(self.scroll_area)
 
+    def add_collapsible_section(
+        self,
+        title: str,
+        content_widget: QWidget,
+        settings_key: str,
+        default_expanded: bool = True,
+    ) -> None:
+        """Wrap a section widget with a clickable collapse/expand header."""
+        expanded = self.settings_manager.get(settings_key, default_expanded)
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(4)
+
+        header_btn = QPushButton()
+        header_btn.setCheckable(True)
+        header_btn.setChecked(expanded)
+
+        def refresh_header_text(is_expanded: bool) -> None:
+            icon = "▼" if is_expanded else "▶"
+            header_btn.setText(f"{icon} {title}")
+
+        refresh_header_text(expanded)
+        content_widget.setVisible(expanded)
+
+        def on_toggle(checked: bool) -> None:
+            content_widget.setVisible(checked)
+            refresh_header_text(checked)
+            self.settings_manager.set(settings_key, checked)
+
+        header_btn.toggled.connect(on_toggle)
+        container_layout.addWidget(header_btn)
+        container_layout.addWidget(content_widget)
+        self.control_layout.addWidget(container)
+
     def setup_camera_controls(self) -> None:
         """Set up camera selection and control buttons."""
         # Create camera group
@@ -222,6 +270,11 @@ class MainWindow(QMainWindow):
         self.rtsp_pass_input.setText(self.settings_manager.get("rtsp_password", ""))
         self.camera_layout.addWidget(self.rtsp_pass_input)
 
+        self.prefer_substream_cb = QCheckBox("Prefer sub-stream for network cameras")
+        self.prefer_substream_cb.setChecked(self.prefer_substream)
+        self.prefer_substream_cb.toggled.connect(self.on_prefer_substream_toggled)
+        self.camera_layout.addWidget(self.prefer_substream_cb)
+
         # Camera control buttons
         self.search_btn = QPushButton("Search Cameras")
         self.search_btn.clicked.connect(self.search_cameras)
@@ -230,6 +283,10 @@ class MainWindow(QMainWindow):
         self.multiview_btn = QPushButton("Open MultiView")
         self.multiview_btn.clicked.connect(self.open_multiview)
         self.camera_layout.addWidget(self.multiview_btn)
+
+        self.fullscreen_btn = QPushButton("Enter Full Screen")
+        self.fullscreen_btn.clicked.connect(self.toggle_main_fullscreen)
+        self.camera_layout.addWidget(self.fullscreen_btn)
 
         self.toggle_btn = QPushButton("Camera Offline")
         self.toggle_btn.clicked.connect(self.toggle_feed)
@@ -248,7 +305,12 @@ class MainWindow(QMainWindow):
 
         # Add to control panel
         self.camera_group.setLayout(self.camera_layout)
-        self.control_layout.addWidget(self.camera_group)
+        self.add_collapsible_section(
+            "Camera",
+            self.camera_group,
+            "ui_expand_camera",
+            default_expanded=True,
+        )
 
     def setup_zone_line_controls(self) -> None:
         """Set up active-zone and entry-line controls."""
@@ -369,7 +431,75 @@ class MainWindow(QMainWindow):
             self.voice_layout.addWidget(btn)
 
         self.voice_group.setLayout(self.voice_layout)
-        self.control_layout.addWidget(self.voice_group)
+        self.add_collapsible_section(
+            "Speech",
+            self.voice_group,
+            "ui_expand_speech",
+            default_expanded=True,
+        )
+
+    def setup_telegram_controls(self) -> None:
+        """Set up Telegram alert controls."""
+        self.telegram_group = QGroupBox("Telegram Alerts:")
+        self.telegram_group.setStyleSheet("QGroupBox::title { color: #00FFFF; }")
+        self.telegram_layout = QVBoxLayout()
+
+        self.telegram_enabled_cb = QCheckBox("Enable Telegram notifications")
+        self.telegram_enabled_cb.setChecked(
+            self.settings_manager.get("telegram_enabled", False)
+        )
+        self.telegram_enabled_cb.toggled.connect(self.on_telegram_enabled_toggled)
+        self.telegram_layout.addWidget(self.telegram_enabled_cb)
+
+        self.telegram_token_input = QLineEdit()
+        self.telegram_token_input.setPlaceholderText("Bot token")
+        self.telegram_token_input.setEchoMode(QLineEdit.Password)
+        self.telegram_token_input.setText(self.settings_manager.get("telegram_bot_token", ""))
+        self.telegram_token_input.editingFinished.connect(self.on_telegram_config_changed)
+        self.telegram_layout.addWidget(self.telegram_token_input)
+
+        self.show_telegram_token_cb = QCheckBox("Show token")
+        self.show_telegram_token_cb.toggled.connect(self.on_show_telegram_token_toggled)
+        self.telegram_layout.addWidget(self.show_telegram_token_cb)
+
+        self.telegram_chat_id_input = QLineEdit()
+        self.telegram_chat_id_input.setPlaceholderText("Chat IDs (comma separated)")
+        saved_chat_ids = self.settings_manager.get("telegram_chat_ids", "")
+        if not saved_chat_ids:
+            saved_chat_ids = self.settings_manager.get("telegram_chat_id", "")
+        self.telegram_chat_id_input.setText(saved_chat_ids)
+        self.telegram_chat_id_input.editingFinished.connect(self.on_telegram_config_changed)
+        self.telegram_layout.addWidget(self.telegram_chat_id_input)
+
+        self.telegram_include_video_cb = QCheckBox("Include recording video clip")
+        self.telegram_include_video_cb.setChecked(
+            self.settings_manager.get("telegram_include_video", False)
+        )
+        self.telegram_include_video_cb.toggled.connect(self.on_telegram_include_video_toggled)
+        self.telegram_layout.addWidget(self.telegram_include_video_cb)
+
+        cooldown_row = QHBoxLayout()
+        cooldown_row.addWidget(QLabel("Cooldown (sec):"))
+        self.telegram_cooldown_spin = QSpinBox()
+        self.telegram_cooldown_spin.setRange(0, 300)
+        self.telegram_cooldown_spin.setValue(
+            int(self.settings_manager.get("telegram_cooldown", 10.0))
+        )
+        self.telegram_cooldown_spin.valueChanged.connect(self.on_telegram_cooldown_changed)
+        cooldown_row.addWidget(self.telegram_cooldown_spin)
+        self.telegram_layout.addLayout(cooldown_row)
+
+        self.telegram_test_btn = QPushButton("Send Telegram Test")
+        self.telegram_test_btn.clicked.connect(self.on_send_telegram_test)
+        self.telegram_layout.addWidget(self.telegram_test_btn)
+
+        self.telegram_group.setLayout(self.telegram_layout)
+        self.add_collapsible_section(
+            "Telegram",
+            self.telegram_group,
+            "ui_expand_telegram",
+            default_expanded=True,
+        )
 
     def setup_orientation_controls(self) -> None:
         """Set up camera orientation controls."""
@@ -393,7 +523,12 @@ class MainWindow(QMainWindow):
             self.vert_btn.setChecked(True)
 
         self.orient_group.setLayout(self.orient_layout)
-        self.control_layout.addWidget(self.orient_group)
+        self.add_collapsible_section(
+            "Orientation",
+            self.orient_group,
+            "ui_expand_orientation",
+            default_expanded=True,
+        )
 
     def setup_camera_feed(self) -> None:
         """Set up the camera feed display area."""
@@ -435,6 +570,7 @@ class MainWindow(QMainWindow):
         self.discovered_network_sources = self.network_discovery.discover(
             username=username,
             password=password,
+            prefer_substream=self.prefer_substream,
         )
         for endpoint in self.discovered_network_sources:
             camera_list.append(endpoint.label)
@@ -746,8 +882,40 @@ class MainWindow(QMainWindow):
             "Adjust how sensitive the detector is to changes (lower = more sensitive)"
         )
         self.sensitivity_layout.addWidget(self.variance_slider)
+
+        # Night bug filter controls
+        self.night_bug_filter_cb = QCheckBox("Night bug filter")
+        self.night_bug_filter_cb.setChecked(
+            self.settings_manager.get("night_bug_filter_enabled", True)
+        )
+        self.night_bug_filter_cb.toggled.connect(self.on_night_bug_filter_toggled)
+        self.sensitivity_layout.addWidget(self.night_bug_filter_cb)
+
+        night_hours_layout = QHBoxLayout()
+        night_hours_layout.addWidget(QLabel("Night hours:"))
+        self.night_bug_start_spin = QSpinBox()
+        self.night_bug_start_spin.setRange(0, 23)
+        self.night_bug_start_spin.setValue(
+            int(self.settings_manager.get("night_bug_start_hour", 20))
+        )
+        self.night_bug_start_spin.valueChanged.connect(self.on_night_bug_schedule_changed)
+        night_hours_layout.addWidget(self.night_bug_start_spin)
+        night_hours_layout.addWidget(QLabel("to"))
+        self.night_bug_end_spin = QSpinBox()
+        self.night_bug_end_spin.setRange(0, 23)
+        self.night_bug_end_spin.setValue(
+            int(self.settings_manager.get("night_bug_end_hour", 6))
+        )
+        self.night_bug_end_spin.valueChanged.connect(self.on_night_bug_schedule_changed)
+        night_hours_layout.addWidget(self.night_bug_end_spin)
+        self.sensitivity_layout.addLayout(night_hours_layout)
         self.sensitivity_group.setLayout(self.sensitivity_layout)
-        self.control_layout.addWidget(self.sensitivity_group)
+        self.add_collapsible_section(
+            "Motion Sensitivity",
+            self.sensitivity_group,
+            "ui_expand_sensitivity",
+            default_expanded=True,
+        )
 
     def setup_recording_controls(self):
         """Set up controls for video recording settings."""
@@ -783,7 +951,12 @@ class MainWindow(QMainWindow):
 
         # Add to control panel
         self.recording_group.setLayout(self.recording_layout)
-        self.control_layout.addWidget(self.recording_group)
+        self.add_collapsible_section(
+            "Recording",
+            self.recording_group,
+            "ui_expand_recording",
+            default_expanded=True,
+        )
 
     def on_recording_enabled_change(self, enabled):
         """Handle recording enabled/disabled toggle."""
@@ -906,6 +1079,12 @@ class MainWindow(QMainWindow):
         frame, _, motion_detected, recording_status = self.motion_detector.detect_motion()
 
         if frame is None:
+            # Treat occasional read/decode errors as transient. Only reconnect after
+            # MotionDetector has already decided to stop the camera.
+            if self.motion_detector.feed_active:
+                self.status_label.setText("Camera frame read error. Waiting for stream recovery...")
+                return
+
             self.status_label.setText("Camera stream dropped. Attempting reconnect...")
             self.disconnect_camera(user_requested=False)
             self.start_reconnect_timer()
@@ -931,9 +1110,53 @@ class MainWindow(QMainWindow):
             # Don't update status during recording to avoid flickering
             pass
 
-        # Trigger alert if motion was detected (only if not already recording)
+        # Handle on-demand Telegram clip requests.
+        requested_clip_chat_ids = self.telegram_notifier.consume_clip_requests()
+        if requested_clip_chat_ids:
+            self.pending_clip_request_chat_ids.extend(requested_clip_chat_ids)
+            # Preserve order, remove duplicates.
+            self.pending_clip_request_chat_ids = list(
+                dict.fromkeys(self.pending_clip_request_chat_ids)
+            )
+        if requested_clip_chat_ids and not self.motion_detector.recording:
+            h, w = frame.shape[:2]
+            self.motion_detector.start_recording((w, h), reason="telegram_clip_request")
+
+        completed_video_path, completed_video_reason = (
+            self.motion_detector.consume_last_completed_recording()
+        )
+
+        # Trigger audio alert immediately on motion.
         if motion_detected:
             self.audio_system.trigger_alert()
+
+        # Telegram behavior:
+        # - include_video ON: send one combined message when clip is complete.
+        # - include_video OFF: send immediate motion text message.
+        if completed_video_path:
+            target_chat_ids = None
+            message = "Sentinel: motion detected."
+            force_video = False
+            bypass_cooldown = False
+            if completed_video_reason == "telegram_clip_request":
+                message = "Sentinel: requested 10-second clip."
+                target_chat_ids = self.pending_clip_request_chat_ids or None
+                force_video = True
+                bypass_cooldown = True
+                self.pending_clip_request_chat_ids = []
+            elif not self.telegram_notifier.include_video:
+                message = ""
+
+            if message:
+                self.telegram_notifier.trigger_alert(
+                    message=message,
+                    video_path=completed_video_path,
+                    target_chat_ids=target_chat_ids,
+                    force_video=force_video,
+                    bypass_cooldown=bypass_cooldown,
+                )
+        elif not self.telegram_notifier.include_video and motion_detected:
+            self.telegram_notifier.trigger_alert(message="Sentinel: motion detected.")
 
         # Display the frame
         self.display_frame(display_frame)
@@ -1063,6 +1286,27 @@ class MainWindow(QMainWindow):
             history=HISTORY_LENGTH, varThreshold=value, detectShadows=DETECT_SHADOWS
         )
 
+    def _apply_night_bug_filter_settings(self) -> None:
+        """Apply night bug filter settings to detector."""
+        enabled = self.night_bug_filter_cb.isChecked()
+        start_hour = int(self.night_bug_start_spin.value())
+        end_hour = int(self.night_bug_end_spin.value())
+        self.motion_detector.set_night_bug_filter(enabled, start_hour, end_hour)
+
+    def on_night_bug_filter_toggled(self, enabled: bool) -> None:
+        self.settings_manager.set("night_bug_filter_enabled", enabled)
+        self._apply_night_bug_filter_settings()
+        status = "enabled" if enabled else "disabled"
+        self.status_label.setText(f"Night bug filter {status}")
+
+    def on_night_bug_schedule_changed(self) -> None:
+        start_hour = int(self.night_bug_start_spin.value())
+        end_hour = int(self.night_bug_end_spin.value())
+        self.settings_manager.set("night_bug_start_hour", start_hour)
+        self.settings_manager.set("night_bug_end_hour", end_hour)
+        self._apply_night_bug_filter_settings()
+        self.status_label.setText(f"Night bug filter schedule: {start_hour:02d}:00-{end_hour:02d}:00")
+
     def on_camera_select(self, value: str) -> None:
         """
         Handle camera selection change.
@@ -1076,6 +1320,38 @@ class MainWindow(QMainWindow):
                 self.settings_manager.set("camera_index", source)
             self.settings_manager.set("camera_source", str(source))
             self.settings_manager.set("camera_display", value)
+
+    def on_prefer_substream_toggled(self, enabled: bool) -> None:
+        self.prefer_substream = enabled
+        self.settings_manager.set("prefer_substream", enabled)
+        mode = "sub-stream" if enabled else "main stream"
+        self.status_label.setText(f"Network discovery now prefers {mode}")
+
+    def toggle_main_fullscreen(self) -> None:
+        """Toggle full-screen mode for the primary camera view."""
+        if not self.is_main_fullscreen:
+            self.scroll_area.hide()
+            self.showFullScreen()
+            self.is_main_fullscreen = True
+            self.fullscreen_btn.setText("Exit Full Screen")
+            return
+
+        self.showNormal()
+        self.scroll_area.show()
+        self.is_main_fullscreen = False
+        self.fullscreen_btn.setText("Enter Full Screen")
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        """Handle fullscreen shortcuts."""
+        if event.key() == Qt.Key_F11:
+            self.toggle_main_fullscreen()
+            event.accept()
+            return
+        if event.key() == Qt.Key_Escape and self.is_main_fullscreen:
+            self.toggle_main_fullscreen()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def on_speed_change(self, value: int) -> None:
         """
@@ -1097,6 +1373,63 @@ class MainWindow(QMainWindow):
         volume = value / 10.0
         self.settings_manager.set("volume", volume)
         self.audio_system.update_settings({"volume": volume})
+
+    def _current_telegram_settings(self) -> dict:
+        """Build Telegram settings payload from current UI values."""
+        token = self.telegram_token_input.text().strip()
+        chat_ids = self.telegram_chat_id_input.text().strip()
+        return {
+            "telegram_enabled": self.telegram_enabled_cb.isChecked(),
+            "telegram_bot_token": token,
+            "telegram_chat_id": chat_ids,
+            "telegram_chat_ids": chat_ids,
+            "telegram_cooldown": float(self.telegram_cooldown_spin.value()),
+            "telegram_include_video": self.telegram_include_video_cb.isChecked(),
+        }
+
+    def on_telegram_enabled_toggled(self, enabled: bool) -> None:
+        self.settings_manager.set("telegram_enabled", enabled)
+        self.telegram_notifier.update_settings({"telegram_enabled": enabled})
+        if enabled and not self.telegram_notifier.is_configured():
+            self.status_label.setText("Telegram enabled: add token + chat ID(s)")
+        elif enabled:
+            self.status_label.setText("Telegram notifications enabled")
+        else:
+            self.status_label.setText("Telegram notifications disabled")
+
+    def on_telegram_config_changed(self) -> None:
+        payload = self._current_telegram_settings()
+        self.settings_manager.set("telegram_bot_token", payload["telegram_bot_token"])
+        self.settings_manager.set("telegram_chat_id", payload["telegram_chat_id"])
+        self.settings_manager.set("telegram_chat_ids", payload["telegram_chat_ids"])
+        self.telegram_notifier.update_settings(payload)
+
+    def on_telegram_cooldown_changed(self, value: int) -> None:
+        self.settings_manager.set("telegram_cooldown", float(value))
+        self.telegram_notifier.update_settings({"telegram_cooldown": float(value)})
+
+    def on_show_telegram_token_toggled(self, checked: bool) -> None:
+        if checked:
+            self.telegram_token_input.setEchoMode(QLineEdit.Normal)
+        else:
+            self.telegram_token_input.setEchoMode(QLineEdit.Password)
+
+    def on_telegram_include_video_toggled(self, enabled: bool) -> None:
+        self.settings_manager.set("telegram_include_video", enabled)
+        self.telegram_notifier.update_settings({"telegram_include_video": enabled})
+
+    def on_send_telegram_test(self) -> None:
+        self.on_telegram_config_changed()
+        if not self.telegram_enabled_cb.isChecked():
+            self.status_label.setText("Enable Telegram notifications first")
+            return
+        if not self.telegram_notifier.is_configured():
+            self.status_label.setText("Telegram test failed: token/chat ID missing")
+            return
+        if self.telegram_notifier.send_test_message():
+            self.status_label.setText("Telegram test sent")
+        else:
+            self.status_label.setText("Telegram test failed")
 
     def on_voice_change(self, idx: int, checked: bool) -> None:
         """
@@ -1137,6 +1470,7 @@ class MainWindow(QMainWindow):
         """
         # Clean up resources
         self.reconnect_timer.stop()
+        self.telegram_notifier.cleanup()
         if self.motion_detector.feed_active:
             self.timer.stop()
             self.motion_detector.cleanup()

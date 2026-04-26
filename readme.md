@@ -1,114 +1,204 @@
 # Sentinel Home - Motion Detection
 
-A Python-based motion detection application using OpenCV and PySide6. This program captures video from a webcam, detects motion, and provides audio alerts using text-to-speech (TTS).
+Sentinel Home is a Python + PySide6 desktop app for local camera monitoring with motion detection, recording, and Telegram notifications.
 
-![Sentinel Home](https://img.shields.io/badge/Sentinel%20Home-Motion%20Detection-00FFFF)
+## Docs Index
 
-## Features
+- `readme.md` - Feature overview, setup, usage, and operations
+- `installation-guide.md` - Step-by-step installation and troubleshooting
+- `project-structure.md` - Codebase layout and module responsibilities
 
-- Real-time motion detection using OpenCV's Background Subtractor MOG2
-- Audio alerts via text-to-speech (pyttsx3) when motion is detected
-- GUI built with PySide6 for camera control and settings management
-- Support for multiple cameras with a dropdown selection
-- Customizable speech settings:
-  - Adjustable speech speed and volume
-  - Multiple voice options
-- Camera feed orientation options (horizontal/vertical)
-- Image capture functionality with timestamp-based naming
-- Recall latest captured image
-- Dark theme UI with cyan accents
-- Motion-triggered video recording:
-  - Automatically records 10-second video clips when motion is detected
-  - Visual recording indicator with countdown timer
-  - Browse and play recordings with system video player
-  - Organized storage with timestamp-based filenames
+## Key Features
+
+- Real-time motion detection using OpenCV MOG2.
+- Local USB and network RTSP camera support.
+- Automatic network camera discovery with optional sub-stream preference.
+- Active zones and entry lines:
+  - Draw polygons for monitored areas.
+  - Draw line(s) for entry crossing events.
+  - Trigger logic supports zone OR line crossing behavior.
+- Motion-triggered recording:
+  - 10-second clips by default.
+  - Recording rendered with motion boxes.
+- Snapshot capture and image recall.
+- Main feed full-screen mode (`F11`, `Esc`, or button).
+- MultiView grid for discovered network cameras:
+  - Click a stream to focus it.
+  - Return to grid with `Return to MultiView`.
+- Audio alerts (Piper TTS if available, `pyttsx3` fallback).
+- Telegram notifications:
+  - Multiple recipients (comma-separated chat IDs).
+  - Cooldown throttling.
+  - Optional clip-in-notification mode (single message with video caption).
+  - Pause/Resume/Status controls by chat command.
+  - On-demand `clip` command (record now and send 10-second clip).
+- Night bug filter (scheduled by hour) to suppress insect-like false positives.
+- Auto reconnect for dropped camera streams.
+- Collapsible control sections with persisted open/closed state.
 
 ## Requirements
 
-- Python 3.6+
-- A webcam or compatible camera device
-- Windows, macOS, or Linux operating system
+- Python 3.10+ recommended
+- Linux, macOS, or Windows
+- Camera source:
+  - Local webcam (`/dev/video*` etc.) and/or
+  - RTSP network camera
 
 ## Installation
 
-1. **Clone the repository**:
+1. Clone and enter the project:
    ```bash
-   git clone https://github.com/yourusername/sentinel.git
+   git clone <your-repo-url>
    cd sentinel
    ```
 
-2. **Create and activate a virtual environment**:
+2. Create and activate a virtual environment:
    ```bash
-   python -m venv .venv
-   
-   # On Windows:
-   .venv\Scripts\activate
-   
-   # On macOS/Linux:
-   source .venv/bin/activate
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+   On Windows (PowerShell):
+   ```powershell
+   python -m venv venv
+   .\venv\Scripts\Activate.ps1
    ```
 
-3. **Install dependencies**:
+3. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
 
-## Usage
+## Run
 
-1. **Run the application**:
-   ```bash
-   python main.py
-   ```
-
-2. **Using the application**:
-   - Click "Search Cameras" to detect available cameras
-   - Select your camera from the dropdown
-   - Click "Camera Offline" to toggle the feed on
-   - Adjust speech settings as needed
-   - Use "Capture Image" to save the current frame
-   - Use "Recall Image" to view the most recently captured image
-
-## Settings
-
-The application automatically saves your preferences in a `settings.json` file, including:
-- Camera selection
-- Speech settings (speed, volume, voice)
-- Camera orientation
-- Window and feed size
-- Feed status (online/offline)
-
-## Directory Structure
-
+```bash
+python main.py
 ```
+
+## First-Time Setup
+
+1. Open app and click `Search Cameras`.
+2. Select your camera from dropdown.
+3. Click `Camera Offline` (button toggles feed on/off).
+4. Optional:
+   - Set `Prefer sub-stream for network cameras`.
+   - Tune `Detection Size` and `Sensitivity`.
+   - Draw active zones and entry lines.
+
+## Detection and Trigger Behavior
+
+- **No zones, no lines**: qualifying motion can trigger.
+- **Zones only**: motion in active zone triggers.
+- **Lines only**: line crossing triggers.
+- **Zones + lines**: zone OR line crossing can trigger.
+
+Use this pattern for driveway use cases:
+- Entry line at driveway boundary to catch incoming vehicles.
+- Active zone over driveway to keep alerts for activity inside zone (pets/people).
+
+## Recording
+
+- Recording starts on valid trigger and writes a clip to `recorded_videos/`.
+- Recording duration is frame-count based for stable output length.
+- `Motion Cooldown` controls minimum gap between recording starts.
+
+## Telegram Setup
+
+### 1) Create bot
+
+In Telegram, open `@BotFather`:
+- `/newbot`
+- Save bot token (full string, including prefix before `:`).
+
+### 2) Get chat ID(s)
+
+- Start chat with bot (or send a message in your bot-enabled group).
+- Open:
+  - `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
+- Copy `message.chat.id`.
+
+### 3) Configure in Sentinel
+
+In `Telegram Alerts` section:
+- Enable Telegram notifications.
+- Paste bot token.
+- Paste one or more chat IDs (comma separated).
+- Set cooldown seconds.
+- Optional: enable `Include recording video clip`.
+- Click `Send Telegram Test`.
+
+## Telegram Commands
+
+Supported commands (case-insensitive):
+
+- `pause <minutes>` - pause notifications for that chat.
+- `resume` - resume notifications for that chat.
+- `status` - show active/paused state for that chat.
+- `clip` - record and send a 10-second clip on demand.
+- `help` - show command list.
+
+Unknown messages get a help response listing valid commands.
+
+## Night Bug Filter
+
+Use `Night bug filter` in Motion Sensitivity section:
+- Enable/disable filter.
+- Configure `Night hours` start/end (0-23).
+- Designed to suppress tiny, fast, edge-near, short-lived night artifacts (insects near lens) while preserving larger real events.
+
+## Full Screen and MultiView
+
+- Main view full-screen:
+  - Click `Enter Full Screen`
+  - or press `F11`
+  - `Esc` exits.
+- MultiView:
+  - `Open MultiView`
+  - click any tile to focus
+  - click `Return to MultiView` to go back to grid.
+
+## Troubleshooting
+
+- RTSP decode errors (`h264 ... no frame`, `cabac decode ...`):
+  - Prefer sub-stream.
+  - Lower resolution/bitrate/fps in camera.
+  - Prefer wired network and stable RTSP transport.
+  - Keep H.264+ / smart codec features off.
+- No Telegram messages:
+  - Verify token, chat ID(s), and bot chat started.
+  - Re-test with `Send Telegram Test`.
+- Too many alerts:
+  - Increase Telegram cooldown.
+  - Increase motion cooldown.
+  - Tighten zones/line placement.
+  - Enable night bug filter schedule.
+
+## Settings File
+
+Runtime settings are saved to:
+- `settings.json`
+
+Includes camera source, detection controls, zone/line data, Telegram settings, UI state, and reconnect/night filter options.
+
+## Project Layout
+
+```text
 sentinel/
-├── main.py              # Main application code
-├── requirements.txt     # Required Python packages
-├── .gitignore           # Git ignore file
-├── README.md            # This file
-├── sentinel.ico         # Application icon (if present)
-└── captured_images/     # Directory for storing captured images (created automatically)
+├── main.py
+├── settings.json
+├── readme.md
+├── requirements.txt
+├── sentinel/
+│   ├── app.py
+│   ├── constants.py
+│   ├── detection/
+│   ├── audio/
+│   ├── notifications/
+│   ├── settings/
+│   └── ui/
+├── captured_images/
+└── recorded_videos/
 ```
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-### Third-Party Licenses
-
-This project uses several third-party libraries, each with their own licenses:
-
-- **PySide6**: Licensed under LGPL v3.0. PySide6 is the official Python module from the Qt for Python project, which provides access to the complete Qt 6.0+ framework. See [Qt licensing](https://www.qt.io/licensing/) for more details.
-
-- **OpenCV**: Licensed under Apache 2.0 License. OpenCV is an open-source computer vision and machine learning software library. See [OpenCV license](https://opencv.org/license/) for more details.
-
-- **NumPy**: Licensed under BSD License. See [NumPy license](https://numpy.org/doc/stable/license.html) for more details.
-
-- **pyttsx3**: Licensed under GNU GPL v3.0. This is a text-to-speech conversion library in Python. See [pyttsx3 license](https://github.com/nateshmbhat/pyttsx3/blob/master/LICENSE) for more details.
-
-When distributing this application, please be aware of the obligations under these licenses, particularly:
-- The LGPL v3.0 license of PySide6 may require you to make available the source code of your application if you distribute binaries
-- The GNU GPL v3.0 license of pyttsx3 requires that derivative works be licensed under the same terms
+This project is licensed under the MIT License. See `LICENSE` if present in your repo.

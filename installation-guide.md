@@ -1,132 +1,104 @@
 # Installation Guide for Sentinel Home
 
-This guide provides detailed instructions for installing and running the Sentinel Home motion detection application.
+This guide focuses on practical setup for current Sentinel Home features:
+- local + RTSP cameras
+- motion detection/recording
+- Telegram alerts and chat commands
+
+For full feature documentation, see `readme.md`.
 
 ## Prerequisites
 
-- Python 3.6 or higher
-- A webcam or compatible camera device
-- Git (for cloning the repository)
+- Python 3.10+ recommended
+- Git
+- A camera source:
+  - local webcam, and/or
+  - RTSP network camera
+- Telegram account (only if using Telegram notifications)
 
-## Installation Methods
+## Recommended Install (Virtual Environment)
 
-### Method 1: Using Git and Virtual Environment (Recommended)
-
-1. **Clone the repository**:
+1. Clone:
    ```bash
-   git clone https://github.com/yourusername/sentinel.git
+   git clone <your-repo-url>
    cd sentinel
    ```
 
-2. **Create and activate a virtual environment**:
+2. Create and activate venv:
    ```bash
-   # Create a virtual environment
-   python -m venv .venv
-
-   # On Windows
-   .venv\Scripts\activate
-
-   # On macOS/Linux
-   source .venv/bin/activate
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+   Windows (PowerShell):
+   ```powershell
+   python -m venv venv
+   .\venv\Scripts\Activate.ps1
    ```
 
-3. **Install the package in development mode**:
-   ```bash
-   pip install -e .
-   ```
-
-4. **Run the application**:
-   ```bash
-   python main.py
-   ```
-
-### Method 2: Direct Installation
-
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/yourusername/sentinel.git
-   cd sentinel
-   ```
-
-2. **Install dependencies**:
+3. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Run the application**:
+4. Run:
    ```bash
    python main.py
    ```
 
-### Method 3: Installation via pip (Future)
+## First Run Checklist
 
-Once the package is published to PyPI, you can install it directly:
+1. Click `Search Cameras`.
+2. Select camera source.
+3. Toggle feed on with `Camera Offline` button.
+4. Optionally enable `Prefer sub-stream for network cameras`.
+5. Tune `Detection Size` / `Sensitivity`.
+6. Draw zones and entry line(s) as needed.
 
-```bash
-pip install sentinel-motion-detection
+## Telegram Setup (Optional)
 
-# Run the application
-sentinel
-```
+1. Create bot with `@BotFather` and copy token.
+2. Send a message to bot (or bot-enabled group).
+3. Open:
+   - `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
+4. Copy `message.chat.id`.
+5. In Sentinel Telegram panel:
+   - enable Telegram
+   - set token
+   - set one or more chat IDs (comma-separated)
+   - set cooldown
+   - send test message
 
-## Troubleshooting
+## Telegram Commands (Current)
 
-### Camera Issues
+- `pause <minutes>`
+- `resume`
+- `status`
+- `clip`
+- `help`
 
-- If no cameras are detected, ensure your webcam is properly connected
-- Some webcams may require specific drivers to be installed
-- Try disconnecting and reconnecting your webcam
-- If using a laptop with built-in webcam, check if it's enabled in BIOS/system settings
+Unknown commands return a help message with valid commands.
 
-### Text-to-Speech Issues
+## Common Troubleshooting
 
-- On Windows, ensure the Microsoft Speech API is installed
-- On macOS, no additional setup should be needed
-- On Linux, you may need to install additional packages:
-  ```bash
-  # Ubuntu/Debian
-  sudo apt-get install espeak
-  
-  # Fedora
-  sudo dnf install espeak
-  ```
+### No camera frames / unstable RTSP
 
+- Prefer sub-stream.
+- Lower camera bitrate/resolution/fps.
+- Keep H.264+ / smart codec / SVC disabled.
+- Use wired network where possible.
 
-### Video Recording Feature
+### Too many false alerts at night
 
-When motion is detected, the application automatically:
-- Records a 10-second video clip
-- Displays a red recording indicator with countdown
-- Saves the video with a timestamp in the "recorded_videos" directory
+- Enable `Night bug filter`.
+- Set schedule hours (example: 20 -> 6).
+- Refine active zones and entry lines.
 
-You can access these recordings through the "Browse Recordings" button, which will open your system's default video player.
+### Too many Telegram messages
 
-Note: The video recordings use the XVID codec, which is widely supported but may require additional codecs on some systems:
-- On Windows, you might need to install K-Lite Codec Pack
-- On macOS, VLC player is recommended
-- On Linux, ensure you have the necessary gstreamer plugins installed
+- Increase Telegram cooldown.
+- Increase motion cooldown if recordings are too frequent.
 
+### TTS issues
 
-### UI Issues
-
-- If you encounter UI rendering problems, ensure your system meets the minimum requirements for PySide6
-- Try updating your graphics drivers if you experience visual glitches
-
-## Development Setup
-
-If you want to contribute to the development:
-
-1. Follow the installation steps using the virtual environment
-2. Install development dependencies:
-   ```bash
-   pip install -r requirements-dev.txt  # If provided
-   ```
-
-3. Run tests:
-   ```bash
-   pytest  # If tests are available
-   ```
-
-## Further Information
-
-For more detailed information on using the application, refer to the README.md file.
+Sentinel prefers Piper if available; otherwise uses `pyttsx3`.
+On Linux, audio output tools and voice packages may be required depending on your distro.

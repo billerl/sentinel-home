@@ -7,6 +7,7 @@ from sentinel.constants import CAPTURE_DIR
 from sentinel.settings import SettingsManager
 from sentinel.detection import MotionDetector
 from sentinel.audio import AudioAlertSystem
+from sentinel.notifications import TelegramNotifier
 from sentinel.ui import MainWindow
 
 
@@ -25,12 +26,14 @@ class MotionDetectionApp:
         self.settings_manager = SettingsManager()
         self.motion_detector = MotionDetector()
         self.audio_system = AudioAlertSystem(self.settings_manager.settings)
+        self.telegram_notifier = TelegramNotifier(self.settings_manager.settings)
         
         # Create main window
         self.main_window = MainWindow(
             self.settings_manager,
             self.motion_detector,
-            self.audio_system
+            self.audio_system,
+            self.telegram_notifier,
         )
     
     def show(self):

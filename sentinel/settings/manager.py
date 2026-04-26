@@ -24,6 +24,7 @@ from sentinel.constants import (
     DEFAULT_ENTRY_DIRECTION,
     AUTO_RECONNECT_DEFAULT,
     RECONNECT_INTERVAL_SECONDS,
+    TELEGRAM_COOLDOWN,
 )
 
 
@@ -49,6 +50,7 @@ class SettingsManager:
             "camera_display": "",
             "rtsp_username": "",
             "rtsp_password": "",
+            "prefer_substream": True,
             "feed_active": False,
             "window_size": DEFAULT_WINDOW_SIZE,
             "feed_size": DEFAULT_FEED_SIZE,
@@ -63,6 +65,21 @@ class SettingsManager:
             "entry_direction": DEFAULT_ENTRY_DIRECTION,
             "auto_reconnect_enabled": AUTO_RECONNECT_DEFAULT,
             "reconnect_interval_seconds": RECONNECT_INTERVAL_SECONDS,
+            "telegram_enabled": False,
+            "telegram_bot_token": "",
+            "telegram_chat_id": "",
+            "telegram_chat_ids": "",
+            "telegram_cooldown": TELEGRAM_COOLDOWN,
+            "telegram_include_video": False,
+            "night_bug_filter_enabled": True,
+            "night_bug_start_hour": 20,
+            "night_bug_end_hour": 6,
+            "ui_expand_camera": True,
+            "ui_expand_speech": True,
+            "ui_expand_telegram": True,
+            "ui_expand_orientation": True,
+            "ui_expand_recording": True,
+            "ui_expand_sensitivity": True,
         }
         self.settings = self.default_settings.copy()
         self.load_settings()

@@ -8,7 +8,7 @@ setup(
     name="sentinel",
     version="1.0.0",
     description="Motion detection application with text-to-speech alerts",
-    author="Luke Biller",
+    author="Luke Biller and Contributors",
     author_email="your.email@example.com",
     packages=find_packages(),
     include_package_data=True,

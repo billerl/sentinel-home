@@ -18,6 +18,7 @@ FRAME_INTERVAL = int(1000 / FPS)  # Timer interval in milliseconds
 
 # Motion alert settings
 MOTION_TIMEOUT = 10.0  # Seconds between motion alerts
+TELEGRAM_COOLDOWN = 10.0  # Seconds between Telegram alerts
 
 # Settings management
 SAVE_DEBOUNCE_INTERVAL = 1.0  # Seconds between settings save operations

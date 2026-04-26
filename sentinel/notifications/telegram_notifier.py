@@ -1,0 +1,319 @@
+"""
+Telegram notification sender for Sentinel Home.
+"""
+
+import json
+import os
+import re
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Any, Dict, List, Optional
+
+
+class TelegramNotifier:
+    """Sends Telegram Bot API alerts with cooldown and recipient pause controls."""
+
+    def __init__(self, settings: Dict[str, Any]):
+        self.enabled = False
+        self.bot_token = ""
+        self.chat_ids: List[str] = []
+        self.cooldown_seconds = 10.0
+        self.include_video = False
+        self.last_alert_time = 0.0
+        self.paused_until_by_chat: Dict[str, float] = {}
+        self._send_lock = threading.Lock()
+        self._listener_thread: Optional[threading.Thread] = None
+        self._listener_running = False
+        self._update_offset: Optional[int] = None
+        self._pending_clip_chat_ids: List[str] = []
+        self.update_settings(settings)
+
+    @staticmethod
+    def _commands_help_text() -> str:
+        return (
+            "I didn't understand that command. Valid commands are:\n"
+            "- Pause <minutes>\n"
+            "- Resume\n"
+            "- Status\n"
+            "- Clip\n"
+            "- Help"
+        )
+
+    @staticmethod
+    def _parse_chat_ids(value: str) -> List[str]:
+        return [item.strip() for item in value.split(",") if item.strip()]
+
+    def _extract_chat_ids_from_settings(self, settings: Dict[str, Any]) -> List[str]:
+        chat_ids_raw = str(settings.get("telegram_chat_ids", "")).strip()
+        if chat_ids_raw:
+            return self._parse_chat_ids(chat_ids_raw)
+        legacy = str(settings.get("telegram_chat_id", "")).strip()
+        return [legacy] if legacy else []
+
+    def update_settings(self, settings: Dict[str, Any]) -> None:
+        """Update notifier settings at runtime."""
+        if "telegram_enabled" in settings:
+            self.enabled = bool(settings["telegram_enabled"])
+        if "telegram_bot_token" in settings:
+            self.bot_token = str(settings["telegram_bot_token"]).strip()
+        if (
+            "telegram_chat_ids" in settings
+            or "telegram_chat_id" in settings
+            or not self.chat_ids
+        ):
+            self.chat_ids = self._extract_chat_ids_from_settings(settings)
+        if "telegram_cooldown" in settings:
+            self.cooldown_seconds = max(0.0, float(settings["telegram_cooldown"]))
+        if "telegram_include_video" in settings:
+            self.include_video = bool(settings["telegram_include_video"])
+        self._refresh_listener_state()
+
+    def is_configured(self) -> bool:
+        """Return True when token and at least one chat ID are present."""
+        return bool(self.bot_token and self.chat_ids)
+
+    def _api_url(self, method: str) -> str:
+        encoded_token = urllib.parse.quote(self.bot_token, safe="")
+        return f"https://api.telegram.org/bot{encoded_token}/{method}"
+
+    @staticmethod
+    def _post_json(url: str, payload: Dict[str, Any], timeout: int = 8) -> bool:
+        data = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return 200 <= int(response.status) < 300
+        except (urllib.error.URLError, TimeoutError, ValueError):
+            return False
+
+    def _send_message_to_chat(self, chat_id: str, message: str) -> bool:
+        return self._post_json(
+            self._api_url("sendMessage"),
+            {
+                "chat_id": chat_id,
+                "text": message,
+                "disable_notification": False,
+            },
+        )
+
+    def _send_video_to_chat(self, chat_id: str, video_path: str, caption: str) -> bool:
+        if not os.path.exists(video_path):
+            return False
+        boundary = f"sentinel-{int(time.time() * 1000)}"
+        with open(video_path, "rb") as video_file:
+            video_bytes = video_file.read()
+
+        parts: List[bytes] = []
+        for name, value in [("chat_id", chat_id), ("caption", caption)]:
+            parts.append(f"--{boundary}\r\n".encode("utf-8"))
+            parts.append(
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8")
+            )
+            parts.append(f"{value}\r\n".encode("utf-8"))
+
+        filename = os.path.basename(video_path)
+        parts.append(f"--{boundary}\r\n".encode("utf-8"))
+        parts.append(
+            (
+                f'Content-Disposition: form-data; name="video"; filename="{filename}"\r\n'
+                "Content-Type: video/mp4\r\n\r\n"
+            ).encode("utf-8")
+        )
+        parts.append(video_bytes)
+        parts.append(b"\r\n")
+        parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+        body = b"".join(parts)
+
+        request = urllib.request.Request(
+            self._api_url("sendVideo"),
+            data=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                return 200 <= int(response.status) < 300
+        except (urllib.error.URLError, TimeoutError, ValueError):
+            return False
+
+    def _is_paused(self, chat_id: str, now_ts: float) -> bool:
+        paused_until = self.paused_until_by_chat.get(chat_id, 0.0)
+        if paused_until <= now_ts:
+            self.paused_until_by_chat.pop(chat_id, None)
+            return False
+        return True
+
+    def _remaining_pause_minutes(self, chat_id: str) -> int:
+        now_ts = time.time()
+        paused_until = self.paused_until_by_chat.get(chat_id, 0.0)
+        if paused_until <= now_ts:
+            self.paused_until_by_chat.pop(chat_id, None)
+            return 0
+        remaining_seconds = int(paused_until - now_ts)
+        return max(1, (remaining_seconds + 59) // 60)
+
+    def _send_alert(
+        self,
+        message: str,
+        video_path: Optional[str] = None,
+        target_chat_ids: Optional[List[str]] = None,
+        force_video: bool = False,
+    ) -> bool:
+        if not self.enabled or not self.is_configured():
+            return False
+        sent_any = False
+        now_ts = time.time()
+        recipients = target_chat_ids if target_chat_ids else self.chat_ids
+        for chat_id in recipients:
+            if self._is_paused(chat_id, now_ts):
+                continue
+            use_video = (self.include_video or force_video) and video_path and os.path.exists(video_path)
+            if use_video:
+                # Single-message flow: send only one video message with caption.
+                sent = self._send_video_to_chat(chat_id, video_path, message)
+                if not sent:
+                    sent = self._send_message_to_chat(chat_id, message)
+            else:
+                sent = self._send_message_to_chat(chat_id, message)
+            sent_any = sent_any or sent
+        return sent_any
+
+    def trigger_alert(
+        self,
+        message: str = "Sentinel: motion detected.",
+        video_path: Optional[str] = None,
+        target_chat_ids: Optional[List[str]] = None,
+        force_video: bool = False,
+        bypass_cooldown: bool = False,
+    ) -> bool:
+        """Send an alert asynchronously if enabled and cooldown elapsed."""
+        if not self.enabled or not self.is_configured():
+            return False
+        if not bypass_cooldown:
+            with self._send_lock:
+                now = time.time()
+                if (now - self.last_alert_time) < self.cooldown_seconds:
+                    return False
+                self.last_alert_time = now
+        thread = threading.Thread(
+            target=self._send_alert,
+            args=(message, video_path, target_chat_ids, force_video),
+            daemon=True,
+        )
+        thread.start()
+        return True
+
+    def send_test_message(self) -> bool:
+        """Send a synchronous test message from the UI."""
+        if not self.enabled or not self.is_configured():
+            return False
+        return self._send_alert("Sentinel Telegram test message.")
+
+    def consume_clip_requests(self) -> List[str]:
+        """Return and clear chat IDs that requested an on-demand clip."""
+        requests = list(dict.fromkeys(self._pending_clip_chat_ids))
+        self._pending_clip_chat_ids = []
+        return requests
+
+    def _refresh_listener_state(self) -> None:
+        if self.enabled and self.is_configured():
+            self._start_listener()
+        else:
+            self._listener_running = False
+
+    def _start_listener(self) -> None:
+        if self._listener_thread and self._listener_thread.is_alive():
+            return
+        self._listener_running = True
+        self._listener_thread = threading.Thread(
+            target=self._listener_loop,
+            daemon=True,
+        )
+        self._listener_thread.start()
+
+    def _listener_loop(self) -> None:
+        while self._listener_running and self.enabled and self.is_configured():
+            try:
+                self._process_pause_commands()
+            except Exception:
+                pass
+            time.sleep(2)
+
+    def _process_pause_commands(self) -> None:
+        params = {"timeout": 20}
+        if self._update_offset is not None:
+            params["offset"] = self._update_offset
+        url = (
+            f"{self._api_url('getUpdates')}?{urllib.parse.urlencode(params)}"
+        )
+        try:
+            with urllib.request.urlopen(url, timeout=25) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError):
+            return
+
+        if not payload.get("ok"):
+            return
+        for item in payload.get("result", []):
+            update_id = int(item.get("update_id", 0))
+            self._update_offset = update_id + 1
+            message = item.get("message", {})
+            chat = message.get("chat", {})
+            chat_id = str(chat.get("id", "")).strip()
+            text = str(message.get("text", "")).strip()
+            if not chat_id or not text or chat_id not in self.chat_ids:
+                continue
+
+            if re.match(r"^resume$", text, flags=re.IGNORECASE):
+                self.paused_until_by_chat.pop(chat_id, None)
+                self._send_message_to_chat(chat_id, "Sentinel notifications resumed.")
+                continue
+
+            if re.match(r"^status$", text, flags=re.IGNORECASE):
+                remaining_minutes = self._remaining_pause_minutes(chat_id)
+                if remaining_minutes > 0:
+                    self._send_message_to_chat(
+                        chat_id,
+                        f"Sentinel notifications are paused for {remaining_minutes} more minute(s).",
+                    )
+                else:
+                    self._send_message_to_chat(chat_id, "Sentinel notifications are active.")
+                continue
+
+            if re.match(r"^help$", text, flags=re.IGNORECASE):
+                self._send_message_to_chat(
+                    chat_id,
+                    self._commands_help_text(),
+                )
+                continue
+
+            if re.match(r"^clip$", text, flags=re.IGNORECASE):
+                self._pending_clip_chat_ids.append(chat_id)
+                self._send_message_to_chat(
+                    chat_id,
+                    "Sentinel is recording a 10-second clip now.",
+                )
+                continue
+
+            match = re.match(r"^pause\s+(\d{1,4})$", text, flags=re.IGNORECASE)
+            if not match:
+                self._send_message_to_chat(chat_id, self._commands_help_text())
+                continue
+            minutes = max(1, int(match.group(1)))
+            self.paused_until_by_chat[chat_id] = time.time() + (minutes * 60)
+            self._send_message_to_chat(
+                chat_id,
+                f"Sentinel notifications paused for {minutes} minutes.",
+            )
+
+    def cleanup(self) -> None:
+        """Stop background listener when app exits."""
+        self._listener_running = False
