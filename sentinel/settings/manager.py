@@ -14,6 +14,7 @@ from sentinel.constants import (
     DEFAULT_VOLUME,
     DEFAULT_WINDOW_SIZE,
     DEFAULT_FEED_SIZE,
+    DEFAULT_FEED_FPS,
     DEFAULT_DISPLAY_OVERLAY_MODE,
     SAVE_DEBOUNCE_INTERVAL,
     MOTION_COOLDOWN,
@@ -50,10 +51,13 @@ class SettingsManager:
             "camera_display": "",
             "rtsp_username": "",
             "rtsp_password": "",
+            "camera_logins": {},
+            "camera_profiles": {},
             "prefer_substream": True,
             "feed_active": False,
             "window_size": DEFAULT_WINDOW_SIZE,
             "feed_size": DEFAULT_FEED_SIZE,
+            "feed_fps": DEFAULT_FEED_FPS,
             "display_overlay_mode": DEFAULT_DISPLAY_OVERLAY_MODE,
             # Add new recording settings
             "recording_enabled": True,  # Enable recording by default
@@ -96,12 +100,42 @@ class SettingsManager:
                 with open(self.settings_file, "r") as f:
                     loaded_settings = json.load(f)
                     self.settings.update(loaded_settings)
+                    self._migrate_camera_profiles()
                     print("Settings loaded successfully")
         except (json.JSONDecodeError, PermissionError, OSError) as e:
             print(f"Error loading settings: {e}")
             print("Using default settings")
 
         return self.settings
+
+    def _migrate_camera_profiles(self) -> None:
+        """Backfill per-camera profiles from legacy single-camera settings."""
+        profiles = self.settings.get("camera_profiles", {})
+        if isinstance(profiles, dict) and profiles:
+            return
+
+        source = self.settings.get("camera_source", "")
+        if source in (None, ""):
+            self.settings["camera_profiles"] = {}
+            return
+
+        profile_id = str(source)
+        self.settings["camera_profiles"] = {
+            profile_id: {
+                "source": str(source),
+                "display": self.settings.get("camera_display", f"Camera {source}"),
+                "active_zones": copy.deepcopy(self.settings.get("active_zones", [])),
+                "entry_lines": copy.deepcopy(self.settings.get("entry_lines", [])),
+                "entry_direction": self.settings.get("entry_direction", DEFAULT_ENTRY_DIRECTION),
+                "min_contour_area": self.settings.get("min_contour_area", MIN_CONTOUR_AREA),
+                "var_threshold": self.settings.get("var_threshold", VAR_THRESHOLD),
+                "motion_cooldown": self.settings.get("motion_cooldown", MOTION_COOLDOWN),
+                "recording_enabled": self.settings.get("recording_enabled", True),
+                "night_bug_filter_enabled": self.settings.get("night_bug_filter_enabled", True),
+                "night_bug_start_hour": self.settings.get("night_bug_start_hour", 20),
+                "night_bug_end_hour": self.settings.get("night_bug_end_hour", 6),
+            }
+        }
 
     def save_settings(self, settings: Dict[str, Any] = None) -> bool:
         """

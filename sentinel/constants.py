@@ -13,8 +13,12 @@ HISTORY_LENGTH = 500  # History length for background subtractor
 VAR_THRESHOLD = 50    # Variance threshold for background subtractor
 DETECT_SHADOWS = True # Whether to detect shadows
 MIN_CONTOUR_AREA = 700  # Minimum contour area to consider as motion
-FPS = 30              # Target frames per second
-FRAME_INTERVAL = int(1000 / FPS)  # Timer interval in milliseconds
+# Live feed: lower FPS = fewer frames decoded/copied per second (less RAM + CPU pressure).
+DEFAULT_FEED_FPS = 15
+FEED_FPS_MIN = 5
+FEED_FPS_MAX = 30
+FPS = DEFAULT_FEED_FPS  # legacy alias
+FRAME_INTERVAL = max(1, int(1000 / DEFAULT_FEED_FPS))  # ms between UI timer ticks
 
 # Motion alert settings
 MOTION_TIMEOUT = 10.0  # Seconds between motion alerts
@@ -36,7 +40,7 @@ DEFAULT_VOLUME = 1.0       # Default volume (0.0 to 1.0)
 # Video recording settings
 VIDEO_DIR = "recorded_videos"  # Directory to store video recordings
 RECORDING_DURATION = 10.0  # Duration of recordings in seconds
-RECORDING_FPS = 20  # Frames per second for recordings
+RECORDING_FPS = 15  # Frames per second for recordings (lower = smaller files, less load)
 VIDEO_CODEC = "XVID"  # Codec to use for recordings (XVID is widely supported)
 MOTION_COOLDOWN = 30.0  # Seconds to wait before starting a new recording after motion
 

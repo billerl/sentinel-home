@@ -255,12 +255,17 @@ class MotionDetector:
             
         return None, None
 
-    def start_camera(self, camera_index: Union[int, str]) -> bool:
+    def start_camera(
+        self,
+        camera_index: Union[int, str],
+        target_fps: Optional[int] = None,
+    ) -> bool:
         """
         Start the camera at the specified index.
 
         Args:
             camera_index: Index of the camera to use
+            target_fps: Requested capture rate (best-effort; reduces work when honored)
 
         Returns:
             True if camera started successfully, False otherwise
@@ -270,6 +275,7 @@ class MotionDetector:
 
         try:
             self.camera_index = camera_index
+            print(f"[Connect] Attempting camera source: {camera_index}")
             if isinstance(camera_index, int):
                 self.cap = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
             else:
@@ -277,12 +283,24 @@ class MotionDetector:
             if not self.cap.isOpened():
                 raise RuntimeError(f"Failed to open camera {camera_index}")
 
+            # Drop stale frames in the driver queue (less RAM/latency when supported).
+            try:
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except Exception:
+                pass
+            if target_fps is not None and target_fps > 0:
+                try:
+                    self.cap.set(cv2.CAP_PROP_FPS, float(target_fps))
+                except Exception:
+                    pass
+
             # Verify we can actually read frames (isOpened alone is not enough)
             if not self.cap.grab():
                 raise RuntimeError(f"Camera {camera_index} opened but cannot grab frames")
 
             self.feed_active = True
             self.consecutive_read_failures = 0
+            print(f"[Connect] Camera connected successfully: {camera_index}")
             return True
         except Exception as e:
             print(f"Error starting camera: {e}")
@@ -344,6 +362,48 @@ class MotionDetector:
             (line_p2[0] - line_p1[0]) * (point[1] - line_p1[1])
             - (line_p2[1] - line_p1[1]) * (point[0] - line_p1[0])
         )
+
+    @staticmethod
+    def _orientation(a: Tuple[int, int], b: Tuple[int, int], c: Tuple[int, int]) -> int:
+        """Return orientation of ordered triplet (a,b,c): 0 collinear, 1 cw, 2 ccw."""
+        val = (b[1] - a[1]) * (c[0] - b[0]) - (b[0] - a[0]) * (c[1] - b[1])
+        if val == 0:
+            return 0
+        return 1 if val > 0 else 2
+
+    @staticmethod
+    def _on_segment(a: Tuple[int, int], b: Tuple[int, int], c: Tuple[int, int]) -> bool:
+        """Return True when point b lies on segment ac."""
+        return (
+            min(a[0], c[0]) <= b[0] <= max(a[0], c[0])
+            and min(a[1], c[1]) <= b[1] <= max(a[1], c[1])
+        )
+
+    def _segments_intersect(
+        self,
+        p1: Tuple[int, int],
+        p2: Tuple[int, int],
+        q1: Tuple[int, int],
+        q2: Tuple[int, int],
+    ) -> bool:
+        """Return True when segment p1p2 intersects segment q1q2."""
+        o1 = self._orientation(p1, p2, q1)
+        o2 = self._orientation(p1, p2, q2)
+        o3 = self._orientation(q1, q2, p1)
+        o4 = self._orientation(q1, q2, p2)
+
+        if o1 != o2 and o3 != o4:
+            return True
+
+        if o1 == 0 and self._on_segment(p1, q1, p2):
+            return True
+        if o2 == 0 and self._on_segment(p1, q2, p2):
+            return True
+        if o3 == 0 and self._on_segment(q1, p1, q2):
+            return True
+        if o4 == 0 and self._on_segment(q1, p2, q2):
+            return True
+        return False
 
     def _crossing_allowed(self, previous_side: float, current_side: float) -> bool:
         if previous_side == 0 or current_side == 0:
@@ -462,6 +522,7 @@ class MotionDetector:
             return False
 
         sides = track.setdefault("line_sides", {})
+        previous_centroid = track.get("previous_centroid", centroid)
         crossed = False
         for idx, line in enumerate(self.entry_lines):
             if len(line) != 2:
@@ -472,6 +533,8 @@ class MotionDetector:
             previous_side = sides.get(idx)
             sides[idx] = current_side
             if previous_side is None:
+                continue
+            if not self._segments_intersect(previous_centroid, centroid, p1, p2):
                 continue
             if self._crossing_allowed(previous_side, current_side):
                 crossed = True

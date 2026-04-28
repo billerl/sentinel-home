@@ -8,7 +8,7 @@ import ipaddress
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import cv2
 
@@ -38,7 +38,8 @@ class NetworkCameraDiscovery:
         "/cam/realmonitor?channel=1&subtype=1",
         "/live/ch00_1",
     ]
-    COMMON_PORTS = [554, 8554]
+    # Some camera models expose sub-stream RTSP on non-standard ports (e.g. 8866).
+    COMMON_PORTS = [554, 8866, 8554]
 
     def __init__(self, socket_timeout: float = 0.25):
         self.socket_timeout = socket_timeout
@@ -49,6 +50,7 @@ class NetworkCameraDiscovery:
         password: str = "",
         scan_limit: int = 80,
         prefer_substream: bool = False,
+        host_credentials: Optional[Dict[str, Dict[str, str]]] = None,
     ) -> List[CameraEndpoint]:
         """Scan local subnet and return endpoints that provide a readable stream."""
         network = self._detect_local_network()
@@ -61,10 +63,11 @@ class NetworkCameraDiscovery:
 
         results: List[CameraEndpoint] = []
         for host in candidate_hosts:
-            endpoint = self._find_working_rtsp_endpoint(
-                host,
-                username,
-                password,
+            endpoint = self._find_working_rtsp_endpoint_with_candidates(
+                host=host,
+                username=username,
+                password=password,
+                host_credentials=host_credentials,
                 prefer_substream=prefer_substream,
             )
             if endpoint:
@@ -76,6 +79,38 @@ class NetworkCameraDiscovery:
                     )
                 )
         return results
+
+    def discover_hosts(self, scan_limit: int = 80) -> List[str]:
+        """Scan local subnet and return hosts with an open RTSP port."""
+        network = self._detect_local_network()
+        if network is None:
+            return []
+        hosts = [str(host) for host in network.hosts()]
+        hosts = hosts[:scan_limit]
+        return self._find_hosts_with_rtsp_port(hosts)
+
+    def resolve_host_endpoint(
+        self,
+        host: str,
+        username: str = "",
+        password: str = "",
+        prefer_substream: bool = False,
+    ) -> Optional[CameraEndpoint]:
+        """Resolve a specific host to a working endpoint with provided credentials."""
+        endpoint = self._find_working_rtsp_endpoint_with_candidates(
+            host=host,
+            username=username,
+            password=password,
+            host_credentials=None,
+            prefer_substream=prefer_substream,
+        )
+        if not endpoint:
+            return None
+        return CameraEndpoint(
+            label=endpoint["label"],
+            source=endpoint["source"],
+            host=host,
+        )
 
     def _detect_local_network(self) -> Optional[ipaddress.IPv4Network]:
         """Infer local /24 subnet from active interface."""
@@ -132,12 +167,52 @@ class NetworkCameraDiscovery:
         for port in self.COMMON_PORTS:
             for path in ordered_paths:
                 url = f"rtsp://{auth}{host}:{port}{path}"
+                print(f"[Discovery] Trying RTSP URL: {url}")
                 if self._stream_is_readable(url):
                     stream_kind = "Substream" if path in sub_patterns else "Main"
+                    print(f"[Discovery] Stream opened: {url}")
                     return {
                         "source": url,
                         "label": f"Network {host} ({stream_kind})",
                     }
+        print(f"[Discovery] No working RTSP URL found for host {host}")
+        return None
+
+    def _find_working_rtsp_endpoint_with_candidates(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        host_credentials: Optional[Dict[str, Dict[str, str]]] = None,
+        prefer_substream: bool = False,
+    ) -> Optional[dict]:
+        """Try host-specific and fallback credentials to find a stream."""
+        credential_candidates = []
+        seen = set()
+
+        def add_candidate(user: str, pwd: str) -> None:
+            key = (user or "", pwd or "")
+            if key in seen:
+                return
+            seen.add(key)
+            credential_candidates.append((user, pwd))
+
+        if host_credentials:
+            host_config = host_credentials.get(host, {})
+            add_candidate(host_config.get("username", ""), host_config.get("password", ""))
+
+        add_candidate(username, password)
+        add_candidate("", "")
+
+        for candidate_user, candidate_pass in credential_candidates:
+            endpoint = self._find_working_rtsp_endpoint(
+                host=host,
+                username=candidate_user,
+                password=candidate_pass,
+                prefer_substream=prefer_substream,
+            )
+            if endpoint:
+                return endpoint
         return None
 
     def _stream_is_readable(self, source: str) -> bool:

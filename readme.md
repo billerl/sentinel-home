@@ -7,6 +7,7 @@ Sentinel Home is a Python + PySide6 desktop app for local camera monitoring with
 - `readme.md` - Feature overview, setup, usage, and operations
 - `installation-guide.md` - Step-by-step installation and troubleshooting
 - `project-structure.md` - Codebase layout and module responsibilities
+- `handoff_summary.md` - Cross-chat continuity notes and update template
 
 ## Key Features
 
@@ -22,9 +23,11 @@ Sentinel Home is a Python + PySide6 desktop app for local camera monitoring with
   - Recording rendered with motion boxes.
 - Snapshot capture and image recall.
 - Main feed full-screen mode (`F11`, `Esc`, or button).
-- MultiView grid for discovered network cameras:
-  - Click a stream to focus it.
-  - Return to grid with `Return to MultiView`.
+- Embedded multi-camera grid (in main window):
+  - Connect multiple cameras simultaneously.
+  - Click a tile to focus that camera in the main view.
+  - Return to grid with `Return to Grid`.
+  - Full screen applies to whichever view is currently shown (grid or focused camera).
 - Audio alerts (Piper TTS if available, `pyttsx3` fallback).
 - Telegram notifications:
   - Multiple recipients (comma-separated chat IDs).
@@ -94,6 +97,16 @@ python main.py
 Use this pattern for driveway use cases:
 - Entry line at driveway boundary to catch incoming vehicles.
 - Active zone over driveway to keep alerts for activity inside zone (pets/people).
+
+## Per-Camera Profiles
+
+- Each connected camera keeps its own profile in `settings.json`:
+  - Active zones
+  - Entry lines + direction
+  - Detection size / sensitivity
+  - Recording cooldown + enabled state
+  - Night bug schedule
+- Editing zones/lines always applies to the currently focused camera.
 
 ## Recording
 

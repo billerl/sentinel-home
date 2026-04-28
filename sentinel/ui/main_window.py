@@ -7,7 +7,9 @@ import os
 import cv2
 import numpy as np
 import subprocess  # Add this for opening videos with system player
-from typing import List, Optional, Tuple
+import time
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtWidgets import (
     QApplication,
@@ -15,6 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QComboBox,
     QPushButton,
     QSlider,
@@ -27,6 +30,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QSpinBox,
+    QInputDialog,
 )
 from PySide6.QtGui import (
     QImage,
@@ -41,7 +45,9 @@ from PySide6.QtCore import Qt, QTimer, QPoint
 
 from sentinel.constants import (
     CONTROL_PANEL_WIDTH,
-    FRAME_INTERVAL,
+    DEFAULT_FEED_FPS,
+    FEED_FPS_MIN,
+    FEED_FPS_MAX,
     CAPTURE_DIR,
     VIDEO_DIR,
     STYLESHEET,
@@ -54,11 +60,23 @@ from sentinel.constants import (
     RECONNECT_INTERVAL_SECONDS,
     DEFAULT_DISPLAY_OVERLAY_MODE,
 )
-from sentinel.detection import MotionDetector, NetworkCameraDiscovery
+from sentinel.detection import MotionDetector, NetworkCameraDiscovery, CameraEndpoint
 from sentinel.audio import AudioAlertSystem
 from sentinel.notifications import TelegramNotifier
 from sentinel.settings import SettingsManager
-from sentinel.ui.multiview_window import MultiViewWindow
+
+
+@dataclass
+class CameraSession:
+    camera_id: str
+    display_name: str
+    source: object
+    detector: MotionDetector
+    profile: dict
+    host: str = ""
+    tile_label: Optional[QLabel] = None
+    last_frame: Optional[np.ndarray] = None
+    pending_clip_request_chat_ids: List[str] = field(default_factory=list)
 
 
 class MainWindow(QMainWindow):
@@ -97,11 +115,15 @@ class MainWindow(QMainWindow):
         self.audio_system = audio_system
         self.telegram_notifier = telegram_notifier
         self.network_discovery = NetworkCameraDiscovery()
+        self.camera_profiles = self._load_camera_profiles()
+        self.camera_sessions: Dict[str, CameraSession] = {}
+        self.focused_camera_id: Optional[str] = None
+        self.view_mode = "focus"
         self.camera_sources = {}
         self.discovered_network_sources = []
-        self.multiview_window = None
-        self.pending_clip_request_chat_ids: List[str] = []
+        self.discovered_rtsp_hosts: List[str] = []
         self.prefer_substream = self.settings_manager.get("prefer_substream", True)
+        self.camera_logins = self._load_camera_logins()
         self.current_frame_size: Tuple[int, int] = (640, 480)
         self.last_display_pixmap_size: Tuple[int, int] = (1, 1)
         self.last_display_offset: Tuple[int, int] = (0, 0)
@@ -109,6 +131,9 @@ class MainWindow(QMainWindow):
         self.is_drawing_line = False
         self.pending_zone_points: List[List[float]] = []
         self.pending_line_points: List[List[float]] = []
+        self.show_detection_size_preview = False
+        self.detection_size_preview_until = 0.0
+        self.detection_size_preview_value = 0
         self.auto_reconnect_enabled = self.settings_manager.get(
             "auto_reconnect_enabled", AUTO_RECONNECT_DEFAULT
         )
@@ -119,16 +144,23 @@ class MainWindow(QMainWindow):
             "display_overlay_mode", DEFAULT_DISPLAY_OVERLAY_MODE
         )
         self.is_main_fullscreen = False
+        raw_fps = int(self.settings_manager.get("feed_fps", DEFAULT_FEED_FPS))
+        self.feed_fps = max(FEED_FPS_MIN, min(FEED_FPS_MAX, raw_fps))
 
         # Set up timer for camera feed updates
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_feed)
         self.reconnect_timer = QTimer()
         self.reconnect_timer.timeout.connect(self.try_reconnect)
+        self.detection_size_release_timer = QTimer()
+        self.detection_size_release_timer.setSingleShot(True)
+        self.detection_size_release_timer.timeout.connect(
+            self.start_detection_size_preview
+        )
 
         # Set up UI
         self.setup_ui()
-        self.cooldown_slider.setEnabled(motion_detector.recording_enabled)
+        self.cooldown_slider.setEnabled(True)
 
         # Initial camera search and setup
         self.search_cameras()
@@ -280,6 +312,18 @@ class MainWindow(QMainWindow):
         self.search_btn.clicked.connect(self.search_cameras)
         self.camera_layout.addWidget(self.search_btn)
 
+        self.add_camera_btn = QPushButton("Add Camera")
+        self.add_camera_btn.clicked.connect(self.add_camera)
+        self.camera_layout.addWidget(self.add_camera_btn)
+
+        self.camera_login_btn = QPushButton("Add Camera Login")
+        self.camera_login_btn.clicked.connect(self.add_camera_login)
+        self.camera_layout.addWidget(self.camera_login_btn)
+
+        self.manage_camera_logins_btn = QPushButton("Manage Camera Logins")
+        self.manage_camera_logins_btn.clicked.connect(self.manage_camera_logins)
+        self.camera_layout.addWidget(self.manage_camera_logins_btn)
+
         self.multiview_btn = QPushButton("Open MultiView")
         self.multiview_btn.clicked.connect(self.open_multiview)
         self.camera_layout.addWidget(self.multiview_btn)
@@ -361,6 +405,15 @@ class MainWindow(QMainWindow):
         self.reconnect_interval_spin.valueChanged.connect(self.on_reconnect_interval_change)
         reconnect_layout.addWidget(self.reconnect_interval_spin)
         self.camera_layout.addLayout(reconnect_layout)
+
+        fps_row = QHBoxLayout()
+        fps_row.addWidget(QLabel("Feed FPS (lower = less RAM/CPU):"))
+        self.feed_fps_spin = QSpinBox()
+        self.feed_fps_spin.setRange(FEED_FPS_MIN, FEED_FPS_MAX)
+        self.feed_fps_spin.setValue(self.feed_fps)
+        self.feed_fps_spin.valueChanged.connect(self.on_feed_fps_changed)
+        fps_row.addWidget(self.feed_fps_spin)
+        self.camera_layout.addLayout(fps_row)
 
     def setup_speech_controls(self) -> None:
         """Set up speech and audio controls."""
@@ -533,6 +586,20 @@ class MainWindow(QMainWindow):
     def setup_camera_feed(self) -> None:
         """Set up the camera feed display area."""
         from PySide6.QtWidgets import QSizePolicy
+        self.feed_container = QWidget()
+        self.feed_layout = QVBoxLayout(self.feed_container)
+        self.feed_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.return_to_grid_btn = QPushButton("Return to Grid")
+        self.return_to_grid_btn.clicked.connect(self.show_grid_view)
+        self.return_to_grid_btn.hide()
+        self.feed_layout.addWidget(self.return_to_grid_btn)
+
+        self.feed_mode_container = QWidget()
+        self.feed_mode_layout = QVBoxLayout(self.feed_mode_container)
+        self.feed_mode_layout.setContentsMargins(0, 0, 0, 0)
+        self.feed_layout.addWidget(self.feed_mode_container, stretch=1)
+
         self.camera_feed = QLabel()
         self.camera_feed.setAlignment(Qt.AlignCenter)
         self.camera_feed.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -543,8 +610,16 @@ class MainWindow(QMainWindow):
         feed_size = self.settings_manager.get("feed_size", (640, 480))
         self.camera_feed.setMinimumSize(320, 240)  # Minimum size
         self.camera_feed.resize(feed_size[0], feed_size[1])
+        self.feed_mode_layout.addWidget(self.camera_feed, stretch=1)
 
-        self.main_layout.addWidget(self.camera_feed, stretch=1)
+        self.grid_widget = QWidget()
+        self.grid_layout = QGridLayout(self.grid_widget)
+        self.grid_layout.setContentsMargins(0, 0, 0, 0)
+        self.grid_layout.setSpacing(8)
+        self.grid_widget.hide()
+        self.feed_mode_layout.addWidget(self.grid_widget, stretch=1)
+
+        self.main_layout.addWidget(self.feed_container, stretch=1)
 
     def search_cameras(self) -> None:
         """Search for available cameras and update the dropdown."""
@@ -571,10 +646,21 @@ class MainWindow(QMainWindow):
             username=username,
             password=password,
             prefer_substream=self.prefer_substream,
+            host_credentials=self.camera_logins,
         )
+        self.discovered_rtsp_hosts = self.network_discovery.discover_hosts()
+        endpoint_hosts = set()
         for endpoint in self.discovered_network_sources:
             camera_list.append(endpoint.label)
             self.camera_sources[endpoint.label] = endpoint.source
+            endpoint_hosts.add(endpoint.host)
+
+        for host in self.discovered_rtsp_hosts:
+            if host in endpoint_hosts:
+                continue
+            pending_label = f"Network {host} (Login Required)"
+            camera_list.append(pending_label)
+            self.camera_sources[pending_label] = f"pending://{host}"
 
         # Restore whichever source was selected last
         saved_source = self.settings_manager.get("camera_source", "")
@@ -603,41 +689,326 @@ class MainWindow(QMainWindow):
 
         self.status_label.setText(f"Camera: {self.camera_combo.currentText()} (Disconnected)")
 
-    def toggle_feed(self) -> None:
-        """Toggle the camera feed on/off."""
-        if not self.motion_detector.feed_active:
-            if self.camera_combo.currentText() == "No Cameras Found":
-                self.status_label.setText("Camera: None Available")
-                return
-            selected_display = self.camera_combo.currentText()
-            selected_source = self.camera_sources.get(selected_display)
-            if selected_source is None:
-                self.status_label.setText("Camera: Invalid Source")
-                return
-            if not self.connect_camera_source(selected_source, selected_display):
-                self.status_label.setText(f"{selected_display}: Failed to Connect")
-                self.start_reconnect_timer()
+    def _load_camera_logins(self) -> dict:
+        """Load per-host camera credentials from settings."""
+        saved = self.settings_manager.get("camera_logins", {})
+        if isinstance(saved, dict):
+            return saved
+        return {}
+
+    def _load_camera_profiles(self) -> dict:
+        """Load per-camera profiles keyed by camera source id."""
+        saved = self.settings_manager.get("camera_profiles", {})
+        if isinstance(saved, dict):
+            return saved
+        return {}
+
+    def _default_profile_for_source(self, source, display_name: str) -> dict:
+        return {
+            "source": str(source),
+            "display": display_name,
+            "active_zones": [],
+            "entry_lines": [],
+            "entry_direction": self.settings_manager.get("entry_direction", "outside_to_inside"),
+            "min_contour_area": self.settings_manager.get("min_contour_area", MIN_CONTOUR_AREA),
+            "var_threshold": self.settings_manager.get("var_threshold", VAR_THRESHOLD),
+            "motion_cooldown": self.settings_manager.get("motion_cooldown", MOTION_COOLDOWN),
+            "recording_enabled": self.settings_manager.get("recording_enabled", True),
+            "night_bug_filter_enabled": self.settings_manager.get("night_bug_filter_enabled", True),
+            "night_bug_start_hour": self.settings_manager.get("night_bug_start_hour", 20),
+            "night_bug_end_hour": self.settings_manager.get("night_bug_end_hour", 6),
+        }
+
+    def _get_or_create_profile(self, source, display_name: str) -> Tuple[str, dict]:
+        camera_id = str(source)
+        profile = self.camera_profiles.get(camera_id)
+        if not isinstance(profile, dict):
+            profile = self._default_profile_for_source(source, display_name)
+            self.camera_profiles[camera_id] = profile
+            self.settings_manager.set("camera_profiles", self.camera_profiles)
         else:
-            self.disconnect_camera()
-            self.show_blank_frame()
+            profile.setdefault("display", display_name)
+            profile.setdefault("source", str(source))
+            profile.setdefault("active_zones", [])
+            profile.setdefault("entry_lines", [])
+            profile.setdefault("entry_direction", "outside_to_inside")
+        return camera_id, profile
+
+    def add_camera_login(self) -> None:
+        """Prompt for and save per-camera login credentials."""
+        host, ok = QInputDialog.getText(
+            self,
+            "Add Camera Login",
+            "Camera IP/Host (example: 192.168.1.10):",
+        )
+        if not ok:
+            return
+        host = host.strip()
+        if not host:
+            return
+
+        current = self.camera_logins.get(host, {})
+        current_username = current.get("username", "")
+        current_password = current.get("password", "")
+
+        username, ok = QInputDialog.getText(
+            self,
+            "Add Camera Login",
+            f"Username for {host} (leave blank to remove saved login):",
+            text=current_username,
+        )
+        if not ok:
+            return
+        username = username.strip()
+
+        if not username:
+            if host in self.camera_logins:
+                del self.camera_logins[host]
+                self.settings_manager.set("camera_logins", self.camera_logins)
+                self.status_label.setText(f"Saved login removed for {host}")
+            return
+
+        password, ok = QInputDialog.getText(
+            self,
+            "Add Camera Login",
+            f"Password for {host}:",
+            QLineEdit.Password,
+            current_password,
+        )
+        if not ok:
+            return
+
+        self.camera_logins[host] = {
+            "username": username,
+            "password": password,
+        }
+        self.settings_manager.set("camera_logins", self.camera_logins)
+        self.status_label.setText(f"Saved login for {host}")
+
+    def manage_camera_logins(self) -> None:
+        """View/edit/remove existing saved per-camera logins."""
+        if not self.camera_logins:
+            QMessageBox.information(
+                self,
+                "Manage Camera Logins",
+                "No saved camera logins yet.",
+            )
+            return
+
+        hosts = sorted(self.camera_logins.keys())
+        host, ok = QInputDialog.getItem(
+            self,
+            "Manage Camera Logins",
+            "Select camera host:",
+            hosts,
+            0,
+            False,
+        )
+        if not ok:
+            return
+
+        action, ok = QInputDialog.getItem(
+            self,
+            "Manage Camera Logins",
+            f"Action for {host}:",
+            ["Edit login", "Remove login"],
+            0,
+            False,
+        )
+        if not ok:
+            return
+
+        if action == "Remove login":
+            del self.camera_logins[host]
+            self.settings_manager.set("camera_logins", self.camera_logins)
+            self.status_label.setText(f"Saved login removed for {host}")
+            return
+
+        current = self.camera_logins.get(host, {})
+        current_username = current.get("username", "")
+        current_password = current.get("password", "")
+
+        username, ok = QInputDialog.getText(
+            self,
+            "Manage Camera Logins",
+            f"Username for {host} (leave blank to remove):",
+            text=current_username,
+        )
+        if not ok:
+            return
+        username = username.strip()
+
+        if not username:
+            if host in self.camera_logins:
+                del self.camera_logins[host]
+                self.settings_manager.set("camera_logins", self.camera_logins)
+                self.status_label.setText(f"Saved login removed for {host}")
+            return
+
+        password, ok = QInputDialog.getText(
+            self,
+            "Manage Camera Logins",
+            f"Password for {host}:",
+            QLineEdit.Password,
+            current_password,
+        )
+        if not ok:
+            return
+
+        self.camera_logins[host] = {
+            "username": username,
+            "password": password,
+        }
+        self.settings_manager.set("camera_logins", self.camera_logins)
+        self.status_label.setText(f"Saved login updated for {host}")
+
+    def add_camera(self) -> None:
+        """Add/resolve a network camera from discovered hosts or manual entry."""
+        host_choices = list(self.discovered_rtsp_hosts)
+        host_choices.append("Manual entry...")
+        selected_host, ok = QInputDialog.getItem(
+            self,
+            "Add Camera",
+            "Choose discovered camera host or manual entry:",
+            host_choices,
+            0,
+            False,
+        )
+        if not ok:
+            return
+
+        host = selected_host
+        if selected_host == "Manual entry...":
+            host, ok = QInputDialog.getText(
+                self,
+                "Add Camera",
+                "Camera IP/Host (example: 192.168.1.10):",
+            )
+            if not ok:
+                return
+            host = host.strip()
+            if not host:
+                return
+
+        resolved = self._resolve_host_with_prompt(host)
+        if not resolved:
+            return
+        self._upsert_discovered_endpoint(resolved)
+        self.camera_combo.setCurrentText(resolved.label)
+        self.status_label.setText(f"{resolved.label}: Added")
+
+    def _upsert_discovered_endpoint(self, endpoint: CameraEndpoint) -> None:
+        """Ensure a resolved endpoint is available in camera sources and multiview."""
+        self.camera_sources[endpoint.label] = endpoint.source
+        existing_hosts = {entry.host for entry in self.discovered_network_sources}
+        if endpoint.host not in existing_hosts:
+            self.discovered_network_sources.append(endpoint)
+        if self.camera_combo.findText(endpoint.label) < 0:
+            self.camera_combo.addItem(endpoint.label)
+
+    def _resolve_host_with_prompt(self, host: str) -> Optional[CameraEndpoint]:
+        """Prompt for per-host login and resolve to a readable stream endpoint."""
+        current = self.camera_logins.get(host, {})
+        current_username = current.get("username", self.rtsp_user_input.text().strip())
+        current_password = current.get("password", self.rtsp_pass_input.text())
+
+        username, ok = QInputDialog.getText(
+            self,
+            "Camera Login",
+            f"Username for {host}:",
+            text=current_username,
+        )
+        if not ok:
+            return None
+        username = username.strip()
+
+        password, ok = QInputDialog.getText(
+            self,
+            "Camera Login",
+            f"Password for {host}:",
+            QLineEdit.Password,
+            current_password,
+        )
+        if not ok:
+            return None
+
+        endpoint = self.network_discovery.resolve_host_endpoint(
+            host=host,
+            username=username,
+            password=password,
+            prefer_substream=self.prefer_substream,
+        )
+        if not endpoint:
+            QMessageBox.warning(
+                self,
+                "Camera Not Added",
+                f"Could not open a stream for {host} using the provided credentials.",
+            )
+            return None
+
+        self.camera_logins[host] = {
+            "username": username,
+            "password": password,
+        }
+        self.settings_manager.set("camera_logins", self.camera_logins)
+        return endpoint
+
+    def toggle_feed(self) -> None:
+        """Toggle selected camera connection on/off without affecting others."""
+        if self.camera_combo.currentText() == "No Cameras Found":
+            self.status_label.setText("Camera: None Available")
+            return
+        selected_display = self.camera_combo.currentText()
+        selected_source = self.camera_sources.get(selected_display)
+        if selected_source is None:
+            self.status_label.setText("Camera: Invalid Source")
+            return
+        session_id = str(selected_source)
+        if session_id in self.camera_sessions:
+            self.disconnect_camera(session_id=session_id)
+            return
+        if not self.connect_camera_source(selected_source, selected_display):
+            self.status_label.setText(f"{selected_display}: Failed to Connect")
+            self.start_reconnect_timer()
 
     def connect_camera_source(self, source, display_name: str) -> bool:
         """Connect selected camera and update UI/settings."""
-        if self.motion_detector.start_camera(source):
-            self.timer.start(FRAME_INTERVAL)
+        if isinstance(source, str) and source.startswith("pending://"):
+            host = source.split("pending://", 1)[1]
+            resolved = self._resolve_host_with_prompt(host)
+            if not resolved:
+                return False
+            self._upsert_discovered_endpoint(resolved)
+            source = resolved.source
+            display_name = resolved.label
+
+        camera_id, profile = self._get_or_create_profile(source, display_name)
+        detector = MotionDetector()
+        session = CameraSession(
+            camera_id=camera_id,
+            display_name=display_name,
+            source=source,
+            detector=detector,
+            profile=profile,
+            host=(source.split("@")[-1].split(":")[0] if isinstance(source, str) and "@" in source else ""),
+        )
+        self._apply_profile_to_detector(session)
+        if detector.start_camera(source, target_fps=self.feed_fps):
+            self.camera_sessions[camera_id] = session
+            self.focused_camera_id = camera_id
+            self.timer.start(self._feed_timer_interval_ms())
             self.reconnect_timer.stop()
-            self.toggle_btn.setText("Camera Online")
+            self.toggle_btn.setText("Disconnect Selected")
             self.status_label.setText(f"{display_name}: Connected")
-            self.search_btn.setEnabled(False)
-            self.search_btn.setProperty("inactive", True)
-            self.search_btn.setStyleSheet(
-                "background-color: #555555; color: #999999; border: 1px solid #444444;"
-            )
-            self.recall_btn.setStyleSheet(
-                "background-color: #555555; color: #999999; border: 1px solid #444444;"
-            )
-            self.recall_btn.setEnabled(False)
-            self.recall_btn.setProperty("inactive", True)
+            self.search_btn.setEnabled(True)
+            self.search_btn.setProperty("inactive", False)
+            self.search_btn.setStyleSheet("")
+            self.recall_btn.setEnabled(True)
+            self.recall_btn.setProperty("inactive", False)
+            self.recall_btn.setStyleSheet("")
+            self._apply_profile_to_controls(profile)
+            self.show_focus_view()
+            self._refresh_grid_tiles()
             self.settings_manager.set("camera_index", source if isinstance(source, int) else 0)
             self.settings_manager.set("camera_source", str(source))
             self.settings_manager.set("camera_display", display_name)
@@ -645,23 +1016,27 @@ class MainWindow(QMainWindow):
             return True
         return False
 
-    def disconnect_camera(self, user_requested: bool = True) -> None:
-        """Disconnect camera and restore idle UI state."""
-        self.motion_detector.stop_camera()
-        self.timer.stop()
-        self.toggle_btn.setText("Camera Offline")
+    def disconnect_camera(self, user_requested: bool = True, session_id: Optional[str] = None) -> None:
+        """Disconnect one camera session and restore idle state if none remain."""
+        target_id = session_id or self.focused_camera_id
+        if not target_id:
+            return
+        session = self.camera_sessions.pop(target_id, None)
+        if not session:
+            return
+        session.detector.stop_camera()
         if user_requested:
             self.reconnect_timer.stop()
+        if not self.camera_sessions:
+            self.timer.stop()
             self.settings_manager.set("feed_active", False)
-        self.status_label.setText(
-            f"{self.settings_manager.get('camera_display', 'Camera')}: Disconnected"
-        )
-        self.search_btn.setEnabled(True)
-        self.search_btn.setProperty("inactive", False)
-        self.search_btn.setStyleSheet("")
-        self.recall_btn.setEnabled(True)
-        self.recall_btn.setProperty("inactive", False)
-        self.recall_btn.setStyleSheet("")
+            self.toggle_btn.setText("Camera Offline")
+            self.show_blank_frame()
+        else:
+            self.focused_camera_id = next(iter(self.camera_sessions.keys()))
+            self.toggle_btn.setText("Disconnect Selected")
+        self._refresh_grid_tiles()
+        self.status_label.setText(f"{session.display_name}: Disconnected")
 
     def start_reconnect_timer(self) -> None:
         """Start retry timer when reconnect is enabled."""
@@ -672,6 +1047,9 @@ class MainWindow(QMainWindow):
 
     def try_reconnect(self) -> None:
         """Attempt reconnect to saved camera source."""
+        if self.camera_sessions:
+            self.reconnect_timer.stop()
+            return
         saved_source = self.settings_manager.get("camera_source", "")
         if not saved_source:
             self.reconnect_timer.stop()
@@ -693,16 +1071,23 @@ class MainWindow(QMainWindow):
 
     def start_initial_camera_if_configured(self) -> None:
         """Attempt startup connect and begin retries if needed."""
-        if not self.settings_manager.get("feed_active", False):
+        profiles = self.settings_manager.get("camera_profiles", {})
+        if not isinstance(profiles, dict) or not profiles:
+            if not self.settings_manager.get("feed_active", False):
+                return
+            saved_source = self.settings_manager.get("camera_source", "")
+            if not saved_source:
+                return
+            source = self._coerce_source(saved_source)
+            display = self.settings_manager.get("camera_display", f"Camera {saved_source}")
+            if not self.connect_camera_source(source, display):
+                self.status_label.setText(f"{display}: Initial connect failed, retrying...")
+                self.start_reconnect_timer()
             return
-        saved_source = self.settings_manager.get("camera_source", "")
-        if not saved_source:
-            return
-        source = self._coerce_source(saved_source)
-        display = self.settings_manager.get("camera_display", f"Camera {saved_source}")
-        if not self.connect_camera_source(source, display):
-            self.status_label.setText(f"{display}: Initial connect failed, retrying...")
-            self.start_reconnect_timer()
+        for camera_id, profile in profiles.items():
+            source = self._coerce_source(profile.get("source", camera_id))
+            display = profile.get("display", f"Camera {camera_id}")
+            self.connect_camera_source(source, display)
 
     def display_frame(self, frame: np.ndarray) -> None:
         """
@@ -732,6 +1117,70 @@ class MainWindow(QMainWindow):
             max(0, (self.camera_feed.height() - scaled.height()) // 2),
         )
         self.camera_feed.setPixmap(scaled)
+
+    def _display_frame_in_label(self, frame: np.ndarray, target: QLabel) -> None:
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = frame_rgb.shape
+        bytes_per_line = ch * w
+        q_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        pixmap = QPixmap.fromImage(q_image)
+        scaled = pixmap.scaled(
+            target.size(),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation,
+        )
+        target.setPixmap(scaled)
+
+    def _refresh_grid_tiles(self) -> None:
+        while self.grid_layout.count():
+            item = self.grid_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.setParent(None)
+
+        sessions = list(self.camera_sessions.values())
+        if not sessions:
+            return
+
+        columns = 2 if len(sessions) > 1 else 1
+        for idx, session in enumerate(sessions):
+            tile = QLabel()
+            tile.setAlignment(Qt.AlignCenter)
+            tile.setMinimumSize(240, 160)
+            tile.setStyleSheet("background-color: black; border: 1px solid #00FFFF;")
+            tile.setText(session.display_name)
+            tile.mousePressEvent = (
+                lambda _event, cam_id=session.camera_id: self.focus_camera(cam_id)
+            )
+            session.tile_label = tile
+            row = idx // columns
+            col = idx % columns
+            self.grid_layout.addWidget(tile, row, col)
+
+    def show_grid_view(self) -> None:
+        self.view_mode = "grid"
+        self.camera_feed.hide()
+        self.grid_widget.show()
+        self.return_to_grid_btn.setText("Return to Single View")
+        self.return_to_grid_btn.show()
+        self.multiview_btn.setText("Single View")
+        self._refresh_grid_tiles()
+
+    def show_focus_view(self) -> None:
+        self.view_mode = "focus"
+        self.grid_widget.hide()
+        self.camera_feed.show()
+        self.return_to_grid_btn.setText("Return to Grid")
+        self.return_to_grid_btn.setVisible(bool(self.camera_sessions))
+        self.multiview_btn.setText("Open MultiView")
+
+    def focus_camera(self, camera_id: str) -> None:
+        if camera_id not in self.camera_sessions:
+            return
+        self.focused_camera_id = camera_id
+        session = self.camera_sessions[camera_id]
+        self._apply_profile_to_controls(session.profile)
+        self.show_focus_view()
 
     def show_blank_frame(self) -> None:
         """Display a blank frame with 'Camera Offline' text."""
@@ -764,8 +1213,10 @@ class MainWindow(QMainWindow):
         """Draw configured zones/lines and in-progress drawing guides."""
         draw = frame.copy()
         height, width = draw.shape[:2]
+        session = self._focused_session()
+        profile = session.profile if session else {}
 
-        for zone in self.settings_manager.get("active_zones", []):
+        for zone in profile.get("active_zones", []):
             points = np.array(
                 [[int(p[0] * width), int(p[1] * height)] for p in zone],
                 dtype=np.int32,
@@ -773,7 +1224,7 @@ class MainWindow(QMainWindow):
             if len(points) >= 3:
                 cv2.polylines(draw, [points], True, (255, 255, 0), 2)
 
-        for line in self.settings_manager.get("entry_lines", []):
+        for line in profile.get("entry_lines", []):
             if len(line) != 2:
                 continue
             p1 = (int(line[0][0] * width), int(line[0][1] * height))
@@ -816,7 +1267,7 @@ class MainWindow(QMainWindow):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """Capture drawing clicks while in zone/line mode."""
-        feed_pos = self.camera_feed.mapFrom(self, event.position().toPoint())
+        feed_pos = self.camera_feed.mapFromGlobal(event.globalPosition().toPoint())
         in_feed = self.camera_feed.rect().contains(feed_pos)
         if in_feed and (self.is_drawing_zone or self.is_drawing_line):
             point = self._label_point_to_normalized(feed_pos)
@@ -857,6 +1308,8 @@ class MainWindow(QMainWindow):
             self.settings_manager.get("min_contour_area", MIN_CONTOUR_AREA)
         )
         self.contour_slider.valueChanged.connect(self.on_contour_size_change)
+        self.contour_slider.sliderPressed.connect(self.on_contour_slider_pressed)
+        self.contour_slider.sliderReleased.connect(self.on_contour_slider_released)
         self.contour_slider.setToolTip(
             "Adjust how large movement needs to be to trigger detection"
         )
@@ -960,27 +1413,26 @@ class MainWindow(QMainWindow):
 
     def on_recording_enabled_change(self, enabled):
         """Handle recording enabled/disabled toggle."""
-        self.settings_manager.set("recording_enabled", enabled)
-
-        # Update cooldown slider enabled state
         self.cooldown_slider.setEnabled(enabled)
-
-        # Update motion detector
-        self.motion_detector.recording_enabled = enabled
-
+        session = self._focused_session()
+        if session:
+            session.profile["recording_enabled"] = enabled
+            session.detector.recording_enabled = enabled
+            self.camera_profiles[session.camera_id] = session.profile
+            self.settings_manager.set("camera_profiles", self.camera_profiles)
         status = "enabled" if enabled else "disabled"
         self.status_label.setText(f"Recording {status}")
 
     def on_cooldown_change(self, value):
         """Handle motion cooldown slider change."""
         cooldown = value / 10.0  # Convert to seconds (0.1 to 10.0)
-        self.settings_manager.set("motion_cooldown", cooldown)
-
-        # Update the display label
         self.cooldown_value_label.setText(f"{cooldown:.1f}s")
-
-        # Update motion detector
-        self.motion_detector.motion_cooldown = cooldown
+        session = self._focused_session()
+        if session:
+            session.profile["motion_cooldown"] = cooldown
+            session.detector.motion_cooldown = cooldown
+            self.camera_profiles[session.camera_id] = session.profile
+            self.settings_manager.set("camera_profiles", self.camera_profiles)
 
     def on_draw_zone_toggled(self, checked: bool) -> None:
         self.is_drawing_zone = checked
@@ -1008,10 +1460,16 @@ class MainWindow(QMainWindow):
         if len(self.pending_zone_points) < 3:
             self.pending_zone_points = []
             return
-        zones = self.settings_manager.get("active_zones", [])
+        session = self._focused_session()
+        if not session:
+            self.pending_zone_points = []
+            return
+        zones = session.profile.get("active_zones", [])
         zones.append(self.pending_zone_points.copy())
-        self.settings_manager.set("active_zones", zones)
-        self.motion_detector.set_active_zones(zones)
+        session.profile["active_zones"] = zones
+        session.detector.set_active_zones(zones)
+        self.camera_profiles[session.camera_id] = session.profile
+        self.settings_manager.set("camera_profiles", self.camera_profiles)
         self.pending_zone_points = []
         self.status_label.setText(f"Active zones: {len(zones)}")
 
@@ -1019,29 +1477,102 @@ class MainWindow(QMainWindow):
         if len(self.pending_line_points) != 2:
             self.pending_line_points = []
             return
-        lines = self.settings_manager.get("entry_lines", [])
+        session = self._focused_session()
+        if not session:
+            self.pending_line_points = []
+            return
+        lines = session.profile.get("entry_lines", [])
         lines.append(self.pending_line_points.copy())
-        self.settings_manager.set("entry_lines", lines)
-        self.motion_detector.set_entry_lines(lines)
+        session.profile["entry_lines"] = lines
+        session.detector.set_entry_lines(lines)
+        self.camera_profiles[session.camera_id] = session.profile
+        self.settings_manager.set("camera_profiles", self.camera_profiles)
         self.pending_line_points = []
         self.status_label.setText(f"Entry lines: {len(lines)}")
 
     def clear_active_zones(self) -> None:
-        self.settings_manager.set("active_zones", [])
-        self.motion_detector.set_active_zones([])
+        session = self._focused_session()
+        if not session:
+            return
+        session.profile["active_zones"] = []
+        session.detector.set_active_zones([])
+        self.camera_profiles[session.camera_id] = session.profile
+        self.settings_manager.set("camera_profiles", self.camera_profiles)
         self.pending_zone_points = []
         self.status_label.setText("Active zones cleared")
 
     def clear_entry_lines(self) -> None:
-        self.settings_manager.set("entry_lines", [])
-        self.motion_detector.set_entry_lines([])
+        session = self._focused_session()
+        if not session:
+            return
+        session.profile["entry_lines"] = []
+        session.detector.set_entry_lines([])
+        self.camera_profiles[session.camera_id] = session.profile
+        self.settings_manager.set("camera_profiles", self.camera_profiles)
         self.pending_line_points = []
         self.status_label.setText("Entry lines cleared")
 
     def on_entry_direction_change(self, value: str) -> None:
-        self.settings_manager.set("entry_direction", value)
-        self.motion_detector.set_entry_direction(value)
+        session = self._focused_session()
+        if session:
+            session.profile["entry_direction"] = value
+            session.detector.set_entry_direction(value)
+            self.camera_profiles[session.camera_id] = session.profile
+            self.settings_manager.set("camera_profiles", self.camera_profiles)
         self.status_label.setText(f"Entry direction: {value}")
+
+    def _focused_session(self) -> Optional[CameraSession]:
+        if self.focused_camera_id and self.focused_camera_id in self.camera_sessions:
+            return self.camera_sessions[self.focused_camera_id]
+        return None
+
+    def _apply_profile_to_controls(self, profile: dict) -> None:
+        self.contour_slider.blockSignals(True)
+        self.variance_slider.blockSignals(True)
+        self.cooldown_slider.blockSignals(True)
+        self.recording_enabled_cb.blockSignals(True)
+        self.entry_direction_combo.blockSignals(True)
+        self.night_bug_filter_cb.blockSignals(True)
+        self.night_bug_start_spin.blockSignals(True)
+        self.night_bug_end_spin.blockSignals(True)
+
+        self.contour_slider.setValue(int(profile.get("min_contour_area", MIN_CONTOUR_AREA)))
+        self.variance_slider.setValue(int(profile.get("var_threshold", VAR_THRESHOLD)))
+        self.cooldown_slider.setValue(int(float(profile.get("motion_cooldown", MOTION_COOLDOWN)) * 10))
+        self.recording_enabled_cb.setChecked(bool(profile.get("recording_enabled", True)))
+        self.entry_direction_combo.setCurrentText(profile.get("entry_direction", "outside_to_inside"))
+        self.night_bug_filter_cb.setChecked(bool(profile.get("night_bug_filter_enabled", True)))
+        self.night_bug_start_spin.setValue(int(profile.get("night_bug_start_hour", 20)))
+        self.night_bug_end_spin.setValue(int(profile.get("night_bug_end_hour", 6)))
+
+        self.contour_slider.blockSignals(False)
+        self.variance_slider.blockSignals(False)
+        self.cooldown_slider.blockSignals(False)
+        self.recording_enabled_cb.blockSignals(False)
+        self.entry_direction_combo.blockSignals(False)
+        self.night_bug_filter_cb.blockSignals(False)
+        self.night_bug_start_spin.blockSignals(False)
+        self.night_bug_end_spin.blockSignals(False)
+
+        self.contour_value_label.setText(str(self.contour_slider.value()))
+        self.variance_value_label.setText(str(self.variance_slider.value()))
+        self.cooldown_value_label.setText(f"{self.cooldown_slider.value() / 10.0:.1f}s")
+
+    def _apply_profile_to_detector(self, session: CameraSession) -> None:
+        profile = session.profile
+        detector = session.detector
+        detector.min_contour_area = int(profile.get("min_contour_area", MIN_CONTOUR_AREA))
+        detector.update_var_threshold(int(profile.get("var_threshold", VAR_THRESHOLD)))
+        detector.recording_enabled = bool(profile.get("recording_enabled", True))
+        detector.motion_cooldown = float(profile.get("motion_cooldown", MOTION_COOLDOWN))
+        detector.set_active_zones(profile.get("active_zones", []))
+        detector.set_entry_lines(profile.get("entry_lines", []))
+        detector.set_entry_direction(profile.get("entry_direction", "outside_to_inside"))
+        detector.set_night_bug_filter(
+            bool(profile.get("night_bug_filter_enabled", True)),
+            int(profile.get("night_bug_start_hour", 20)),
+            int(profile.get("night_bug_end_hour", 6)),
+        )
 
     def update_display_mode_button_text(self) -> None:
         """Refresh display mode toggle button text."""
@@ -1073,97 +1604,122 @@ class MainWindow(QMainWindow):
         if self.reconnect_timer.isActive():
             self.reconnect_timer.start(int(self.reconnect_interval_seconds * 1000))
 
+    def _feed_timer_interval_ms(self) -> int:
+        return max(1, int(1000 / max(1, self.feed_fps)))
+
+    def on_feed_fps_changed(self, value: int) -> None:
+        self.feed_fps = max(FEED_FPS_MIN, min(FEED_FPS_MAX, int(value)))
+        self.settings_manager.set("feed_fps", self.feed_fps)
+        if self.timer.isActive():
+            self.timer.setInterval(self._feed_timer_interval_ms())
+
     def update_feed(self):
-        """Update the camera feed with motion detection."""
-        # Get frame with motion detection and recording status
-        frame, _, motion_detected, recording_status = self.motion_detector.detect_motion()
-
-        if frame is None:
-            # Treat occasional read/decode errors as transient. Only reconnect after
-            # MotionDetector has already decided to stop the camera.
-            if self.motion_detector.feed_active:
-                self.status_label.setText("Camera frame read error. Waiting for stream recovery...")
-                return
-
-            self.status_label.setText("Camera stream dropped. Attempting reconnect...")
-            self.disconnect_camera(user_requested=False)
-            self.start_reconnect_timer()
+        """Update all active camera feeds and render focused/grid views."""
+        if not self.camera_sessions:
             return
 
-        raw_frame = self.motion_detector.get_last_raw_frame()
-        display_frame = frame
-        if self.display_overlay_mode == "raw" and raw_frame is not None:
-            display_frame = raw_frame
-
-        # Handle camera orientation
-        if self.settings_manager.get("cam_orientation", "horizontal") == "vertical":
-            display_frame = cv2.rotate(display_frame, cv2.ROTATE_90_CLOCKWISE)
-
-        self.current_frame_size = (display_frame.shape[1], display_frame.shape[0])
-        if self.display_overlay_mode == "overlay":
-            display_frame = self.draw_zone_line_overlays(display_frame)
-
-        # Update status based on recording state
-        if recording_status == "started":
-            self.status_label.setText("Recording started (10 seconds)")
-        elif recording_status == "recording":
-            # Don't update status during recording to avoid flickering
-            pass
-
-        # Handle on-demand Telegram clip requests.
         requested_clip_chat_ids = self.telegram_notifier.consume_clip_requests()
-        if requested_clip_chat_ids:
-            self.pending_clip_request_chat_ids.extend(requested_clip_chat_ids)
-            # Preserve order, remove duplicates.
-            self.pending_clip_request_chat_ids = list(
-                dict.fromkeys(self.pending_clip_request_chat_ids)
-            )
-        if requested_clip_chat_ids and not self.motion_detector.recording:
-            h, w = frame.shape[:2]
-            self.motion_detector.start_recording((w, h), reason="telegram_clip_request")
+        alive_sessions: Dict[str, CameraSession] = {}
+        for camera_id, session in list(self.camera_sessions.items()):
+            frame, _, motion_detected, recording_status = session.detector.detect_motion()
+            if frame is None:
+                if session.detector.feed_active:
+                    alive_sessions[camera_id] = session
+                    continue
+                self.status_label.setText(f"{session.display_name}: stream dropped")
+                continue
 
-        completed_video_path, completed_video_reason = (
-            self.motion_detector.consume_last_completed_recording()
-        )
+            raw_frame = session.detector.get_last_raw_frame()
+            display_frame = frame
+            if self.display_overlay_mode == "raw" and raw_frame is not None:
+                display_frame = raw_frame
+            if self.settings_manager.get("cam_orientation", "horizontal") == "vertical":
+                display_frame = cv2.rotate(display_frame, cv2.ROTATE_90_CLOCKWISE)
 
-        # Trigger audio alert immediately on motion.
-        if motion_detected:
-            self.audio_system.trigger_alert()
+            if self.focused_camera_id == camera_id and self.display_overlay_mode == "overlay":
+                display_frame = self.draw_zone_line_overlays(display_frame)
+            if self.focused_camera_id == camera_id and self.show_detection_size_preview:
+                if time.time() <= self.detection_size_preview_until:
+                    display_frame = self.draw_detection_size_preview(display_frame)
+                else:
+                    self.show_detection_size_preview = False
 
-        # Telegram behavior:
-        # - include_video ON: send one combined message when clip is complete.
-        # - include_video OFF: send immediate motion text message.
-        if completed_video_path:
-            target_chat_ids = None
-            message = "Sentinel: motion detected."
-            force_video = False
-            bypass_cooldown = False
-            if completed_video_reason == "telegram_clip_request":
-                message = "Sentinel: requested 10-second clip."
-                target_chat_ids = self.pending_clip_request_chat_ids or None
-                force_video = True
-                bypass_cooldown = True
-                self.pending_clip_request_chat_ids = []
-            elif not self.telegram_notifier.include_video:
-                message = ""
+            session.last_frame = display_frame
+            alive_sessions[camera_id] = session
 
-            if message:
-                self.telegram_notifier.trigger_alert(
-                    message=message,
-                    video_path=completed_video_path,
-                    target_chat_ids=target_chat_ids,
-                    force_video=force_video,
-                    bypass_cooldown=bypass_cooldown,
+            if recording_status == "started" and self.focused_camera_id == camera_id:
+                self.status_label.setText(f"{session.display_name}: recording started")
+
+            if requested_clip_chat_ids and not session.detector.recording:
+                h, w = frame.shape[:2]
+                session.pending_clip_request_chat_ids.extend(requested_clip_chat_ids)
+                session.pending_clip_request_chat_ids = list(
+                    dict.fromkeys(session.pending_clip_request_chat_ids)
                 )
-        elif not self.telegram_notifier.include_video and motion_detected:
-            self.telegram_notifier.trigger_alert(message="Sentinel: motion detected.")
+                session.detector.start_recording((w, h), reason="telegram_clip_request")
 
-        # Display the frame
-        self.display_frame(display_frame)
+            completed_video_path, completed_video_reason = (
+                session.detector.consume_last_completed_recording()
+            )
+
+            if motion_detected:
+                self.audio_system.trigger_alert()
+
+            if completed_video_path:
+                target_chat_ids = None
+                message = f"Sentinel: motion detected on {session.display_name}."
+                force_video = False
+                bypass_cooldown = False
+                if completed_video_reason == "telegram_clip_request":
+                    message = f"Sentinel: requested 10-second clip from {session.display_name}."
+                    target_chat_ids = session.pending_clip_request_chat_ids or None
+                    force_video = True
+                    bypass_cooldown = True
+                    session.pending_clip_request_chat_ids = []
+                elif not self.telegram_notifier.include_video:
+                    message = ""
+
+                if message:
+                    self.telegram_notifier.trigger_alert(
+                        message=message,
+                        video_path=completed_video_path,
+                        target_chat_ids=target_chat_ids,
+                        force_video=force_video,
+                        bypass_cooldown=bypass_cooldown,
+                    )
+            elif not self.telegram_notifier.include_video and motion_detected:
+                self.telegram_notifier.trigger_alert(
+                    message=f"Sentinel: motion detected on {session.display_name}."
+                )
+
+        self.camera_sessions = alive_sessions
+        if not self.camera_sessions:
+            self.timer.stop()
+            self.show_blank_frame()
+            self.toggle_btn.setText("Camera Offline")
+            return
+
+        if not self.focused_camera_id or self.focused_camera_id not in self.camera_sessions:
+            self.focused_camera_id = next(iter(self.camera_sessions.keys()))
+
+        focused = self.camera_sessions.get(self.focused_camera_id)
+        if focused and focused.last_frame is not None and self.view_mode == "focus":
+            self.current_frame_size = (focused.last_frame.shape[1], focused.last_frame.shape[0])
+            self.display_frame(focused.last_frame)
+
+        if self.view_mode == "grid":
+            self._refresh_grid_tiles()
+            for session in self.camera_sessions.values():
+                if session.tile_label and session.last_frame is not None:
+                    self._display_frame_in_label(session.last_frame, session.tile_label)
 
     def capture_image(self) -> None:
         """Capture and save an image from the camera."""
-        result = self.motion_detector.capture_image(
+        session = self._focused_session()
+        if not session:
+            self.status_label.setText("Capture Failed: No focused camera")
+            return
+        result = session.detector.capture_image(
             orientation=self.settings_manager.get("cam_orientation", "horizontal")
         )
 
@@ -1257,44 +1813,96 @@ class MainWindow(QMainWindow):
             self.status_label.setText(f"Error opening video: {str(e)}")
 
     def open_multiview(self) -> None:
-        """Open a grid view for discovered network cameras."""
-        if not self.discovered_network_sources:
+        """Toggle embedded grid mode on/off."""
+        if not self.camera_sessions:
             QMessageBox.information(
                 self,
-                "No Network Cameras",
-                "No network streams are available yet. Run Search Cameras first.",
+                "No Cameras Connected",
+                "Connect at least one camera first.",
             )
             return
-
-        sources = [(endpoint.label, endpoint.source) for endpoint in self.discovered_network_sources]
-        self.multiview_window = MultiViewWindow(sources=sources, parent=self)
-        self.multiview_window.show()
+        if self.view_mode == "grid":
+            self.show_focus_view()
+            return
+        self.show_grid_view()
 
     def on_contour_size_change(self, value):
         """Handle minimum contour area slider change."""
-        self.settings_manager.set("min_contour_area", value)
         self.contour_value_label.setText(f"{value}")
-        self.motion_detector.min_contour_area = value
+        session = self._focused_session()
+        if session:
+            session.profile["min_contour_area"] = value
+            session.detector.min_contour_area = value
+            self.camera_profiles[session.camera_id] = session.profile
+            self.settings_manager.set("camera_profiles", self.camera_profiles)
+
+    def on_contour_slider_pressed(self) -> None:
+        """Hide preview while slider is actively dragged."""
+        self.detection_size_release_timer.stop()
+        self.show_detection_size_preview = False
+
+    def on_contour_slider_released(self) -> None:
+        """After 1s dwell, show detection-size preview for 5 seconds."""
+        self.detection_size_release_timer.start(1000)
+
+    def start_detection_size_preview(self) -> None:
+        """Enable minimum detection size overlay preview."""
+        self.detection_size_preview_value = int(self.contour_slider.value())
+        self.show_detection_size_preview = True
+        self.detection_size_preview_until = time.time() + 5.0
+
+    def draw_detection_size_preview(self, frame: np.ndarray) -> np.ndarray:
+        """Draw centered box representing current minimum contour area."""
+        draw = frame.copy()
+        frame_h, frame_w = draw.shape[:2]
+        area = max(100, int(self.detection_size_preview_value))
+        side = int(np.sqrt(area))
+        side = max(12, min(side, min(frame_w, frame_h) // 2))
+        center_x, center_y = frame_w // 2, frame_h // 2
+        x1 = center_x - side // 2
+        y1 = center_y - side // 2
+        x2 = center_x + side // 2
+        y2 = center_y + side // 2
+
+        cv2.rectangle(draw, (x1, y1), (x2, y2), (0, 255, 255), 2)
+        cv2.putText(
+            draw,
+            f"Min detection size: {self.detection_size_preview_value}",
+            (max(10, x1 - 30), max(30, y1 - 10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 255),
+            2,
+        )
+        return draw
 
     def on_variance_change(self, value):
         """Handle variance threshold slider change."""
-        self.settings_manager.set("var_threshold", value)
         self.variance_value_label.setText(f"{value}")
-
-        # This requires recreating the background subtractor
-        self.motion_detector.fgbg = cv2.createBackgroundSubtractorMOG2(
-            history=HISTORY_LENGTH, varThreshold=value, detectShadows=DETECT_SHADOWS
-        )
+        session = self._focused_session()
+        if session:
+            session.profile["var_threshold"] = value
+            session.detector.fgbg = cv2.createBackgroundSubtractorMOG2(
+                history=HISTORY_LENGTH, varThreshold=value, detectShadows=DETECT_SHADOWS
+            )
+            self.camera_profiles[session.camera_id] = session.profile
+            self.settings_manager.set("camera_profiles", self.camera_profiles)
 
     def _apply_night_bug_filter_settings(self) -> None:
         """Apply night bug filter settings to detector."""
         enabled = self.night_bug_filter_cb.isChecked()
         start_hour = int(self.night_bug_start_spin.value())
         end_hour = int(self.night_bug_end_spin.value())
-        self.motion_detector.set_night_bug_filter(enabled, start_hour, end_hour)
+        session = self._focused_session()
+        if session:
+            session.profile["night_bug_filter_enabled"] = enabled
+            session.profile["night_bug_start_hour"] = start_hour
+            session.profile["night_bug_end_hour"] = end_hour
+            session.detector.set_night_bug_filter(enabled, start_hour, end_hour)
+            self.camera_profiles[session.camera_id] = session.profile
+            self.settings_manager.set("camera_profiles", self.camera_profiles)
 
     def on_night_bug_filter_toggled(self, enabled: bool) -> None:
-        self.settings_manager.set("night_bug_filter_enabled", enabled)
         self._apply_night_bug_filter_settings()
         status = "enabled" if enabled else "disabled"
         self.status_label.setText(f"Night bug filter {status}")
@@ -1302,8 +1910,6 @@ class MainWindow(QMainWindow):
     def on_night_bug_schedule_changed(self) -> None:
         start_hour = int(self.night_bug_start_spin.value())
         end_hour = int(self.night_bug_end_spin.value())
-        self.settings_manager.set("night_bug_start_hour", start_hour)
-        self.settings_manager.set("night_bug_end_hour", end_hour)
         self._apply_night_bug_filter_settings()
         self.status_label.setText(f"Night bug filter schedule: {start_hour:02d}:00-{end_hour:02d}:00")
 
@@ -1316,6 +1922,15 @@ class MainWindow(QMainWindow):
         """
         if value != "No Cameras Found" and value in self.camera_sources:
             source = self.camera_sources[value]
+            if isinstance(source, str) and source.startswith("pending://"):
+                self.settings_manager.set("camera_display", value)
+                return
+            camera_id = str(source)
+            if camera_id in self.camera_sessions:
+                self.focus_camera(camera_id)
+                self.toggle_btn.setText("Disconnect Selected")
+            else:
+                self.toggle_btn.setText("Connect Selected")
             if isinstance(source, int):
                 self.settings_manager.set("camera_index", source)
             self.settings_manager.set("camera_source", str(source))
@@ -1471,9 +2086,9 @@ class MainWindow(QMainWindow):
         # Clean up resources
         self.reconnect_timer.stop()
         self.telegram_notifier.cleanup()
-        if self.motion_detector.feed_active:
-            self.timer.stop()
-            self.motion_detector.cleanup()
+        self.timer.stop()
+        for session in self.camera_sessions.values():
+            session.detector.cleanup()
 
         # Save window dimensions here (not in resizeEvent) to get reliable values
         screen = QApplication.primaryScreen().availableGeometry()
@@ -1484,7 +2099,7 @@ class MainWindow(QMainWindow):
             min(self.height(), max_h),
         ])
         self.settings_manager.set(
-            "feed_size", [self.camera_feed.width(), self.camera_feed.height()]
+            "feed_size", [self.feed_container.width(), self.feed_container.height()]
         )
         self.settings_manager.set("feed_active", False)
 
