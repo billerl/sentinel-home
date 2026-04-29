@@ -71,6 +71,10 @@ Sentinel Home is a Python + PySide6 desktop app for local camera monitoring with
    pip install -r requirements.txt
    ```
 
+4. Optional (better TTS): install Piper runtime support:
+   ```bash
+   pip install -r requirements-piper.txt
+   ```
 ## Run
 
 ```bash
@@ -179,6 +183,12 @@ Use `Night bug filter` in Motion Sensitivity section:
 - No Telegram messages:
   - Verify token, chat ID(s), and bot chat started.
   - Re-test with `Send Telegram Test`.
+- Piper not being used:
+  - Install optional dependencies: `pip install -r requirements-piper.txt`
+  - Put a Piper voice pair in `models/`:
+    - `<voice>.onnx`
+    - `<voice>.onnx.json`
+  - Ensure Linux audio tool exists: `aplay` (package: `alsa-utils`)
 - Too many alerts:
   - Increase Telegram cooldown.
   - Increase motion cooldown.

@@ -78,6 +78,55 @@ For full feature documentation, see `readme.md`.
 
 Unknown commands return a help message with valid commands.
 
+## Piper TTS (Optional but Recommended)
+
+Sentinel already includes Piper integration in code (`sentinel/audio/alert_system.py`).
+No code changes are required to "turn on" Piper; it activates when:
+
+1. the Python package is installed, and
+2. at least one model exists in `models/*.onnx` (with matching `.onnx.json`).
+
+### 1) Install Piper package
+
+Inside the project venv:
+
+```bash
+pip install -r requirements-piper.txt
+```
+
+### 2) Ensure local audio playback tool exists (Linux)
+
+Sentinel plays Piper output through `aplay`, so install ALSA utils if needed:
+
+```bash
+sudo apt update
+sudo apt install -y alsa-utils
+```
+
+### 3) Download a Piper voice model
+
+Create model directory and add a voice pair from the official Piper voices repo:
+
+```bash
+mkdir -p models
+```
+
+Download both files with the same basename, for example:
+
+- `models/en_US-lessac-medium.onnx`
+- `models/en_US-lessac-medium.onnx.json`
+
+### 4) Run Sentinel
+
+```bash
+python main.py
+```
+
+If Piper loads successfully, startup logs include:
+- `Piper TTS initialised with voice: <voice_id>`
+
+If not installed or no model is present, Sentinel falls back to `pyttsx3`.
+
 ## Common Troubleshooting
 
 ### No camera frames / unstable RTSP
@@ -102,3 +151,7 @@ Unknown commands return a help message with valid commands.
 
 Sentinel prefers Piper if available; otherwise uses `pyttsx3`.
 On Linux, audio output tools and voice packages may be required depending on your distro.
+For Piper specifically, verify:
+- `pip show piper-tts`
+- model files exist in `models/` as `.onnx` + `.onnx.json` pairs
+- `aplay` exists (`which aplay`)

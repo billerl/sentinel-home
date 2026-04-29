@@ -62,6 +62,41 @@ At the **start** of each new chat, instruct the assistant to:
 - Keep `settings.json` untracked.
 - Do not commit tokens/passwords from screenshots or local settings.
 
+## Agent Terminal Operation Notes
+- In Cursor Agent mode, the assistant can execute non-interactive terminal commands directly in the project workspace.
+- Commands run in a persistent shell session and can read/write repo files.
+- For privileged or unrestricted operations (for example pushing to remote), the agent may request elevated permissions; user approval is required by the client when needed.
+- The assistant cannot bypass OS permission prompts that require interactive auth (for example `sudo` password entry) unless those commands are already allowed in the environment.
+- Good practice for future chats:
+  - Ask the assistant to run diagnostics first (`git status`, environment checks) before edits.
+  - Ask for a summary of every command's result after long runs.
+  - Ask the assistant to update this handoff file before ending the session.
+
+## Piper TTS Handoff (Implemented + Enablement Steps)
+- Piper support is already implemented in code at `sentinel/audio/alert_system.py`.
+- Runtime behavior:
+  - Sentinel tries `piper.voice` first.
+  - If Piper package/model is missing, it falls back to `pyttsx3`.
+- New repo file: `requirements-piper.txt` (installs `piper-tts`).
+- Enable Piper on a fresh machine:
+  1. `python3 -m venv venv && source venv/bin/activate`
+  2. `pip install -r requirements.txt`
+  3. `pip install -r requirements-piper.txt`
+  4. Linux audio utility (if missing): `sudo apt install -y alsa-utils`
+  5. Create model folder: `mkdir -p models`
+  6. Download matching model pair into `models/`:
+     - `<voice>.onnx`
+     - `<voice>.onnx.json`
+  7. Run: `python main.py`
+  8. Verify startup log shows `Piper TTS initialised with voice: ...`
+- If Piper does not load:
+  - check `pip show piper-tts`
+  - confirm model pair names match exactly
+  - confirm `aplay` exists (`which aplay`)
+
+## Suggested Next-Chat Prompt
+- "Read `handoff_summary.md` and continue from current state. Verify Piper is active on this machine, run a quick TTS validation, and report any missing OS/package prerequisites. Update `handoff_summary.md` before finishing."
+
 ---
 
 ## Next Session Checklist
@@ -125,6 +160,9 @@ At the **start** of each new chat, instruct the assistant to:
   - switched timer start from fixed interval constant to dynamic interval based on selected feed FPS
   - passes `target_fps=self.feed_fps` when connecting a camera session
 - Continued prior stream-discovery/profile work already in tree (`network_discovery.py`, `readme.md` updates) and prepared all pending updates for push.
+- Added explicit Piper install support file: `requirements-piper.txt`.
+- Expanded `installation-guide.md` and `readme.md` with concrete Piper setup/verification instructions for new hosts.
+- Added "Agent Terminal Operation Notes" and "Suggested Next-Chat Prompt" sections to this handoff file for seamless chat-to-chat transfer.
 
 ### Validation Performed
 - Read lints after substantive edits; no linter errors reported in modified files.
