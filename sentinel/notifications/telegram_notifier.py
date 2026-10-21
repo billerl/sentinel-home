@@ -36,6 +36,7 @@ class TelegramNotifier:
         self._pending_detailed_status_chat_ids: List[str] = []
         self._pending_access_chat_ids: List[str] = []
         self._pending_video_queries: List[Tuple[str, str]] = []
+        self._pending_questions: List[Tuple[str, str]] = []
         self.update_settings(settings)
 
     @staticmethod
@@ -49,6 +50,7 @@ class TelegramNotifier:
             "- Status — cameras, recording and Telegram options summary\n"
             "- Access — how to reach Sentinel remotely (web link, Tailscale, Remote Desktop)\n"
             "- Videos <when> — send recorded clips, e.g. Videos last 2 hours, Videos 2pm-4pm people\n"
+            "- Ask in plain words — Did anyone come by? Any deliveries today? What happened last night?\n"
             "- Help — this message\n\n"
             "Clip:\n"
             "- Clip — record ~10s per connected camera and upload\n\n"
@@ -357,6 +359,15 @@ class TelegramNotifier:
         pending, self._pending_video_queries = self._pending_video_queries, []
         return pending
 
+    def consume_questions(self) -> List[Tuple[str, str]]:
+        """Return and clear (chat_id, text) plain-language questions ("did anyone come by?")."""
+        pending, self._pending_questions = self._pending_questions, []
+        return pending
+
+    def send_photo(self, chat_id: str, jpeg: bytes, caption: str) -> bool:
+        """Synchronously send one photo (used for question replies)."""
+        return self._send_photo_to_chat(chat_id, jpeg, caption)
+
     def send_video(self, chat_id: str, video_path: str, caption: str) -> bool:
         """Synchronously send one video (used for query replies)."""
         return self._send_video_to_chat(chat_id, video_path, caption)
@@ -451,6 +462,12 @@ class TelegramNotifier:
                 self._pending_video_queries.append((chat_id, text))
                 continue
 
+            from sentinel.engine.questions import QUESTION_HELP, is_question
+
+            if is_question(text):
+                self._pending_questions.append((chat_id, text))
+                continue
+
             if re.match(r"^help$", text, flags=re.IGNORECASE):
                 self._send_message_to_chat(
                     chat_id,
@@ -477,7 +494,11 @@ class TelegramNotifier:
 
             match = re.match(r"^pause\s+(\d{1,4})$", text, flags=re.IGNORECASE)
             if not match:
-                self._send_message_to_chat(chat_id, self._commands_help_text())
+                if text.endswith("?"):  # a question we didn't understand: show the kinds we do
+                    self._send_message_to_chat(chat_id, "Sorry, I didn't catch that. " + QUESTION_HELP
+                                               + "\n\nSend Help for all commands.")
+                else:
+                    self._send_message_to_chat(chat_id, self._commands_help_text())
                 continue
             minutes = max(1, int(match.group(1)))
             self.paused_until_by_chat[chat_id] = time.time() + (minutes * 60)

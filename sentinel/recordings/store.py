@@ -13,7 +13,7 @@ import sqlite3
 import subprocess
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from sentinel.logging_utils import app_logger
 
@@ -101,6 +101,25 @@ class RecordingStore:
             if "labels" not in columns:
                 # Comma-separated objects seen during the clip, e.g. "person,car".
                 conn.execute("ALTER TABLE recordings ADD COLUMN labels TEXT")
+            # Recognised objects (one row per alert-worthy sighting) with a snapshot,
+            # for "did anyone come by?" and the like.
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts REAL NOT NULL,
+                    camera_key TEXT NOT NULL,
+                    camera_name TEXT NOT NULL,
+                    grp TEXT NOT NULL,
+                    label TEXT,
+                    vehicle_type TEXT,
+                    zone TEXT,
+                    description TEXT NOT NULL,
+                    snapshot TEXT
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts)")
 
     def _abs(self, rel_path: str) -> str:
         return os.path.join(self.root, rel_path)
@@ -111,6 +130,77 @@ class RecordingStore:
     def _inside_root(self, path: str) -> bool:
         real = os.path.realpath(path)
         return real.startswith(os.path.realpath(self.root) + os.sep)
+
+    # ------------------------------------------------------------------- events
+    def add_event(self, ts: float, camera_key: str, camera_name: str, group: str, description: str,
+                  label: Optional[str] = None, vehicle_type: Optional[str] = None, zone: Optional[str] = None,
+                  snapshot_jpeg: Optional[bytes] = None) -> int:
+        """Record a recognised object; the snapshot is stored beside that day's clips."""
+        snapshot = None
+        if snapshot_jpeg:
+            local = time.localtime(ts)
+            day_dir = os.path.join(self.root, time.strftime("%Y-%m-%d", local))
+            os.makedirs(day_dir, exist_ok=True)
+            name = f"{camera_slug(camera_key)}_{time.strftime('%H%M%S', local)}_{int((ts % 1) * 1000):03d}_event.jpg"
+            try:
+                with open(os.path.join(day_dir, name), "wb") as handle:
+                    handle.write(snapshot_jpeg)
+                snapshot = self._rel(os.path.join(day_dir, name))
+            except OSError:
+                snapshot = None
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO events (ts, camera_key, camera_name, grp, label, vehicle_type, zone, description, snapshot)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (ts, camera_key, camera_name, group, label, vehicle_type, zone, description, snapshot),
+            )
+            return int(cur.lastrowid)
+
+    def events(self, start_ts: float, end_ts: float, groups: Optional[Iterable[str]] = None,
+               camera_keys: Optional[Iterable[str]] = None) -> List[Dict[str, Any]]:
+        """Events in [start, end), oldest first, optionally filtered by group and camera."""
+        sql, args = "SELECT * FROM events WHERE ts >= ? AND ts < ?", [start_ts, end_ts]
+        sql, args = self._event_filters(sql, args, groups, camera_keys)
+        with self._connect() as conn:
+            return [dict(r) for r in conn.execute(sql + " ORDER BY ts", args)]
+
+    def last_event(self, before_ts: float, groups: Optional[Iterable[str]] = None,
+                   camera_keys: Optional[Iterable[str]] = None) -> Optional[Dict[str, Any]]:
+        sql, args = "SELECT * FROM events WHERE ts < ?", [before_ts]
+        sql, args = self._event_filters(sql, args, groups, camera_keys)
+        with self._connect() as conn:
+            row = conn.execute(sql + " ORDER BY ts DESC LIMIT 1", args).fetchone()
+        return dict(row) if row else None
+
+    def event_count(self) -> int:
+        with self._connect() as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0])
+
+    @staticmethod
+    def _event_filters(sql: str, args: List[Any], groups, camera_keys) -> Tuple[str, List[Any]]:
+        for column, values in (("grp", groups), ("camera_key", camera_keys)):
+            values = list(values or [])
+            if values:
+                sql += f" AND {column} IN ({','.join('?' * len(values))})"
+                args += values
+        return sql, args
+
+    def event_snapshot_path(self, event: Dict[str, Any]) -> Optional[str]:
+        rel = event.get("snapshot")
+        if not rel:
+            return None
+        path = self._abs(rel)
+        return path if self._inside_root(path) and os.path.isfile(path) else None
+
+    def _delete_events_before(self, cutoff: float) -> int:
+        with self._connect() as conn:
+            old = conn.execute("SELECT id, snapshot FROM events WHERE ts < ?", (cutoff,)).fetchall()
+        for row in old:
+            if row["snapshot"]:
+                self._delete_file(self._abs(row["snapshot"]))
+        with self._lock, self._connect() as conn:
+            conn.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
+        return len(old)
 
     # ---------------------------------------------------------------- recording
     def new_clip_path(self, camera_key: str, start_ts: Optional[float] = None) -> str:
@@ -336,6 +426,7 @@ class RecordingStore:
                 ).fetchall()
             d, f = self._delete_records(old)
             deleted, freed = deleted + d, freed + f
+            self._delete_events_before(cutoff)
 
             # Unindexed stray clips (e.g. from a crash mid-recording).
             for dirpath, dirnames, filenames in os.walk(self.root):

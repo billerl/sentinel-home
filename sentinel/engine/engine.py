@@ -204,6 +204,13 @@ class Engine:
         self._init_web()
         self._init_objects()
         self._build_cameras()
+        try:
+            imported = self.backfill_events_from_log()
+            if imported:
+                app_logger.log("info", "events_backfilled", count=imported, component="engine", action="start")
+        except Exception as e:
+            app_logger.log("error", "events_backfill_failed", error_message=str(e), component="engine",
+                           action="start")
         if not self.cameras:
             print("No cameras configured (settings.json camera_profiles is empty).")
         for pipeline in self.cameras.values():
@@ -259,6 +266,17 @@ class Engine:
                        label=event.track.label, zone=event.zone_name, score=round(event.track.best_score, 2),
                        vehicle_type=vt.key if vt else None, type_prob=round(vt.prob, 2) if vt else None,
                        description=event.description, component="engine", action="on_object")
+        ok, encoded = cv2.imencode(".jpg", event.snapshot, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        jpeg = encoded.tobytes() if ok else None
+        try:  # history for "did anyone come by?"
+            self.recording_store.add_event(
+                event.timestamp, pipeline.host, pipeline.display_name, group, event.description,
+                label=event.track.label, vehicle_type=vt.key if vt else None, zone=event.zone_name,
+                snapshot_jpeg=jpeg,
+            )
+        except Exception as e:
+            app_logger.log("error", "event_store_failed", error_message=str(e), component="engine",
+                           action="on_object")
         wanted = self.settings.get("object_alert_groups", [])
         # Deliveries are vehicles too: "Vehicles" covers them, "Deliveries" alone means only those.
         if not self.objects_active() or not (group in wanted or (group == "delivery" and "vehicle" in wanted)):
@@ -270,10 +288,8 @@ class Engine:
         self._object_alert_times[key] = event.timestamp
         if self.audio is not None:
             self.audio.trigger_alert(event.description.split(" ", 1)[1])  # drop the emoji
-        if self.settings.get("telegram_motion_alerts", True):
-            ok, jpeg = cv2.imencode(".jpg", event.snapshot, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            if ok:
-                self.telegram.trigger_photo_alert(event.description, jpeg.tobytes())
+        if self.settings.get("telegram_motion_alerts", True) and jpeg:
+            self.telegram.trigger_photo_alert(event.description, jpeg)
 
     def _on_motion(self, pipeline: CameraPipeline) -> None:
         if self.objects_active():
@@ -323,6 +339,10 @@ class Engine:
                     threading.Thread(
                         target=self.answer_video_query, args=(chat_id, text), name="video-query", daemon=True
                     ).start()
+                for chat_id, text in self.telegram.consume_questions():
+                    threading.Thread(
+                        target=self.answer_question, args=(chat_id, text), name="question", daemon=True
+                    ).start()
                 clip_chats = self.telegram.consume_clip_requests()
                 if clip_chats:
                     self._request_clips(clip_chats)
@@ -331,6 +351,62 @@ class Engine:
                     "error", "telegram_command_failed", error_message=str(e),
                     component="engine", action="command_loop",
                 )
+
+    def answer_question(self, chat_id: str, text: str) -> None:
+        """Reply to 'did anyone come by?'-style questions from the event history."""
+        from sentinel.engine.questions import _fmt_clock, answer_question, parse_question
+
+        names = {p.display_name: key for key, p in self.cameras.items()}
+        q = parse_question(text, names.keys())
+        keys = [names[n] for n in q.cameras] or None
+        groups = sorted(q.groups) or None
+        store = self.recording_store
+        events = store.events(q.start, q.end, groups, keys)
+        others: Dict[str, int] = {}
+        if groups:
+            for e in store.events(q.start, q.end, None, keys):
+                if e["grp"] not in q.groups:
+                    others[e["grp"]] = others.get(e["grp"], 0) + 1
+        last = store.last_event(q.start, groups, keys) if not events else None
+        reply, photos = answer_question(q, events, last, others=others)
+        if self.detection_worker is None:
+            reply = ("Note: object recognition is off, so I only know about sightings from before it was "
+                     "turned off.\n\n" + reply)
+        self.telegram.reply_to_chat(chat_id, reply)
+        for event in photos:
+            path = store.event_snapshot_path(event)
+            if not path:
+                continue
+            try:
+                with open(path, "rb") as handle:
+                    jpeg = handle.read()
+            except OSError:
+                continue
+            self.telegram.send_photo(chat_id, jpeg, f"{_fmt_clock(event['ts'])} — {event['description']}")
+        app_logger.log("info", "question_answered", period=q.period, groups=groups, cameras=q.cameras,
+                       matches=len(events), component="engine", action="answer_question")
+
+    def backfill_events_from_log(self) -> int:
+        """One-off: import sightings logged before the events table existed (no photos)."""
+        if self.recording_store.event_count():
+            return 0
+        from sentinel.detection.objects import CLASS_GROUPS
+        from sentinel.detection.vehicle_type import VEHICLE_TYPES
+
+        keys = {p.display_name: key for key, p in self.cameras.items()}
+        added = 0
+        for record in admin.object_log_records():
+            vt = record.get("vehicle_type")
+            group = "delivery" if vt in VEHICLE_TYPES and VEHICLE_TYPES[vt][1] else CLASS_GROUPS.get(record.get("label"))
+            if not group or group == "delivery" and not vt:
+                continue
+            name = record.get("camera_display") or "Camera"
+            self.recording_store.add_event(
+                record["ts"], keys.get(name, name), name, group, record.get("description") or "",
+                label=record.get("label"), vehicle_type=vt, zone=record.get("zone"),
+            )
+            added += 1
+        return added
 
     def answer_video_query(self, chat_id: str, text: str, max_clips: int = 8) -> None:
         """Reply to 'videos <when> [people|vehicles|animals] [camera]' with matching clips."""

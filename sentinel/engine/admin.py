@@ -313,6 +313,26 @@ def recent_objects(log_path: str = "sentinel_events.log", limit: int = 15) -> Li
     return out
 
 
+def object_log_records(log_path: str = "sentinel_events.log") -> List[Dict[str, Any]]:
+    """Every 'object_detected' record in the current and rotated event logs, oldest first."""
+    out = []
+    for path in (log_path + ".1", log_path):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    if '"object_detected"' not in line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                        record["ts"] = time.mktime(time.strptime(record["timestamp"], "%Y-%m-%dT%H:%M:%S"))
+                    except (ValueError, KeyError):
+                        continue
+                    out.append(record)
+        except OSError:
+            continue
+    return sorted(out, key=lambda r: r["ts"])
+
+
 def recent_events(log_path: str = "sentinel_events.log", limit: int = 25) -> List[Dict[str, Any]]:
     """Last ``limit`` meaningful events (already credential-redacted by the logger)."""
     try:
