@@ -1,5 +1,6 @@
 """Tests for sentinel.web.auth.WebAuthManager."""
 
+import _test_env  # noqa: F401  (isolates the event log)
 import unittest
 from unittest.mock import patch
 

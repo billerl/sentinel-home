@@ -8,7 +8,7 @@ import numpy as np
 import time
 import threading
 from typing import Tuple, List, Optional, Union, Dict, Any
-from sentinel.logging_utils import app_logger
+from sentinel.logging_utils import app_logger, redact
 
 # Import the constants
 from sentinel.constants import (
@@ -34,7 +34,8 @@ class MotionDetector:
 
     def __init__(self):
         """Initialize the motion detector."""
-        self._lock = threading.Lock()
+        # Reentrant: the read-error path calls stop_camera() while holding it.
+        self._lock = threading.RLock()
         self.cap = None
         self.camera_index: Union[int, str] = 0
         self.feed_active = False
@@ -52,12 +53,22 @@ class MotionDetector:
         self.recording_start_time = 0
         self.last_motion_time = 0
         self.frames_recorded = 0
-        self.recording_target_frames = int(RECORDING_DURATION * RECORDING_FPS)
+        # Frames per second actually written; updated from the camera on connect so
+        # clips play back at real speed (a 12 fps substream labelled 15 fps played fast).
+        self.recording_fps = float(RECORDING_FPS)
+        self.recording_target_frames = int(RECORDING_DURATION * self.recording_fps)
+        # Held around cap.read() so a camera is never released mid-read.
+        self._read_lock = threading.Lock()
         self.current_video_path: Optional[str] = None
         self.last_completed_video_path: Optional[str] = None
         self.current_recording_reason: str = "motion"
         self.last_completed_video_reason: str = "motion"
         self.motion_cooldown = MOTION_COOLDOWN
+
+        # Optional recording index (sentinel.recordings.RecordingStore) and camera identity
+        self.recording_store = None
+        self.camera_key = "camera"
+        self.camera_name = "Camera"
 
         # Zone and line based alert gating
         self.active_zones = DEFAULT_ACTIVE_ZONES.copy()
@@ -84,6 +95,12 @@ class MotionDetector:
         # Create video directory if it doesn't exist
         if not os.path.exists(VIDEO_DIR):
             os.makedirs(VIDEO_DIR)
+
+    def set_recording_identity(self, recording_store, camera_key: str, camera_name: str) -> None:
+        """Name clips after this camera and index them in ``recording_store``."""
+        self.recording_store = recording_store
+        self.camera_key = camera_key or "camera"
+        self.camera_name = camera_name or self.camera_key
 
     def set_recording_enabled(self, enabled: bool) -> None:
         with self._lock:
@@ -163,19 +180,23 @@ class MotionDetector:
             return
 
         try:
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            video_path = os.path.join(VIDEO_DIR, f"motion_{timestamp}.avi")
+            start_ts = time.time()
+            if self.recording_store is not None:
+                video_path = self.recording_store.new_clip_path(self.camera_key, start_ts)
+            else:
+                timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime(start_ts))
+                video_path = os.path.join(VIDEO_DIR, f"motion_{timestamp}.avi")
 
             # Get the four-character code for the video codec
             fourcc = cv2.VideoWriter_fourcc(*VIDEO_CODEC)
 
             # Create video writer
             self.video_writer = cv2.VideoWriter(
-                video_path, fourcc, RECORDING_FPS, frame_size, True  # isColor
+                video_path, fourcc, self.recording_fps, frame_size, True  # isColor
             )
 
             self.recording = True
-            self.recording_start_time = time.time()
+            self.recording_start_time = start_ts
             self.frames_recorded = 0
             self.current_video_path = video_path
             self.current_recording_reason = reason
@@ -201,6 +222,7 @@ class MotionDetector:
             if self.current_video_path:
                 self.last_completed_video_path = self.current_video_path
                 self.last_completed_video_reason = self.current_recording_reason
+                self._index_completed_recording(self.current_video_path)
             self.current_video_path = None
             self.current_recording_reason = "motion"
 
@@ -217,6 +239,28 @@ class MotionDetector:
             self.current_video_path = None
             self.current_recording_reason = "motion"
             return False
+
+    def _index_completed_recording(self, video_path: str) -> None:
+        if self.recording_store is None:
+            return
+        try:
+            self.recording_store.add_recording(
+                video_path,
+                self.camera_key,
+                self.camera_name,
+                self.recording_start_time,
+                time.time(),
+                self.current_recording_reason,
+            )
+        except Exception as e:
+            app_logger.log(
+                "error",
+                "recording_index_failed",
+                video_path=video_path,
+                error_message=str(e),
+                component="motion_detector",
+                action="stop_recording",
+            )
 
     def write_frame(self, frame):
         """
@@ -314,7 +358,7 @@ class MotionDetector:
 
             try:
                 self.camera_index = camera_index
-                print(f"[Connect] Attempting camera source: {camera_index}")
+                print(f"[Connect] Attempting camera source: {redact(str(camera_index))}")
                 app_logger.log(
                     "info",
                     "camera_connect_attempt",
@@ -341,6 +385,7 @@ class MotionDetector:
                         self.cap.set(cv2.CAP_PROP_FPS, float(target_fps))
                     except Exception:
                         pass
+                self._update_recording_fps(target_fps)
 
                 # Verify we can actually read frames (isOpened alone is not enough)
                 if not self.cap.grab():
@@ -349,7 +394,7 @@ class MotionDetector:
                 self.feed_active = True
                 self.consecutive_read_failures = 0
                 self.last_error_message = None
-                print(f"[Connect] Camera connected successfully: {camera_index}")
+                print(f"[Connect] Camera connected successfully: {redact(str(camera_index))}")
                 app_logger.log(
                     "info",
                     "camera_connect_success",
@@ -360,7 +405,7 @@ class MotionDetector:
                 )
                 return True
             except Exception as e:
-                print(f"Error starting camera: {e}")
+                print(f"Error starting camera: {redact(str(e))}")
                 self.last_error_message = str(e)
                 app_logger.log(
                     "error",
@@ -377,15 +422,45 @@ class MotionDetector:
                 self.feed_active = False
                 return False
 
+    def _update_recording_fps(self, target_fps: Optional[int]) -> None:
+        """Record at the rate frames really arrive: camera fps, capped by the loop rate."""
+        try:
+            source_fps = float(self.cap.get(cv2.CAP_PROP_FPS)) if self.cap else 0.0
+        except Exception:
+            source_fps = 0.0
+        if not (1.0 <= source_fps <= 60.0):
+            source_fps = float(RECORDING_FPS)
+        if target_fps:
+            source_fps = min(source_fps, float(target_fps))
+        self.recording_fps = source_fps
+        self.recording_target_frames = max(1, int(round(RECORDING_DURATION * source_fps)))
+
     def stop_camera(self) -> None:
-        """Stop the currently active camera."""
+        """Stop the camera, finalizing any clip in progress.
+
+        The capture is released on a helper thread once any in-flight
+        ``cap.read()`` returns, so callers (the UI thread) never block on a hung
+        RTSP read and OpenCV never frees a capture that is still being read.
+        """
         with self._lock:
             self.feed_active = False
-            if self.cap:
-                self.cap.release()
-                self.cap = None
+            if self.recording:
+                self.stop_recording()
+            cap, self.cap = self.cap, None
             self.consecutive_read_failures = 0
             self.tracks = {}
+        if cap is not None:
+            def _release() -> None:
+                with self._read_lock:
+                    cap.release()
+
+            if self._read_lock.acquire(blocking=False):
+                try:
+                    cap.release()
+                finally:
+                    self._read_lock.release()
+            else:
+                threading.Thread(target=_release, name="cap-release", daemon=True).start()
 
     def update_var_threshold(self, value):
         """Update the variance threshold and recreate the background subtractor."""
@@ -627,8 +702,11 @@ class MotionDetector:
             cap = self.cap
 
         try:
-            # Perform blocking network I/O WITHOUT the lock
-            ret, frame = cap.read()
+            # Perform blocking network I/O WITHOUT the main lock
+            with self._read_lock:
+                if not self.feed_active:
+                    return None, None, [], False, None
+                ret, frame = cap.read()
             
             # Re-acquire lock for the heavy lifting and shared state access
             with self._lock:

@@ -1,3 +1,4 @@
+import _test_env  # noqa: F401  (isolates the event log)
 import io
 import math
 import wave

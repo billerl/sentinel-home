@@ -12,6 +12,8 @@ from typing import Dict, List, Optional
 
 import cv2
 
+from sentinel.logging_utils import redact
+
 
 @dataclass
 class CameraEndpoint:
@@ -167,10 +169,10 @@ class NetworkCameraDiscovery:
         for port in self.COMMON_PORTS:
             for path in ordered_paths:
                 url = f"rtsp://{auth}{host}:{port}{path}"
-                print(f"[Discovery] Trying RTSP URL: {url}")
+                print(f"[Discovery] Trying RTSP URL: {redact(url)}")
                 if self._stream_is_readable(url):
                     stream_kind = "Substream" if path in sub_patterns else "Main"
-                    print(f"[Discovery] Stream opened: {url}")
+                    print(f"[Discovery] Stream opened: {redact(url)}")
                     return {
                         "source": url,
                         "label": f"Network {host} ({stream_kind})",

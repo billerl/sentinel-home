@@ -4,6 +4,8 @@ Settings management for Sentinel Home.
 
 import os
 import json
+import tempfile
+import threading
 import time
 import copy
 from typing import Any, Dict
@@ -67,6 +69,8 @@ class SettingsManager:
         """
         self.settings_file = settings_file
         self.last_save_time = 0
+        self._save_lock = threading.RLock()
+        self._deferred_save: threading.Timer = None
         self.default_settings = {
             "speech_speed": DEFAULT_SPEECH_SPEED,
             "volume": DEFAULT_VOLUME,
@@ -88,6 +92,11 @@ class SettingsManager:
             # Add new recording settings
             "recording_enabled": True,  # Enable recording by default
             "motion_cooldown": MOTION_COOLDOWN,  # Use value from constants
+            # Retention: delete clips older than N days; if free disk space drops
+            # below the percentage, delete oldest clips (keeping the last 24h)
+            "recording_retention_enabled": True,
+            "recording_retention_days": 30,
+            "recording_min_free_percent": 10,
             "min_contour_area": MIN_CONTOUR_AREA,
             "var_threshold": VAR_THRESHOLD,
             "active_zones": copy.deepcopy(DEFAULT_ACTIVE_ZONES),
@@ -193,30 +202,46 @@ class SettingsManager:
         Returns:
             True if settings were saved, False if debounced
         """
-        current_time = time.time()
-        if not force and (current_time - self.last_save_time) < SAVE_DEBOUNCE_INTERVAL:
-            return False  # Skip saving if called too soon
+        with self._save_lock:
+            current_time = time.time()
+            if settings:
+                self.settings.update(settings)
+            if not force and (current_time - self.last_save_time) < SAVE_DEBOUNCE_INTERVAL:
+                # Too soon: save once the debounce window ends instead of dropping it.
+                if self._deferred_save is None:
+                    delay = SAVE_DEBOUNCE_INTERVAL - (current_time - self.last_save_time)
+                    self._deferred_save = threading.Timer(delay, self._run_deferred_save)
+                    self._deferred_save.daemon = True
+                    self._deferred_save.start()
+                return False
 
-        if settings:
-            self.settings.update(settings)
+            temp_file = None
+            try:
+                print("Saving settings...")
+                # Secrets live in this file (camera passwords, bot token): owner-only.
+                directory = os.path.dirname(os.path.abspath(self.settings_file))
+                fd, temp_file = tempfile.mkstemp(prefix=".settings-", suffix=".tmp", dir=directory)
+                with os.fdopen(fd, "w") as f:
+                    json.dump(copy.deepcopy(self.settings), f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(temp_file, self.settings_file)
+                print("Settings saved.")
+                self.last_save_time = current_time
+                return True
+            except (OSError, TypeError, ValueError, RuntimeError) as e:
+                print(f"Error saving settings: {e}")
+                if temp_file and os.path.exists(temp_file):
+                    try:
+                        os.remove(temp_file)
+                    except OSError:
+                        pass
+                return False
 
-        try:
-            print("Saving settings...")
-            temp_file = f"{self.settings_file}.tmp"
-            with open(temp_file, "w") as f:
-                json.dump(self.settings, f, indent=2)
-            os.replace(temp_file, self.settings_file)
-            print("Settings saved.")
-            self.last_save_time = current_time
-            return True
-        except (PermissionError, OSError) as e:
-            print(f"Error saving settings: {e}")
-            if os.path.exists(temp_file):
-                try:
-                    os.remove(temp_file)
-                except:
-                    pass
-            return False
+    def _run_deferred_save(self) -> None:
+        with self._save_lock:
+            self._deferred_save = None
+        self.save_settings(force=True)
 
     def get(self, key: str, default: Any = None) -> Any:
         """
@@ -240,6 +265,7 @@ class SettingsManager:
             value: Setting value
             save: Whether to save settings after update
         """
-        self.settings[key] = value
+        with self._save_lock:
+            self.settings[key] = value
         if save:
             self.save_settings()

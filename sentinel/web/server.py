@@ -4,12 +4,22 @@ Flask HTTP server: login, MJPEG streams, camera JSON API.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import cv2
-from flask import Flask, Response, jsonify, redirect, render_template, request, url_for
+from flask import (
+    Flask,
+    Response,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    url_for,
+)
 
 from sentinel.logging_utils import app_logger
 from sentinel.web.auth import WebAuthManager, _client_ip
@@ -17,6 +27,7 @@ from sentinel.web.bind_util import bind_host_allowed
 from sentinel.web.frame_broker import FrameBroker
 
 if TYPE_CHECKING:
+    from sentinel.recordings import RecordingStore
     from sentinel.settings import SettingsManager
 
 
@@ -57,9 +68,15 @@ def _template_dir() -> str:
 class WebServer:
     """Runs Flask in a daemon thread when web.enabled and password_hash are set."""
 
-    def __init__(self, settings_manager: "SettingsManager", frame_broker: FrameBroker) -> None:
+    def __init__(
+        self,
+        settings_manager: "SettingsManager",
+        frame_broker: FrameBroker,
+        recording_store: Optional["RecordingStore"] = None,
+    ) -> None:
         self._settings = settings_manager
         self._broker = frame_broker
+        self._recordings = recording_store
         self._thread: Optional[threading.Thread] = None
         self._auth: Optional[WebAuthManager] = None
         self._limiter: Optional[_StreamLimiter] = None
@@ -116,6 +133,13 @@ class WebServer:
         settings = self._settings
         auth = self._auth
         limiter = self._limiter
+        recordings = self._recordings
+
+        def _loggable_username(typed: str) -> str:
+            # People sometimes type their password into the username box; only
+            # log the attempted name when it is the real one.
+            configured = str(self._auth_cfg().get("username", ""))
+            return typed if typed and typed == configured else "(other)"
 
         def _session_token() -> Optional[str]:
             return request.cookies.get("sentinel_session")
@@ -153,7 +177,7 @@ class WebServer:
                     "warning",
                     "web_login_locked",
                     ip=ip,
-                    username_attempted=request.form.get("username", ""),
+                    username_attempted=_loggable_username(request.form.get("username", "")),
                     retry_after_seconds=int(retry_after) + 1,
                     component="web_server",
                     action="login",
@@ -206,7 +230,7 @@ class WebServer:
             app_logger.log(
                 "warning",
                 "web_login_failed",
-                username_attempted=username,
+                username_attempted=_loggable_username(username),
                 ip=ip,
                 component="web_server",
                 action="login",
@@ -216,7 +240,7 @@ class WebServer:
                     "warning",
                     "web_login_locked",
                     ip=ip,
-                    username_attempted=username,
+                    username_attempted=_loggable_username(username),
                     retry_after_seconds=int(ra) + 1,
                     component="web_server",
                     action="login",
@@ -340,6 +364,80 @@ class WebServer:
             resp.headers["Pragma"] = "no-cache"
             resp.headers["X-Accel-Buffering"] = "no"
             return resp
+
+        @app.route("/api/recordings")
+        def api_recordings():
+            """Timeline data for one local day: camera rows + clip offsets in seconds."""
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            if recordings is None:
+                return jsonify({"error": "recordings unavailable"}), 503
+            from sentinel.recordings.store import local_day_bounds
+
+            today = time.strftime("%Y-%m-%d")
+            date_str = request.args.get("date") or today
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_str):
+                return jsonify({"error": "bad date"}), 400
+            try:
+                day_start, day_end = local_day_bounds(date_str)
+            except ValueError:
+                return jsonify({"error": "bad date"}), 400
+
+            clips = recordings.query(day_start, day_end)
+
+            # Rows: live cameras first (keyed by host, as the detector names clips),
+            # then any other cameras seen that day, with "unknown" last.
+            rows: List[Dict[str, str]] = []
+            seen = set()
+            for key, display in broker.list_camera_hosts():
+                if key not in seen:
+                    seen.add(key)
+                    rows.append({"key": key, "name": display})
+            for clip in sorted(clips, key=lambda c: c["camera_key"] == "unknown"):
+                if clip["camera_key"] not in seen:
+                    seen.add(clip["camera_key"])
+                    rows.append({"key": clip["camera_key"], "name": clip["camera_name"]})
+
+            def _day(offset_days: int) -> str:
+                return time.strftime(
+                    "%Y-%m-%d", time.localtime(day_start + 43200 + offset_days * 86400)
+                )
+
+            now = time.time()
+            return jsonify(
+                {
+                    "date": date_str,
+                    "prev_date": _day(-1),
+                    "next_date": _day(1) if date_str < today else None,
+                    "day_seconds": day_end - day_start,
+                    "now_offset": now - day_start if day_start <= now < day_end else None,
+                    "cameras": rows,
+                    "clips": [
+                        {
+                            "id": c["id"],
+                            "cam": c["camera_key"],
+                            "s": round(c["start_ts"] - day_start, 1),
+                            "e": round(c["end_ts"] - day_start, 1),
+                            "reason": c["reason"],
+                        }
+                        for c in clips
+                    ],
+                }
+            )
+
+        @app.route("/recordings/<int:recording_id>/video")
+        def recording_video(recording_id: int):
+            """Browser-playable MP4 of one clip (converted on first request, then cached)."""
+            redir = _require_session()
+            if redir:
+                return redir
+            if recordings is None:
+                return "Recordings unavailable", 503
+            path = recordings.web_playable_path(recording_id)
+            if not path:
+                return "Clip not found or could not be converted", 404
+            return send_file(path, mimetype="video/mp4", conditional=True, max_age=3600)
 
         port = int(cfg.get("port", 8088))
         app_logger.log(

@@ -3,12 +3,22 @@ Main application module for Sentinel Home.
 """
 
 import os
-from sentinel.constants import CAPTURE_DIR
+
+import cv2
+
+from sentinel.constants import CAPTURE_DIR, VIDEO_DIR
 from sentinel.settings import SettingsManager
 from sentinel.detection import MotionDetector
 from sentinel.audio import AudioAlertSystem
 from sentinel.notifications import TelegramNotifier
+from sentinel.recordings import RecordingStore
 from sentinel.ui import MainWindow
+
+
+# OpenCV's default thread pool busy-spins between the small per-frame jobs we
+# give it (blur, MOG2, dilate) and was the single largest CPU cost. Each camera
+# already has its own worker thread, so run OpenCV single-threaded.
+cv2.setNumThreads(1)
 
 
 class MotionDetectionApp:
@@ -28,6 +38,10 @@ class MotionDetectionApp:
         self.audio_system = AudioAlertSystem(self.settings_manager.settings)
         self.telegram_notifier = TelegramNotifier(self.settings_manager.settings)
 
+        # Recording index + hourly retention cleanup (runs in a background thread)
+        self.recording_store = RecordingStore(VIDEO_DIR)
+        self.recording_store.start_maintenance(lambda: self.settings_manager.settings)
+
         frame_broker = None
         web_cfg = self.settings_manager.settings.get("web")
         if isinstance(web_cfg, dict) and web_cfg.get("enabled"):
@@ -44,7 +58,9 @@ class MotionDetectionApp:
                     print(f"  ({e})")
                 else:
                     frame_broker = FrameBroker()
-                    web_server = WebServer(self.settings_manager, frame_broker)
+                    web_server = WebServer(
+                        self.settings_manager, frame_broker, self.recording_store
+                    )
                     web_server.start()
             else:
                 print(
@@ -58,6 +74,7 @@ class MotionDetectionApp:
             self.audio_system,
             self.telegram_notifier,
             frame_broker=frame_broker,
+            recording_store=self.recording_store,
         )
     
     def show(self):

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
+    from sentinel.recordings import RecordingStore
     from sentinel.web.frame_broker import FrameBroker
 
 from PySide6.QtWidgets import (
@@ -193,8 +194,10 @@ class MainWindow(QMainWindow):
         audio_system: AudioAlertSystem,
         telegram_notifier: TelegramNotifier,
         frame_broker: Optional["FrameBroker"] = None,
+        recording_store: Optional["RecordingStore"] = None,
     ):
         super().__init__()
+        self.recording_store = recording_store
 
         # Apply sensitivity settings from stored settings
         motion_detector.min_contour_area = settings_manager.get("min_contour_area", MIN_CONTOUR_AREA)
@@ -1137,6 +1140,9 @@ class MainWindow(QMainWindow):
             profile=profile,
             host=self._extract_host(source),
         )
+        detector.set_recording_identity(
+            self.recording_store, session.host or display_name, display_name
+        )
         self._apply_profile_to_detector(session)
         if detector.start_camera(source, target_fps=self.feed_fps):
             # Set up background thread for this camera
@@ -1248,40 +1254,59 @@ class MainWindow(QMainWindow):
             self.reconnect_timer.start(int(self.reconnect_interval_seconds * 1000))
 
     def try_reconnect(self) -> None:
-        """Attempt reconnect to saved camera source."""
-        if self.camera_sessions:
+        """Reconnect every saved camera that is not currently connected."""
+        profiles = self.settings_manager.get("camera_profiles", {})
+        targets = []
+        if isinstance(profiles, dict) and profiles:
+            for camera_id, profile in profiles.items():
+                if camera_id in self.camera_sessions:
+                    continue
+                source = self._coerce_source(profile.get("source", camera_id))
+                targets.append((source, profile.get("display", f"Camera {camera_id}")))
+        elif not self.camera_sessions:
+            saved_source = self.settings_manager.get("camera_source", "")
+            if saved_source:
+                source = self._coerce_source(saved_source)
+                targets.append(
+                    (source, self.settings_manager.get("camera_display", f"Camera {saved_source}"))
+                )
+        if not targets:
             self.reconnect_timer.stop()
             return
-        saved_source = self.settings_manager.get("camera_source", "")
-        if not saved_source:
-            self.reconnect_timer.stop()
-            return
-        source = self._coerce_source(saved_source)
-        display = self.settings_manager.get("camera_display", f"Camera {saved_source}")
-        if self.connect_camera_source(source, display):
-            self.status_label.setText(f"{display}: Reconnected")
+
+        focused_before = self.focused_camera_id
+        still_down = 0
+        for source, display in targets:
+            if self.connect_camera_source(source, display):
+                self.status_label.setText(f"{display}: Reconnected")
+                app_logger.log(
+                    "info",
+                    "camera_reconnect_success",
+                    camera_id=str(source),
+                    camera_ip=self._extract_host(source) or "unknown",
+                    camera_display=display,
+                    component="main_window",
+                    action="try_reconnect",
+                    retry_outcome="recovered",
+                )
+                continue
+            still_down += 1
+            self.status_label.setText(f"{display}: Reconnecting...")
             app_logger.log(
-                "info",
-                "camera_reconnect_success",
+                "error",
+                "camera_reconnect_failed",
                 camera_id=str(source),
                 camera_ip=self._extract_host(source) or "unknown",
                 camera_display=display,
                 component="main_window",
                 action="try_reconnect",
-                retry_outcome="recovered",
+                retry_outcome="will_retry",
             )
-            return
-        self.status_label.setText(f"{display}: Reconnecting...")
-        app_logger.log(
-            "error",
-            "camera_reconnect_failed",
-            camera_id=str(source),
-            camera_ip=self._extract_host(source) or "unknown",
-            camera_display=display,
-            component="main_window",
-            action="try_reconnect",
-            retry_outcome="will_retry",
-        )
+        # connect_camera_source focuses the new camera; keep the user's focus.
+        if focused_before in self.camera_sessions:
+            self.focused_camera_id = focused_before
+        if not still_down:
+            self.reconnect_timer.stop()
 
     def _coerce_source(self, source_value: str):
         """Convert saved source into int index when possible."""
@@ -1309,7 +1334,8 @@ class MainWindow(QMainWindow):
         for camera_id, profile in profiles.items():
             source = self._coerce_source(profile.get("source", camera_id))
             display = profile.get("display", f"Camera {camera_id}")
-            self.connect_camera_source(source, display)
+            if not self.connect_camera_source(source, display):
+                self.start_reconnect_timer()
 
     def display_frame(self, frame: np.ndarray) -> None:
         """
@@ -2048,8 +2074,9 @@ class MainWindow(QMainWindow):
                     action="update_feed",
                     error_message=error_msg or "stream_dropped",
                 )
-                # Properly clean up the leaked thread
+                # Properly clean up the leaked thread, then retry just this camera
                 self.disconnect_camera(user_requested=False, session_id=camera_id)
+                self.start_reconnect_timer()
                 continue
 
             display_frame = frame
@@ -2248,9 +2275,13 @@ class MainWindow(QMainWindow):
                 self.status_label.setText("No videos found.")
                 return
 
-            # Check if the directory has any videos
-            video_files = [f for f in os.listdir(VIDEO_DIR) if f.endswith((".avi", ".mp4"))]
-            if not video_files:
+            # Check if the directory (or its per-day folders) has any videos
+            has_videos = any(
+                name.endswith((".avi", ".mp4"))
+                for _, _, names in os.walk(VIDEO_DIR)
+                for name in names
+            )
+            if not has_videos:
                 self.status_label.setText("No videos found.")
                 return
 

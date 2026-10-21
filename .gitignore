@@ -41,3 +41,8 @@ Thumbs.db
 
 # Operator-only infra notes (never commit)
 cloudflare-tunnel-notes.local.md
+# Rotated logs
+*.log.*
+
+# Portable git toolchain (local only)
+.tools/

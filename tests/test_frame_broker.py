@@ -13,20 +13,23 @@ class TestFrameBroker(unittest.TestCase):
         b = FrameBroker()
         f = np.zeros((10, 10, 3), dtype=np.uint8)
         f[0, 0, 0] = 42
-        b.publish("cam1", "Front", f)
-        got, ts = b.get_latest("cam1")
+        b.publish("rtsp://u:secret@10.0.0.5/s", "Front", f)
+        wid = b.web_id("rtsp://u:secret@10.0.0.5/s")
+        self.assertNotIn("secret", wid)
+        got, ts = b.get_latest(wid)
         self.assertIsNotNone(got)
         assert got is not None
         self.assertEqual(int(got[0, 0, 0]), 42)
         self.assertGreater(ts, 0.0)
         f[0, 0, 0] = 99
-        got_stable, _ = b.get_latest("cam1")
+        got_stable, _ = b.get_latest(wid)
         assert got_stable is not None
         self.assertEqual(int(got_stable[0, 0, 0]), 42)
         cams = b.list_cameras()
-        self.assertEqual(cams, [("cam1", "Front")])
-        b.unpublish("cam1")
-        got2, _ = b.get_latest("cam1")
+        self.assertEqual(cams, [(wid, "Front")])
+        self.assertEqual(b.list_camera_hosts(), [("10.0.0.5", "Front")])
+        b.unpublish("rtsp://u:secret@10.0.0.5/s")
+        got2, _ = b.get_latest(wid)
         self.assertIsNone(got2)
 
     def test_clear(self) -> None:
@@ -52,7 +55,7 @@ class TestFrameBroker(unittest.TestCase):
         for t in threads:
             t.join()
         self.assertEqual(errors, [])
-        got, _ = b.get_latest("x")
+        got, _ = b.get_latest(b.web_id("x"))
         self.assertIsNotNone(got)
         assert got is not None
         self.assertTrue(np.all(got[:, :, 0] == got[0, 0, 0]))
