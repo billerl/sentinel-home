@@ -120,6 +120,7 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "remote_web_url": _url,
     "remote_rdp_user": _username,
     "web.max_fps": _num(1, 20, int),
+    "web.show_zones": _bool,
 }
 
 # Secrets that may be replaced but are never sent back to the browser.

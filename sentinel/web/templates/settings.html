@@ -197,6 +197,7 @@
           <div class="field" style="flex: 0 1 200px"><span>Retry every (seconds)</span><input type="number" min="5" max="300" data-key="reconnect_interval_seconds"></div>
           <div class="field" style="flex: 0 1 200px"><span>Processing rate (fps)</span><input type="number" min="5" max="30" data-key="feed_fps"></div>
           <div class="field" style="flex: 0 1 200px"><span>Web live view rate (fps)</span><input type="number" min="1" max="20" data-key="web.max_fps"></div>
+          <label style="align-self: end"><input type="checkbox" data-key="web.show_zones"> Show zones on the live view</label>
         </div>
         <p class="hint">Processing rate changes apply after a camera reconnects.</p>
         <div class="save-row"><button class="primary" onclick="saveSection('recording')">Save</button><span class="msg" id="msg-recording"></span></div>
@@ -250,6 +251,7 @@
         <summary>Getting around</summary>
         <ul>
           <li><b>Live</b> — all cameras. Tap one for full screen; tap again to go back.</li>
+          <li><b>Zones: on / off</b> (top of the live page) — shows or hides the zone outlines on the live view. Detection still uses the zones either way. It applies to everyone watching.</li>
           <li><b>Timeline</b> (under the cameras) — a mark for every clip, coloured by what was in it: <b style="color:#ff4d6d">people</b>, <b style="color:#4da3ff">vehicles</b>, <b style="color:#5fd38a">animals</b>, <b style="color:#b98cff">deliveries</b>, grey for motion with nothing recognised, orange for clips you requested from Telegram. The buttons next to the zoom filter by type. Tap a mark to play it. Use <b>◀ ▶</b> or the date box to change day, <b>24h / 6h / 1h</b> to zoom, and <b>▶ Latest clip</b> to jump to the newest. In the player, <b>Previous / Next</b> step through that camera's clips.</li>
           <li><b>Zones</b> — tell Sentinel which parts of each picture matter.</li>
           <li><b>Settings</b> — this page.</li>
@@ -331,10 +333,10 @@
       telegram: ["telegram_enabled", "telegram_chat_ids", "telegram_motion_alerts", "telegram_include_video", "telegram_cooldown"],
       recording: ["recording_retention_enabled", "recording_retention_days", "recording_min_free_percent",
                   "night_bug_start_hour", "night_bug_end_hour", "auto_reconnect_enabled",
-                  "reconnect_interval_seconds", "feed_fps", "web.max_fps"],
+                  "reconnect_interval_seconds", "feed_fps", "web.max_fps", "web.show_zones"],
       audio: ["volume", "speech_speed", "voice_id"],
       access: ["remote_web_url", "remote_rdp_user"],
-      detection: ["object_detection_enabled", "alert_mode", "detector_model", "object_alert_cooldown"]
+      detection: ["object_detection_enabled", "vehicle_types_enabled", "alert_mode", "detector_model", "object_alert_cooldown"]
     };
 
     function $(id) { return document.getElementById(id); }

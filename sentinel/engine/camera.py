@@ -38,6 +38,19 @@ def camera_host(source: object, display_name: str = "") -> str:
     return display_name or str(source)
 
 
+def zoomed_view(frame: np.ndarray, box: Tuple[int, int, int, int], width: int = 960) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
+    """A 16:9 close-up around ``box`` (about 4x its size), scaled to ``width``; returns (image, box in it)."""
+    fh, fw = frame.shape[:2]
+    x, y, w, h = box
+    cw = int(min(fw, max(4 * w, 4 * h * 16 / 9, 480)))
+    ch = int(min(fh, cw * 9 / 16))
+    x0 = int(min(max(0, x + w / 2 - cw / 2), fw - cw))
+    y0 = int(min(max(0, y + h / 2 - ch / 2), fh - ch))
+    scale = width / cw
+    crop = cv2.resize(frame[y0:y0 + ch, x0:x0 + cw], (width, int(ch * scale)), interpolation=cv2.INTER_AREA)
+    return crop, (int((x - x0) * scale), int((y - y0) * scale), int(w * scale), int(h * scale))
+
+
 def draw_zones_and_lines(frame: np.ndarray, profile: Dict[str, Any]) -> np.ndarray:
     """Draw a profile's zones (cyan) and entry lines (magenta) onto ``frame`` in place."""
     height, width = frame.shape[:2]
@@ -85,6 +98,7 @@ class CameraPipeline:
         self.detector.set_recording_identity(recording_store, self.host, display_name)
         self._store = recording_store
         self.hd: Optional[HDRecorder] = None
+        self._last_hd_grab = 0.0
         self._broker = frame_broker
         self._settings = settings
         self._on_motion = on_motion
@@ -311,6 +325,8 @@ class CameraPipeline:
         classifier = getattr(self._detections, "vehicle_classifier", None)
         for track in ready:
             if classifier is not None and wants_type_check(track):
+                if self._check_in_hd_later(classifier, track, confirmed, ts, first=True):
+                    continue  # reported once the HD look is done
                 self._check_vehicle_type(classifier, track)
             self._report_track(track, confirmed, ts)
         if classifier is None:
@@ -319,20 +335,95 @@ class CameraPipeline:
         # pulls up to the curb is much easier to recognise than when it first appeared.
         for track in self.tracker.tracks:
             if track.alerted and track.type_checks and wants_type_check(track):
+                if self._check_in_hd_later(classifier, track, confirmed, ts, first=False):
+                    continue
                 if self._check_vehicle_type(classifier, track):
                     self._report_track(track, confirmed, ts)
 
-    def _check_vehicle_type(self, classifier, track) -> bool:
-        """Classify the track's best crop; True if it just turned out to be a delivery."""
-        box = track.big_box
+    # Vehicles smaller than this fraction of the frame width are looked at in the
+    # main (HD) stream: 4x the pixels makes a van on the street recognisable.
+    HD_FAR_FRACTION = 0.25
+    HD_MIN_INTERVAL = 2.0  # seconds between HD grabs per camera (each costs ~0.6 CPU-seconds)
+
+    def _check_in_hd_later(self, classifier, track, confirmed, ts: float, first: bool) -> bool:
+        """Queue a type check on the HD frame for a far vehicle; False if not applicable/busy."""
+        hd, worker = self.hd, self._detections
+        if hd is None or not hd.running or not hasattr(worker, "run_later"):
+            return False
+        _, _, bw, bh = track.big_box
+        if max(bw, bh) >= self.HD_FAR_FRACTION * track.big_frame.shape[1]:
+            return False
+        now = time.time()
+        if now - self._last_hd_grab < self.HD_MIN_INTERVAL:
+            return False
+        track.type_pending = True
+
+        def job() -> None:
+            try:
+                view = self._hd_view(track)
+                newly_delivery = self._check_vehicle_type(classifier, track, view)
+                if first or newly_delivery:
+                    self._report_track(track, confirmed, ts)
+            except Exception as e:
+                app_logger.log("error", "hd_vehicle_check_failed", error_message=str(e),
+                               camera_display=self.display_name, component="camera", action="hd_check")
+                if first and not track.alerted:
+                    self._report_track(track, confirmed, ts)  # never lose the alert itself
+            finally:
+                track.type_pending = False
+
+        if not worker.run_later(job):
+            track.type_pending = False
+            return False
+        self._last_hd_grab = now
+        return True
+
+    def _hd_view(self, track) -> Optional[Tuple[np.ndarray, Tuple[int, int, int, int]]]:
+        """(HD frame, vehicle box in it) for the track's closest sighting, or None."""
+        big = self.hd.keyframe_near(track.big_ts) if self.hd is not None else None
+        detector = getattr(self._detections, "detector", None)
+        if big is None or detector is None:
+            return None
+        sub_h, sub_w = track.big_frame.shape[:2]
+        hd_h, hd_w = big.shape[:2]
+        sx, sy = hd_w / sub_w, hd_h / sub_h
+        x, y, w, h = track.big_box
+        cx, cy, bw, bh = (x + w / 2) * sx, (y + h / 2) * sy, w * sx, h * sy
+        # The keyframe can be up to ~1 s away from the sighting, so search around it.
+        rx0, rx1 = int(max(0, cx - 2.5 * bw)), int(min(hd_w, cx + 2.5 * bw))
+        ry0, ry1 = int(max(0, cy - 1.5 * bh)), int(min(hd_h, cy + 1.5 * bh))
+        region = big[ry0:ry1, rx0:rx1]
+        if region.size == 0:
+            return None
+        found = [d for d in detector.detect(region, min_score=0.3) if d.group == "vehicle" and d.label != "bicycle"]
+
+        def cost(d) -> float:
+            dx = d.box[0] + d.box[2] / 2 + rx0 - cx
+            dy = d.box[1] + d.box[3] / 2 + ry0 - cy
+            size = abs(np.log(max(1, d.box[2] * d.box[3]) / max(1.0, bw * bh)))
+            return (dx * dx + dy * dy) ** 0.5 / max(bw, bh) + size
+
+        if not found:
+            return None
+        best = min(found, key=cost)
+        if cost(best) > 3.0:
+            return None  # probably a different vehicle
+        bx, by, bw2, bh2 = best.box
+        return big, (bx + rx0, by + ry0, bw2, bh2)
+
+    def _check_vehicle_type(self, classifier, track, view=None) -> bool:
+        """Classify the track's closest view (HD if given); True if it just turned out to be a delivery."""
+        frame, box = view if view is not None else (track.big_frame, track.big_box)
         try:
-            vt = classifier.classify(track.big_frame, box)
+            vt = classifier.classify(frame, box)
         except Exception as e:  # never let the classifier break detection
             app_logger.log("error", "vehicle_classifier_failed", error_message=str(e),
                            camera_display=self.display_name, component="camera", action="classify")
             vt = None
         track.type_checks += 1
-        track.type_checked_area = box[2] * box[3]
+        track.type_checked_area = track.big_box[2] * track.big_box[3]
+        if view is not None:
+            track.hd_view = view
         if vt is None:
             return False
         newly_delivery = vt.delivery and not (track.vehicle_type and track.vehicle_type.delivery)
@@ -351,7 +442,10 @@ class CameraPipeline:
         companions = sum(1 for t in confirmed if t is not track and t.group == track.group == "person")
         vt = track.vehicle_type
         tag = vt.phrase if vt is not None and vt.delivery else track.label
-        snapshot = source.copy()
+        if track.hd_view is not None:
+            snapshot, (x, y, bw, bh) = zoomed_view(*track.hd_view)  # far away: send the HD close-up
+        else:
+            snapshot = source.copy()
         cv2.rectangle(snapshot, (x, y), (x + bw, y + bh), (0, 200, 255), 2)
         cv2.putText(snapshot, tag, (x, max(12, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 2)
         event = ObjectEvent(
@@ -398,8 +492,10 @@ class CameraPipeline:
         self._last_publish = now
         if web.get("published_frame", "overlay") == "raw" and raw is not None:
             frame = raw
-        else:
+        elif web.get("show_zones", True):
             frame = draw_zones_and_lines(annotated, self.profile)
+        else:
+            frame = annotated  # zones still apply; they just aren't drawn
         self._broker.publish(
             self.camera_id,
             self.display_name,

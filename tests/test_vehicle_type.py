@@ -208,6 +208,118 @@ class TestPipelineAndAlerts(unittest.TestCase):
         self.assertEqual(len(self._alert(["delivery"], None)), 0)
 
 
+class _FakeHD:
+    running = True
+
+    def __init__(self, frame):
+        self.frame, self.asked = frame, []
+
+    def keyframe_near(self, ts):
+        self.asked.append(ts)
+        return self.frame
+
+
+class _FakeWorker:
+    """Runs 'later' jobs immediately; detector finds a vehicle near the expected HD spot."""
+
+    def __init__(self, classifier, hd_box):
+        self.vehicle_classifier = classifier
+        self.hd_box = hd_box
+        self.jobs = 0
+        outer = self
+
+        class _Det:
+            def detect(self, region, min_score=0.3):
+                outer.region = region.shape
+                return [Detection("truck", 0.7, outer.hd_box)]
+        self.detector = _Det()
+
+    def run_later(self, job):
+        self.jobs += 1
+        job()
+        return True
+
+
+class TestHDView(TestPipelineAndAlerts):
+    def _setup_hd(self, hd_box):
+        self.seen = []
+        clf = _FakeClassifier({})
+        clf.classify = lambda frame, box: (self.seen.append((frame.shape, box)), _vt("ups"))[1]
+        hd_frame = np.full((H * 4, W * 4, 3), 90, dtype=np.uint8)
+        self.pipeline.hd = _FakeHD(hd_frame)
+        self.pipeline._last_hd_grab = 0.0
+        worker = _FakeWorker(clf, hd_box)
+        if self.pipeline.tracker is None:
+            self.pipeline.tracker = CameraObjectTracker(self.pipeline.host)
+        self.pipeline._detections = worker
+        return worker
+
+    def _go(self, boxes):
+        for i, box in enumerate(boxes):
+            self.pipeline._handle_detections([Detection("truck", 0.8, box)], GREY, 1000.0 + i)
+
+    def test_far_vehicle_is_classified_in_hd(self):
+        # Closest sub box (320,100,44,33) is centred at HD (1368,466), 176x132; the search region
+        # starts at (928,268), so a vehicle found at region (352,132) is right where expected.
+        worker = self._setup_hd((352, 132, 176, 132))
+        self._go([(290, 100, 40, 30), (320, 100, 44, 33)])
+        self.assertEqual(worker.jobs, 1)
+        self.assertEqual(self.seen[0][0], (H * 4, W * 4, 3))         # HD frame used
+        self.assertEqual(self.seen[0][1], (1280, 400, 176, 132))     # re-found box, in HD coordinates
+        self.assertEqual(len(self.events), 1)
+        self.assertTrue(self.events[0].description.startswith("📦 A UPS truck"))
+        self.assertEqual(self.events[0].snapshot.shape[1], 960)       # zoomed close-up
+        self.assertFalse(self.events[0].track.type_pending)
+
+    def test_wrong_vehicle_in_hd_falls_back_to_substream(self):
+        self._setup_hd((0, 0, 900, 500))  # huge box far from the expected spot
+        self._go([(290, 100, 40, 30), (320, 100, 44, 33)])
+        self.assertEqual(self.seen[0][0], (H, W, 3))
+        self.assertEqual(self.events[0].snapshot.shape, (H, W, 3))
+
+    def test_near_vehicle_skips_hd(self):
+        worker = self._setup_hd((0, 0, 10, 10))
+        self._go([(100, 100, 200, 120), (130, 100, 200, 120)])
+        self.assertEqual(worker.jobs, 0)
+        self.assertEqual(self.pipeline.hd.asked, [])
+        self.assertEqual(len(self.events), 1)
+
+    def test_zoomed_view_keeps_box(self):
+        from sentinel.engine.camera import zoomed_view
+        frame = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        img, (x, y, w, h) = zoomed_view(frame, (2400, 1300, 150, 100))  # near the corner
+        self.assertEqual(img.shape[1], 960)
+        self.assertTrue(0 <= x and x + w <= img.shape[1] + 1 and 0 <= y and y + h <= img.shape[0] + 1)
+
+
+class TestKeyframeNear(unittest.TestCase):
+    def test_picks_nearest_segment(self):
+        import subprocess
+        import time as _time
+        from sentinel.recordings.hd_recorder import HDRecorder
+        from sentinel.recordings.store import find_ffmpeg
+
+        ffmpeg = find_ffmpeg()
+        if not ffmpeg:
+            self.skipTest("ffmpeg not available")
+        root = tempfile.mkdtemp(prefix="sentinel-kf-")
+        self.addCleanup(shutil.rmtree, root, True)
+        rec = HDRecorder("rtsp://x/main/", "cam", buffer_root=root)
+        os.makedirs(rec.buffer_dir)
+        base = int(_time.time()) - 10
+        for i, colour in enumerate(("red", "blue")):
+            ts = base + 2 * i
+            path = os.path.join(rec.buffer_dir, _time.strftime("%Y%m%d%H%M%S", _time.localtime(ts)) + ".mkv")
+            subprocess.run([ffmpeg, "-loglevel", "error", "-f", "lavfi", "-i", f"color={colour}:s=64x36:d=1",
+                            "-c:v", "libx264", "-f", "matroska", path], check=True)
+            os.utime(path, (ts + 2, ts + 2))  # last write = end of segment
+        first = rec.keyframe_near(base + 0.3, wait=False)
+        second = rec.keyframe_near(base + 2.4, wait=False)
+        self.assertGreater(int(first[..., 2].mean()), 150)   # red (BGR)
+        self.assertGreater(int(second[..., 0].mean()), 150)  # blue
+        self.assertIsNone(rec.keyframe_near(base + 60, wait=False))
+
+
 class TestQueries(unittest.TestCase):
     def test_delivery_words(self):
         q, _ = parse_video_query("videos yesterday deliveries", [])

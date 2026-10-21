@@ -10,6 +10,7 @@ block on inference. Tracks turn into at most one event each.
 import itertools
 import json
 import os
+import queue
 import threading
 import time
 from dataclasses import dataclass, field
@@ -56,12 +57,15 @@ class Track:
     # Closest (largest) view so far, for the vehicle-type check.
     big_frame: Optional[np.ndarray] = None
     big_box: Optional[Tuple[int, int, int, int]] = None
+    big_ts: float = 0.0
+    type_pending: bool = False  # a background (HD) type check is queued
+    hd_view: Optional[Tuple[np.ndarray, Tuple[int, int, int, int]]] = None  # HD frame + box, if one was used
     type_checks: int = 0
     type_checked_area: int = 0
 
-    def see(self, frame: np.ndarray, box: Tuple[int, int, int, int]) -> None:
+    def see(self, frame: np.ndarray, box: Tuple[int, int, int, int], now: float = 0.0) -> None:
         if self.big_box is None or box[2] * box[3] > self.big_box[2] * self.big_box[3]:
-            self.big_frame, self.big_box = frame, box
+            self.big_frame, self.big_box, self.big_ts = frame, box, now
 
     def vote(self, label: str, score: float) -> None:
         """Small models flip between e.g. car/truck/bus; the label is the score-weighted majority."""
@@ -109,7 +113,7 @@ class ObjectEvent:
 
 def wants_type_check(track: Track) -> bool:
     """An alerted vehicle not yet known to be a delivery that is now clearly bigger than when last checked."""
-    if track.group != "vehicle" or track.label == "bicycle" or track.big_box is None:
+    if track.group != "vehicle" or track.label == "bicycle" or track.big_box is None or track.type_pending:
         return False
     if track.vehicle_type is not None and track.vehicle_type.delivery:
         return False
@@ -303,7 +307,7 @@ class CameraObjectTracker:
             if best is not None:
                 unmatched.remove(best)
                 track.vote(best.label, best.score)
-                track.see(frame, best.box)
+                track.see(frame, best.box, now)
                 track.boxes.append((now, best.box))
                 track.boxes = track.boxes[-30:]
                 track.last_seen = now
@@ -316,7 +320,7 @@ class CameraObjectTracker:
             track = Track(next(self._ids), det.label, det.group, now, now,
                           [(now, det.box)], det.score, 1, best_frame=frame, best_box=det.box)
             track.vote(det.label, det.score)
-            track.see(frame, det.box)
+            track.see(frame, det.box, now)
             self.tracks.append(track)
 
         frame_w = frame.shape[1]
@@ -389,6 +393,9 @@ class DetectionWorker:
                  vehicle_classifier: Optional["VehicleClassifier"] = None) -> None:
         self.detector = detector
         self.vehicle_classifier = vehicle_classifier  # runs on this thread via the camera callbacks
+        # Slow extras (HD frame grabs) run on their own thread so detection never waits.
+        self._jobs: "queue.Queue[Callable[[], None]]" = queue.Queue(maxsize=2)
+        self._job_thread = threading.Thread(target=self._run_jobs, name="object-extras", daemon=True)
         self.min_interval = min_interval
         self._slots: Dict[str, Tuple[np.ndarray, float, Callable]] = {}
         self._last_run: Dict[str, float] = {}
@@ -399,11 +406,36 @@ class DetectionWorker:
 
     def start(self) -> None:
         self._thread.start()
+        self._job_thread.start()
 
     def stop(self) -> None:
         with self._cond:
             self._stop = True
             self._cond.notify_all()
+        try:
+            self._jobs.put_nowait(None)
+        except queue.Full:
+            pass
+
+    def run_later(self, job: Callable[[], None]) -> bool:
+        """Queue a slow job; False (caller should do without) if two are already waiting."""
+        if self._stop:
+            return False
+        try:
+            self._jobs.put_nowait(job)
+            return True
+        except queue.Full:
+            return False
+
+    def _run_jobs(self) -> None:
+        while not self._stop:
+            job = self._jobs.get()
+            if job is None:
+                return
+            try:
+                job()
+            except Exception:
+                pass
 
     def submit(self, camera_key: str, frame: np.ndarray, callback: Callable[[List[Detection], np.ndarray, float], None]) -> bool:
         """Offer a frame; skipped if this camera was analysed too recently."""

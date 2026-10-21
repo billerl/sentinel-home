@@ -53,6 +53,12 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     (`sentinel/detection/vehicle_prompts.npz`). After editing `VEHICLE_TYPES`, rebuild them with
     `tools/build_vehicle_prompts.py`. Recognised deliveries add a `delivery` clip label and alert group;
     vehicles are re-checked (up to 3 times) as they get closer, which can send a second "📦" alert.
+  - Far vehicles (box < 1/4 of the frame width) are checked on the HD stream instead: a background
+    thread (`DetectionWorker.run_later`) waits for the segment holding the sighting to close, decodes its
+    keyframe (`HDRecorder.keyframe_near`, ~0.6 CPU-s), re-finds the vehicle with YOLOX near the scaled box
+    and classifies the sharp crop; the alert photo becomes an HD close-up. Adds ~3 s to those alerts;
+    at most one grab per camera per 2 s, and skipped when two jobs are already queued.
+  - `web.show_zones` (live-page "Zones: on/off" button) only hides the drawn outlines.
 - **Alerts:**
   - `alert_mode` is `objects` by default: a Telegram photo plus a natural sentence, then the clip.
   - The per-camera/per-type cooldown is `object_alert_cooldown`.

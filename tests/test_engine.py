@@ -163,6 +163,20 @@ class TestEngineConfig(unittest.TestCase):
             self.engine.update_camera_config("192.168.0.10", {"min_contour_area": "lots"})[0]
         )
 
+    def test_zone_outlines_can_be_hidden(self):
+        pipeline = self.engine.cameras["192.168.0.10"]
+        self.assertTrue(self.engine.update_camera_config(
+            "192.168.0.10", {"active_zones": [[[0.1, 0.1], [0.9, 0.1], [0.9, 0.9]]]})[0])
+        published = []
+        pipeline._broker = type("B", (), {"publish": lambda self, cid, name, frame, jpeg_quality: published.append(frame)})()
+        for show in (True, False):
+            self.assertTrue(self.engine.update_settings({"web.show_zones": show})[0])
+            pipeline._last_publish = 0.0
+            pipeline._publish(np.zeros((90, 160, 3), dtype=np.uint8), None)
+        self.assertGreater(int(published[0].sum()), 0)   # outline drawn
+        self.assertEqual(int(published[1].sum()), 0)     # hidden
+        self.assertEqual(len(pipeline.detector.active_zones), 1)  # still enforced
+
     def test_feature_toggle_updates_profiles(self):
         replies = []
         self.engine.telegram.reply_to_chat = lambda chat, msg: replies.append(msg)

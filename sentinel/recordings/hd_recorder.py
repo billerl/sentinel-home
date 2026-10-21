@@ -17,6 +17,9 @@ import threading
 import time
 from typing import Callable, Dict, List, Optional, Tuple
 
+import cv2
+import numpy as np
+
 from sentinel.logging_utils import app_logger, redact
 from sentinel.recordings.store import find_ffmpeg
 
@@ -88,6 +91,40 @@ class HDRecorder:
         with self._lock:
             self._pending.append((start_ts - PRE_ROLL_SECONDS, end_ts + POST_ROLL_SECONDS, out_path, callback))
         return True
+
+    def keyframe_near(self, ts: float, max_gap: float = SEGMENT_SECONDS, wait: bool = True) -> Optional[np.ndarray]:
+        """Full-resolution frame from about ``ts``, or None.
+
+        Every segment starts on a keyframe, so the first frame of the segment that
+        starts nearest ``ts`` decodes cheaply (~0.25 s for 1440p) and is at most about
+        one segment off; callers re-find moving objects in it. ffmpeg only writes a
+        segment out when it closes, so with ``wait`` this blocks until the segment
+        holding ``ts`` is on disk (up to ~2.5 s); call it from a background thread.
+        """
+        delay = ts + SEGMENT_SECONDS + 0.5 - time.time()
+        if wait and 0 < delay <= SEGMENT_SECONDS + 1:
+            time.sleep(delay)
+        segments = self._segments()
+        best: Optional[Tuple[float, str]] = None
+        for i, (name_ts, path) in enumerate(segments):
+            try:
+                if os.path.getsize(path) == 0:
+                    continue
+                # Names have 1 s resolution; the previous segment's last write is a closer start time.
+                start = os.path.getmtime(segments[i - 1][1]) if i > 0 else name_ts
+            except OSError:
+                continue
+            gap = abs(start - ts)
+            if gap <= max_gap and (best is None or gap < best[0]):
+                best = (gap, path)
+        if best is None:
+            return None
+        cap = cv2.VideoCapture(best[1], cv2.CAP_FFMPEG)
+        try:
+            ok, frame = cap.read()
+        finally:
+            cap.release()
+        return frame if ok else None
 
     # ----------------------------------------------------------------- loop
     def _ffmpeg_cmd(self, ffmpeg: str) -> List[str]:

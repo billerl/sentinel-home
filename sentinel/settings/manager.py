@@ -39,6 +39,7 @@ WEB_VIEWER_DEFAULTS: Dict[str, Any] = {
     "jpeg_quality": 80,
     "max_fps": 10,
     "published_frame": "overlay",
+    "show_zones": True,  # draw zones/entry lines on the live feed (display only)
     "max_concurrent_streams": 8,
     "max_concurrent_streams_per_session": 8,
     "auth": {

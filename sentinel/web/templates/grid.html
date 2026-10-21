@@ -205,6 +205,7 @@
   <header>
     <h1>Sentinel Live</h1>
     <button class="header-btn" id="tl-toggle" type="button" onclick="toggleTimeline()">Timeline</button>
+    <button class="header-btn" id="zones-toggle" type="button" onclick="toggleZones()" title="Show or hide the zone outlines on the live view (detection is unaffected)" hidden>Zones: on</button>
     <a class="header-btn" href="{{ url_for('zones_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Zones</a>
     <a class="header-btn" href="{{ url_for('settings_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Settings</a>
     <form method="post" action="{{ url_for('logout') }}" style="margin: 0;">
@@ -410,6 +411,35 @@
       var row = tl.cameras.find(function(c) { return c.key === key; });
       return row ? row.name : key;
     }
+
+    // Zone outlines are drawn on the server, so this switches them for every viewer.
+    var zonesShown = true;
+    function showZonesState(on) {
+      zonesShown = on;
+      var b = document.getElementById("zones-toggle");
+      b.textContent = on ? "Zones: on" : "Zones: off";
+      b.classList.toggle("active", on);
+      b.hidden = false;
+    }
+    async function loadZonesState() {
+      try {
+        var r = await fetch("/api/settings");
+        if (r.ok) showZonesState((await r.json()).values["web.show_zones"] !== false);
+      } catch (e) {}
+    }
+    async function toggleZones() {
+      var want = !zonesShown;
+      showZonesState(want);
+      try {
+        var r = await fetch("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+          body: JSON.stringify({ "web.show_zones": want })
+        });
+        if (!r.ok) throw new Error();
+      } catch (e) { showZonesState(!want); }
+    }
+    loadZonesState();
 
     function toggleTimeline(show) {
       var el = document.getElementById("timeline");
