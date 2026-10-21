@@ -48,6 +48,13 @@ timeline, natural-language Telegram alerts and questions, all in a web UI. Every
 - HD segments are only written when they close (~2 s); anything reading them must wait (see
   `HDRecorder.keyframe_near`).
 - Telegram polling (`getUpdates`) is shared: a second running bot instance steals the user's messages.
+- `recorded_videos/household.db` and `.household/` hold the user's own labels (which photo is whose car).
+  Never delete or rebuild sightings without checking `vehicle_id`/`ignored` first — the user may be
+  labelling on the Vehicles page while you work.
+- Night = infrared: use `is_greyscale` (per-pixel channel spread), not saturation. CLIP tells cars apart
+  well by day but poorly in IR; family-car identity at night comes from parking-spot stickiness.
+- In the web editors, never grow JS arrays by setting `.length` — the holes are sent as `null` (this
+  once named a zone "None"). Server-side cleaners must treat non-strings as "".
 
 ## Conventions
 - Code style: match the surrounding code; short docstrings that say *why*; no new dependencies
