@@ -38,3 +38,6 @@ Thumbs.db
 # Local environment files
 .env
 .env.local
+
+# Operator-only infra notes (never commit)
+cloudflare-tunnel-notes.local.md

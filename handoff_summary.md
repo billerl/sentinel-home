@@ -1,184 +1,178 @@
 # Sentinel Handoff Summary
 
-Use this file as the single source of truth across chats.  
-At the **start** of each new chat, instruct the assistant to:
-
-1. Read `handoff_summary.md`
-2. Continue from current state
-3. Update this file at end of session
+Use this file as continuity across chats. At the **start** of a new session, ask the assistant to read this file, continue from **Current Status**, and update this file before wrapping up.
 
 ---
 
 ## Project
-- Name: Sentinel Home
-- Repo: `https://github.com/billerl/sentinel-home.git`
-- Primary branch: `main`
 
-## Current Status
-- Desktop app with PySide6/OpenCV is functional.
-- RTSP sub-stream discovery/preference implemented.
-- Motion detection supports zones + entry lines.
-- Trigger behavior currently: **zone OR line crossing**.
-- Entry line crossing logic updated to use **actual drawn segment** intersection.
-- Auto reconnect for dropped stream implemented.
-- Collapsible UI sections + fullscreen + MultiView focus mode implemented.
-- Detection size slider preview overlay implemented (1s dwell after release, 5s display).
-- Night bug filter with schedule implemented.
-- Telegram features implemented (alerts, commands, on-demand clip).
-
-## Telegram Features
-- Multiple recipient support via `telegram_chat_ids` (comma-separated).
-- Cooldown setting exists and is separate from recording cooldown.
-- Include-video mode sends one combined event message with clip.
-- Commands:
-  - `pause <minutes>`
-  - `resume`
-  - `status`
-  - `help`
-  - `clip` (records 10 seconds and sends to requester)
-- Unknown command returns coherent help text.
-
-## Detection / Gating Notes
-- Modes in practice:
-  - No zones/no lines -> contour motion trigger
-  - Zones only -> zone motion trigger
-  - Lines only -> line crossing trigger
-  - Zones + lines -> zone OR line trigger
-- Direction setting (`outside_to_inside`, `inside_to_outside`, `both`) controls accepted crossing direction only.
-- Line crossing now requires movement segment to intersect drawn line segment.
-
-## Known Environment Notes
-- `settings.json` is intentionally gitignored (contains secrets and local preferences).
-- Live runtime values may differ from defaults; always check `settings.json` when debugging behavior.
-- Push from agent environment previously failed due DNS/network (`Could not resolve host: github.com`), but local push should work from user terminal.
-
-## Docs Updated
-- `readme.md`
-- `installation-guide.md`
-- `project-structure.md`
-
-## Safety / Privacy
-- No hardcoded secrets should be committed.
-- Keep `settings.json` untracked.
-- Do not commit tokens/passwords from screenshots or local settings.
-
-## Agent Terminal Operation Notes
-- In Cursor Agent mode, the assistant can execute non-interactive terminal commands directly in the project workspace.
-- Commands run in a persistent shell session and can read/write repo files.
-- For privileged or unrestricted operations (for example pushing to remote), the agent may request elevated permissions; user approval is required by the client when needed.
-- The assistant cannot bypass OS permission prompts that require interactive auth (for example `sudo` password entry) unless those commands are already allowed in the environment.
-- Good practice for future chats:
-  - Ask the assistant to run diagnostics first (`git status`, environment checks) before edits.
-  - Ask for a summary of every command's result after long runs.
-  - Ask the assistant to update this handoff file before ending the session.
-
-## Piper TTS Handoff (Implemented + Enablement Steps)
-- Piper support is already implemented in code at `sentinel/audio/alert_system.py`.
-- Runtime behavior:
-  - Sentinel tries `piper.voice` first.
-  - If Piper package/model is missing, it falls back to `pyttsx3`.
-- New repo file: `requirements-piper.txt` (installs `piper-tts`).
-- Enable Piper on a fresh machine:
-  1. `python3 -m venv venv && source venv/bin/activate`
-  2. `pip install -r requirements.txt`
-  3. `pip install -r requirements-piper.txt`
-  4. Linux audio utility (if missing): `sudo apt install -y alsa-utils`
-  5. Create model folder: `mkdir -p models`
-  6. Download matching model pair into `models/`:
-     - `<voice>.onnx`
-     - `<voice>.onnx.json`
-  7. Run: `python main.py`
-  8. Verify startup log shows `Piper TTS initialised with voice: ...`
-- If Piper does not load:
-  - check `pip show piper-tts`
-  - confirm model pair names match exactly
-  - confirm `aplay` exists (`which aplay`)
-
-## Suggested Next-Chat Prompt
-- "Read `handoff_summary.md` and continue from current state. Verify Piper is active on this machine, run a quick TTS validation, and report any missing OS/package prerequisites. Update `handoff_summary.md` before finishing."
+- **Name:** Sentinel Home  
+- **Repo:** `https://github.com/billerl/sentinel-home.git`  
+- **Primary branch:** `main`  
+- **Clone path:** `git clone … && cd sentinel-home` (repo folder name `sentinel-home`)
 
 ---
 
-## Next Session Checklist
-- [ ] Read this file first.
-- [ ] Confirm current user goal for this session.
-- [ ] Verify local app behavior against latest logic before changing code.
-- [ ] Update this file before ending session:
-  - What changed
-  - What was verified
-  - Any blockers
-  - Next suggested actions
+## Current Status (code + behavior)
+
+- **Desktop app** (PySide6 + OpenCV) — multi-session: each camera has its own `MotionDetector` and profile in `settings.json` → `camera_profiles`.
+- **RTSP** — discovery, sub-stream preference, per-host logins, reconnect timer when streams drop.
+- **Motion** — MOG2, contours, night-bug filter, motion-triggered recording, Telegram clip request path respects **recording enabled**.
+- **Zone / line gating (fixed logic, Apr 2026)**  
+  - **No zones, no lines:** any qualifying motion can trigger.  
+  - **Zones only:** centroid must be inside a polygon (**no longer bypassed** by empty entry-lines returning “true”).  
+  - **Lines only:** line-crossing logic only (entry lines empty no longer makes `_line_crossed_for_track` return true).  
+  - **Both:** zone **OR** line crossing.  
+  - Line crossing uses **segment intersection** with the drawn segment.  
+- **Vertical camera view** — `MotionDetector` applies `cam_orientation` **inside** `detect_motion()` so zones/lines match the UI; duplicate rotate removed from `MainWindow.update_feed`.
+- **Embedded MultiView** — `QStackedWidget` so grid gets full feed area; grid tiles **letterbox** (`KeepAspectRatio`); **single-click** tile = active camera for controls; **double-click** = single view; overlay mode draws **each** camera’s zones on its own tile; `_ensure_grid_tiles` avoids rebuilding the grid every frame.
+- **Camera dropdown** — connected sessions stay listed after discovery returns empty; `_ensure_camera_selectable` on connect; reconnect starts when all sessions drop.
+- **Audio** — Piper preferred; **WAV amplitude scaled** from volume slider before `aplay`; pyttsx3 fallback.
+- **Telegram** — `urllib` HTTPS to `api.telegram.org` (needs **internet egress** from the host, not the camera LAN).
+- **Logging** — `sentinel/logging_utils.py` → append JSONL to `sentinel_events.log` (gitignored `*.log`): connect, read errors, stream drop, reconnect, recording toggle, volume, etc.
+- **Web viewer (May 2026)** — Optional Flask server in `sentinel/web/`: `FrameBroker` receives the same display frames as the UI from `MainWindow.update_feed` (no second RTSP decode). Routes: `/login` (bcrypt + session cookie + IP lockout/backoff), `/`, `/api/cameras`, `/stream?id=…` MJPEG (query param — camera ids are often RTSP URLs with slashes), `/snapshot.jpg?id=…`. Defaults (merged): `web.bind_host=127.0.0.1`, `web.port=8088`; **`0.0.0.0`** common for LAN phones; refuse bind inside `web.camera_subnet_block`. `python -m sentinel.web.set_password` sets credentials. Logs: `web_login_*`, `web_session_revoked`, `web_server_start`. Deps: **Flask**, **bcrypt** in `requirements.txt`. Lazy package `__getattr__` in `sentinel/web/__init__.py`. **Cloudflare Tunnel:** see checklist section below + **`installation-guide.md`**.
+- **GPU / VAAPI** — user chose to **hold off** on hardware decode (see plan `cpu_vs_gpu_decode` in Cursor plans if present); stay on OpenCV CPU decode until revisited.
+
+### Runtime log review (Apr 29, 2026 sample)
+
+From `sentinel_events.log` on disk (one file sample; **not** multi-day unless the app ran continuously and the file was not rotated):
+
+- **Errors:** `camera_read_error` (frame read failures) and `camera_stream_dropped` clustered around transient RTSP/H.264 issues on **192.168.0.10** and **192.168.0.11**; **`camera_reconnect_success`** appeared (no `camera_reconnect_failed` in sample).
+- **Risk:** each JSON line can include the **full RTSP URL with embedded credentials** — treat `sentinel_events.log` like a secret; consider **redacting URLs** in a future logging change.
 
 ---
 
-## Session Update Template
+## Docs (keep in sync when behavior changes)
+
+- `readme.md` — user-facing overview + tables  
+- `installation-guide.md` — venv, Piper (`requirements-piper.txt`, `models/`, `aplay`), Telegram network note, **web viewer + Cloudflare Tunnel / Tailscale**, logging, tests  
+- `project-structure.md` — paths, new modules (`logging_utils.py`, `sentinel/web/`, `tests/`)  
+- `handoff_summary.md` — this file  
+
+---
+
+## Known environment / safety
+
+- **`settings.json`** — gitignored; may contain RTSP passwords and Telegram token — never commit.  
+- **`sentinel_events.log`** — gitignored (`*.log`). **May contain RTSP passwords** in `camera_id` / URL fields — restrict file permissions and avoid sharing.  
+- **GPU** — not used yet; decode + MOG2 are CPU-bound unless a future GStreamer/VAAPI or OpenCV-CUDA path is added (**deferred by user**).  
+- **Git on agent host:** this environment often has **no `git` binary** — the assistant **cannot** run `git fetch`/`push` here. On your machine run:
+  ```bash
+  cd /path/to/sentinel-home
+  git fetch origin && git status -sb
+  git log origin/main..HEAD --oneline   # unpushed commits
+  git log HEAD..origin/main --oneline   # commits on remote you lack
+  ```
+  Then `git add -A && git commit … && git push origin main` as needed.
+
+---
+
+## Piper quick reference
+
+| Step | Action |
+|------|--------|
+| 1 | `pip install -r requirements-piper.txt` |
+| 2 | Linux: `sudo apt install -y alsa-utils` → `aplay` |
+| 3 | Add `models/<voice>.onnx` [+ `.json`] |
+| 4 | Run app; console: `Piper TTS initialised with voice: …` |
+
+Implementation: `sentinel/audio/alert_system.py` (`_apply_volume_to_wav`, `_speak_piper`).
+
+---
+
+## Cloudflare Tunnel (remote HTTPS) — operator checklist
+
+**Full prose + example `config.yml`:** [`installation-guide.md`](installation-guide.md) → section **“Remote HTTPS with Cloudflare Tunnel (typical)”**.
+
+Nothing in this repo installs or configures `cloudflared`; the user (or next chat) does that on the **Sentinel PC**. Summary:
+
+| Step | Action |
+|------|--------|
+| 1 | **Web viewer OK locally:** Sentinel running, `web.enabled` true, password set (`python -m sentinel.web.set_password`), reachable at `http://127.0.0.1:8088` (or whatever `web.port` is). |
+| 2 | **Install `cloudflared`** on the same PC (OS package or `.deb` from Cloudflare’s GitHub releases). |
+| 3 | **`cloudflared tunnel login`** — browser; choose the Cloudflare **zone** that holds the domain (e.g. `example.com`). |
+| 4 | **`cloudflared tunnel create <name>`** — creates tunnel; note UUID / credentials path under `~/.cloudflared/`. |
+| 5 | **`cloudflared tunnel route dns <name> cams.example.com`** — creates DNS pointing at the tunnel (replace hostname). |
+| 6 | **`~/.cloudflared/config.yml`** — map `hostname: cams.example.com` → **`service: http://127.0.0.1:8088`** (must match `settings.json` `web.port`; see install guide for full YAML including `http_status:404` fallback). |
+| 7 | **Run as service:** `sudo cloudflared service install` then `sudo systemctl enable --now cloudflared` (or distro equivalent). |
+| 8 | **Optional hardening:** Cloudflare **Zero Trust → Access** policy on `cams.example.com` (email OTP / Google) *before* Sentinel’s own login. |
+
+**Bind host vs tunnel**
+
+- **Tunnel-only (recommended for remote):** `web.bind_host` can stay **`127.0.0.1`** — `cloudflared` connects to localhost; cameras stay isolated; no extra LAN exposure.
+- **Same Wi‑Fi phones without tunnel:** set `web.bind_host` to **`0.0.0.0`** or the PC’s LAN IP (not inside `web.camera_subnet_block`). Firewall may need **`8088/tcp`** allowed.
+
+**Not done automatically**
+
+- DNS hostname choice (`cams.*` vs other subdomain).
+- Cloudflare Access policies.
+- Troubleshooting: `journalctl -u cloudflared`, Tunnel **Metrics** in Zero Trust dashboard, verify ingress URL matches loopback + port.
+
+---
+
+## Suggested next-chat prompts
+
+- “Read `handoff_summary.md`. Add GStreamer + VAAPI RTSP decode behind a feature flag and document deps in `installation-guide.md`.”  
+- “Read `handoff_summary.md`. Add a UI button to tail the last N lines of `sentinel_events.log`.”  
+- “Read `handoff_summary.md`. Redact RTSP credentials in `sentinel_events.log` (log host + path only).”  
+- “Read `handoff_summary.md`. Add web viewer recording playback or CSRF tokens on logout POST.”  
+- “Read `handoff_summary.md`. Help debug Cloudflare Tunnel → Sentinel web viewer (ingress, Access, MJPEG).”
+
+---
+
+## Next session checklist
+
+- [ ] Read this file first.  
+- [ ] Confirm user goal.  
+- [ ] Run smoke checks before large refactors.  
+- [ ] Update this file before ending: changes, validation, blockers, next steps.
+
+---
+
+## Session update template
+
+### Date/Time  
+### Goal worked on  
+### Changes made  
+### Validation performed  
+### Open issues / risks  
+### Next recommended step  
+
+---
+
+## Latest session update
 
 ### Date/Time
-- 
 
-### Goal Worked On
-- 
+- Monday, May 4, 2026 (UTC-4) — optional HTTP web viewer + auth + docs
 
-### Changes Made
-- 
+### Goal worked on
 
-### Validation Performed
-- 
+- Live multi-camera **web page** (MJPEG grid) with **login**, **bcrypt** password, **session cookies**, **IP lockout** with exponential backoff, **bind-host guard** so the server never listens on the camera-only subnet, **Cloudflare Tunnel** / Tailscale documentation. Isolated camera LAN unchanged.
 
-### Open Issues / Risks
-- 
+### Changes made
 
-### Next Recommended Step
-- 
+- New package **`sentinel/web/`**: `frame_broker.py`, `auth.py`, `bind_util.py`, `server.py`, `set_password.py`, `templates/login.html`, `templates/grid.html`; lazy **`__getattr__`** in `sentinel/web/__init__.py` so lightweight imports skip NumPy.  
+- **`sentinel/app.py`**: when `web.enabled` and `web.auth.password_hash` set, start `FrameBroker` + `WebServer` thread; pass broker into `MainWindow`.  
+- **`sentinel/ui/main_window.py`**: `update_feed` publishes to broker (`web.published_frame` raw vs overlay path); `disconnect_camera` / stream-drop / empty sessions **unpublish** / **clear**.  
+- **`sentinel/settings/manager.py`**: `WEB_VIEWER_DEFAULTS`, `ensure_web_defaults()`, `save_settings(..., force=)` for CLI. **`sentinel/__init__.py`** added (package marker).  
+- **`requirements.txt`**: `Flask>=3.0.0`, `bcrypt>=4.0.0`.  
+- **Tests:** `tests/test_frame_broker.py`, `tests/test_web_auth.py`, `tests/test_web_bind.py`.  
+- **Docs:** `readme.md`, `installation-guide.md` (web + Tunnel + Tailscale), `project-structure.md`, this handoff.  
+- **Handoff:** Added **“Cloudflare Tunnel — operator checklist”** section (table + bind-host guidance); install guide remains canonical for YAML/commands.
 
----
+### Validation performed
 
-## Latest Session Update
+- **`tests.test_web_bind`**: passes with system Python (no venv).  
+- **Full suite** (`unittest discover`): not run in agent — image lacked `python3-venv` / preinstalled NumPy; user should run `pip install -r requirements.txt` in a venv and `python3 -m unittest discover -s tests -p 'test_*.py'`.
 
-### Date/Time
-- Tuesday, Apr 28, 2026 (UTC-4)
+### Open issues / risks
 
-### Goal Worked On
-- Diagnose full-system lockups, reduce runtime memory pressure in Sentinel, and prepare clean handoff for migration to a Dell OptiPlex host.
+- **Logout** is POST without CSRF token (home / tunnel use case; harden if exposed broadly).  
+- **`web_login_*` events** may include `username_attempted` — low sensitivity; still local log.  
+- Cloudflare free tier **video proxying** policy: keep `max_fps` / `jpeg_quality` modest or prefer Tailscale.
 
-### Changes Made
-- Ran system diagnostics on the Acer host (CPU/RAM/swap/load/thermal/kernel logs) and found sustained memory-pressure indicators instead of thermal/GPU fault signatures.
-- Added lower-load feed defaults in `sentinel/constants.py`:
-  - `DEFAULT_FEED_FPS = 15` (new default from 30)
-  - bounds: `FEED_FPS_MIN = 5`, `FEED_FPS_MAX = 30`
-  - reduced `RECORDING_FPS` from 20 to 15
-- Added persisted runtime setting `feed_fps` in `sentinel/settings/manager.py` defaults.
-- Updated `sentinel/detection/motion_detector.py` camera start path:
-  - `start_camera(..., target_fps=...)` now accepts requested FPS
-  - best-effort `CAP_PROP_FPS` apply
-  - best-effort `CAP_PROP_BUFFERSIZE = 1` to reduce queued stale frames
-- Updated `sentinel/ui/main_window.py`:
-  - imported new feed-FPS constants
-  - loaded/sanitized persisted `feed_fps`
-  - added `Feed FPS (lower = less RAM/CPU)` spinbox in camera controls
-  - added `_feed_timer_interval_ms()` and `on_feed_fps_changed()`
-  - switched timer start from fixed interval constant to dynamic interval based on selected feed FPS
-  - passes `target_fps=self.feed_fps` when connecting a camera session
-- Continued prior stream-discovery/profile work already in tree (`network_discovery.py`, `readme.md` updates) and prepared all pending updates for push.
-- Added explicit Piper install support file: `requirements-piper.txt`.
-- Expanded `installation-guide.md` and `readme.md` with concrete Piper setup/verification instructions for new hosts.
-- Added "Agent Terminal Operation Notes" and "Suggested Next-Chat Prompt" sections to this handoff file for seamless chat-to-chat transfer.
+### Next recommended step
 
-### Validation Performed
-- Read lints after substantive edits; no linter errors reported in modified files.
-- Performed import/smoke check from venv:
-  - `./venv/bin/python -c "from sentinel.ui.main_window import MainWindow; from sentinel.constants import DEFAULT_FEED_FPS; assert DEFAULT_FEED_FPS==15; print('ok')"`
-  - Result: `ok`
-- Verified git working tree includes updated handoff + code changes before commit/push.
-
-### Open Issues / Risks
-- `settings.json` continues to store camera credentials in plain text (existing behavior).
-- Feed FPS and camera driver FPS controls are best-effort; some RTSP/camera backends may ignore `CAP_PROP_FPS`.
-- Host remains 8 GB RAM limited; lower FPS reduces pressure but does not eliminate system-wide contention under heavy multitasking.
-
-### Next Recommended Step
-- On OptiPlex migration:
-  - install dependencies/venv, then run app with one stream first
-  - confirm `Feed FPS` default is 15 and adjust only if stable
-  - keep network cameras on sub-stream where possible
-- After bootstrapping on new host, run a 20-30 minute soak test with Telegram enabled and recording enabled to validate sustained memory behavior.
+- **Cloudflare Tunnel:** follow the **“Cloudflare Tunnel (remote HTTPS) — operator checklist”** table above; paste-ready **`config.yml`** and commands live in **`installation-guide.md`** (Tunnel subsection). Prefer **`web.bind_host: "127.0.0.1"`** when using tunnel-only remote access.  
+- Optional: run full unit tests locally; commit and push (agent host may lack `git`).

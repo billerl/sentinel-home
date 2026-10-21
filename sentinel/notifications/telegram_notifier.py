@@ -10,7 +10,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class TelegramNotifier:
@@ -29,18 +29,77 @@ class TelegramNotifier:
         self._listener_running = False
         self._update_offset: Optional[int] = None
         self._pending_clip_chat_ids: List[str] = []
+        self._pending_remote_commands: List[Tuple[str, Dict[str, bool]]] = []
+        self._pending_detailed_status_chat_ids: List[str] = []
         self.update_settings(settings)
 
     @staticmethod
     def _commands_help_text() -> str:
         return (
-            "I didn't understand that command. Valid commands are:\n"
-            "- Pause <minutes>\n"
-            "- Resume\n"
-            "- Status\n"
-            "- Clip\n"
-            "- Help"
+            "Sentinel bot commands (case-insensitive):\n\n"
+            "Pause / resume:\n"
+            "- Pause <minutes> — pause Telegram alerts for this chat\n"
+            "- Resume — unpause\n\n"
+            "Information:\n"
+            "- Status — pause state + recording / Telegram options summary\n"
+            "- Help — this message\n\n"
+            "Clip:\n"
+            "- Clip — record ~10s per connected camera and upload\n\n"
+            "Enable / disable (combine with \"and\" or commas):\n"
+            "- Recording — motion-triggered clip capture to disk\n"
+            "- Messages — Telegram motion alerts (text / clips per settings)\n"
+            "- Clips — attach motion recordings to Telegram (checkbox)\n"
+            "- Night bug / Night bug filter — scheduled small-motion filter\n"
+            "- Reconnect / Auto reconnect — stream reconnect when dropped\n\n"
+            "Examples:\n"
+            "- Enable recording and messages\n"
+            "- Disable clips\n"
+            "- Enable night bug filter"
         )
+
+    # Aliases ordered longest-first so compound phrases match first.
+    _FEATURE_ALIAS_TO_KEY: Tuple[Tuple[str, str], ...] = (
+        ("night bug filter", "night_bug"),
+        ("night bug", "night_bug"),
+        ("auto reconnect", "reconnect"),
+        ("telegram clips", "clips"),
+        ("video clips", "clips"),
+        ("recording", "recording"),
+        ("messages", "messages"),
+        ("clips", "clips"),
+        ("reconnect", "reconnect"),
+    )
+
+    @classmethod
+    def _parse_feature_toggle_command(cls, text: str) -> Tuple[Optional[Dict[str, bool]], Optional[str]]:
+        """Parse enable/disable feature phrases; returns (changes dict or None, error or None)."""
+        raw = text.strip()
+        m = re.match(r"^(enable|disable)\s+(.+)$", raw, flags=re.IGNORECASE)
+        if not m:
+            return None, None
+        want_on = m.group(1).lower() == "enable"
+        rest = m.group(2).strip().lower().replace(",", " and ")
+        parts = [p.strip() for p in re.split(r"\s+and\s+", rest) if p.strip()]
+        if not parts:
+            return None, "Say what to enable or disable, e.g. recording, messages, or clips."
+
+        changes: Dict[str, bool] = {}
+        unknown: List[str] = []
+        for part in parts:
+            matched_key = None
+            for alias, key in cls._FEATURE_ALIAS_TO_KEY:
+                if part == alias:
+                    matched_key = key
+                    break
+            if matched_key is not None:
+                changes[matched_key] = want_on
+            else:
+                unknown.append(part)
+        if unknown:
+            return None, (
+                f"Unknown: {', '.join(unknown)}. Send Help for valid phrases."
+            )
+        return changes, None
 
     @staticmethod
     def _parse_chat_ids(value: str) -> List[str]:
@@ -223,6 +282,28 @@ class TelegramNotifier:
         self._pending_clip_chat_ids = []
         return requests
 
+    def consume_remote_feature_commands(self) -> List[Tuple[str, Dict[str, bool]]]:
+        """Return and clear (chat_id, feature_changes) from Telegram toggle commands."""
+        pending = list(self._pending_remote_commands)
+        self._pending_remote_commands = []
+        return pending
+
+    def consume_detailed_status_requests(self) -> List[str]:
+        """Return and clear chat IDs waiting for a full Status reply."""
+        chats = list(dict.fromkeys(self._pending_detailed_status_chat_ids))
+        self._pending_detailed_status_chat_ids = []
+        return chats
+
+    def reply_to_chat(self, chat_id: str, message: str) -> bool:
+        """Send a plain text reply (main thread / worker thread safe enough for Bot API)."""
+        if not self.is_configured():
+            return False
+        return self._send_message_to_chat(chat_id, message)
+
+    def remaining_pause_minutes(self, chat_id: str) -> int:
+        """Minutes remaining for Pause for this chat, or 0 if active."""
+        return self._remaining_pause_minutes(chat_id)
+
     def _refresh_listener_state(self) -> None:
         if self.enabled and self.is_configured():
             self._start_listener()
@@ -278,14 +359,7 @@ class TelegramNotifier:
                 continue
 
             if re.match(r"^status$", text, flags=re.IGNORECASE):
-                remaining_minutes = self._remaining_pause_minutes(chat_id)
-                if remaining_minutes > 0:
-                    self._send_message_to_chat(
-                        chat_id,
-                        f"Sentinel notifications are paused for {remaining_minutes} more minute(s).",
-                    )
-                else:
-                    self._send_message_to_chat(chat_id, "Sentinel notifications are active.")
+                self._pending_detailed_status_chat_ids.append(chat_id)
                 continue
 
             if re.match(r"^help$", text, flags=re.IGNORECASE):
@@ -301,6 +375,15 @@ class TelegramNotifier:
                     chat_id,
                     "Sentinel is recording a 10-second clip now.",
                 )
+                continue
+
+            changes, parse_err = self._parse_feature_toggle_command(text)
+            if parse_err is not None:
+                self._send_message_to_chat(chat_id, parse_err)
+                continue
+            if changes is not None:
+                if changes:
+                    self._pending_remote_commands.append((chat_id, changes))
                 continue
 
             match = re.match(r"^pause\s+(\d{1,4})$", text, flags=re.IGNORECASE)

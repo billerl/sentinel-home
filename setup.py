@@ -12,11 +12,16 @@ setup(
     author_email="your.email@example.com",
     packages=find_packages(),
     include_package_data=True,
+    package_data={
+        "sentinel.web": ["templates/*.html"],
+    },
     install_requires=[
         "opencv-python>=4.5.0",
         "numpy>=1.20.0",
         "pyttsx3>=2.90",
         "PySide6>=6.0.0",
+        "Flask>=3.0.0",
+        "bcrypt>=4.0.0",
     ],
     entry_points={
         "console_scripts": [

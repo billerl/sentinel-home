@@ -8,8 +8,13 @@ import cv2
 import numpy as np
 import subprocess  # Add this for opening videos with system player
 import time
+import threading
+from urllib.parse import urlparse
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    from sentinel.web.frame_broker import FrameBroker
 
 from PySide6.QtWidgets import (
     QApplication,
@@ -31,6 +36,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSpinBox,
     QInputDialog,
+    QSizePolicy,
+    QStackedWidget,
 )
 from PySide6.QtGui import (
     QImage,
@@ -41,7 +48,7 @@ from PySide6.QtGui import (
     QMouseEvent,
     QKeyEvent,
 )
-from PySide6.QtCore import Qt, QTimer, QPoint
+from PySide6.QtCore import Qt, QTimer, QPoint, Signal, QThread, QObject
 
 from sentinel.constants import (
     CONTROL_PANEL_WIDTH,
@@ -64,6 +71,68 @@ from sentinel.detection import MotionDetector, NetworkCameraDiscovery, CameraEnd
 from sentinel.audio import AudioAlertSystem
 from sentinel.notifications import TelegramNotifier
 from sentinel.settings import SettingsManager
+from sentinel.logging_utils import app_logger
+
+
+class CameraWorker(QObject):
+    """Background worker that continuously pulls frames and runs detection."""
+    
+    finished = Signal()
+    
+    def __init__(self, detector: MotionDetector, source: object, fps: int):
+        super().__init__()
+        self.detector = detector
+        self.source = source
+        self.fps = fps
+        self._running = False
+        self._lock = threading.Lock()
+        
+        # Shared state protected by lock
+        # Results: (annotated_frame, raw_frame, motion_rects, motion_detected, recording_status, error_message, is_active)
+        self._latest_results: Tuple[Optional[np.ndarray], Optional[np.ndarray], List[Tuple[int, int, int, int]], bool, Optional[str], Optional[str], bool] = (
+            None, None, [], False, None, None, True
+        )
+
+    def start_loop(self):
+        """Main loop started when thread begins."""
+        self._running = True
+        interval = 1.0 / self.fps
+        
+        while self._running:
+            loop_start = time.time()
+            
+            # Perform blocking network I/O and CPU-intensive detection
+            # detector.detect_motion() now returns 5 values
+            ann, raw, rects, mot, rec = self.detector.detect_motion()
+            
+            with self._lock:
+                self._latest_results = (
+                    ann, raw, rects, mot, rec, 
+                    self.detector.last_error_message, 
+                    self.detector.feed_active
+                )
+            
+            # If the detector stopped itself (too many failures), we should exit the worker too
+            if not self.detector.feed_active:
+                break
+
+            # Pace the loop to the target FPS
+            elapsed = time.time() - loop_start
+            wait_time = max(0, interval - elapsed)
+            if wait_time > 0:
+                time.sleep(wait_time)
+        
+        self._running = False
+        self.finished.emit()
+
+    def stop(self):
+        """Signal the loop to stop."""
+        self._running = False
+
+    def get_latest_results(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], List[Tuple[int, int, int, int]], bool, Optional[str], Optional[str], bool]:
+        """Thread-safe retrieval of latest camera data."""
+        with self._lock:
+            return self._latest_results
 
 
 @dataclass
@@ -77,6 +146,39 @@ class CameraSession:
     tile_label: Optional[QLabel] = None
     last_frame: Optional[np.ndarray] = None
     pending_clip_request_chat_ids: List[str] = field(default_factory=list)
+    thread: Optional[QThread] = None
+    worker: Optional[CameraWorker] = None
+
+
+class GridCameraTile(QLabel):
+    """Grid cell: single-click selects active camera; double-click opens single view."""
+
+    single_clicked = Signal(str)
+    double_clicked = Signal(str)
+
+    def __init__(self, camera_id: str, parent=None):
+        super().__init__(parent)
+        self._camera_id = camera_id
+        self._single_click_timer = QTimer(self)
+        self._single_click_timer.setSingleShot(True)
+        self._single_click_timer.timeout.connect(self._emit_single)
+
+    def _emit_single(self) -> None:
+        self.single_clicked.emit(self._camera_id)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            ms = QApplication.styleHints().mouseDoubleClickInterval() + 120
+            self._single_click_timer.start(ms)
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._single_click_timer.stop()
+            self.double_clicked.emit(self._camera_id)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -90,6 +192,7 @@ class MainWindow(QMainWindow):
         motion_detector: MotionDetector,
         audio_system: AudioAlertSystem,
         telegram_notifier: TelegramNotifier,
+        frame_broker: Optional["FrameBroker"] = None,
     ):
         super().__init__()
 
@@ -107,6 +210,9 @@ class MainWindow(QMainWindow):
             settings_manager.get("night_bug_filter_enabled", True),
             settings_manager.get("night_bug_start_hour", 20),
             settings_manager.get("night_bug_end_hour", 6),
+        )
+        motion_detector.set_cam_orientation(
+            settings_manager.get("cam_orientation", "horizontal")
         )
 
         # Store component references
@@ -143,6 +249,18 @@ class MainWindow(QMainWindow):
         self.display_overlay_mode = self.settings_manager.get(
             "display_overlay_mode", DEFAULT_DISPLAY_OVERLAY_MODE
         )
+        self.frame_broker = frame_broker
+        _web = self.settings_manager.settings.get("web")
+        self.web_enabled = bool(
+            frame_broker is not None
+            and isinstance(_web, dict)
+            and _web.get("enabled")
+        )
+        self.web_published_frame = (
+            str(_web.get("published_frame", "overlay"))
+            if isinstance(_web, dict)
+            else "overlay"
+        )
         self.is_main_fullscreen = False
         raw_fps = int(self.settings_manager.get("feed_fps", DEFAULT_FEED_FPS))
         self.feed_fps = max(FEED_FPS_MIN, min(FEED_FPS_MAX, raw_fps))
@@ -157,6 +275,7 @@ class MainWindow(QMainWindow):
         self.detection_size_release_timer.timeout.connect(
             self.start_detection_size_preview
         )
+        self._grid_sessions_signature: Tuple[str, ...] = ()
 
         # Set up UI
         self.setup_ui()
@@ -504,6 +623,13 @@ class MainWindow(QMainWindow):
         self.telegram_enabled_cb.toggled.connect(self.on_telegram_enabled_toggled)
         self.telegram_layout.addWidget(self.telegram_enabled_cb)
 
+        self.telegram_motion_alerts_cb = QCheckBox("Telegram motion alerts (text/video on detection)")
+        self.telegram_motion_alerts_cb.setChecked(
+            self.settings_manager.get("telegram_motion_alerts", True)
+        )
+        self.telegram_motion_alerts_cb.toggled.connect(self.on_telegram_motion_alerts_toggled)
+        self.telegram_layout.addWidget(self.telegram_motion_alerts_cb)
+
         self.telegram_token_input = QLineEdit()
         self.telegram_token_input.setPlaceholderText("Bot token")
         self.telegram_token_input.setEchoMode(QLineEdit.Password)
@@ -585,7 +711,6 @@ class MainWindow(QMainWindow):
 
     def setup_camera_feed(self) -> None:
         """Set up the camera feed display area."""
-        from PySide6.QtWidgets import QSizePolicy
         self.feed_container = QWidget()
         self.feed_layout = QVBoxLayout(self.feed_container)
         self.feed_layout.setContentsMargins(0, 0, 0, 0)
@@ -610,14 +735,20 @@ class MainWindow(QMainWindow):
         feed_size = self.settings_manager.get("feed_size", (640, 480))
         self.camera_feed.setMinimumSize(320, 240)  # Minimum size
         self.camera_feed.resize(feed_size[0], feed_size[1])
-        self.feed_mode_layout.addWidget(self.camera_feed, stretch=1)
 
         self.grid_widget = QWidget()
+        self.grid_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.grid_layout = QGridLayout(self.grid_widget)
         self.grid_layout.setContentsMargins(0, 0, 0, 0)
-        self.grid_layout.setSpacing(8)
-        self.grid_widget.hide()
-        self.feed_mode_layout.addWidget(self.grid_widget, stretch=1)
+        self.grid_layout.setSpacing(4)
+
+        # Stack ensures grid gets the full feed area; hiding the single-view label
+        # in a shared QVBoxLayout can still squeeze the grid geometry.
+        self.feed_stack = QStackedWidget()
+        self.feed_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.feed_stack.addWidget(self.camera_feed)
+        self.feed_stack.addWidget(self.grid_widget)
+        self.feed_mode_layout.addWidget(self.feed_stack, stretch=1)
 
         self.main_layout.addWidget(self.feed_container, stretch=1)
 
@@ -625,6 +756,7 @@ class MainWindow(QMainWindow):
         """Search for available cameras and update the dropdown."""
         camera_list = []
         self.camera_sources = {}
+        connected_session_ids = set(self.camera_sessions.keys())
 
         for i in range(10):  # Check the first 10 camera indices
             try:
@@ -662,6 +794,13 @@ class MainWindow(QMainWindow):
             camera_list.append(pending_label)
             self.camera_sources[pending_label] = f"pending://{host}"
 
+        # Keep currently connected sessions selectable even when discovery
+        # temporarily reports no cameras or host probes time out.
+        for session in self.camera_sessions.values():
+            if session.display_name not in self.camera_sources:
+                camera_list.append(session.display_name)
+                self.camera_sources[session.display_name] = session.source
+
         # Restore whichever source was selected last
         saved_source = self.settings_manager.get("camera_source", "")
         saved_display = self.settings_manager.get("camera_display", "")
@@ -687,7 +826,13 @@ class MainWindow(QMainWindow):
                     break
             self.camera_combo.setCurrentText(matched_display or camera_list[0])
 
-        self.status_label.setText(f"Camera: {self.camera_combo.currentText()} (Disconnected)")
+        selected_display = self.camera_combo.currentText()
+        selected_source = self.camera_sources.get(selected_display)
+        selected_id = str(selected_source) if selected_source is not None else ""
+        if selected_id in connected_session_ids:
+            self.status_label.setText(f"Camera: {selected_display} (Connected)")
+        else:
+            self.status_label.setText(f"Camera: {selected_display} (Disconnected)")
 
     def _load_camera_logins(self) -> dict:
         """Load per-host camera credentials from settings."""
@@ -990,11 +1135,28 @@ class MainWindow(QMainWindow):
             source=source,
             detector=detector,
             profile=profile,
-            host=(source.split("@")[-1].split(":")[0] if isinstance(source, str) and "@" in source else ""),
+            host=self._extract_host(source),
         )
         self._apply_profile_to_detector(session)
         if detector.start_camera(source, target_fps=self.feed_fps):
+            # Set up background thread for this camera
+            thread = QThread()
+            worker = CameraWorker(detector, source, self.feed_fps)
+            worker.moveToThread(thread)
+            
+            # Connect signals
+            thread.started.connect(worker.start_loop)
+            worker.finished.connect(thread.quit)
+            worker.finished.connect(worker.deleteLater)
+            thread.finished.connect(thread.deleteLater)
+            
+            session.thread = thread
+            session.worker = worker
+            
             self.camera_sessions[camera_id] = session
+            thread.start()
+            
+            self._ensure_camera_selectable(display_name, source)
             self.focused_camera_id = camera_id
             self.timer.start(self._feed_timer_interval_ms())
             self.reconnect_timer.stop()
@@ -1013,8 +1175,38 @@ class MainWindow(QMainWindow):
             self.settings_manager.set("camera_source", str(source))
             self.settings_manager.set("camera_display", display_name)
             self.settings_manager.set("feed_active", True)
+            app_logger.log(
+                "info",
+                "camera_connected",
+                camera_id=camera_id,
+                camera_ip=session.host or "unknown",
+                camera_display=display_name,
+                component="main_window",
+                action="connect_camera_source",
+            )
             return True
+        app_logger.log(
+            "error",
+            "camera_connect_failed",
+            camera_id=camera_id,
+            camera_ip=session.host or "unknown",
+            camera_display=display_name,
+            component="main_window",
+            action="connect_camera_source",
+            error_message=detector.last_error_message or "connect_failed",
+        )
         return False
+
+    def _ensure_camera_selectable(self, display_name: str, source: object) -> None:
+        """Ensure connected camera appears in combo even after empty discovery."""
+        self.camera_sources[display_name] = source
+        self.camera_combo.blockSignals(True)
+        if self.camera_combo.count() == 1 and self.camera_combo.itemText(0) == "No Cameras Found":
+            self.camera_combo.clear()
+        if self.camera_combo.findText(display_name) < 0:
+            self.camera_combo.addItem(display_name)
+        self.camera_combo.setCurrentText(display_name)
+        self.camera_combo.blockSignals(False)
 
     def disconnect_camera(self, user_requested: bool = True, session_id: Optional[str] = None) -> None:
         """Disconnect one camera session and restore idle state if none remain."""
@@ -1024,6 +1216,16 @@ class MainWindow(QMainWindow):
         session = self.camera_sessions.pop(target_id, None)
         if not session:
             return
+        
+        if session.worker:
+            session.worker.stop()
+        if session.thread:
+            session.thread.quit()
+            # Do NOT call .wait() here; it can hang the UI for 30s if OpenCV is stuck in a socket read.
+            # The thread will eventually exit its loop and be deleted by the deleteLater connections.
+
+        if self.frame_broker is not None and self.web_enabled:
+            self.frame_broker.unpublish(target_id)
         session.detector.stop_camera()
         if user_requested:
             self.reconnect_timer.stop()
@@ -1058,8 +1260,28 @@ class MainWindow(QMainWindow):
         display = self.settings_manager.get("camera_display", f"Camera {saved_source}")
         if self.connect_camera_source(source, display):
             self.status_label.setText(f"{display}: Reconnected")
+            app_logger.log(
+                "info",
+                "camera_reconnect_success",
+                camera_id=str(source),
+                camera_ip=self._extract_host(source) or "unknown",
+                camera_display=display,
+                component="main_window",
+                action="try_reconnect",
+                retry_outcome="recovered",
+            )
             return
         self.status_label.setText(f"{display}: Reconnecting...")
+        app_logger.log(
+            "error",
+            "camera_reconnect_failed",
+            camera_id=str(source),
+            camera_ip=self._extract_host(source) or "unknown",
+            camera_display=display,
+            component="main_window",
+            action="try_reconnect",
+            retry_outcome="will_retry",
+        )
 
     def _coerce_source(self, source_value: str):
         """Convert saved source into int index when possible."""
@@ -1119,13 +1341,18 @@ class MainWindow(QMainWindow):
         self.camera_feed.setPixmap(scaled)
 
     def _display_frame_in_label(self, frame: np.ndarray, target: QLabel) -> None:
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # Contiguous RGB + copy so Qt never reads stale numpy backing after this returns.
+        frame_rgb = np.ascontiguousarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         h, w, ch = frame_rgb.shape
         bytes_per_line = ch * w
         q_image = QImage(frame_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
-        pixmap = QPixmap.fromImage(q_image)
+        pixmap = QPixmap.fromImage(q_image.copy())
+        size = target.size()
+        if size.width() <= 0 or size.height() <= 0:
+            return
+        # Fit inside the tile without cropping (correct per-camera aspect; small letterbox).
         scaled = pixmap.scaled(
-            target.size(),
+            size,
             Qt.KeepAspectRatio,
             Qt.SmoothTransformation,
         )
@@ -1140,27 +1367,57 @@ class MainWindow(QMainWindow):
 
         sessions = list(self.camera_sessions.values())
         if not sessions:
+            self._grid_sessions_signature = ()
             return
 
         columns = 2 if len(sessions) > 1 else 1
+        rows = (len(sessions) + columns - 1) // columns
         for idx, session in enumerate(sessions):
-            tile = QLabel()
+            tile = GridCameraTile(session.camera_id)
             tile.setAlignment(Qt.AlignCenter)
-            tile.setMinimumSize(240, 160)
-            tile.setStyleSheet("background-color: black; border: 1px solid #00FFFF;")
+            tile.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            tile.setMinimumSize(120, 90)
+            tile.setScaledContents(False)
             tile.setText(session.display_name)
-            tile.mousePressEvent = (
-                lambda _event, cam_id=session.camera_id: self.focus_camera(cam_id)
-            )
+            tile.single_clicked.connect(self.activate_camera_for_grid)
+            tile.double_clicked.connect(self.focus_camera)
             session.tile_label = tile
             row = idx // columns
             col = idx % columns
             self.grid_layout.addWidget(tile, row, col)
+        for r in range(rows):
+            self.grid_layout.setRowStretch(r, 1)
+        for c in range(columns):
+            self.grid_layout.setColumnStretch(c, 1)
+        self._grid_sessions_signature = tuple(sorted(self.camera_sessions.keys()))
+        self._style_grid_tile_borders()
+
+    def _ensure_grid_tiles(self) -> None:
+        """Rebuild grid tiles only when session set changes (not every frame)."""
+        sig = tuple(sorted(self.camera_sessions.keys()))
+        if sig != self._grid_sessions_signature or self.grid_layout.count() == 0:
+            self._refresh_grid_tiles()
+        else:
+            self._style_grid_tile_borders()
+
+    def _style_grid_tile_borders(self) -> None:
+        """Highlight the active camera tile in grid mode."""
+        for session in self.camera_sessions.values():
+            tile = session.tile_label
+            if tile is None:
+                continue
+            if session.camera_id == self.focused_camera_id:
+                tile.setStyleSheet(
+                    "background-color: black; border: 3px solid #00FFFF;"
+                )
+            else:
+                tile.setStyleSheet(
+                    "background-color: black; border: 1px solid #448888;"
+                )
 
     def show_grid_view(self) -> None:
         self.view_mode = "grid"
-        self.camera_feed.hide()
-        self.grid_widget.show()
+        self.feed_stack.setCurrentWidget(self.grid_widget)
         self.return_to_grid_btn.setText("Return to Single View")
         self.return_to_grid_btn.show()
         self.multiview_btn.setText("Single View")
@@ -1168,13 +1425,25 @@ class MainWindow(QMainWindow):
 
     def show_focus_view(self) -> None:
         self.view_mode = "focus"
-        self.grid_widget.hide()
-        self.camera_feed.show()
+        self.feed_stack.setCurrentWidget(self.camera_feed)
         self.return_to_grid_btn.setText("Return to Grid")
         self.return_to_grid_btn.setVisible(bool(self.camera_sessions))
         self.multiview_btn.setText("Open MultiView")
 
+    def activate_camera_for_grid(self, camera_id: str) -> None:
+        """Grid mode: select which camera drives the control panel (stay in grid)."""
+        if camera_id not in self.camera_sessions:
+            return
+        self.focused_camera_id = camera_id
+        session = self.camera_sessions[camera_id]
+        self._apply_profile_to_controls(session.profile)
+        self._style_grid_tile_borders()
+        self.status_label.setText(
+            f"Grid — active: {session.display_name} (double-click tile for single view)"
+        )
+
     def focus_camera(self, camera_id: str) -> None:
+        """Open single-camera view for this feed."""
         if camera_id not in self.camera_sessions:
             return
         self.focused_camera_id = camera_id
@@ -1209,12 +1478,10 @@ class MainWindow(QMainWindow):
         # Display the frame
         self.display_frame(frame)
 
-    def draw_zone_line_overlays(self, frame: np.ndarray) -> np.ndarray:
-        """Draw configured zones/lines and in-progress drawing guides."""
+    def _draw_profile_zones_lines(self, frame: np.ndarray, profile: dict) -> np.ndarray:
+        """Draw saved zones/lines from a camera profile onto frame."""
         draw = frame.copy()
         height, width = draw.shape[:2]
-        session = self._focused_session()
-        profile = session.profile if session else {}
 
         for zone in profile.get("active_zones", []):
             points = np.array(
@@ -1230,6 +1497,13 @@ class MainWindow(QMainWindow):
             p1 = (int(line[0][0] * width), int(line[0][1] * height))
             p2 = (int(line[1][0] * width), int(line[1][1] * height))
             cv2.line(draw, p1, p2, (255, 0, 255), 2)
+
+        return draw
+
+    def _draw_pending_zone_line_guides(self, frame: np.ndarray) -> np.ndarray:
+        """Draw in-progress polygon/line while drawing on the focused camera."""
+        draw = frame.copy()
+        height, width = draw.shape[:2]
 
         if self.pending_zone_points:
             pending = np.array(
@@ -1250,6 +1524,14 @@ class MainWindow(QMainWindow):
             )
             cv2.line(draw, p1, p2, (0, 255, 255), 1)
         return draw
+
+    def draw_zone_line_overlays(self, frame: np.ndarray) -> np.ndarray:
+        """Draw configured zones/lines and in-progress drawing guides (single-view focused camera)."""
+        session = self._focused_session()
+        profile = session.profile if session else {}
+        frame = self._draw_profile_zones_lines(frame, profile)
+        frame = self._draw_pending_zone_line_guides(frame)
+        return frame
 
     def _label_point_to_normalized(self, pos: QPoint) -> Optional[List[float]]:
         """Map mouse click in QLabel to normalized frame coordinates."""
@@ -1414,14 +1696,21 @@ class MainWindow(QMainWindow):
     def on_recording_enabled_change(self, enabled):
         """Handle recording enabled/disabled toggle."""
         self.cooldown_slider.setEnabled(enabled)
-        session = self._focused_session()
-        if session:
-            session.profile["recording_enabled"] = enabled
-            session.detector.recording_enabled = enabled
+        self.settings_manager.set("recording_enabled", bool(enabled))
+        for session in self.camera_sessions.values():
+            session.profile["recording_enabled"] = bool(enabled)
+            session.detector.set_recording_enabled(enabled)
             self.camera_profiles[session.camera_id] = session.profile
-            self.settings_manager.set("camera_profiles", self.camera_profiles)
+        self.settings_manager.set("camera_profiles", self.camera_profiles)
         status = "enabled" if enabled else "disabled"
         self.status_label.setText(f"Recording {status}")
+        app_logger.log(
+            "info",
+            "recording_toggle_changed",
+            component="main_window",
+            action="on_recording_enabled_change",
+            recording_enabled=bool(enabled),
+        )
 
     def on_cooldown_change(self, value):
         """Handle motion cooldown slider change."""
@@ -1430,7 +1719,7 @@ class MainWindow(QMainWindow):
         session = self._focused_session()
         if session:
             session.profile["motion_cooldown"] = cooldown
-            session.detector.motion_cooldown = cooldown
+            session.detector.set_motion_cooldown(cooldown)
             self.camera_profiles[session.camera_id] = session.profile
             self.settings_manager.set("camera_profiles", self.camera_profiles)
 
@@ -1561,6 +1850,9 @@ class MainWindow(QMainWindow):
     def _apply_profile_to_detector(self, session: CameraSession) -> None:
         profile = session.profile
         detector = session.detector
+        detector.set_cam_orientation(
+            self.settings_manager.get("cam_orientation", "horizontal")
+        )
         detector.min_contour_area = int(profile.get("min_contour_area", MIN_CONTOUR_AREA))
         detector.update_var_threshold(int(profile.get("var_threshold", VAR_THRESHOLD)))
         detector.recording_enabled = bool(profile.get("recording_enabled", True))
@@ -1613,31 +1905,166 @@ class MainWindow(QMainWindow):
         if self.timer.isActive():
             self.timer.setInterval(self._feed_timer_interval_ms())
 
+    def _build_telegram_status_message(self, chat_id: str) -> str:
+        remaining = self.telegram_notifier.remaining_pause_minutes(chat_id)
+        lines = ["Sentinel status"]
+        if remaining > 0:
+            lines.append(f"Pause: {remaining} minute(s) left for this chat")
+        else:
+            lines.append("Pause: not paused")
+        lines.append(
+            f"Video recording (motion): {'on' if self.recording_enabled_cb.isChecked() else 'off'}"
+        )
+        lines.append(
+            f"Telegram motion alerts: {'on' if self.telegram_motion_alerts_cb.isChecked() else 'off'}"
+        )
+        lines.append(
+            f"Motion clip uploads (Telegram): {'on' if self.telegram_include_video_cb.isChecked() else 'off'}"
+        )
+        lines.append(f"Night bug filter: {'on' if self.night_bug_filter_cb.isChecked() else 'off'}")
+        lines.append(f"Auto reconnect: {'on' if self.auto_reconnect_cb.isChecked() else 'off'}")
+        lines.append(f"Alert cooldown: {self.telegram_cooldown_spin.value()}s")
+        return "\n".join(lines)
+
+    def _apply_night_bug_enabled_all_sessions(self, enabled: bool) -> None:
+        start_hour = int(self.night_bug_start_spin.value())
+        end_hour = int(self.night_bug_end_spin.value())
+        self.settings_manager.set("night_bug_filter_enabled", enabled)
+        self.night_bug_filter_cb.blockSignals(True)
+        self.night_bug_filter_cb.setChecked(enabled)
+        self.night_bug_filter_cb.blockSignals(False)
+        for session in self.camera_sessions.values():
+            session.profile["night_bug_filter_enabled"] = enabled
+            session.profile["night_bug_start_hour"] = start_hour
+            session.profile["night_bug_end_hour"] = end_hour
+            session.detector.set_night_bug_filter(enabled, start_hour, end_hour)
+            self.camera_profiles[session.camera_id] = session.profile
+        self.settings_manager.set("camera_profiles", self.camera_profiles)
+
+    def _apply_telegram_remote_features(self, chat_id: str, changes: Dict[str, bool]) -> None:
+        lines_applied: List[str] = []
+        for key, val in changes.items():
+            if key == "recording":
+                self.recording_enabled_cb.blockSignals(True)
+                self.recording_enabled_cb.setChecked(val)
+                self.recording_enabled_cb.blockSignals(False)
+                self.on_recording_enabled_change(val)
+                lines_applied.append(f"Recording: {'on' if val else 'off'}")
+            elif key == "messages":
+                self.telegram_motion_alerts_cb.blockSignals(True)
+                self.telegram_motion_alerts_cb.setChecked(val)
+                self.telegram_motion_alerts_cb.blockSignals(False)
+                self.settings_manager.set("telegram_motion_alerts", val)
+                lines_applied.append(f"Telegram motion alerts: {'on' if val else 'off'}")
+            elif key == "clips":
+                self.telegram_include_video_cb.blockSignals(True)
+                self.telegram_include_video_cb.setChecked(val)
+                self.telegram_include_video_cb.blockSignals(False)
+                self.on_telegram_include_video_toggled(val)
+                lines_applied.append(f"Motion clip uploads: {'on' if val else 'off'}")
+            elif key == "night_bug":
+                self._apply_night_bug_enabled_all_sessions(val)
+                lines_applied.append(f"Night bug filter: {'on' if val else 'off'}")
+            elif key == "reconnect":
+                self.auto_reconnect_cb.blockSignals(True)
+                self.auto_reconnect_cb.setChecked(val)
+                self.auto_reconnect_cb.blockSignals(False)
+                self.on_auto_reconnect_toggled(val)
+                lines_applied.append(f"Auto reconnect: {'on' if val else 'off'}")
+        summary = (
+            "Applied:\n" + "\n".join(lines_applied)
+            if lines_applied
+            else "No changes applied."
+        )
+        self.telegram_notifier.reply_to_chat(chat_id, summary)
+
     def update_feed(self):
         """Update all active camera feeds and render focused/grid views."""
-        if not self.camera_sessions:
-            return
+        for chat_id in self.telegram_notifier.consume_detailed_status_requests():
+            self.telegram_notifier.reply_to_chat(
+                chat_id, self._build_telegram_status_message(chat_id)
+            )
+        for chat_id, changes in self.telegram_notifier.consume_remote_feature_commands():
+            self._apply_telegram_remote_features(chat_id, changes)
 
         requested_clip_chat_ids = self.telegram_notifier.consume_clip_requests()
+
+        if not self.camera_sessions:
+            for cid in dict.fromkeys(requested_clip_chat_ids):
+                self.telegram_notifier.reply_to_chat(
+                    cid,
+                    "Sentinel: no camera connected; clip not recorded.",
+                )
+            return
         alive_sessions: Dict[str, CameraSession] = {}
         for camera_id, session in list(self.camera_sessions.items()):
-            frame, _, motion_detected, recording_status = session.detector.detect_motion()
+            if session.worker:
+                # Thread-safe retrieval of ALL state
+                (
+                    frame,
+                    raw_frame,
+                    motion_rects,
+                    motion_detected,
+                    recording_status,
+                    error_msg,
+                    is_active,
+                ) = session.worker.get_latest_results()
+            else:
+                # Fallback for synchronous startup (rare)
+                frame, raw_frame, motion_rects, motion_detected, recording_status = session.detector.detect_motion()
+                error_msg = session.detector.last_error_message
+                is_active = session.detector.feed_active
+            
             if frame is None:
-                if session.detector.feed_active:
+                if is_active:
+                    # Connection is alive but stuttering; dim the last frame to show it's "frozen/stale"
+                    if session.last_frame is not None:
+                        stale_frame = session.last_frame.copy()
+                        # Dim the frame (multiply by 0.5)
+                        stale_frame = (stale_frame.astype(np.float32) * 0.5).astype(np.uint8)
+                        cv2.putText(
+                            stale_frame,
+                            "SIGNAL STUTTER / CONNECTING...",
+                            (20, 50),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.8,
+                            (0, 255, 255),
+                            2,
+                        )
+                        session.last_frame = stale_frame
+                    
                     alive_sessions[camera_id] = session
                     continue
+                
+                # Camera has dropped and stopped itself
                 self.status_label.setText(f"{session.display_name}: stream dropped")
+                app_logger.log(
+                    "error",
+                    "camera_stream_dropped",
+                    camera_id=session.camera_id,
+                    camera_ip=session.host or self._extract_host(session.source) or "unknown",
+                    camera_display=session.display_name,
+                    component="main_window",
+                    action="update_feed",
+                    error_message=error_msg or "stream_dropped",
+                )
+                # Properly clean up the leaked thread
+                self.disconnect_camera(user_requested=False, session_id=camera_id)
                 continue
 
-            raw_frame = session.detector.get_last_raw_frame()
             display_frame = frame
             if self.display_overlay_mode == "raw" and raw_frame is not None:
                 display_frame = raw_frame
-            if self.settings_manager.get("cam_orientation", "horizontal") == "vertical":
-                display_frame = cv2.rotate(display_frame, cv2.ROTATE_90_CLOCKWISE)
 
-            if self.focused_camera_id == camera_id and self.display_overlay_mode == "overlay":
-                display_frame = self.draw_zone_line_overlays(display_frame)
+            if self.display_overlay_mode == "overlay":
+                if self.view_mode == "grid":
+                    display_frame = self._draw_profile_zones_lines(
+                        display_frame, session.profile
+                    )
+                    if camera_id == self.focused_camera_id:
+                        display_frame = self._draw_pending_zone_line_guides(display_frame)
+                elif self.focused_camera_id == camera_id:
+                    display_frame = self.draw_zone_line_overlays(display_frame)
             if self.focused_camera_id == camera_id and self.show_detection_size_preview:
                 if time.time() <= self.detection_size_preview_until:
                     display_frame = self.draw_detection_size_preview(display_frame)
@@ -1647,16 +2074,41 @@ class MainWindow(QMainWindow):
             session.last_frame = display_frame
             alive_sessions[camera_id] = session
 
+            if self.frame_broker is not None and self.web_enabled:
+                pub = (
+                    raw_frame
+                    if self.web_published_frame == "raw" and raw_frame is not None
+                    else display_frame
+                )
+                wcfg = self.settings_manager.settings.get("web", {})
+                q = int(wcfg.get("jpeg_quality", 80))
+                self.frame_broker.publish(camera_id, session.display_name, pub, jpeg_quality=q)
+
             if recording_status == "started" and self.focused_camera_id == camera_id:
                 self.status_label.setText(f"{session.display_name}: recording started")
 
-            if requested_clip_chat_ids and not session.detector.recording:
+            if (
+                requested_clip_chat_ids
+                and not session.detector.recording
+                and session.detector.recording_enabled
+            ):
                 h, w = frame.shape[:2]
                 session.pending_clip_request_chat_ids.extend(requested_clip_chat_ids)
                 session.pending_clip_request_chat_ids = list(
                     dict.fromkeys(session.pending_clip_request_chat_ids)
                 )
                 session.detector.start_recording((w, h), reason="telegram_clip_request")
+            elif requested_clip_chat_ids and not session.detector.recording_enabled:
+                app_logger.log(
+                    "info",
+                    "recording_skip_telegram_clip_request",
+                    camera_id=session.camera_id,
+                    camera_ip=session.host or self._extract_host(session.source) or "unknown",
+                    camera_display=session.display_name,
+                    component="main_window",
+                    action="update_feed",
+                    recording_enabled=False,
+                )
 
             completed_video_path, completed_video_reason = (
                 session.detector.consume_last_completed_recording()
@@ -1670,12 +2122,15 @@ class MainWindow(QMainWindow):
                 message = f"Sentinel: motion detected on {session.display_name}."
                 force_video = False
                 bypass_cooldown = False
+                motion_alerts_on = self.telegram_motion_alerts_cb.isChecked()
                 if completed_video_reason == "telegram_clip_request":
                     message = f"Sentinel: requested 10-second clip from {session.display_name}."
                     target_chat_ids = session.pending_clip_request_chat_ids or None
                     force_video = True
                     bypass_cooldown = True
                     session.pending_clip_request_chat_ids = []
+                elif not motion_alerts_on:
+                    message = ""
                 elif not self.telegram_notifier.include_video:
                     message = ""
 
@@ -1687,16 +2142,23 @@ class MainWindow(QMainWindow):
                         force_video=force_video,
                         bypass_cooldown=bypass_cooldown,
                     )
-            elif not self.telegram_notifier.include_video and motion_detected:
+            elif (
+                self.telegram_motion_alerts_cb.isChecked()
+                and not self.telegram_notifier.include_video
+                and motion_detected
+            ):
                 self.telegram_notifier.trigger_alert(
                     message=f"Sentinel: motion detected on {session.display_name}."
                 )
 
         self.camera_sessions = alive_sessions
         if not self.camera_sessions:
+            if self.frame_broker is not None and self.web_enabled:
+                self.frame_broker.clear()
             self.timer.stop()
             self.show_blank_frame()
             self.toggle_btn.setText("Camera Offline")
+            self.start_reconnect_timer()
             return
 
         if not self.focused_camera_id or self.focused_camera_id not in self.camera_sessions:
@@ -1708,7 +2170,7 @@ class MainWindow(QMainWindow):
             self.display_frame(focused.last_frame)
 
         if self.view_mode == "grid":
-            self._refresh_grid_tiles()
+            self._ensure_grid_tiles()
             for session in self.camera_sessions.values():
                 if session.tile_label and session.last_frame is not None:
                     self._display_frame_in_label(session.last_frame, session.tile_label)
@@ -1832,7 +2294,7 @@ class MainWindow(QMainWindow):
         session = self._focused_session()
         if session:
             session.profile["min_contour_area"] = value
-            session.detector.min_contour_area = value
+            session.detector.set_min_contour_area(value)
             self.camera_profiles[session.camera_id] = session.profile
             self.settings_manager.set("camera_profiles", self.camera_profiles)
 
@@ -1927,7 +2389,10 @@ class MainWindow(QMainWindow):
                 return
             camera_id = str(source)
             if camera_id in self.camera_sessions:
-                self.focus_camera(camera_id)
+                if self.view_mode == "grid":
+                    self.activate_camera_for_grid(camera_id)
+                else:
+                    self.focus_camera(camera_id)
                 self.toggle_btn.setText("Disconnect Selected")
             else:
                 self.toggle_btn.setText("Connect Selected")
@@ -1988,6 +2453,27 @@ class MainWindow(QMainWindow):
         volume = value / 10.0
         self.settings_manager.set("volume", volume)
         self.audio_system.update_settings({"volume": volume})
+        self.status_label.setText(f"Volume: {int(volume * 100)}%")
+        app_logger.log(
+            "info",
+            "volume_changed",
+            component="main_window",
+            action="on_volume_change",
+            volume=volume,
+        )
+
+    def _extract_host(self, source: object) -> str:
+        """Extract camera host/IP from integer index or URL-like source."""
+        if isinstance(source, int):
+            return f"local-{source}"
+        if not isinstance(source, str):
+            return ""
+        if source.startswith("pending://"):
+            return source.split("pending://", 1)[1]
+        if "://" in source:
+            parsed = urlparse(source)
+            return parsed.hostname or ""
+        return ""
 
     def _current_telegram_settings(self) -> dict:
         """Build Telegram settings payload from current UI values."""
@@ -1999,6 +2485,7 @@ class MainWindow(QMainWindow):
             "telegram_chat_id": chat_ids,
             "telegram_chat_ids": chat_ids,
             "telegram_cooldown": float(self.telegram_cooldown_spin.value()),
+            "telegram_motion_alerts": self.telegram_motion_alerts_cb.isChecked(),
             "telegram_include_video": self.telegram_include_video_cb.isChecked(),
         }
 
@@ -2017,6 +2504,9 @@ class MainWindow(QMainWindow):
         self.settings_manager.set("telegram_bot_token", payload["telegram_bot_token"])
         self.settings_manager.set("telegram_chat_id", payload["telegram_chat_id"])
         self.settings_manager.set("telegram_chat_ids", payload["telegram_chat_ids"])
+        self.settings_manager.set(
+            "telegram_motion_alerts", bool(payload["telegram_motion_alerts"])
+        )
         self.telegram_notifier.update_settings(payload)
 
     def on_telegram_cooldown_changed(self, value: int) -> None:
@@ -2028,6 +2518,9 @@ class MainWindow(QMainWindow):
             self.telegram_token_input.setEchoMode(QLineEdit.Normal)
         else:
             self.telegram_token_input.setEchoMode(QLineEdit.Password)
+
+    def on_telegram_motion_alerts_toggled(self, enabled: bool) -> None:
+        self.settings_manager.set("telegram_motion_alerts", bool(enabled))
 
     def on_telegram_include_video_toggled(self, enabled: bool) -> None:
         self.settings_manager.set("telegram_include_video", enabled)
@@ -2063,6 +2556,8 @@ class MainWindow(QMainWindow):
         """Handle camera orientation change."""
         orientation = "horizontal" if self.horiz_btn.isChecked() else "vertical"
         self.settings_manager.set("cam_orientation", orientation)
+        for session in self.camera_sessions.values():
+            session.detector.set_cam_orientation(orientation)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         """
@@ -2087,7 +2582,12 @@ class MainWindow(QMainWindow):
         self.reconnect_timer.stop()
         self.telegram_notifier.cleanup()
         self.timer.stop()
-        for session in self.camera_sessions.values():
+        for session in list(self.camera_sessions.values()):
+            if session.worker:
+                session.worker.stop()
+            if session.thread:
+                session.thread.quit()
+                # Again, no .wait() to ensure immediate UI exit
             session.detector.cleanup()
 
         # Save window dimensions here (not in resizeEvent) to get reliable values

@@ -6,7 +6,9 @@ import os
 import cv2
 import numpy as np
 import time
+import threading
 from typing import Tuple, List, Optional, Union, Dict, Any
+from sentinel.logging_utils import app_logger
 
 # Import the constants
 from sentinel.constants import (
@@ -32,6 +34,7 @@ class MotionDetector:
 
     def __init__(self):
         """Initialize the motion detector."""
+        self._lock = threading.Lock()
         self.cap = None
         self.camera_index: Union[int, str] = 0
         self.feed_active = False
@@ -74,26 +77,59 @@ class MotionDetector:
         self.consecutive_read_failures = 0
         self.max_consecutive_read_failures = MAX_CONSECUTIVE_READ_FAILURES
         self.last_raw_frame = None
+        self.last_error_message: Optional[str] = None
+        # Match UI "Camera View" so zone/line clicks align with motion gating.
+        self.cam_orientation: str = "horizontal"
 
         # Create video directory if it doesn't exist
         if not os.path.exists(VIDEO_DIR):
             os.makedirs(VIDEO_DIR)
 
+    def set_recording_enabled(self, enabled: bool) -> None:
+        with self._lock:
+            self.recording_enabled = bool(enabled)
+
+    def set_min_contour_area(self, area: int) -> None:
+        with self._lock:
+            self.min_contour_area = int(area)
+
+    def set_motion_cooldown(self, cooldown: float) -> None:
+        with self._lock:
+            self.motion_cooldown = float(cooldown)
+
     def set_active_zones(self, zones: List[List[List[float]]]) -> None:
-        self.active_zones = zones or []
+        with self._lock:
+            self.active_zones = zones or []
 
     def set_entry_lines(self, lines: List[List[List[float]]]) -> None:
-        self.entry_lines = lines or []
+        with self._lock:
+            self.entry_lines = lines or []
 
     def set_entry_direction(self, direction: str) -> None:
-        if direction in ("outside_to_inside", "inside_to_outside", "both"):
-            self.entry_direction = direction
+        with self._lock:
+            if direction in ("outside_to_inside", "inside_to_outside", "both"):
+                self.entry_direction = direction
 
     def set_night_bug_filter(self, enabled: bool, start_hour: int, end_hour: int) -> None:
         """Update night bug filter schedule settings."""
-        self.night_bug_filter_enabled = bool(enabled)
-        self.night_bug_start_hour = max(0, min(23, int(start_hour)))
-        self.night_bug_end_hour = max(0, min(23, int(end_hour)))
+        with self._lock:
+            self.night_bug_filter_enabled = bool(enabled)
+            self.night_bug_start_hour = max(0, min(23, int(start_hour)))
+            self.night_bug_end_hour = max(0, min(23, int(end_hour)))
+
+    def set_cam_orientation(self, orientation: str) -> None:
+        """horizontal | vertical — vertical matches UI rotate before zones/lines."""
+        orient = "vertical" if orientation == "vertical" else "horizontal"
+        with self._lock:
+            if orient == getattr(self, "cam_orientation", "horizontal"):
+                return
+            self.cam_orientation = orient
+            # Frame size changes; reset background model so motion mask stays sane.
+            self.fgbg = cv2.createBackgroundSubtractorMOG2(
+                history=HISTORY_LENGTH,
+                varThreshold=self.var_threshold,
+                detectShadows=DETECT_SHADOWS,
+            )
 
     def get_last_raw_frame(self) -> Optional[np.ndarray]:
         """Return the latest unannotated frame."""
@@ -270,63 +306,96 @@ class MotionDetector:
         Returns:
             True if camera started successfully, False otherwise
         """
-        if self.feed_active:
-            self.stop_camera()
+        with self._lock:
+            if self.feed_active:
+                if self.cap:
+                    self.cap.release()
+                    self.cap = None
 
-        try:
-            self.camera_index = camera_index
-            print(f"[Connect] Attempting camera source: {camera_index}")
-            if isinstance(camera_index, int):
-                self.cap = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
-            else:
-                self.cap = cv2.VideoCapture(camera_index)
-            if not self.cap.isOpened():
-                raise RuntimeError(f"Failed to open camera {camera_index}")
-
-            # Drop stale frames in the driver queue (less RAM/latency when supported).
             try:
-                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            except Exception:
-                pass
-            if target_fps is not None and target_fps > 0:
+                self.camera_index = camera_index
+                print(f"[Connect] Attempting camera source: {camera_index}")
+                app_logger.log(
+                    "info",
+                    "camera_connect_attempt",
+                    camera_id=str(camera_index),
+                    camera_source=str(camera_index),
+                    component="motion_detector",
+                    action="start_camera",
+                )
+                if isinstance(camera_index, int):
+                    self.cap = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
+                else:
+                    self.cap = cv2.VideoCapture(camera_index)
+                if not self.cap.isOpened():
+                    raise RuntimeError(f"Failed to open camera {camera_index}")
+
+                # Increase buffer size to handle network jitters (especially for high-FPS or 4K)
                 try:
-                    self.cap.set(cv2.CAP_PROP_FPS, float(target_fps))
+                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 5)
                 except Exception:
                     pass
 
-            # Verify we can actually read frames (isOpened alone is not enough)
-            if not self.cap.grab():
-                raise RuntimeError(f"Camera {camera_index} opened but cannot grab frames")
+                if target_fps is not None and target_fps > 0:
+                    try:
+                        self.cap.set(cv2.CAP_PROP_FPS, float(target_fps))
+                    except Exception:
+                        pass
 
-            self.feed_active = True
-            self.consecutive_read_failures = 0
-            print(f"[Connect] Camera connected successfully: {camera_index}")
-            return True
-        except Exception as e:
-            print(f"Error starting camera: {e}")
-            if self.cap:
-                self.cap.release()
-                self.cap = None
-            self.feed_active = False
-            return False
+                # Verify we can actually read frames (isOpened alone is not enough)
+                if not self.cap.grab():
+                    raise RuntimeError(f"Camera {camera_index} opened but cannot grab frames")
+
+                self.feed_active = True
+                self.consecutive_read_failures = 0
+                self.last_error_message = None
+                print(f"[Connect] Camera connected successfully: {camera_index}")
+                app_logger.log(
+                    "info",
+                    "camera_connect_success",
+                    camera_id=str(camera_index),
+                    camera_source=str(camera_index),
+                    component="motion_detector",
+                    action="start_camera",
+                )
+                return True
+            except Exception as e:
+                print(f"Error starting camera: {e}")
+                self.last_error_message = str(e)
+                app_logger.log(
+                    "error",
+                    "camera_connect_error",
+                    camera_id=str(camera_index),
+                    camera_source=str(camera_index),
+                    component="motion_detector",
+                    action="start_camera",
+                    error_message=str(e),
+                )
+                if self.cap:
+                    self.cap.release()
+                    self.cap = None
+                self.feed_active = False
+                return False
 
     def stop_camera(self) -> None:
         """Stop the currently active camera."""
-        self.feed_active = False
-        if self.cap:
-            self.cap.release()
-            self.cap = None
-        self.consecutive_read_failures = 0
-        self.tracks = {}
+        with self._lock:
+            self.feed_active = False
+            if self.cap:
+                self.cap.release()
+                self.cap = None
+            self.consecutive_read_failures = 0
+            self.tracks = {}
 
     def update_var_threshold(self, value):
         """Update the variance threshold and recreate the background subtractor."""
-        self.var_threshold = value
-        self.fgbg = cv2.createBackgroundSubtractorMOG2(
-            history=HISTORY_LENGTH,
-            varThreshold=self.var_threshold,
-            detectShadows=DETECT_SHADOWS
-    )
+        with self._lock:
+            self.var_threshold = value
+            self.fgbg = cv2.createBackgroundSubtractorMOG2(
+                history=HISTORY_LENGTH,
+                varThreshold=self.var_threshold,
+                detectShadows=DETECT_SHADOWS
+            )
 
     def _denormalize_points(
         self,
@@ -515,7 +584,7 @@ class MotionDetector:
         height: int,
     ) -> bool:
         if not self.entry_lines:
-            return True
+            return False
 
         track = self.tracks.get(track_id)
         if not track:
@@ -540,119 +609,155 @@ class MotionDetector:
                 crossed = True
         return crossed
 
-    def detect_motion(self):
+    def detect_motion(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], List[Tuple[int, int, int, int]], bool, Optional[str]]:
         """
         Capture a frame and detect motion.
 
         Returns:
             Tuple containing:
-            - The processed frame (or None if no frame could be captured)
+            - The processed/annotated frame (or None if no frame could be captured)
+            - The raw original frame (or None)
             - List of motion rectangles (x, y, w, h)
-            - Boolean indicating if motion was detected
+            - Boolean indicating if gated motion was detected
             - Recording status message (or None if not recording)
         """
-        if not self.feed_active or not self.cap or not self.cap.isOpened():
-            return None, [], False, None
+        with self._lock:
+            if not self.feed_active or not self.cap or not self.cap.isOpened():
+                return None, None, [], False, None
+            cap = self.cap
 
         try:
-            ret, frame = self.cap.read()
-            if not ret:
-                raise RuntimeError("Failed to read frame from camera")
-            self.consecutive_read_failures = 0
+            # Perform blocking network I/O WITHOUT the lock
+            ret, frame = cap.read()
+            
+            # Re-acquire lock for the heavy lifting and shared state access
+            with self._lock:
+                if not ret:
+                    raise RuntimeError("Failed to read frame from camera")
+                self.consecutive_read_failures = 0
 
-            # Make a copy of the original frame for recording
-            original_frame = frame.copy()
-            self.last_raw_frame = original_frame.copy()
-            recording_frame = original_frame.copy()
-
-            # Process frame for motion detection
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            blurred = cv2.GaussianBlur(gray, (21, 21), 0)
-            fgmask = self.fgbg.apply(blurred)
-            kernel = np.ones((5, 5), np.uint8)
-            fgmask = cv2.dilate(fgmask, kernel, iterations=2)
-            contours, _ = cv2.findContours(
-                fgmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-            )
-
-            # Filter contours by size and draw rectangles
-            motion_detected = False
-            motion_rects = []
-            gated_motion_detected = False
-            frame_h, frame_w = frame.shape[:2]
-
-            for contour in contours:
-                contour_area = cv2.contourArea(contour)
-                if contour_area < self.min_contour_area:
-                    continue
-
-                (x, y, w, h) = cv2.boundingRect(contour)
-                centroid = (x + w // 2, y + h // 2)
-                in_active_zone = self._point_in_active_zone(centroid, frame_w, frame_h)
-
-                track_id = self._assign_track(centroid)
-                if self._night_bug_filter_active() and self._is_bug_like_motion(
-                    contour_area,
-                    track_id,
-                    centroid,
-                    frame_w,
-                    frame_h,
-                ):
-                    continue
-                crossed_line = self._line_crossed_for_track(track_id, centroid, frame_w, frame_h)
-                should_trigger = in_active_zone or crossed_line
-                if not should_trigger:
-                    continue
-
-                motion_rects.append((x, y, w, h))
-
-                # Draw rectangle and label on annotated/recording frame
-                cv2.rectangle(recording_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                cv2.putText(
-                    recording_frame,
-                    "Motion Detected",
-                    (x, y - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 255, 0),
-                    2,
-                )
-                motion_detected = True
-                gated_motion_detected = True
-
-            self._cleanup_old_tracks()
-
-            # Handle recording based on motion detection
-            recording_status, _ = self.check_recording_status(
-                gated_motion_detected, recording_frame
-            )
-
-            # Add recording indicator to the frame if recording
-            if self.recording:
-                elapsed_time = time.time() - self.recording_start_time
-                remaining_time = max(0, RECORDING_DURATION - elapsed_time)
-
-                # Add recording indicator with time remaining
-                cv2.putText(
-                    recording_frame,
-                    f"REC {remaining_time:.1f}s",
-                    (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    (0, 0, 255),
-                    2,
+                # Make copies for different uses
+                raw_frame = frame.copy()
+                self.last_raw_frame = raw_frame.copy()
+                recording_frame = frame.copy()
+                
+                # Process frame for motion detection
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                blurred = cv2.GaussianBlur(gray, (21, 21), 0)
+                fgmask = self.fgbg.apply(blurred)
+                kernel = np.ones((5, 5), np.uint8)
+                fgmask = cv2.dilate(fgmask, kernel, iterations=2)
+                contours, _ = cv2.findContours(
+                    fgmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
                 )
 
-                # Add red circle as recording indicator
-                cv2.circle(recording_frame, (30, 50), 8, (0, 0, 255), -1)
+                # Filter contours by size and draw rectangles
+                motion_detected = False
+                motion_rects = []
+                gated_motion_detected = False
+                frame_h, frame_w = frame.shape[:2]
 
-            return recording_frame, motion_rects, gated_motion_detected, recording_status
+                for contour in contours:
+                    contour_area = cv2.contourArea(contour)
+                    if contour_area < self.min_contour_area:
+                        continue
+
+                    (x, y, w, h) = cv2.boundingRect(contour)
+                    centroid = (x + w // 2, y + h // 2)
+                    in_active_zone = self._point_in_active_zone(centroid, frame_w, frame_h)
+
+                    track_id = self._assign_track(centroid)
+                    if self._night_bug_filter_active() and self._is_bug_like_motion(
+                        contour_area,
+                        track_id,
+                        centroid,
+                        frame_w,
+                        frame_h,
+                    ):
+                        continue
+                    crossed_line = self._line_crossed_for_track(
+                        track_id, centroid, frame_w, frame_h
+                    )
+                    has_zones = bool(self.active_zones)
+                    has_lines = bool(self.entry_lines)
+                    if not has_zones and not has_lines:
+                        should_trigger = True
+                    elif has_zones and has_lines:
+                        should_trigger = in_active_zone or crossed_line
+                    elif has_zones:
+                        should_trigger = in_active_zone
+                    else:
+                        should_trigger = crossed_line
+                    if not should_trigger:
+                        continue
+
+                    motion_rects.append((x, y, w, h))
+
+                    # Draw rectangle and label on annotated/recording frame
+                    cv2.rectangle(recording_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                    cv2.putText(
+                        recording_frame,
+                        "Motion Detected",
+                        (x, y - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 255, 0),
+                        2,
+                    )
+                    motion_detected = True
+                    gated_motion_detected = True
+
+                self._cleanup_old_tracks()
+
+                # Handle recording based on motion detection
+                recording_status, _ = self.check_recording_status(
+                    gated_motion_detected, recording_frame
+                )
+
+                # Add recording indicator to the frame if recording
+                if self.recording:
+                    elapsed_time = time.time() - self.recording_start_time
+                    remaining_time = max(0, RECORDING_DURATION - elapsed_time)
+
+                    # Add recording indicator with time remaining
+                    cv2.putText(
+                        recording_frame,
+                        f"REC {remaining_time:.1f}s",
+                        (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (0, 0, 255),
+                        2,
+                    )
+
+                    # Add red circle as recording indicator
+                    cv2.circle(recording_frame, (30, 50), 8, (0, 0, 255), -1)
+
+                return recording_frame, raw_frame, motion_rects, gated_motion_detected, recording_status
         except Exception as e:
-            print(f"Error in motion detection: {e}")
-            self.consecutive_read_failures += 1
-            if self.consecutive_read_failures >= self.max_consecutive_read_failures:
-                self.stop_camera()
-            return None, [], False, None
+            with self._lock:
+                print(f"Error in motion detection: {e}")
+                self.last_error_message = str(e)
+                self.consecutive_read_failures += 1
+                app_logger.log(
+                    "error",
+                    "camera_read_error",
+                    camera_id=str(self.camera_index),
+                    camera_source=str(self.camera_index),
+                    component="motion_detector",
+                    action="detect_motion",
+                    error_message=str(e),
+                    retry_outcome=(
+                        "camera_stopped"
+                        if self.consecutive_read_failures >= self.max_consecutive_read_failures
+                        else "will_retry"
+                    ),
+                    consecutive_failures=self.consecutive_read_failures,
+                    max_failures=self.max_consecutive_read_failures,
+                )
+                if self.consecutive_read_failures >= self.max_consecutive_read_failures:
+                    self.stop_camera()
+                return None, None, [], False, None
 
     def capture_image(self, orientation: str = "horizontal") -> Optional[Tuple[np.ndarray, str]]:
         """
@@ -664,11 +769,13 @@ class MotionDetector:
         Returns:
             Tuple containing the captured frame and filename, or None if capture failed
         """
-        if not self.feed_active or not self.cap or not self.cap.isOpened():
-            return None
+        with self._lock:
+            if not self.feed_active or not self.cap or not self.cap.isOpened():
+                return None
+            cap = self.cap
 
         try:
-            ret, frame = self.cap.read()
+            ret, frame = cap.read()
             if not ret:
                 raise RuntimeError("Failed to capture image")
 

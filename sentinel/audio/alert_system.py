@@ -9,6 +9,7 @@ import time
 import wave
 import threading
 import subprocess
+import audioop
 from dataclasses import dataclass
 from typing import Dict, Any, List, Optional
 
@@ -190,15 +191,39 @@ class AudioAlertSystem:
                     text, wav_file, syn_config=syn_config, set_wav_format=True
                 )
 
+            wav_payload = self._apply_volume_to_wav(wav_buffer.getvalue(), self._volume)
             proc = subprocess.Popen(
                 ["aplay", "-q", "-"],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            proc.communicate(wav_buffer.getvalue())
+            proc.communicate(wav_payload)
         except Exception as e:
             print(f"Piper TTS playback error: {e}")
+
+    def _apply_volume_to_wav(self, wav_bytes: bytes, volume: float) -> bytes:
+        """Scale WAV PCM amplitude to honor volume slider for Piper output."""
+        volume_scale = max(0.0, min(1.0, float(volume)))
+        if volume_scale == 1.0:
+            return wav_bytes
+        try:
+            source = io.BytesIO(wav_bytes)
+            target = io.BytesIO()
+            with wave.open(source, "rb") as in_wav:
+                params = in_wav.getparams()
+                raw_frames = in_wav.readframes(in_wav.getnframes())
+                scaled_frames = audioop.mul(
+                    raw_frames,
+                    in_wav.getsampwidth(),
+                    volume_scale,
+                )
+            with wave.open(target, "wb") as out_wav:
+                out_wav.setparams(params)
+                out_wav.writeframes(scaled_frames)
+            return target.getvalue()
+        except Exception:
+            return wav_bytes
 
     def update_settings(self, settings: Dict[str, Any]) -> None:
         """Apply updated settings to the active TTS engine."""

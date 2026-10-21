@@ -27,13 +27,37 @@ class MotionDetectionApp:
         self.motion_detector = MotionDetector()
         self.audio_system = AudioAlertSystem(self.settings_manager.settings)
         self.telegram_notifier = TelegramNotifier(self.settings_manager.settings)
-        
-        # Create main window
+
+        frame_broker = None
+        web_cfg = self.settings_manager.settings.get("web")
+        if isinstance(web_cfg, dict) and web_cfg.get("enabled"):
+            auth_cfg = web_cfg.get("auth") if isinstance(web_cfg.get("auth"), dict) else {}
+            if (auth_cfg.get("password_hash") or "").strip():
+                try:
+                    from sentinel.web.frame_broker import FrameBroker
+                    from sentinel.web.server import WebServer
+                except ImportError as e:
+                    print(
+                        "Web viewer: need Flask and bcrypt. "
+                        "Run: pip install -r requirements.txt"
+                    )
+                    print(f"  ({e})")
+                else:
+                    frame_broker = FrameBroker()
+                    web_server = WebServer(self.settings_manager, frame_broker)
+                    web_server.start()
+            else:
+                print(
+                    "Web viewer: web.enabled is true but no password_hash. "
+                    "Run: python -m sentinel.web.set_password"
+                )
+
         self.main_window = MainWindow(
             self.settings_manager,
             self.motion_detector,
             self.audio_system,
             self.telegram_notifier,
+            frame_broker=frame_broker,
         )
     
     def show(self):

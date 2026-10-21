@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sentinel — Sign in</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #2e2e2e;
+      color: #00ffff;
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      background: #3e3e3e;
+      border: 1px solid #00ffff;
+      border-radius: 8px;
+      padding: 2rem;
+      width: 100%;
+      max-width: 360px;
+    }
+    h1 { font-size: 1.25rem; margin: 0 0 1rem; }
+    label { display: block; margin-top: 0.75rem; font-size: 0.9rem; }
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      margin-top: 0.25rem;
+      padding: 0.5rem;
+      border: 1px solid #00ffff;
+      border-radius: 4px;
+      background: #2e2e2e;
+      color: #00ffff;
+    }
+    button {
+      margin-top: 1.25rem;
+      width: 100%;
+      padding: 0.6rem;
+      background: #00ffff;
+      color: #2e2e2e;
+      border: none;
+      border-radius: 4px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: #00cccc; }
+    .err {
+      background: #4a2020;
+      color: #ff8888;
+      padding: 0.5rem;
+      border-radius: 4px;
+      margin-top: 1rem;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Sentinel Home</h1>
+    {% if locked %}
+    <p class="err">Too many failed attempts. Try again in about {{ retry_after }} seconds.</p>
+    {% endif %}
+    {% if error %}
+    <p class="err">{{ error }}</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('login') }}">
+      <label for="username">Username</label>
+      <input id="username" name="username" type="text" autocomplete="username" required>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-top: 1rem;">
+        <input type="checkbox" name="remember" value="1" checked style="width: auto; margin: 0;">
+        <span>Keep me signed in</span>
+      </label>
+      <button type="submit">Sign in</button>
+    </form>
+  </div>
+</body>
+</html>

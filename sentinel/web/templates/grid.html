@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sentinel — Live</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #000;
+      color: #00ffff;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      padding: 0 1rem;
+      background: #1a1a1a;
+      z-index: 10;
+      height: 40px;
+    }
+    h1 { font-size: 0.9rem; margin: 0; flex: 1; }
+    
+    #grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      grid-auto-rows: 1fr;
+      gap: 2px;
+      background: #111;
+      padding: 2px;
+      overflow: hidden;
+    }
+    
+    .tile {
+      position: relative;
+      background: #000;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      cursor: pointer;
+    }
+    .tile h2 {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      font-size: 0.75rem;
+      margin: 0;
+      padding: 4px 8px;
+      background: rgba(0,0,0,0.6);
+      z-index: 5;
+    }
+    .tile img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    #focus-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #000;
+      z-index: 1000;
+    }
+    #focus-header {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      padding: 10px;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.9), transparent);
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      z-index: 1010;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    #focus-overlay:hover #focus-header { opacity: 1; }
+    
+    #focus-content {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #focus-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain; /* Ensures 100% visibility without cropping */
+    }
+
+    button {
+      background: rgba(0,255,255,0.2);
+      color: #00ffff;
+      border: 1px solid #00ffff;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .logout { border-color: #ff5555; color: #ff5555; font-size: 0.7rem; padding: 2px 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Sentinel Live</h1>
+    <form method="post" action="{{ url_for('logout') }}" style="margin: 0;">
+      <button class="logout" type="submit">Log out</button>
+    </form>
+  </header>
+
+  <div id="grid"></div>
+
+  <div id="focus-overlay">
+    <div id="focus-header">
+      <button onclick="closeFocus()">← Back</button>
+      <div id="focus-title"></div>
+    </div>
+    <div id="focus-content" onclick="closeFocus()">
+      <img id="focus-img" alt="">
+    </div>
+  </div>
+
+  <script type="application/json" id="initial-cameras">{{ cameras | tojson }}</script>
+  
+  <script>
+    var liveCams = [];
+    var focusedCamId = null;
+    var gridTimers = {};
+
+    function openFocus(camId, displayName) {
+      focusedCamId = camId;
+      var overlay = document.getElementById('focus-overlay');
+      var img = document.getElementById('focus-img');
+      document.getElementById('focus-title').textContent = displayName;
+      
+      // High-quality MJPEG for focus
+      img.src = "/stream?id=" + encodeURIComponent(camId);
+      overlay.style.display = 'block';
+      
+      // Stop grid updates
+      Object.values(gridTimers).forEach(clearInterval);
+      gridTimers = {};
+    }
+
+    function closeFocus() {
+      document.getElementById('focus-img').src = "";
+      document.getElementById('focus-overlay').style.display = 'none';
+      focusedCamId = null;
+      applyCameras(liveCams);
+    }
+
+    function updateTile(camId, imgElement) {
+      var url = "/snapshot.jpg?id=" + encodeURIComponent(camId) + "&t=" + Date.now();
+      var loader = new Image();
+      loader.onload = function() { imgElement.src = url; };
+      loader.src = url;
+    }
+
+    function applyCameras(cams) {
+      var root = document.getElementById("grid");
+      liveCams = cams;
+      root.innerHTML = "";
+      Object.values(gridTimers).forEach(clearInterval);
+      gridTimers = {};
+
+      cams.forEach(function(c) {
+        var tile = document.createElement('div');
+        tile.className = 'tile';
+        tile.onclick = function() { openFocus(c.id, c.display || c.id); };
+        
+        var h2 = document.createElement('h2');
+        h2.textContent = c.display;
+        
+        var img = document.createElement('img');
+        img.src = "/snapshot.jpg?id=" + encodeURIComponent(c.id);
+        
+        tile.appendChild(h2);
+        tile.appendChild(img);
+        root.appendChild(tile);
+
+        // Staggered snapshot updates for the grid (1.5s interval)
+        // This is MUCH more stable for mobile than multiple concurrent MJPEG streams.
+        gridTimers[c.id] = setInterval(function() {
+          if (!focusedCamId) updateTile(c.id, img);
+        }, 1500 + (Math.random() * 500));
+      });
+    }
+
+    (function boot() {
+      try {
+        var raw = document.getElementById("initial-cameras").textContent;
+        applyCameras(JSON.parse(raw || "[]"));
+      } catch (e) {}
+    })();
+
+    async function refreshList() {
+      if (focusedCamId) return;
+      try {
+        var r = await fetch("/api/cameras");
+        var cams = await r.json();
+        var cur = liveCams.map(c => c.id).sort().join(",");
+        var nxt = cams.map(c => c.id).sort().join(",");
+        if (cur !== nxt) applyCameras(cams);
+      } catch (e) {}
+    }
+    setInterval(refreshList, 10000);
+  </script>
+</body>
+</html>

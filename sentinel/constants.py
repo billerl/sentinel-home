@@ -52,7 +52,7 @@ DEFAULT_ENTRY_DIRECTION = "outside_to_inside"
 # Camera reconnect defaults
 AUTO_RECONNECT_DEFAULT = True
 RECONNECT_INTERVAL_SECONDS = 5
-MAX_CONSECUTIVE_READ_FAILURES = 3
+MAX_CONSECUTIVE_READ_FAILURES = 30
 
 # Application stylesheet - Dark theme with cyan accents
 STYLESHEET = """

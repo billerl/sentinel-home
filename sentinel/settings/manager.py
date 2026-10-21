@@ -6,7 +6,7 @@ import os
 import json
 import time
 import copy
-from typing import Dict, Any
+from typing import Any, Dict
 
 from sentinel.constants import (
     SETTINGS_FILE,
@@ -27,6 +27,32 @@ from sentinel.constants import (
     RECONNECT_INTERVAL_SECONDS,
     TELEGRAM_COOLDOWN,
 )
+
+# Web viewer (MJPEG); merged into settings on load — see installation-guide.md
+WEB_VIEWER_DEFAULTS: Dict[str, Any] = {
+    "enabled": False,
+    "bind_host": "127.0.0.1",
+    "port": 8088,
+    "camera_subnet_block": "192.168.0.0/24",
+    "jpeg_quality": 80,
+    "max_fps": 10,
+    "published_frame": "overlay",
+    "max_concurrent_streams": 8,
+    "max_concurrent_streams_per_session": 8,
+    "auth": {
+        "username": "",
+        "password_hash": "",
+        "session_secret": "",
+        "session_idle_minutes": 60,
+        "session_max_days": 7,
+        "max_attempts": 5,
+        "attempt_window_minutes": 5,
+        "lockout_minutes": 15,
+        "lockout_backoff_factor": 2,
+        "lockout_max_minutes": 240,
+        "bind_session_to_ip": True,
+    },
+}
 
 
 class SettingsManager:
@@ -75,6 +101,7 @@ class SettingsManager:
             "telegram_chat_ids": "",
             "telegram_cooldown": TELEGRAM_COOLDOWN,
             "telegram_include_video": False,
+            "telegram_motion_alerts": True,
             "night_bug_filter_enabled": True,
             "night_bug_start_hour": 20,
             "night_bug_end_hour": 6,
@@ -106,7 +133,25 @@ class SettingsManager:
             print(f"Error loading settings: {e}")
             print("Using default settings")
 
+        self.ensure_web_defaults()
         return self.settings
+
+    def ensure_web_defaults(self) -> None:
+        """Merge web viewer defaults; safe to call after manual edits."""
+        base = copy.deepcopy(WEB_VIEWER_DEFAULTS)
+        existing = self.settings.get("web")
+        if not isinstance(existing, dict):
+            self.settings["web"] = base
+            return
+        merged = base
+        for k, v in existing.items():
+            if k == "auth" and isinstance(v, dict):
+                merged["auth"] = {**merged["auth"], **v}
+            elif isinstance(v, dict) and isinstance(merged.get(k), dict):
+                merged[k] = {**merged[k], **v}
+            else:
+                merged[k] = v
+        self.settings["web"] = merged
 
     def _migrate_camera_profiles(self) -> None:
         """Backfill per-camera profiles from legacy single-camera settings."""
@@ -137,18 +182,19 @@ class SettingsManager:
             }
         }
 
-    def save_settings(self, settings: Dict[str, Any] = None) -> bool:
+    def save_settings(self, settings: Dict[str, Any] = None, force: bool = False) -> bool:
         """
         Save settings to the settings file with debouncing.
         
         Args:
             settings: The settings dictionary to save
+            force: If True, skip debounce (e.g. set_password CLI)
             
         Returns:
             True if settings were saved, False if debounced
         """
         current_time = time.time()
-        if (current_time - self.last_save_time) < SAVE_DEBOUNCE_INTERVAL:
+        if not force and (current_time - self.last_save_time) < SAVE_DEBOUNCE_INTERVAL:
             return False  # Skip saving if called too soon
 
         if settings:
@@ -156,13 +202,20 @@ class SettingsManager:
 
         try:
             print("Saving settings...")
-            with open(self.settings_file, "w") as f:
-                json.dump(self.settings, f)
+            temp_file = f"{self.settings_file}.tmp"
+            with open(temp_file, "w") as f:
+                json.dump(self.settings, f, indent=2)
+            os.replace(temp_file, self.settings_file)
             print("Settings saved.")
             self.last_save_time = current_time
             return True
         except (PermissionError, OSError) as e:
             print(f"Error saving settings: {e}")
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except:
+                    pass
             return False
 
     def get(self, key: str, default: Any = None) -> Any:

@@ -9,7 +9,15 @@ from typing import List, Tuple
 import cv2
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import QDialog, QGridLayout, QLabel, QVBoxLayout, QPushButton, QWidget
+from PySide6.QtWidgets import (
+    QDialog,
+    QGridLayout,
+    QLabel,
+    QVBoxLayout,
+    QPushButton,
+    QWidget,
+    QSizePolicy,
+)
 
 
 class ClickableLabel(QLabel):
@@ -42,31 +50,42 @@ class MultiViewWindow(QDialog):
         self.timer.timeout.connect(self.update_streams)
 
         root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
         self.return_btn = QPushButton("Return to MultiView")
         self.return_btn.clicked.connect(self.return_to_grid)
         self.return_btn.hide()
         root.addWidget(self.return_btn)
 
         self.grid_widget = QWidget()
+        self.grid_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.grid = QGridLayout(self.grid_widget)
-        root.addWidget(self.grid_widget)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setSpacing(4)
+        root.addWidget(self.grid_widget, stretch=1)
 
         self.focus_label = QLabel("No stream selected")
         self.focus_label.setAlignment(Qt.AlignCenter)
+        self.focus_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.focus_label.setStyleSheet("background-color: black; color: #00FFFF;")
         self.focus_label.hide()
-        root.addWidget(self.focus_label)
+        root.addWidget(self.focus_label, stretch=1)
 
         columns = 2
+        rows = (len(self.sources) + columns - 1) // columns if self.sources else 1
         for i, (name, source) in enumerate(self.sources):
             label = ClickableLabel(i, f"{name}\nConnecting...")
             label.setAlignment(Qt.AlignCenter)
             label.setStyleSheet("background-color: black; color: #00FFFF;")
-            label.setMinimumSize(320, 240)
+            label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            label.setMinimumSize(120, 90)
             label.clicked.connect(self.focus_stream)
             self.grid.addWidget(label, i // columns, i % columns)
             self.labels.append(label)
             self.captures.append(cv2.VideoCapture(source))
+        for r in range(rows):
+            self.grid.setRowStretch(r, 1)
+        for c in range(columns):
+            self.grid.setColumnStretch(c, 1)
 
         self.timer.start(120)
 
@@ -106,22 +125,22 @@ class MultiViewWindow(QDialog):
             h, w, ch = frame_rgb.shape
             q_image = QImage(frame_rgb.data, w, h, ch * w, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(q_image)
+            label_sz = (
+                self.focus_label.size()
+                if self.focused_index == i
+                else label.size()
+            )
+            if label_sz.width() <= 0 or label_sz.height() <= 0:
+                continue
+            scaled = pixmap.scaled(
+                label_sz,
+                Qt.KeepAspectRatioByExpanding,
+                Qt.SmoothTransformation,
+            )
             if self.focused_index == i:
-                self.focus_label.setPixmap(
-                    pixmap.scaled(
-                        self.focus_label.size(),
-                        Qt.KeepAspectRatio,
-                        Qt.SmoothTransformation,
-                    )
-                )
+                self.focus_label.setPixmap(scaled)
             elif self.focused_index is None:
-                label.setPixmap(
-                    pixmap.scaled(
-                        label.size(),
-                        Qt.KeepAspectRatio,
-                        Qt.SmoothTransformation,
-                    )
-                )
+                label.setPixmap(scaled)
 
     def closeEvent(self, event):
         self.timer.stop()

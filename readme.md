@@ -1,227 +1,148 @@
 # Sentinel Home - Motion Detection
 
-Sentinel Home is a Python + PySide6 desktop app for local camera monitoring with motion detection, recording, and Telegram notifications.
+Sentinel Home is a **Python + PySide6** desktop app for local camera monitoring: motion detection, optional zones/lines, recording, speech alerts, and Telegram notifications.
 
-## Docs Index
+## Docs index
 
-- `readme.md` - Feature overview, setup, usage, and operations
-- `installation-guide.md` - Step-by-step installation and troubleshooting
-- `project-structure.md` - Codebase layout and module responsibilities
-- `handoff_summary.md` - Cross-chat continuity notes and update template
+| File | Purpose |
+|------|---------|
+| `readme.md` | This file — features, behavior, quick start |
+| `installation-guide.md` | Step-by-step install, Piper, Telegram, troubleshooting |
+| `project-structure.md` | Repository layout and module roles |
+| `handoff_summary.md` | Maintainer / agent handoff notes |
 
-## Key Features
+## Key features
 
-- Real-time motion detection using OpenCV MOG2.
-- Local USB and network RTSP camera support.
-- Automatic network camera discovery with optional sub-stream preference.
-- Active zones and entry lines:
-  - Draw polygons for monitored areas.
-  - Draw line(s) for entry crossing events.
-  - Trigger logic supports zone OR line crossing behavior.
-- Motion-triggered recording:
-  - 10-second clips by default.
-  - Recording rendered with motion boxes.
-- Snapshot capture and image recall.
-- Main feed full-screen mode (`F11`, `Esc`, or button).
-- Embedded multi-camera grid (in main window):
-  - Connect multiple cameras simultaneously.
-  - Click a tile to focus that camera in the main view.
-  - Return to grid with `Return to Grid`.
-  - Full screen applies to whichever view is currently shown (grid or focused camera).
-- Audio alerts (Piper TTS if available, `pyttsx3` fallback).
-- Telegram notifications:
-  - Multiple recipients (comma-separated chat IDs).
-  - Cooldown throttling.
-  - Optional clip-in-notification mode (single message with video caption).
-  - Pause/Resume/Status controls by chat command.
-  - On-demand `clip` command (record now and send 10-second clip).
-- Night bug filter (scheduled by hour) to suppress insect-like false positives.
-- Auto reconnect for dropped camera streams.
-- Collapsible control sections with persisted open/closed state.
+- **Motion detection** — OpenCV MOG2 background subtraction.  
+- **Cameras** — USB (V4L2) and RTSP; discovery with optional **sub-stream** preference; per-host credentials; auto-reconnect.  
+- **Zones and entry lines** — Normalized coordinates (0–1) stored per camera profile; gating modes (see below).  
+- **Recording** — Motion-triggered clips (duration from constants); optional Telegram **clip** command; global + per-profile **recording enabled** toggle.  
+- **Multi-camera** — Several RTSP/USB sessions at once; **embedded grid** in the main window.  
+- **Display** — Single view or grid; **overlay** vs **raw**; **vertical** camera view (detection matches drawn zones).  
+- **Audio alerts** — **Piper** neural TTS when `piper-tts` + `models/*.onnx` are present; **`aplay`** on Linux; **pyttsx3** fallback; **volume** and **speech speed** sliders (Piper volume scales WAV before playback).  
+- **Telegram** — HTTPS to `api.telegram.org`; multiple chat IDs; cooldown; optional motion clip uploads; **pause / resume / status / clip / help**; **enable/disable** phrases for recording, motion alerts, clips, night-bug filter, and auto-reconnect (see `installation-guide.md`).  
+- **Night bug filter** — Scheduled suppression of small fast edge-near motion.  
+- **Structured logging** — JSON lines appended to `sentinel_events.log` (local, gitignored via `*.log`).  
+- **Web viewer (optional)** — Live multi-camera MJPEG grid over HTTP with login, bcrypt password, session cookies, and IP-based lockout after failed attempts. Binds to `127.0.0.1` by default (safe with Cloudflare Tunnel). See **`installation-guide.md`**.  
+- **UI** — Collapsible sections, fullscreen (`F11` / `Esc`), persisted window state.
 
 ## Requirements
 
-- Python 3.10+ recommended
-- Linux, macOS, or Windows
-- Camera source:
-  - Local webcam (`/dev/video*` etc.) and/or
-  - RTSP network camera
+- Python **3.10+** recommended  
+- **Linux** (primary), macOS, or Windows  
+- Cameras: local and/or **RTSP**  
+- **Piper (optional):** `alsa-utils` (`aplay`) on Linux — see `installation-guide.md`  
+- **Telegram (optional):** host must reach the **public internet** for the Bot API (not the same as an isolated camera VLAN)
 
-## Installation
+## Quick install
 
-1. Clone and enter the project:
-   ```bash
-   git clone <your-repo-url>
-   cd sentinel
-   ```
+```bash
+git clone https://github.com/billerl/sentinel-home.git
+cd sentinel-home
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+pip install -r requirements-piper.txt   # optional, recommended
+python main.py
+```
 
-2. Create and activate a virtual environment:
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
-   On Windows (PowerShell):
-   ```powershell
-   python -m venv venv
-   .\venv\Scripts\Activate.ps1
-   ```
+Place Piper voice files under `models/` (`.onnx` + optional `.onnx.json`). Details: **`installation-guide.md`**.
 
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. Optional (better TTS): install Piper runtime support:
-   ```bash
-   pip install -r requirements-piper.txt
-   ```
 ## Run
 
 ```bash
 python main.py
 ```
 
-## First-Time Setup
+## Web viewer (optional)
 
-1. Open app and click `Search Cameras`.
-2. Select your camera from dropdown.
-3. Click `Camera Offline` (button toggles feed on/off).
-4. Optional:
-   - Set `Prefer sub-stream for network cameras`.
-   - Tune `Detection Size` and `Sensitivity`.
-   - Draw active zones and entry lines.
+1. Set credentials: `python -m sentinel.web.set_password` (from repo root, venv active).  
+2. In `settings.json`, set `"web": { "enabled": true, ... }` (defaults are merged on startup; see `installation-guide.md`).  
+3. Restart the app. Open `http://127.0.0.1:8088/` (or your `web.bind_host` / `web.port`), sign in, and view the live grid.  
+4. For remote HTTPS access, use **Cloudflare Tunnel** (or Tailscale) as documented in **`installation-guide.md`** — cameras can stay on an isolated LAN; the app only listens on the address you configure, not on the camera subnet.
 
-## Detection and Trigger Behavior
+## First-time setup
 
-- **No zones, no lines**: qualifying motion can trigger.
-- **Zones only**: motion in active zone triggers.
-- **Lines only**: line crossing triggers.
-- **Zones + lines**: zone OR line crossing can trigger.
+1. **Search Cameras** — refresh the list.  
+2. Select a source; use **Connect** / **Disconnect** on the toggle button.  
+3. Optional: **Prefer sub-stream**, **Feed FPS**, Telegram, zones/lines.
 
-Use this pattern for driveway use cases:
-- Entry line at driveway boundary to catch incoming vehicles.
-- Active zone over driveway to keep alerts for activity inside zone (pets/people).
+## Detection and trigger behavior
 
-## Per-Camera Profiles
+Rules implemented in `sentinel/detection/motion_detector.py`:
 
-- Each connected camera keeps its own profile in `settings.json`:
-  - Active zones
-  - Entry lines + direction
-  - Detection size / sensitivity
-  - Recording cooldown + enabled state
-  - Night bug schedule
-- Editing zones/lines always applies to the currently focused camera.
+| Configuration | Motion triggers when |
+|----------------|----------------------|
+| **No zones, no lines** | Any qualifying motion blob (after night-bug filter, min area, etc.) |
+| **Zones only** | Centroid lies **inside** at least one active polygon |
+| **Lines only** | A track **crosses** a configured entry segment (direction rules apply) |
+| **Zones + lines** | **Inside a zone OR** valid **line crossing** |
+
+Entry line mode requires the motion path segment to **intersect** the drawn line segment (not just proximity to the infinite line).
+
+**Vertical view:** the detector uses the same **90° clockwise** frame as the UI so stored normalized zones/lines match what you draw.
+
+## Embedded MultiView (grid)
+
+- **Open MultiView** switches the main feed area to a **two-up grid** (when two or more cameras are connected).  
+- **Single-click** a tile: that camera becomes **active** (control panel + pending zone draw apply to it); **all** cameras can show **zone/line overlays** in overlay mode.  
+- **Double-click** a tile: **single-camera** view for that feed.  
+- **Return to Grid** / **Single View** toggles layout.  
+- Tiles use a **stacked layout** so the grid gets the full feed area; scaling uses **letterboxed** fit so aspect ratio stays correct (small black bars if cell aspect ≠ video).
+
+Standalone **`MultiViewWindow`** exists in `multiview_window.py` for optional use; the primary workflow is the embedded grid in `main_window.py`.
 
 ## Recording
 
-- Recording starts on valid trigger and writes a clip to `recorded_videos/`.
-- Recording duration is frame-count based for stable output length.
-- `Motion Cooldown` controls minimum gap between recording starts.
+- Clips go under `recorded_videos/`.  
+- **Enable Video Recording** is honored for motion and for Telegram clip requests.  
+- Cooldown is configurable per camera profile.
 
-## Telegram Setup
+## Telegram setup
 
-### 1) Create bot
+See **`installation-guide.md`** for token, chat ID, and test message steps.
 
-In Telegram, open `@BotFather`:
-- `/newbot`
-- Save bot token (full string, including prefix before `:`).
+**Network:** Telegram uses **outbound HTTPS** from the PC running Sentinel to Telegram’s servers — not your camera-only subnet.
 
-### 2) Get chat ID(s)
+## Structured logging
 
-- Start chat with bot (or send a message in your bot-enabled group).
-- Open:
-  - `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
-- Copy `message.chat.id`.
+When events occur (camera errors, reconnects, recording toggle, volume changes, etc.), the app may append JSON objects to **`sentinel_events.log`**. The file is ignored by git (`*.log`). Use it when diagnosing stream stability or control bugs.
 
-### 3) Configure in Sentinel
+**Privacy:** log lines may contain **RTSP credentials** as part of URL fields—treat the file like a secret.
 
-In `Telegram Alerts` section:
-- Enable Telegram notifications.
-- Paste bot token.
-- Paste one or more chat IDs (comma separated).
-- Set cooldown seconds.
-- Optional: enable `Include recording video clip`.
-- Click `Send Telegram Test`.
+## Troubleshooting (short)
 
-## Telegram Commands
+| Symptom | Things to try |
+|--------|----------------|
+| RTSP decode / `h264` errors | Sub-stream, lower bitrate/FPS, wired path, disable SVC |
+| Motion outside drawn zone | Check line-only vs zone-only rules; vertical vs horizontal view |
+| Piper silent | `requirements-piper.txt`, `models/`, `which aplay` |
+| High CPU | Lower **Feed FPS**, fewer streams, lower camera resolution |
+| Multiple Python processes | `pgrep -af main.py` — keep a single intentional run |
 
-Supported commands (case-insensitive):
+More detail: **`installation-guide.md`**.
 
-- `pause <minutes>` - pause notifications for that chat.
-- `resume` - resume notifications for that chat.
-- `status` - show active/paused state for that chat.
-- `clip` - record and send a 10-second clip on demand.
-- `help` - show command list.
+## Settings file
 
-Unknown messages get a help response listing valid commands.
+Runtime state is stored in **`settings.json`** (gitignored). Includes camera sources, profiles (zones, lines, sensitivity, recording), Telegram fields, UI expansion flags, etc.
 
-## Night Bug Filter
+## Project layout (abbreviated)
 
-Use `Night bug filter` in Motion Sensitivity section:
-- Enable/disable filter.
-- Configure `Night hours` start/end (0-23).
-- Designed to suppress tiny, fast, edge-near, short-lived night artifacts (insects near lens) while preserving larger real events.
-
-## Full Screen and MultiView
-
-- Main view full-screen:
-  - Click `Enter Full Screen`
-  - or press `F11`
-  - `Esc` exits.
-- MultiView:
-  - `Open MultiView`
-  - click any tile to focus
-  - click `Return to MultiView` to go back to grid.
-
-## Troubleshooting
-
-- RTSP decode errors (`h264 ... no frame`, `cabac decode ...`):
-  - Prefer sub-stream.
-  - Lower resolution/bitrate/fps in camera.
-  - Prefer wired network and stable RTSP transport.
-  - Keep H.264+ / smart codec features off.
-- No Telegram messages:
-  - Verify token, chat ID(s), and bot chat started.
-  - Re-test with `Send Telegram Test`.
-- Piper not being used:
-  - Install optional dependencies: `pip install -r requirements-piper.txt`
-  - Put a Piper voice pair in `models/`:
-    - `<voice>.onnx`
-    - `<voice>.onnx.json`
-  - Ensure Linux audio tool exists: `aplay` (package: `alsa-utils`)
-- Too many alerts:
-  - Increase Telegram cooldown.
-  - Increase motion cooldown.
-  - Tighten zones/line placement.
-  - Enable night bug filter schedule.
-
-## Settings File
-
-Runtime settings are saved to:
-- `settings.json`
-
-Includes camera source, detection controls, zone/line data, Telegram settings, UI state, and reconnect/night filter options.
-
-## Project Layout
-
-```text
-sentinel/
-├── main.py
-├── settings.json
-├── readme.md
-├── requirements.txt
-├── sentinel/
-│   ├── app.py
-│   ├── constants.py
-│   ├── detection/
-│   ├── audio/
-│   ├── notifications/
-│   ├── settings/
-│   └── ui/
-├── captured_images/
-└── recorded_videos/
 ```
+sentinel-home/
+  main.py
+  requirements.txt
+  requirements-piper.txt
+  readme.md
+  installation-guide.md
+  models/                 # Piper ONNX voices (local)
+  sentinel/               # application package
+  tests/                  # unit tests
+```
+
+Full tree: **`project-structure.md`**.
 
 ## License
 
-This project is licensed under the MIT License. See `LICENSE` if present in your repo.
+MIT (see `LICENSE` if present in the repository).
