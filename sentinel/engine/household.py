@@ -51,6 +51,8 @@ IGNORE_SIMILARITY = 0.90  # looks like something marked "not ours" -> hidden too
 MAX_REFS_PER_LIGHT = 80  # per car, per day/night: plenty, and keeps matching fast
 MIN_DAYS = 2  # only cars seen on this many different days are suggested (skips visitors, deliveries)
 
+ASK_AFTER_SCANS = 3  # parked and still unknown after ~3 minutes: worth asking whose it is
+
 SCAN_INTERVAL = 60.0
 CONFIRM_SCANS = 2  # seen this many scans in a row = parked
 LEAVE_SCANS = 3  # missing this many scans in a row = left
@@ -349,6 +351,8 @@ class Parked:
     last_photo: float = 0.0
     last_night: Optional[bool] = None
     announced: bool = False  # its arrival was reported (or it was already here at start)
+    asked: bool = False  # we asked "whose car is this?" (only once per parking)
+    ignored: bool = False  # the user said it's not ours
 
 
 class PresenceTracker:
@@ -357,12 +361,14 @@ class PresenceTracker:
     def __init__(self, store: HouseholdStore, detector, classifier,
                  cameras: Callable[[], List[Any]],
                  on_change: Callable[[str, Any, Vehicle, float, Optional[bytes]], None],
-                 state_path: Optional[str] = None, interval: float = SCAN_INTERVAL) -> None:
+                 state_path: Optional[str] = None, interval: float = SCAN_INTERVAL,
+                 on_unknown: Optional[Callable[[Any, "Parked", np.ndarray, int, Dict[int, float]], None]] = None) -> None:
         self.store = store
         self.detector = detector
         self.classifier = classifier
         self.cameras = cameras  # -> objects with host, display_name, snapshot(), zone_name_at()
         self.on_change = on_change  # (kind 'arrived'/'left', camera, vehicle, ts, jpeg)
+        self.on_unknown = on_unknown  # (camera, parked, frame, sighting id, scores): ask whose car it is
         self.state_path = state_path
         self.interval = interval
         self.parked: Dict[str, List[Parked]] = {}
@@ -440,9 +446,10 @@ class PresenceTracker:
             if p.missed:
                 continue  # hidden this time (someone walking past); keep its identity
             photo_due = p.last_night != night or now - p.last_photo >= SIGHTING_EVERY
+            embedding = None
             if p.vehicle_id is None or photo_due:
                 embedding = self.classifier.embed(crop_for_clip(frame, p.box))
-                if p.vehicle_id is None:
+                if p.vehicle_id is None and not p.ignored:
                     # Unknown so far (e.g. arrived in the dark): try again every scan.
                     p.vehicle_id, _ = self.store.identify(embedding, night)
                 if photo_due:
@@ -457,6 +464,12 @@ class PresenceTracker:
                     p.last_photo, p.last_night = now, night
             if p.seen >= CONFIRM_SCANS:
                 p.confirmed = True
+            if (self.on_unknown is not None and p.vehicle_id is None and not p.ignored and not p.asked
+                    and not night and p.seen >= ASK_AFTER_SCANS and embedding is not None
+                    and p.box[0] > 2 and p.box[0] + p.box[2] < frame.shape[1] - 2):  # whole car in view
+                p.asked = True
+                sid = self.store.add_sighting(now, key, cam.display_name, frame, p.box, embedding)
+                self.on_unknown(cam, p, frame, sid, self.store.scores(embedding, night))
             if p.confirmed and p.vehicle_id is not None and not p.announced:
                 p.announced = True
                 vehicle = self.store.vehicle(p.vehicle_id)
@@ -468,6 +481,12 @@ class PresenceTracker:
     def present(self) -> Dict[str, List[Parked]]:
         with self._lock:
             return {k: [p for p in v if p.confirmed] for k, v in self.parked.items()}
+
+    def set_identity(self, parked: "Parked", vehicle_id: Optional[int], ignored: bool = False) -> None:
+        """The user told us whose car this parked one is (or that it isn't ours)."""
+        with self._lock:
+            parked.vehicle_id = vehicle_id
+            parked.ignored = ignored
 
     def forget_identities(self) -> None:
         """After the user relabels photos: re-identify parked cars on the next scan."""
@@ -511,6 +530,6 @@ class PresenceTracker:
         for key, cars in data.items():
             self.parked[key] = [Parked(tuple(c["box"]), c["first_seen"], c["last_seen"], seen=CONFIRM_SCANS,
                                        vehicle_id=c.get("vehicle_id"), confirmed=c.get("confirmed", False),
-                                       announced=True)
+                                       announced=True, asked=True)
                                 for c in cars if c.get("last_seen", 0) >= cutoff]
             self._baseline.add(key)  # restored: changes from here on are real

@@ -106,6 +106,9 @@ class Engine:
         self.detection_worker = None
         self.detector_error: Optional[str] = None
         self._object_alert_times: Dict[Tuple[str, str], float] = {}
+        # Open "whose car is this?" questions: sighting id -> {camera, parked, messages, ts}
+        self._car_asks: Dict[int, Dict[str, Any]] = {}
+        self._car_ask_days: Dict[str, int] = {}  # date -> questions sent
         self._last_description: Dict[str, Tuple[float, str]] = {}
         self._video_query_lock = threading.Lock()
 
@@ -203,6 +206,7 @@ class Engine:
                 cameras=lambda: [p for p in self.cameras.values() if p.connected],
                 on_change=self._on_household_change,
                 state_path=os.path.join(self.household.crops_dir, "presence.json"),
+                on_unknown=self._ask_whose_car,
             )
         app_logger.log("info", "object_detector_ready", model=os.path.basename(model), device=detector.device,
                        vehicle_types=classifier is not None,
@@ -394,6 +398,8 @@ class Engine:
                     threading.Thread(
                         target=self.answer_question, args=(chat_id, text), name="question", daemon=True
                     ).start()
+                for chat_id, message_id, data, callback_id in self.telegram.consume_button_presses():
+                    self.handle_button(chat_id, message_id, data, callback_id)
                 clip_chats = self.telegram.consume_clip_requests()
                 if clip_chats:
                     self._request_clips(clip_chats)
@@ -517,6 +523,77 @@ class Engine:
         if self.presence is not None:
             self.presence.forget_identities()
         return True, f"{n} photos updated"
+
+    # ------------------------------------------------- "whose car is this?" (Telegram)
+    def _ask_whose_car(self, pipeline, parked, frame, sighting_id: int, scores: Dict[int, float]) -> None:
+        """A car has been parked a few minutes and we can't name it: ask, with a button per family car."""
+        s = self.settings
+        vehicles = self.household.vehicles()
+        now = time.time()
+        hour = time.localtime(now).tm_hour
+        today = time.strftime("%Y-%m-%d", time.localtime(now))
+        if (not vehicles or not s.get("household_ask_enabled", True) or not self.telegram.enabled
+                or not self.telegram.is_configured()
+                or not int(s.get("household_ask_start_hour", 8)) <= hour < int(s.get("household_ask_end_hour", 21))
+                or self._car_ask_days.get(today, 0) >= int(s.get("household_ask_per_day", 3))):
+            return
+        from sentinel.engine.camera import zoomed_view
+        from sentinel.engine.questions import _fmt_clock
+
+        image, (x, y, w, h) = zoomed_view(frame, parked.box, width=640)
+        cv2.rectangle(image, (x, y), (x + w, y + h), (0, 200, 255), 2)
+        ok, jpeg = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        if not ok:
+            return
+        ranked = sorted(vehicles, key=lambda v: -scores.get(v.id, 0.0))  # likeliest first
+        names = [(v.name[:1].upper() + v.name[1:], f"hh:{sighting_id}:{v.id}") for v in ranked]
+        rows = [names[i:i + 2] for i in range(0, len(names), 2)]
+        rows.append([("Not ours", f"hh:{sighting_id}:x"), ("Skip", f"hh:{sighting_id}:s")])
+        caption = (f"🚗 Whose car is this? Parked at the {pipeline.display_name} since {_fmt_clock(parked.first_seen)}.\n"
+                   "Tap a name and I'll recognise it next time.")
+        sent = []
+        for chat_id in self.telegram.chat_ids:
+            message_id = self.telegram.send_photo_with_buttons(chat_id, jpeg.tobytes(), caption, rows)
+            if message_id:
+                sent.append((chat_id, message_id))
+        if sent:
+            self._car_ask_days = {today: self._car_ask_days.get(today, 0) + 1}
+            self._car_asks[sighting_id] = {"parked": parked, "messages": sent, "ts": now}
+            app_logger.log("info", "household_asked", camera_display=pipeline.display_name, component="engine",
+                           action="ask_whose_car")
+
+    def handle_button(self, chat_id: str, message_id: int, data: str, callback_id: str) -> None:
+        """A tap on one of our Telegram buttons."""
+        m = re.fullmatch(r"hh:(\d+):(\d+|x|s)", data or "")
+        if not m:
+            self.telegram.answer_button(callback_id)
+            return
+        sighting_id, choice = int(m.group(1)), m.group(2)
+        ask = self._car_asks.pop(sighting_id, None)
+        messages = ask["messages"] if ask else [(chat_id, message_id)]
+        parked = ask["parked"] if ask else None
+        if choice == "s":
+            caption, toast = "Skipped — I won't ask about this one again.", "Skipped"
+        elif choice == "x":
+            self.household.assign([sighting_id], None, ignore=True)
+            if parked is not None and self.presence is not None:
+                self.presence.set_identity(parked, None, ignored=True)
+            caption, toast = "OK — not one of ours. I won't ask about it again.", "Not ours"
+        else:
+            vehicle = self.household.vehicle(int(choice))
+            if vehicle is None:
+                self.telegram.answer_button(callback_id, "That car isn't on the list any more")
+                return
+            self.household.assign([sighting_id], vehicle.id)
+            if parked is not None and self.presence is not None:
+                self.presence.set_identity(parked, vehicle.id)  # its arrival gets recorded on the next check
+            name = vehicle.name[:1].upper() + vehicle.name[1:]
+            caption, toast = f"✓ That's {name} — thanks! I'll recognise it next time.", "Thanks!"
+        self.telegram.answer_button(callback_id, toast)
+        for chat, mid in messages:
+            self.telegram.edit_caption(chat, mid, caption)
+        app_logger.log("info", "household_answer", choice="named" if choice.isdigit() else choice,
+                       component="engine", action="handle_button")
 
     def answer_household_question(self, hq) -> str:
         from sentinel.engine.questions import VehicleStatus, answer_household

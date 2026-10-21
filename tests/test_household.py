@@ -276,3 +276,114 @@ class TestEngineHousehold(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAskWhoseCar(unittest.TestCase):
+    BOX = (100, 100, 200, 150)
+
+    def setUp(self):
+        from sentinel.engine import Engine
+        from sentinel.settings.manager import SettingsManager
+
+        self.dir = tempfile.mkdtemp(prefix="sentinel-ask-")
+        self.old_cwd = os.getcwd()
+        os.chdir(self.dir)
+        sm = SettingsManager(settings_file=os.path.join(self.dir, "settings.json"))
+        sm.settings.update({"household_ask_start_hour": 0, "household_ask_end_hour": 24})
+        self.engine = Engine(sm)
+        e = self.engine
+        self.sierra = e.household.save_vehicle("Luke's Sierra", "Luke", [], "pickup")
+        self.fusion = e.household.save_vehicle("Abigail's Fusion", "Abigail", [], "sedan")
+        for i in range(3):
+            e.household.add_sighting(0, "cam", "Garage", COLOUR, self.BOX, unit(10 + i, SIERRA, 0.008), self.sierra)
+            e.household.add_sighting(0, "cam", "Garage", COLOUR, self.BOX, unit(20 + i, FUSION, 0.008), self.fusion)
+        self.sent, self.edits, self.toasts = [], [], []
+        tg = e.telegram
+        tg.enabled, tg.bot_token, tg.chat_ids = True, "123:abc", ["111"]
+        tg.send_photo_with_buttons = lambda chat, jpeg, caption, rows: (self.sent.append((chat, caption, rows)), 42)[1]
+        tg.edit_caption = lambda chat, mid, caption: self.edits.append((chat, mid, caption))
+        tg.answer_button = lambda cb, text="": self.toasts.append(text)
+        self.det, self.clf = _Det(), _Clf()
+        self.changes = []
+        self.cam = types.SimpleNamespace(host="192.168.0.9", display_name="Garage")
+        e.presence = PresenceTracker(e.household, self.det, self.clf, cameras=lambda: [self.cam],
+                                     on_change=lambda kind, cam, v, ts, jpeg: self.changes.append((kind, v.name)),
+                                     on_unknown=e._ask_whose_car)
+        self.t = time.time() - 600
+
+    def tearDown(self):
+        os.chdir(self.old_cwd)
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def scan(self, boxes, frame=COLOUR):
+        self.det.boxes = boxes
+        self.engine.presence.scan(self.cam, frame, self.t)
+        self.t += 60
+
+    def park_stranger(self, look=unit(90, (SIERRA + FUSION * 1.4) / np.linalg.norm(SIERRA + FUSION * 1.4), 0.002), frame=COLOUR):
+        self.clf.next = look
+        self.scan([])
+        for _ in range(4):
+            self.scan([self.BOX], frame)
+
+    def test_asks_once_with_likeliest_first(self):
+        self.park_stranger()
+        self.assertEqual(len(self.sent), 1)
+        chat, caption, rows = self.sent[0]
+        self.assertIn("Whose car is this?", caption)
+        self.assertEqual(rows[0][0][0], "Abigail's Fusion")  # closer look than the Sierra
+        self.assertEqual([b[0] for b in rows[-1]], ["Not ours", "Skip"])
+        self.scan([self.BOX]); self.scan([self.BOX])
+        self.assertEqual(len(self.sent), 1)  # never twice for the same parked car
+
+    def test_answer_names_it_and_records_the_arrival(self):
+        self.park_stranger()
+        data = self.sent[0][2][0][0][1]  # first button: Abigail's Fusion
+        self.engine.handle_button("111", 42, data, "cb1")
+        self.assertEqual(self.toasts, ["Thanks!"])
+        self.assertIn("That's Abigail's Fusion", self.edits[0][2])
+        self.scan([self.BOX])
+        self.assertEqual(self.changes, [("arrived", "Abigail's Fusion")])
+        self.assertEqual(self.engine.presence.where_is(self.fusion)[0], "192.168.0.9")
+        sid = int(data.split(":")[1])
+        self.assertEqual({s["id"]: s["vehicle_id"] for s in self.engine.household.sightings(labelled=True)}[sid], self.fusion)
+
+    def test_not_ours_stops_questions_and_hides_it(self):
+        self.park_stranger()
+        sid = int(self.sent[0][2][-1][0][1].split(":")[1])
+        self.engine.handle_button("111", 42, f"hh:{sid}:x", "cb2")
+        self.assertIn("not one of ours", self.edits[0][2])
+        self.assertNotIn(sid, [s["id"] for s in self.engine.household.sightings()])
+        self.assertTrue(self.engine.presence.present()["192.168.0.9"][0].ignored)
+
+    def test_limits(self):
+        self.engine.settings["household_ask_per_day"] = 0
+        self.park_stranger()
+        self.assertEqual(self.sent, [])
+        self.engine.settings["household_ask_per_day"] = 3
+        self.engine.presence.parked.clear()
+        self.park_stranger(frame=NIGHT)
+        self.assertEqual(self.sent, [])  # not at night: the photo wouldn't help anyone
+        self.engine.presence.parked.clear()
+        self.clf.next = unit(91, SIERRA, 0.004)
+        self.scan([]); [self.scan([self.BOX]) for _ in range(4)]
+        self.assertEqual(self.sent, [])  # recognised: nothing to ask
+
+    def test_stale_or_foreign_buttons(self):
+        self.engine.handle_button("111", 7, "hh:99999:s", "cb3")
+        self.assertEqual(self.toasts, ["Skipped"])
+        self.engine.handle_button("111", 7, "rm -rf", "cb4")
+        self.assertEqual(self.toasts[-1], "")
+
+
+class TestAskSkipsCutOffCars(TestAskWhoseCar):
+    BOX = (0, 100, 200, 150)  # touching the left edge of the picture
+
+    def test_asks_once_with_likeliest_first(self):
+        self.park_stranger()
+        self.assertEqual(self.sent, [])
+
+    test_answer_names_it_and_records_the_arrival = None
+    test_not_ours_stops_questions_and_hides_it = None
+    test_limits = None
+    test_stale_or_foreign_buttons = None

@@ -108,6 +108,11 @@ class SettingsManager:
             "vehicle_types_enabled": True,
             # Where object detection runs: "auto" (Intel GPU if usable, else CPU), "GPU" or "CPU".
             "inference_device": "auto",
+            # Ask in Telegram "whose car is this?" (with buttons) when a parked car isn't recognised.
+            "household_ask_enabled": True,
+            "household_ask_per_day": 3,
+            "household_ask_start_hour": 8,
+            "household_ask_end_hour": 21,
             "object_alert_cooldown": 60,
             # Shown in the Help page and the Telegram "access" reply
             "remote_web_url": "",

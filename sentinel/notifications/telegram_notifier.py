@@ -37,6 +37,8 @@ class TelegramNotifier:
         self._pending_access_chat_ids: List[str] = []
         self._pending_video_queries: List[Tuple[str, str]] = []
         self._pending_questions: List[Tuple[str, str]] = []
+        # Button taps: (chat_id, message_id, data, callback_query_id)
+        self._pending_buttons: List[Tuple[str, int, str, str]] = []
         # Extra question check supplied by the engine (knows the family's car/owner names).
         self.question_filter: Optional[Callable[[str], bool]] = None
         self.update_settings(settings)
@@ -242,6 +244,48 @@ class TelegramNotifier:
         except (urllib.error.URLError, TimeoutError, ValueError, OSError):
             return False
 
+    def send_photo_with_buttons(self, chat_id: str, jpeg: bytes, caption: str,
+                                buttons: List[List[Tuple[str, str]]]) -> Optional[int]:
+        """Send a photo with inline buttons (rows of (label, callback data)); returns its message id."""
+        if not self.is_configured():
+            return None
+        markup = json.dumps({"inline_keyboard": [[{"text": t, "callback_data": d} for t, d in row] for row in buttons]})
+        boundary = f"sentinel-{int(time.time() * 1000)}"
+        parts: List[bytes] = []
+        for name, value in [("chat_id", chat_id), ("caption", caption), ("reply_markup", markup)]:
+            parts.append(f"--{boundary}\r\n".encode("utf-8"))
+            parts.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+            parts.append(f"{value}\r\n".encode("utf-8"))
+        parts.append(f"--{boundary}\r\n".encode("utf-8"))
+        parts.append(b'Content-Disposition: form-data; name="photo"; filename="sentinel.jpg"\r\n'
+                     b"Content-Type: image/jpeg\r\n\r\n")
+        parts.append(jpeg)
+        parts.append(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+        request = urllib.request.Request(
+            self._api_url("sendPhoto"), data=b"".join(parts),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            return int(payload["result"]["message_id"]) if payload.get("ok") else None
+        except (urllib.error.URLError, TimeoutError, ValueError, OSError, KeyError, TypeError):
+            return None
+
+    def consume_button_presses(self) -> List[Tuple[str, int, str, str]]:
+        """Return and clear (chat_id, message_id, data, callback_id) taps on inline buttons."""
+        pending, self._pending_buttons = self._pending_buttons, []
+        return pending
+
+    def answer_button(self, callback_id: str, text: str = "") -> bool:
+        """Acknowledge a tap (stops the button's loading spinner; optional toast)."""
+        return self._post_json(self._api_url("answerCallbackQuery"), {"callback_query_id": callback_id, "text": text})
+
+    def edit_caption(self, chat_id: str, message_id: int, caption: str) -> bool:
+        """Replace a photo's caption and remove its buttons."""
+        return self._post_json(self._api_url("editMessageCaption"),
+                               {"chat_id": chat_id, "message_id": message_id, "caption": caption})
+
     def trigger_photo_alert(self, caption: str, jpeg: bytes) -> bool:
         """Send a snapshot with a caption to every unpaused chat (async). The caller
         applies its own cooldown; the global text-alert cooldown is not used."""
@@ -438,6 +482,13 @@ class TelegramNotifier:
         for item in payload.get("result", []):
             update_id = int(item.get("update_id", 0))
             self._update_offset = update_id + 1
+            press = item.get("callback_query")
+            if press:
+                chat_id = str(((press.get("message") or {}).get("chat") or {}).get("id", "")).strip()
+                if chat_id and chat_id in self.chat_ids:  # only our own chats may press our buttons
+                    self._pending_buttons.append((chat_id, int(press["message"].get("message_id", 0)),
+                                                  str(press.get("data", ""))[:64], str(press.get("id", ""))))
+                continue
             message = item.get("message", {})
             chat = message.get("chat", {})
             chat_id = str(chat.get("id", "")).strip()
