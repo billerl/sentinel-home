@@ -6,6 +6,7 @@ the others. It reports what happens (motion, finished clips, up/down) to the
 engine through callbacks; it never touches Telegram, audio or the web directly.
 """
 
+import os
 import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
@@ -17,6 +18,7 @@ import numpy as np
 from sentinel.constants import MIN_CONTOUR_AREA, MOTION_COOLDOWN, VAR_THRESHOLD
 from sentinel.detection import MotionDetector
 from sentinel.logging_utils import app_logger, redact
+from sentinel.recordings.hd_recorder import HDRecorder, main_stream_url
 
 if TYPE_CHECKING:
     from sentinel.recordings import RecordingStore
@@ -78,6 +80,8 @@ class CameraPipeline:
         self.profile = profile
         self.detector = MotionDetector()
         self.detector.set_recording_identity(recording_store, self.host, display_name)
+        self._store = recording_store
+        self.hd: Optional[HDRecorder] = None
         self._broker = frame_broker
         self._settings = settings
         self._on_motion = on_motion
@@ -126,10 +130,20 @@ class CameraPipeline:
         return self.detector.get_last_raw_frame()
 
     # --------------------------------------------------------------- lifecycle
+    def hd_source(self) -> Optional[str]:
+        """Main-stream URL for high-res recording, or None when disabled/unknown."""
+        if not self.profile.get("hd_recording", True) or not isinstance(self.source, str):
+            return None
+        return self.profile.get("record_source") or main_stream_url(self.source)
+
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
+        url = self.hd_source()
+        if url and self._store is not None:
+            self.hd = HDRecorder(url, self.host)
+            self.hd.start()
         self._thread = threading.Thread(
             target=self._run, name=f"camera-{self.host}", daemon=True
         )
@@ -141,6 +155,10 @@ class CameraPipeline:
         self.detector.stop_camera()
         if self._thread and self._thread is not threading.current_thread():
             self._thread.join(timeout)
+        self._deliver_completed_clip()  # clip finalized by stop_camera
+        if self.hd is not None:
+            self.hd.stop()
+            self.hd = None
         if self._broker is not None:
             self._broker.unpublish(self.camera_id)
 
@@ -212,16 +230,34 @@ class CameraPipeline:
             self._publish(annotated, raw)
             if motion:
                 self._on_motion(self)
-            path, reason = self.detector.consume_last_completed_recording()
-            if path:
-                chats: List[str] = []
-                if reason == CLIP_REQUEST_REASON:
-                    chats, self._clip_chats = self._clip_chats, []
-                self._on_clip(self, path, reason, chats)
+            self._deliver_completed_clip()
 
             wait = interval - (time.time() - loop_start)
             if wait > 0:
                 self._stop.wait(wait)
+
+    def _deliver_completed_clip(self) -> None:
+        """Report a finished clip, upgraded to the high-res version with pre-roll when available."""
+        path, reason = self.detector.consume_last_completed_recording()
+        if not path:
+            return
+        chats: List[str] = []
+        if reason == CLIP_REQUEST_REASON:
+            chats, self._clip_chats = self._clip_chats, []
+        span = self.detector.last_completed_span
+        hd = self.hd
+        if hd is not None and hd.running and span and span[2] is not None:
+            start_ts, end_ts, record_id = span
+            hd_out = os.path.splitext(path)[0] + "_hd.mp4"
+
+            def _done(hd_path: Optional[str]) -> None:
+                if hd_path and self._store is not None:
+                    self._store.attach_hd(record_id, hd_path)
+                self._on_clip(self, hd_path or path, reason, chats)
+
+            if hd.request_clip(start_ts, end_ts, hd_out, _done):
+                return
+        self._on_clip(self, path, reason, chats)
 
     def _start_requested_clip(self, frame: Optional[np.ndarray]) -> None:
         with self._lock:

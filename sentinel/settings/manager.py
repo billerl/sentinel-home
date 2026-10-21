@@ -97,6 +97,9 @@ class SettingsManager:
             "recording_retention_enabled": True,
             "recording_retention_days": 30,
             "recording_min_free_percent": 10,
+            # Shown in the Help page and the Telegram "access" reply
+            "remote_web_url": "",
+            "remote_rdp_user": "",
             "min_contour_area": MIN_CONTOUR_AREA,
             "var_threshold": VAR_THRESHOLD,
             "active_zones": copy.deepcopy(DEFAULT_ACTIVE_ZONES),

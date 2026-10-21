@@ -28,6 +28,9 @@ from sentinel.constants import (
     MAX_CONSECUTIVE_READ_FAILURES,
 )
 
+CAMERA_OPEN_TIMEOUT_MS = 15000
+CAMERA_READ_TIMEOUT_MS = 10000
+
 
 class MotionDetector:
     """Handles camera access and motion detection."""
@@ -67,6 +70,8 @@ class MotionDetector:
 
         # Optional recording index (sentinel.recordings.RecordingStore) and camera identity
         self.recording_store = None
+        # (start_ts, end_ts, recording_id) of the most recently indexed clip
+        self.last_completed_span: Optional[Tuple[float, float, Optional[int]]] = None
         self.camera_key = "camera"
         self.camera_name = "Camera"
 
@@ -257,14 +262,17 @@ class MotionDetector:
         if self.recording_store is None:
             return
         try:
-            self.recording_store.add_recording(
+            end_ts = time.time()
+            self.last_completed_span = (self.recording_start_time, end_ts, None)
+            record_id = self.recording_store.add_recording(
                 video_path,
                 self.camera_key,
                 self.camera_name,
                 self.recording_start_time,
-                time.time(),
+                end_ts,
                 self.current_recording_reason,
             )
+            self.last_completed_span = (self.recording_start_time, end_ts, record_id)
         except Exception as e:
             app_logger.log(
                 "error",
@@ -383,7 +391,16 @@ class MotionDetector:
                 if isinstance(camera_index, int):
                     self.cap = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
                 else:
-                    self.cap = cv2.VideoCapture(camera_index)
+                    # Bounded open/read so an unresponsive camera can't hang this
+                    # camera's thread forever (the pipeline will retry instead).
+                    self.cap = cv2.VideoCapture(
+                        camera_index,
+                        cv2.CAP_FFMPEG,
+                        [
+                            cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, CAMERA_OPEN_TIMEOUT_MS,
+                            cv2.CAP_PROP_READ_TIMEOUT_MSEC, CAMERA_READ_TIMEOUT_MS,
+                        ],
+                    )
                 if not self.cap.isOpened():
                     raise RuntimeError(f"Failed to open camera {camera_index}")
 

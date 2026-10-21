@@ -7,13 +7,17 @@ remote control. Replaces the old Qt MainWindow, which ran invisibly under Xvfb.
 
 import copy
 import os
+import re
 import threading
+import time
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote, urlparse
 
 import cv2
 import numpy as np
 
 from sentinel.constants import CAPTURE_DIR, VIDEO_DIR
+from sentinel.engine import admin
 from sentinel.engine.camera import CLIP_REQUEST_REASON, CameraPipeline, camera_host
 from sentinel.logging_utils import app_logger
 from sentinel.notifications import TelegramNotifier
@@ -48,7 +52,14 @@ def _clean_lines(value: Any) -> List[List[List[float]]]:
     return [l for l in lines if len(l) == 2][:8]
 
 
+def _display_name(value: Any) -> Optional[str]:
+    text = re.sub(r"\s+", " ", str(value)).strip()
+    return text[:60] if text else None
+
+
 EDITABLE_PROFILE_FIELDS = {
+    "display": _display_name,
+    "enabled": bool,
     "active_zones": _clean_zones,
     "entry_lines": _clean_lines,
     "entry_direction": lambda v: v if v in _ENTRY_DIRECTIONS else None,
@@ -56,6 +67,7 @@ EDITABLE_PROFILE_FIELDS = {
     "motion_cooldown": lambda v: max(0.0, min(300.0, float(v))),
     "recording_enabled": bool,
     "night_bug_filter_enabled": bool,
+    "hd_recording": bool,
 }
 
 
@@ -77,6 +89,8 @@ class Engine:
         self.web_server = None
         self.cameras: Dict[str, CameraPipeline] = {}
         self._command_thread: Optional[threading.Thread] = None
+        self.started_at = time.time()
+        self._cpu = admin.CpuMeter()
 
     # ------------------------------------------------------------------ setup
     def _init_audio(self):
@@ -110,25 +124,26 @@ class Engine:
         profiles = self.settings.get("camera_profiles", {})
         return profiles if isinstance(profiles, dict) else {}
 
+    def _make_pipeline(self, camera_id: str, profile: Dict[str, Any]) -> CameraPipeline:
+        source = profile.get("source", camera_id)
+        if isinstance(source, str) and source.isdigit():
+            source = int(source)
+        return CameraPipeline(
+            camera_id,
+            source,
+            profile.get("display") or f"Camera {camera_host(source)}",
+            profile,
+            recording_store=self.recording_store,
+            frame_broker=self.frame_broker,
+            settings=lambda: self.settings,
+            on_motion=self._on_motion,
+            on_clip=self._on_clip,
+            on_status=self._on_camera_status,
+        )
+
     def _build_cameras(self) -> None:
         for camera_id, profile in self._camera_profiles().items():
-            if profile.get("enabled", True) is False:
-                continue
-            source = profile.get("source", camera_id)
-            if isinstance(source, str) and source.isdigit():
-                source = int(source)
-            pipeline = CameraPipeline(
-                camera_id,
-                source,
-                profile.get("display") or f"Camera {camera_host(source)}",
-                profile,
-                recording_store=self.recording_store,
-                frame_broker=self.frame_broker,
-                settings=lambda: self.settings,
-                on_motion=self._on_motion,
-                on_clip=self._on_clip,
-                on_status=self._on_camera_status,
-            )
+            pipeline = self._make_pipeline(camera_id, profile)
             self.cameras[pipeline.host] = pipeline
 
     # -------------------------------------------------------------- lifecycle
@@ -142,7 +157,8 @@ class Engine:
         if not self.cameras:
             print("No cameras configured (settings.json camera_profiles is empty).")
         for pipeline in self.cameras.values():
-            pipeline.start()
+            if pipeline.profile.get("enabled", True):
+                pipeline.start()
         self._command_thread = threading.Thread(
             target=self._command_loop, name="telegram-commands", daemon=True
         )
@@ -210,6 +226,8 @@ class Engine:
             try:
                 for chat_id in self.telegram.consume_detailed_status_requests():
                     self.telegram.reply_to_chat(chat_id, self.status_message(chat_id))
+                for chat_id in self.telegram.consume_access_requests():
+                    self.telegram.reply_to_chat(chat_id, admin.access_message(self.settings))
                 for chat_id, changes in self.telegram.consume_remote_feature_commands():
                     self.apply_feature_toggles(chat_id, changes)
                 clip_chats = self.telegram.consume_clip_requests()
@@ -222,7 +240,7 @@ class Engine:
                 )
 
     def _request_clips(self, chat_ids: List[str]) -> None:
-        live = [p for p in self.cameras.values() if p.connected]
+        live = [p for p in self.cameras.values() if p.connected and p.profile.get("enabled", True)]
         if not live:
             for chat_id in chat_ids:
                 self.telegram.reply_to_chat(chat_id, "Sentinel: no camera connected; clip not recorded.")
@@ -243,6 +261,9 @@ class Engine:
         lines = ["Sentinel status"]
         lines.append(f"Pause: {remaining} minute(s) left for this chat" if remaining > 0 else "Pause: not paused")
         for pipeline in self.cameras.values():
+            if not pipeline.profile.get("enabled", True):
+                lines.append(f"{pipeline.display_name}: disabled")
+                continue
             state = "online" if pipeline.connected else "OFFLINE"
             rec = on(pipeline.detector.recording_enabled)
             lines.append(f"{pipeline.display_name}: {state}, recording {rec}")
@@ -296,14 +317,26 @@ class Engine:
         out = []
         for key, pipeline in sorted(self.cameras.items(), key=lambda kv: kv[1].display_name):
             p = pipeline.profile
+            source = urlparse(str(pipeline.source))
             out.append(
                 {
                     "key": key,
                     "name": pipeline.display_name,
                     "online": pipeline.connected,
+                    "stream": f"{source.scheme}://{source.hostname}:{source.port or 554}{source.path}"
+                    if source.hostname else "local device",
+                    "username": source.username or "",
+                    "last_frame_age": round(time.time() - pipeline.last_frame_time, 1)
+                    if pipeline.last_frame_time else None,
+                    "recording": pipeline.detector.recording,
+                    "hd_available": pipeline.hd_source() is not None,
+                    "hd_running": bool(pipeline.hd and pipeline.hd.running),
                     **{field: copy.deepcopy(p.get(field)) for field in EDITABLE_PROFILE_FIELDS},
                 }
             )
+            out[-1]["enabled"] = p.get("enabled", True) is not False
+            out[-1]["hd_recording"] = p.get("hd_recording", True) is not False
+            out[-1]["display"] = pipeline.display_name
         return out
 
     def update_camera_config(self, key: str, changes: Dict[str, Any]) -> Tuple[bool, str]:
@@ -327,7 +360,17 @@ class Engine:
             profile = dict(pipeline.profile, **cleaned)
             self._camera_profiles()[pipeline.camera_id] = profile
             pipeline.apply_profile(profile)
+            if "display" in cleaned:
+                pipeline.display_name = cleaned["display"]
+                pipeline.detector.camera_name = cleaned["display"]
             self.settings_manager.save_settings(force=True)
+        if "hd_recording" in cleaned and "enabled" not in cleaned and pipeline.profile.get("enabled", True):
+            self.reconnect_camera(key)  # restart to start/stop the main-stream recorder
+        if "enabled" in cleaned:
+            if cleaned["enabled"]:
+                self.reconnect_camera(key)
+            else:
+                pipeline.stop()
         app_logger.log(
             "info", "camera_config_updated", camera_ip=key, fields=sorted(cleaned),
             component="engine", action="update_camera_config",
@@ -337,3 +380,161 @@ class Engine:
     def camera_snapshot(self, key: str) -> Optional[np.ndarray]:
         pipeline = self.cameras.get(key)
         return pipeline.snapshot() if pipeline else None
+
+    # ------------------------------------------------- camera management
+    def reconnect_camera(self, key: str) -> Tuple[bool, str]:
+        """Restart a camera's pipeline with a fresh connection."""
+        with self._lock:
+            old = self.cameras.get(key)
+            if old is None:
+                return False, "unknown camera"
+            old.stop(timeout=3)
+            pipeline = self._make_pipeline(old.camera_id, old.profile)
+            self.cameras[key] = pipeline
+        if pipeline.profile.get("enabled", True):
+            pipeline.start()
+        return True, "reconnecting"
+
+    def add_camera(self, spec: Dict[str, Any]) -> Tuple[bool, str]:
+        """Add an RTSP camera from {name, host, port, path, username, password}."""
+        host = str(spec.get("host", "")).strip()
+        if not re.fullmatch(r"[A-Za-z0-9.\-]{1,253}", host):
+            return False, "enter the camera's IP address or hostname"
+        if host in self.cameras:
+            return False, "that camera is already added"
+        try:
+            port = int(spec.get("port") or 554)
+        except (TypeError, ValueError):
+            return False, "port must be a number"
+        if not 1 <= port <= 65535:
+            return False, "port must be 1-65535"
+        path = str(spec.get("path") or "/").strip()
+        if not path.startswith("/") or re.search(r"\s", path):
+            return False, "stream path must start with /"
+        name = _display_name(spec.get("name") or "") or f"Camera {host}"
+        user = str(spec.get("username") or "")
+        password = str(spec.get("password") or "")
+        auth = ""
+        if user:
+            auth = quote(user, safe="") + (":" + quote(password, safe="") if password else "") + "@"
+        source = f"rtsp://{auth}{host}:{port}{path}"
+        profile = {
+            "source": source,
+            "display": name,
+            "enabled": True,
+            "active_zones": [],
+            "entry_lines": [],
+            "entry_direction": "outside_to_inside",
+            "min_contour_area": 2000,
+            "motion_cooldown": 30.0,
+            "recording_enabled": True,
+            "night_bug_filter_enabled": bool(self.settings.get("night_bug_filter_enabled", True)),
+            "night_bug_start_hour": int(self.settings.get("night_bug_start_hour", 20)),
+            "night_bug_end_hour": int(self.settings.get("night_bug_end_hour", 6)),
+        }
+        with self._lock:
+            self._camera_profiles()[source] = profile
+            self.settings["camera_profiles"] = self._camera_profiles()
+            self.settings_manager.save_settings(force=True)
+            pipeline = self._make_pipeline(source, profile)
+            self.cameras[pipeline.host] = pipeline
+        pipeline.start()
+        app_logger.log("info", "camera_added", camera_ip=host, camera_display=name,
+                       component="engine", action="add_camera")
+        return True, pipeline.host
+
+    def remove_camera(self, key: str) -> Tuple[bool, str]:
+        with self._lock:
+            pipeline = self.cameras.pop(key, None)
+            if pipeline is None:
+                return False, "unknown camera"
+            self._camera_profiles().pop(pipeline.camera_id, None)
+            self.settings_manager.save_settings(force=True)
+        pipeline.stop(timeout=3)
+        app_logger.log("info", "camera_removed", camera_ip=key, camera_display=pipeline.display_name,
+                       component="engine", action="remove_camera")
+        return True, "removed"
+
+    # ---------------------------------------------------- general settings
+    def settings_view(self) -> Dict[str, Any]:
+        """Editable settings for the web page (secrets reported only as set/unset)."""
+        values = {key: admin.get_setting(self.settings, key) for key in admin.SETTINGS_SCHEMA}
+        values["telegram_chat_ids"] = admin._chat_ids(
+            self.settings.get("telegram_chat_ids") or self.settings.get("telegram_chat_id") or ""
+        )
+        return {
+            "values": values,
+            "secrets": {key: bool(self.settings.get(key)) for key in admin.WRITE_ONLY_SETTINGS},
+            "voices": admin.available_voices(),
+        }
+
+    def update_settings(self, changes: Dict[str, Any]) -> Tuple[bool, str]:
+        cleaned: Dict[str, Any] = {}
+        for key, value in changes.items():
+            validator = admin.SETTINGS_SCHEMA.get(key) or admin.WRITE_ONLY_SETTINGS.get(key)
+            if validator is None:
+                return False, f"not editable: {key}"
+            try:
+                cleaned[key] = validator(value)
+            except (TypeError, ValueError) as e:
+                return False, f"{key}: {e}"
+        with self._lock:
+            for key, value in cleaned.items():
+                admin.set_setting(self.settings, key, value)
+            if "telegram_chat_ids" in cleaned:
+                self.settings["telegram_chat_id"] = ""  # legacy single-id field
+            self._apply_settings_side_effects(cleaned)
+            self.settings_manager.save_settings(force=True)
+        app_logger.log("info", "settings_updated", fields=sorted(cleaned), component="engine",
+                       action="update_settings")
+        return True, "saved"
+
+    def _apply_settings_side_effects(self, cleaned: Dict[str, Any]) -> None:
+        telegram_keys = {k: v for k, v in cleaned.items() if k.startswith("telegram_")}
+        if telegram_keys:
+            update = dict(telegram_keys)
+            if "telegram_chat_ids" in update:
+                update["telegram_chat_id"] = ""
+            self.telegram.update_settings(update)
+        if {"night_bug_start_hour", "night_bug_end_hour"} & cleaned.keys():
+            self._set_all_profiles({
+                "night_bug_start_hour": int(self.settings.get("night_bug_start_hour", 20)),
+                "night_bug_end_hour": int(self.settings.get("night_bug_end_hour", 6)),
+            })
+        if {"volume", "speech_speed", "voice_id"} & cleaned.keys():
+            if self.audio is None:
+                self.audio = self._init_audio()
+            else:
+                self.audio.update_settings(self.settings)
+
+    def send_telegram_test(self) -> Tuple[bool, str]:
+        if not self.telegram.enabled:
+            return False, "Telegram is turned off"
+        if not self.telegram.is_configured():
+            return False, "add a bot token and at least one chat id first"
+        if self.telegram.send_test_message():
+            return True, "test message sent"
+        return False, "Telegram did not accept the message (check the token and chat ids)"
+
+    def system_status(self) -> Dict[str, Any]:
+        cams = [
+            {
+                "key": c["key"],
+                "name": c["name"],
+                "enabled": c["enabled"],
+                "online": c["online"],
+                "recording": c["recording"],
+                "last_frame_age": c["last_frame_age"],
+            }
+            for c in self.camera_configs()
+        ]
+        return {
+            "uptime_seconds": int(time.time() - self.started_at),
+            "cpu_percent": self._cpu.percent(),
+            "disk": admin.disk_status(),
+            "recordings": self.recording_store.stats(),
+            "cameras": cams,
+            "telegram": {"enabled": self.telegram.enabled, "configured": self.telegram.is_configured()},
+            "remote": admin.remote_access_info(self.settings),
+            "events": admin.recent_events(),
+        }

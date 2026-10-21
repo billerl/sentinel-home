@@ -428,6 +428,123 @@ class WebServer:
             )
             return jsonify({"ok": True})
 
+        def _config_guard():
+            """Shared checks for config writes; returns an error response or None."""
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            if engine is None:
+                return jsonify({"error": "configuration unavailable"}), 503
+            if not _write_request_ok():
+                return jsonify({"error": "bad request"}), 400
+            return None
+
+        def _result(ok: bool, message: str):
+            return (jsonify({"ok": True, "message": message}) if ok
+                    else (jsonify({"error": message}), 400))
+
+        @app.route("/api/config/cameras", methods=["POST"])
+        def api_add_camera():
+            err = _config_guard()
+            if err:
+                return err
+            body = request.get_json(silent=True)
+            if not isinstance(body, dict):
+                return jsonify({"error": "expected a JSON object"}), 400
+            return _result(*engine.add_camera(body))
+
+        @app.route("/api/config/cameras/<key>/delete", methods=["POST"])
+        def api_remove_camera(key: str):
+            err = _config_guard()
+            if err:
+                return err
+            return _result(*engine.remove_camera(key))
+
+        @app.route("/api/config/cameras/<key>/reconnect", methods=["POST"])
+        def api_reconnect_camera(key: str):
+            err = _config_guard()
+            if err:
+                return err
+            return _result(*engine.reconnect_camera(key))
+
+        @app.route("/settings")
+        def settings_page():
+            redir = _require_session()
+            if redir:
+                return redir
+            return render_template("settings.html")
+
+        @app.route("/help")
+        def help_page():
+            return redirect(url_for("settings_page") + "#help")
+
+        @app.route("/api/settings", methods=["GET", "POST"])
+        def api_settings():
+            if request.method == "GET":
+                redir = _require_session()
+                if redir:
+                    return jsonify({"error": "unauthorized"}), 401
+                if engine is None:
+                    return jsonify({"error": "configuration unavailable"}), 503
+                view = engine.settings_view()
+                view["web_username"] = str(self._auth_cfg().get("username", ""))
+                return jsonify(view)
+            err = _config_guard()
+            if err:
+                return err
+            body = request.get_json(silent=True)
+            if not isinstance(body, dict):
+                return jsonify({"error": "expected a JSON object"}), 400
+            return _result(*engine.update_settings(body))
+
+        @app.route("/api/settings/telegram-test", methods=["POST"])
+        def api_telegram_test():
+            err = _config_guard()
+            if err:
+                return err
+            return _result(*engine.send_telegram_test())
+
+        @app.route("/api/settings/password", methods=["POST"])
+        def api_change_password():
+            err = _config_guard()
+            if err:
+                return err
+            ip = _client_ip(request.remote_addr or "", request.headers)
+            locked, retry_after = auth.is_locked(ip)
+            if locked:
+                return jsonify({"error": f"too many attempts; try again in {int(retry_after) + 1}s"}), 429
+            body = request.get_json(silent=True) or {}
+            current = str(body.get("current", ""))
+            new = str(body.get("new", ""))
+            username = str(self._auth_cfg().get("username", ""))
+            if not auth.verify_password(username, current):
+                auth.record_failure(ip)
+                app_logger.log("warning", "web_password_change_failed", ip=ip,
+                               component="web_server", action="change_password")
+                return jsonify({"error": "current password is wrong"}), 400
+            if len(new) < 10:
+                return jsonify({"error": "new password must be at least 10 characters"}), 400
+            import bcrypt
+
+            new_hash = bcrypt.hashpw(new.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("ascii")
+            web = dict(self._web_cfg())
+            web["auth"] = {**self._auth_cfg(), "password_hash": new_hash}
+            self._settings.settings["web"] = web
+            self._settings.save_settings(force=True)
+            auth.reload_config(web["auth"])
+            app_logger.log("info", "web_password_changed", ip=ip,
+                           component="web_server", action="change_password")
+            return jsonify({"ok": True, "message": "password changed"})
+
+        @app.route("/api/status")
+        def api_status():
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            if engine is None:
+                return jsonify({"error": "status unavailable"}), 503
+            return jsonify(engine.system_status())
+
         @app.route("/api/config/cameras/<key>/snapshot.jpg")
         def api_camera_snapshot(key: str):
             """Clean frame (no overlays) for drawing zones on."""
@@ -442,6 +559,9 @@ class WebServer:
                 return "Encode error", 500
             resp = Response(buf.tobytes(), mimetype="image/jpeg")
             resp.headers["Cache-Control"] = "no-store"
+            if request.args.get("download"):
+                name = f"{key}_{time.strftime('%Y%m%d_%H%M%S')}.jpg".replace(":", "-")
+                resp.headers["Content-Disposition"] = f'attachment; filename="{name}"'
             return resp
 
         @app.route("/api/recordings")
@@ -499,6 +619,7 @@ class WebServer:
                             "s": round(c["start_ts"] - day_start, 1),
                             "e": round(c["end_ts"] - day_start, 1),
                             "reason": c["reason"],
+                            "hd": bool(c.get("hd_path")),
                         }
                         for c in clips
                     ],

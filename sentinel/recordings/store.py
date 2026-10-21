@@ -94,6 +94,10 @@ class RecordingStore:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_recordings_start ON recordings(start_ts)"
             )
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(recordings)")}
+            if "hd_path" not in columns:
+                # High-res MP4 from the main stream (see hd_recorder.py), when available.
+                conn.execute("ALTER TABLE recordings ADD COLUMN hd_path TEXT")
 
     def _abs(self, rel_path: str) -> str:
         return os.path.join(self.root, rel_path)
@@ -141,12 +145,33 @@ class RecordingStore:
             )
             return cur.lastrowid
 
+    def attach_hd(self, recording_id: int, hd_path: str) -> None:
+        """Record the high-res MP4 that goes with a clip."""
+        try:
+            size = os.path.getsize(hd_path)
+        except OSError:
+            size = 0
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE recordings SET hd_path = ?, size_bytes = size_bytes + ? WHERE id = ?",
+                (self._rel(hd_path), size, recording_id),
+            )
+
+    def hd_absolute_path(self, record: Dict[str, Any]) -> Optional[str]:
+        rel = record.get("hd_path")
+        if not rel:
+            return None
+        path = self._abs(rel)
+        if not self._inside_root(path) or not os.path.isfile(path):
+            return None
+        return path
+
     def query(self, start_ts: float, end_ts: float) -> List[Dict[str, Any]]:
         """Clips that start within [start_ts, end_ts), oldest first."""
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, path, camera_key, camera_name, start_ts, end_ts, reason
+                SELECT id, path, camera_key, camera_name, start_ts, end_ts, reason, hd_path
                 FROM recordings WHERE start_ts >= ? AND start_ts < ?
                 ORDER BY start_ts
                 """,
@@ -167,6 +192,24 @@ class RecordingStore:
         if not self._inside_root(path) or not os.path.isfile(path):
             return None
         return path
+
+    def stats(self) -> Dict[str, Any]:
+        """Totals for the status page: clip count, size, today's clips, oldest clip."""
+        day_start, day_end = local_day_bounds(time.strftime("%Y-%m-%d"))
+        with self._connect() as conn:
+            total, size, oldest = conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(size_bytes), 0), MIN(start_ts) FROM recordings"
+            ).fetchone()
+            today = conn.execute(
+                "SELECT COUNT(*) FROM recordings WHERE start_ts >= ? AND start_ts < ?",
+                (day_start, day_end),
+            ).fetchone()[0]
+        return {
+            "clips": total,
+            "size_gb": round(size / 1e9, 2),
+            "today": today,
+            "oldest": time.strftime("%Y-%m-%d", time.localtime(oldest)) if oldest else None,
+        }
 
     # --------------------------------------------------------- legacy backfill
     def backfill_legacy(self) -> int:
@@ -226,6 +269,8 @@ class RecordingStore:
         deleted, freed = 0, 0
         for record in records:
             freed += self._delete_file(self._abs(record["path"]))
+            if record["hd_path"]:
+                freed += self._delete_file(self._abs(record["hd_path"]))
             self._delete_file(os.path.join(self.cache_dir, f"{record['id']}.mp4"))
             deleted += 1
         with self._lock, self._connect() as conn:
@@ -277,7 +322,7 @@ class RecordingStore:
             cutoff = time.time() - float(retention_days) * 86400
             with self._connect() as conn:
                 old = conn.execute(
-                    "SELECT id, path FROM recordings WHERE start_ts < ?", (cutoff,)
+                    "SELECT id, path, hd_path FROM recordings WHERE start_ts < ?", (cutoff,)
                 ).fetchall()
             d, f = self._delete_records(old)
             deleted, freed = deleted + d, freed + f
@@ -301,7 +346,7 @@ class RecordingStore:
             while free_percent_fn() < min_free_percent:
                 with self._connect() as conn:
                     oldest = conn.execute(
-                        "SELECT id, path FROM recordings WHERE start_ts < ? "
+                        "SELECT id, path, hd_path FROM recordings WHERE start_ts < ? "
                         "ORDER BY start_ts LIMIT 200",
                         (keep_after,),
                     ).fetchall()
@@ -367,6 +412,9 @@ class RecordingStore:
         record = self.get(recording_id)
         if not record:
             return None
+        hd = self.hd_absolute_path(record)
+        if hd:
+            return hd  # already H.264 MP4: browsers play it as-is
         source = self.absolute_path(record)
         if not source:
             return None

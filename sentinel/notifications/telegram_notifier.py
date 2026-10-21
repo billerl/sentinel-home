@@ -31,6 +31,7 @@ class TelegramNotifier:
         self._pending_clip_chat_ids: List[str] = []
         self._pending_remote_commands: List[Tuple[str, Dict[str, bool]]] = []
         self._pending_detailed_status_chat_ids: List[str] = []
+        self._pending_access_chat_ids: List[str] = []
         self.update_settings(settings)
 
     @staticmethod
@@ -41,7 +42,8 @@ class TelegramNotifier:
             "- Pause <minutes> — pause Telegram alerts for this chat\n"
             "- Resume — unpause\n\n"
             "Information:\n"
-            "- Status — pause state + recording / Telegram options summary\n"
+            "- Status — cameras, recording and Telegram options summary\n"
+            "- Access — how to reach Sentinel remotely (web link, Tailscale, Remote Desktop)\n"
             "- Help — this message\n\n"
             "Clip:\n"
             "- Clip — record ~10s per connected camera and upload\n\n"
@@ -288,6 +290,24 @@ class TelegramNotifier:
         self._pending_remote_commands = []
         return pending
 
+    # Phrases that ask "how do I get to Sentinel from elsewhere?"
+    _ACCESS_PHRASES = {
+        "access", "remote", "remote access", "connect", "how do i connect",
+        "web", "website", "link", "url", "tailscale", "remote desktop", "rdp",
+    }
+
+    @classmethod
+    def _is_access_request(cls, text: str) -> bool:
+        normalized = re.sub(r"[^a-z ]+", "", text.lower()).strip()
+        normalized = re.sub(r"\s+", " ", normalized)
+        return normalized in cls._ACCESS_PHRASES
+
+    def consume_access_requests(self) -> List[str]:
+        """Return and clear chat IDs that asked how to access Sentinel remotely."""
+        chats = list(dict.fromkeys(self._pending_access_chat_ids))
+        self._pending_access_chat_ids = []
+        return chats
+
     def consume_detailed_status_requests(self) -> List[str]:
         """Return and clear chat IDs waiting for a full Status reply."""
         chats = list(dict.fromkeys(self._pending_detailed_status_chat_ids))
@@ -360,6 +380,10 @@ class TelegramNotifier:
 
             if re.match(r"^status$", text, flags=re.IGNORECASE):
                 self._pending_detailed_status_chat_ids.append(chat_id)
+                continue
+
+            if self._is_access_request(text):
+                self._pending_access_chat_ids.append(chat_id)
                 continue
 
             if re.match(r"^help$", text, flags=re.IGNORECASE):
