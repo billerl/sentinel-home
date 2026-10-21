@@ -129,6 +129,16 @@ class TestEventStore(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.dir, ignore_errors=True)
 
+    def test_none_zone_sentences_are_repaired(self):
+        now = time.time()
+        for text in ("🚶 Someone is in the None (Garage).", "🚗 A car pulled into the None (Garage).",
+                     "🚶 2 people are walking past the None (Garage).", "🚶 Someone is in the Driveway (Garage)."):
+            self.store.add_event(now, "k", "Garage", "person", text)
+        repaired = RecordingStore(self.dir)  # repair runs when the store opens
+        self.assertEqual([e["description"] for e in repaired.events(0, now + 1)],
+                         ["🚶 Someone is at the Garage.", "🚗 A car pulled in at the Garage.",
+                          "🚶 2 people are walking past the Garage.", "🚶 Someone is in the Driveway (Garage)."])
+
     def test_add_query_and_retention(self):
         now = time.time()
         old = self.store.add_event(now - 40 * 86400, "192.168.0.10", "Front Door", "person", "🚶 old", snapshot_jpeg=b"jpeg")

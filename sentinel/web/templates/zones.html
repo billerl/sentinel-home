@@ -437,8 +437,8 @@
     function finishZone() {
       if (tool !== "zone" || drawing.length < 3) return;
       draft.active_zones.push(drawing);
-      draft.zone_names.length = draft.active_zones.length - 1;
-      draft.zone_names.push("");
+      // One name per zone; pad with "" (setting .length would leave holes that JSON sends as null).
+      draft.zone_names = draft.active_zones.map(function(_, i) { return draft.zone_names[i] || ""; });
       selected = { kind: "zone", index: draft.active_zones.length - 1 };
       markDirty();
       cancelDraw();

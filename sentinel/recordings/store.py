@@ -120,6 +120,11 @@ class RecordingStore:
                 """
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts)")
+            # Undo the "None" zone-name bug in stored sentences ("in the None (Garage)" -> "at the Garage").
+            for wrong, right in ((" in the None (", " at the "), (" into the None (", " in at the "),
+                                 (" leaving the None (", " leaving at the "), (" the None (", " the ")):
+                conn.execute("UPDATE events SET description = replace(replace(description, ?, ?), ').', '.') "
+                             "WHERE description LIKE ?", (wrong, right, f"%{wrong}%"))
 
     def _abs(self, rel_path: str) -> str:
         return os.path.join(self.root, rel_path)

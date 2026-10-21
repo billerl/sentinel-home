@@ -177,6 +177,15 @@ class TestEngineConfig(unittest.TestCase):
         self.assertEqual(int(published[1].sum()), 0)     # hidden
         self.assertEqual(len(pipeline.detector.active_zones), 1)  # still enforced
 
+    def test_unnamed_zones_never_become_none(self):
+        from sentinel.engine.engine import _clean_zone_names, _repair_zone_names
+
+        self.assertEqual(_clean_zone_names([None, " Driveway ", 5]), ["", "Driveway", ""])
+        profiles = {"a": {"zone_names": ["None", "Porch"]}, "b": {"zone_names": ["Yard"]}}
+        self.assertTrue(_repair_zone_names(profiles))
+        self.assertEqual(profiles["a"]["zone_names"], ["", "Porch"])
+        self.assertFalse(_repair_zone_names(profiles))
+
     def test_feature_toggle_updates_profiles(self):
         replies = []
         self.engine.telegram.reply_to_chat = lambda chat, msg: replies.append(msg)

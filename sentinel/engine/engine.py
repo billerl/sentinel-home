@@ -54,7 +54,18 @@ def _clean_lines(value: Any) -> List[List[List[float]]]:
 
 def _clean_zone_names(value: Any) -> List[str]:
     names = value if isinstance(value, list) else []
-    return [re.sub(r"\s+", " ", str(n)).strip()[:30] for n in names][:16]
+    return [re.sub(r"\s+", " ", n).strip()[:30] if isinstance(n, str) else "" for n in names][:16]
+
+
+def _repair_zone_names(profiles: Dict[str, Dict[str, Any]]) -> bool:
+    """An older zone editor saved unnamed zones as the text "None"; blank them. True if changed."""
+    changed = False
+    for profile in profiles.values():
+        names = profile.get("zone_names")
+        if isinstance(names, list) and "None" in names:
+            profile["zone_names"] = ["" if n == "None" else n for n in names]
+            changed = True
+    return changed
 
 
 def _display_name(value: Any) -> Optional[str]:
@@ -217,6 +228,8 @@ class Engine:
         return self.detection_worker is not None and self.settings.get("alert_mode", "objects") == "objects"
 
     def _build_cameras(self) -> None:
+        if _repair_zone_names(self._camera_profiles()):
+            self.settings_manager.save_settings(force=True)
         for camera_id, profile in self._camera_profiles().items():
             pipeline = self._make_pipeline(camera_id, profile)
             self.cameras[pipeline.host] = pipeline
