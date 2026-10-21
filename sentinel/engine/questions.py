@@ -240,3 +240,127 @@ def answer_question(q: Question, events: List[Dict], last_before: Optional[Dict]
         lines.append(f'For the clips, reply "{hint}".')
     photos = [headline(v) for v in reversed(shown) if headline(v).get("snapshot")][:3]
     return "\n".join(lines), photos
+
+
+# ------------------------------------------------------------ household cars
+@dataclass
+class HouseholdQuestion:
+    kind: str  # "arrived", "left", "present", "list"
+    vehicle_ids: List[int] = field(default_factory=list)
+
+
+_LIST_PATTERNS = (
+    r"\b(what|which)\s+(cars?|vehicles?|trucks?)\b.*\b(driveway|home|here|parked|outside|in)\b",
+    r"\bwho'?s\s+(home|here)\b",
+    r"\bwho\s+is\s+(home|here)\b",
+    r"\b(is\s+)?any(one|body)\s+home\b",
+    r"\b(cars?|vehicles?)\s+(are\s+)?(in\s+the\s+driveway|at\s+home|here)\b",
+)
+_ARRIVED = r"\b(get|got|gets|come|came|arrive|arrived|pull|pulled|make it|made it)\b.*\b(home|back|here|in)\b|\barriv\w*\b"
+_LEFT = r"\b(leave|left|leaves|go|went|head(?:ed)? out|take off|took off|drive off|drove off|gone)\b"
+
+
+def mentioned_vehicles(text: str, vehicles: Iterable) -> List[int]:
+    t = " " + re.sub(r"[^a-z0-9' ]+", " ", text.lower()) + " "
+    out = []
+    for v in vehicles:
+        if any(re.search(rf"(?<![a-z']){re.escape(w)}(?![a-z])", t) for w in v.words()):
+            out.append(v.id)
+    return out
+
+
+def household_question(text: str, vehicles: Iterable) -> Optional[HouseholdQuestion]:
+    """Questions about the family's cars, or None. Checked before the visitor questions."""
+    t = text.strip().lower()
+    if re.match(r"^(videos?|recordings?|footage|status|help|clip|pause|resume|enable|disable)\b", t):
+        return None
+    vehicles = list(vehicles)
+    ids = mentioned_vehicles(t, vehicles)
+    if not ids:
+        return HouseholdQuestion("list") if any(re.search(p, t) for p in _LIST_PATTERNS) else None
+    if re.search(r"\bwhen\b|\bwhat time\b|\bhow long ago\b", t) or re.search(r"\bdid\b", t):
+        if re.search(_LEFT, t):
+            return HouseholdQuestion("left", ids)
+        if re.search(_ARRIVED, t):
+            return HouseholdQuestion("arrived", ids)
+    if re.search(r"\b(is|are|where|still)\b", t) or re.search(r"\b(home|here|back|around|gone|out|away)\b", t):
+        return HouseholdQuestion("present", ids)
+    return None
+
+
+@dataclass
+class VehicleStatus:
+    name: str  # "Abigail's Fusion"
+    here: bool
+    camera: Optional[str] = None  # where it's parked
+    here_since: Optional[float] = None  # first seen in this parking (None if before tracking began)
+    last_arrival: Optional[float] = None
+    last_departure: Optional[float] = None
+
+
+def _cap(name: str) -> str:
+    return name[:1].upper() + name[1:]
+
+
+def answer_household(q: HouseholdQuestion, statuses: Dict[int, VehicleStatus], unknown_here: List[str],
+                     now: Optional[float] = None, page_url: str = "") -> str:
+    """Reply for a household question. ``statuses`` covers every known vehicle."""
+    now = time.time() if now is None else now
+    if not statuses:
+        where = f" ({page_url}/vehicles)" if page_url else ""
+        text = f"I don't know your cars yet. Name them on the Vehicles page{where} and I'll keep track of who's home."
+        if q.kind == "list" and unknown_here:
+            text += f"\nRight now I can see {len(unknown_here)} parked {'car' if len(unknown_here) == 1 else 'cars'}."
+        return text
+
+    if q.kind == "list":
+        here = [s for s in statuses.values() if s.here]
+        away = [s for s in statuses.values() if not s.here]
+        lines = []
+        if here:
+            lines.append("Home now: " + ", ".join(
+                _cap(s.name) + (f" (since {_fmt_when(s.here_since, now)})" if s.here_since else "") for s in here) + ".")
+        else:
+            lines.append("None of your cars are here right now.")
+        if away:
+            lines.append("Away: " + ", ".join(
+                s.name + (f" (left {_fmt_when(s.last_departure, now)})" if s.last_departure else "") for s in away) + ".")
+        if unknown_here:
+            n = len(unknown_here)
+            lines.append(f"Also {n} {'car' if n == 1 else 'cars'} I don't recognise ({', '.join(sorted(set(unknown_here)))}).")
+        return "\n".join(lines)
+
+    lines = []
+    for vid in q.vehicle_ids:
+        s = statuses.get(vid)
+        if s is None:
+            continue
+        name = _cap(s.name)
+        arr, dep = s.last_arrival, s.last_departure
+        if q.kind == "arrived":
+            if arr:
+                text = f"{name} got home {_fmt_when(arr, now)}"
+                if dep and dep > arr:
+                    text += f", then left again {_fmt_when(dep, now)}."
+                else:
+                    text += " and is still here." if s.here else "."
+            elif s.here:
+                text = f"{name} is here, but it was already parked when I started keeping track, so I don't know when it got home."
+            else:
+                text = f"I haven't seen {s.name} get home yet" + (f" (it left {_fmt_when(dep, now)})." if dep else ".")
+        elif q.kind == "left":
+            if dep:
+                text = f"{name} left {_fmt_when(dep, now)}"
+                text += f" and got back {_fmt_when(arr, now)}." if arr and arr > dep else "."
+            elif s.here:
+                text = f"{name} hasn't left — it's here" + (f" ({s.camera})." if s.camera else ".")
+            else:
+                text = f"I haven't seen {s.name} leave since I started keeping track."
+        else:  # present
+            if s.here:
+                text = f"Yes — {s.name} is here" + (f" ({s.camera})" if s.camera else "")
+                text += f", since {_fmt_when(s.here_since, now)}." if s.here_since else "."
+            else:
+                text = f"No — {s.name} isn't here" + (f"; it left {_fmt_when(dep, now)}." if dep else ".")
+        lines.append(text)
+    return "\n".join(lines) or "I don't know that car."

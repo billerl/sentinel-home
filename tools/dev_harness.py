@@ -29,6 +29,12 @@ live_db = os.path.join(REPO, "recorded_videos", "recordings.db")
 if os.path.exists(live_db):  # timeline/events data to look at (clips themselves won't play)
     src = sqlite3.connect(f"file:{live_db}?mode=ro", uri=True)
     src.backup(sqlite3.connect(os.path.join(WORK, "recorded_videos", "recordings.db")))
+live_household = os.path.join(REPO, "recorded_videos", "household.db")
+if os.path.exists(live_household):  # vehicles + photos for the Vehicles page
+    src = sqlite3.connect(f"file:{live_household}?mode=ro", uri=True)
+    src.backup(sqlite3.connect(os.path.join(WORK, "recorded_videos", "household.db")))
+    shutil.copytree(os.path.join(REPO, "recorded_videos", ".household"), os.path.join(WORK, "recorded_videos", ".household"),
+                    ignore=shutil.ignore_patterns("presence.json*"))
 os.chdir(WORK)
 
 from sentinel.web import auth as auth_mod  # noqa: E402

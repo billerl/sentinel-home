@@ -413,9 +413,17 @@ class CameraPipeline:
 
     def _check_vehicle_type(self, classifier, track, view=None) -> bool:
         """Classify the track's closest view (HD if given); True if it just turned out to be a delivery."""
+        from sentinel.detection.vehicle_type import crop_for_clip, is_greyscale
+
         frame, box = view if view is not None else (track.big_frame, track.big_box)
         try:
-            vt = classifier.classify(frame, box)
+            embedding = classifier.embed(crop_for_clip(frame, box))
+            vt = classifier.classify(frame, box, embedding)
+            household = getattr(self._detections, "household", None)
+            if household is not None and track.known_vehicle is None and not (vt and vt.delivery):
+                vehicle_id, _ = household.identify(embedding, is_greyscale(frame))
+                if vehicle_id is not None:
+                    track.known_vehicle = household.vehicle(vehicle_id)
         except Exception as e:  # never let the classifier break detection
             app_logger.log("error", "vehicle_classifier_failed", error_message=str(e),
                            camera_display=self.display_name, component="camera", action="classify")

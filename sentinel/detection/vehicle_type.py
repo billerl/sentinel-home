@@ -90,8 +90,11 @@ def crop_for_clip(frame: np.ndarray, box: Tuple[int, int, int, int], pad: float 
 
 
 def is_greyscale(frame: np.ndarray) -> bool:
-    small = cv2.resize(frame, (64, 36), interpolation=cv2.INTER_AREA)
-    return float(cv2.cvtColor(small, cv2.COLOR_BGR2HSV)[..., 1].mean()) < 12.0
+    """True for infrared (night) pictures. Per-pixel spread between the colour channels
+    is ~3 in IR frames from these cameras (JPEG noise only), 5-13 at dawn and 20+ in
+    daylight; average saturation was too noisy to tell them apart."""
+    small = cv2.resize(frame, (64, 36), interpolation=cv2.INTER_AREA).astype(np.int16)
+    return float((small.max(2) - small.min(2)).mean()) < 8.0
 
 
 class VehicleClassifier:
@@ -132,8 +135,11 @@ class VehicleClassifier:
             vec = self._request.get_output_tensor(0).data[0].copy()
         return vec / (np.linalg.norm(vec) + 1e-8)
 
-    def probabilities(self, frame: np.ndarray, box: Tuple[int, int, int, int]) -> Dict[str, float]:
-        logits = self._scale * (self._text @ self.embed(crop_for_clip(frame, box)))
+    def probabilities(self, frame: np.ndarray, box: Tuple[int, int, int, int],
+                      embedding: Optional[np.ndarray] = None) -> Dict[str, float]:
+        if embedding is None:
+            embedding = self.embed(crop_for_clip(frame, box))
+        logits = self._scale * (self._text @ embedding)
         exp = np.exp(logits - logits.max())
         probs = exp / exp.sum()
         out = dict.fromkeys(VEHICLE_TYPES, 0.0)
@@ -141,11 +147,12 @@ class VehicleClassifier:
             out[key] += float(p)
         return out
 
-    def classify(self, frame: np.ndarray, box: Tuple[int, int, int, int]) -> Optional[VehicleType]:
+    def classify(self, frame: np.ndarray, box: Tuple[int, int, int, int],
+                 embedding: Optional[np.ndarray] = None) -> Optional[VehicleType]:
         """Best vehicle type for the box, or None when unavailable or unsure."""
         if not self.available:
             return None
-        probs = self.probabilities(frame, box)
+        probs = self.probabilities(frame, box, embedding)
         ranked = sorted(probs.items(), key=lambda kv: -kv[1])
         key, prob = ranked[0]
         phrase, delivery, _ = VEHICLE_TYPES[key]

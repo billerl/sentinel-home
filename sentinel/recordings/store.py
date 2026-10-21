@@ -172,6 +172,13 @@ class RecordingStore:
             row = conn.execute(sql + " ORDER BY ts DESC LIMIT 1", args).fetchone()
         return dict(row) if row else None
 
+    def last_household_event(self, vehicle_id: int, kind: str) -> Optional[Dict[str, Any]]:
+        """Latest 'arrived'/'left' event for a household vehicle."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM events WHERE grp = 'household' AND vehicle_type = ? AND label = ? "
+                               "ORDER BY ts DESC LIMIT 1", (str(vehicle_id), kind)).fetchone()
+        return dict(row) if row else None
+
     def event_count(self) -> int:
         with self._connect() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0])

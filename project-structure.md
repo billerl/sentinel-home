@@ -25,8 +25,13 @@ sentinel-home/                         # repository root
     ├── logging_utils.py               # JSONL logger with credential redaction + rotation
     ├── engine/
     │   ├── engine.py                  # Engine: cameras, Telegram control/alerts, audio, web, config API
-    │   └── camera.py                  # CameraPipeline: one thread per camera (capture, motion,
-    │                                  #   recording, clip requests, reconnect with backoff)
+    │   ├── camera.py                  # CameraPipeline: one thread per camera (capture, motion,
+    │   │                              #   recording, clip requests, reconnect with backoff)
+    │   ├── objects.py                 # Detection worker, tracking, plain-English descriptions
+    │   ├── household.py               # Family cars: photo references, recognition, who's home
+    │   ├── questions.py               # Telegram questions ("did anyone come by?", "is Steph home?")
+    │   ├── queries.py                 # "videos <when>" parsing
+    │   └── admin.py                   # Settings schema, status, access message helpers
     ├── detection/
     │   ├── motion_detector.py         # Capture + MOG2 motion analysis, zones/lines, clip writing
     │   ├── objects.py                 # YOLOX object detector (OpenVINO)
@@ -41,7 +46,8 @@ sentinel-home/                         # repository root
     │   ├── frame_broker.py            # Latest frame per camera; opaque ids; lazy JPEG encoding
     │   ├── bind_util.py               # Refuse binding on camera-only subnets
     │   ├── set_password.py            # CLI: `python -m sentinel.web.set_password`
-    │   └── templates/                 # login.html, grid.html (live + timeline + player), zones.html
+    │   ├── static/                    # Icons + web app manifest
+    │   └── templates/                 # login, grid (live + timeline + player), zones, settings, vehicles
     ├── notifications/
     │   └── telegram_notifier.py       # HTTPS Bot API, commands, clips
     ├── audio/

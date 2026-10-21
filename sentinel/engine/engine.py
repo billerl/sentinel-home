@@ -91,6 +91,10 @@ class Engine:
         self._started = False
 
         self.recording_store = RecordingStore(VIDEO_DIR)
+        from sentinel.engine.household import HouseholdStore
+
+        self.household = HouseholdStore(VIDEO_DIR)
+        self.presence = None  # PresenceTracker, when object detection + CLIP are available
         self.telegram = TelegramNotifier(self.settings)
         self.audio = self._init_audio()
         self.frame_broker = None
@@ -181,7 +185,25 @@ class Engine:
                                component="engine", action="init_objects")
                 classifier = None
         self.detection_worker = DetectionWorker(detector, vehicle_classifier=classifier)
+        self.detection_worker.household = self.household
+        if classifier is not None:
+            coarse = {"car": "car", "suv": "suv", "pickup": "pickup", "minivan": "van", "van": "van"}
+
+            def _body(embedding):
+                probs = {k: p for k, p in classifier.probabilities(None, None, embedding).items() if k in coarse}
+                return coarse[max(probs, key=probs.get)]
+
+            self.household.body_of = _body
         self.detection_worker.start()
+        if classifier is not None and self.settings.get("household_tracking_enabled", True):
+            from sentinel.engine.household import PresenceTracker
+
+            self.presence = PresenceTracker(
+                self.household, detector, classifier,
+                cameras=lambda: [p for p in self.cameras.values() if p.connected],
+                on_change=self._on_household_change,
+                state_path=os.path.join(self.household.crops_dir, "presence.json"),
+            )
         app_logger.log("info", "object_detector_ready", model=os.path.basename(model), device=detector.device,
                        vehicle_types=classifier is not None,
                        classifier_device=classifier.device if classifier is not None else None,
@@ -216,6 +238,15 @@ class Engine:
         for pipeline in self.cameras.values():
             if pipeline.profile.get("enabled", True):
                 pipeline.start()
+        if self.presence is not None:
+            self.presence.start()
+
+        def _household_filter(text: str) -> bool:
+            from sentinel.engine.questions import household_question
+
+            return household_question(text, self.household.vehicles()) is not None
+
+        self.telegram.question_filter = _household_filter
         self._command_thread = threading.Thread(
             target=self._command_loop, name="telegram-commands", daemon=True
         )
@@ -233,6 +264,8 @@ class Engine:
             pipeline.stop()
         if self.detection_worker is not None:
             self.detection_worker.stop()
+        if self.presence is not None:
+            self.presence.stop()
         self.telegram.cleanup()
         self.recording_store.stop()
         if self.audio is not None:
@@ -265,6 +298,7 @@ class Engine:
         app_logger.log("info", "object_detected", camera_display=pipeline.display_name,
                        label=event.track.label, zone=event.zone_name, score=round(event.track.best_score, 2),
                        vehicle_type=vt.key if vt else None, type_prob=round(vt.prob, 2) if vt else None,
+                       known_vehicle=event.track.known_vehicle.name if event.track.known_vehicle else None,
                        description=event.description, component="engine", action="on_object")
         ok, encoded = cv2.imencode(".jpg", event.snapshot, [cv2.IMWRITE_JPEG_QUALITY, 85])
         jpeg = encoded.tobytes() if ok else None
@@ -290,6 +324,23 @@ class Engine:
             self.audio.trigger_alert(event.description.split(" ", 1)[1])  # drop the emoji
         if self.settings.get("telegram_motion_alerts", True) and jpeg:
             self.telegram.trigger_photo_alert(event.description, jpeg)
+
+    def _on_household_change(self, kind: str, pipeline, vehicle, ts: float, jpeg: Optional[bytes]) -> None:
+        """A family car parked ('arrived') or drove off ('left'); kept for "when did X get home?"."""
+        from sentinel.engine.household import sentence_case
+
+        if kind == "arrived":
+            text = f"🏠 {sentence_case(vehicle.name)} got home ({pipeline.display_name})."
+        else:
+            text = f"👋 {sentence_case(vehicle.name)} left ({pipeline.display_name})."
+        try:
+            self.recording_store.add_event(ts, pipeline.host, pipeline.display_name, "household", text,
+                                           label=kind, vehicle_type=str(vehicle.id), snapshot_jpeg=jpeg)
+        except Exception as e:
+            app_logger.log("error", "event_store_failed", error_message=str(e), component="engine",
+                           action="household")
+        app_logger.log("info", "household_" + kind, vehicle=vehicle.name, camera_display=pipeline.display_name,
+                       component="engine", action="presence")
 
     def _on_motion(self, pipeline: CameraPipeline) -> None:
         if self.objects_active():
@@ -356,6 +407,14 @@ class Engine:
         """Reply to 'did anyone come by?'-style questions from the event history."""
         from sentinel.engine.questions import _fmt_clock, answer_question, parse_question
 
+        from sentinel.engine.questions import household_question
+
+        hq = household_question(text, self.household.vehicles())
+        if hq is not None:
+            self.telegram.reply_to_chat(chat_id, self.answer_household_question(hq))
+            app_logger.log("info", "question_answered", kind="household_" + hq.kind, component="engine",
+                           action="answer_question")
+            return
         names = {p.display_name: key for key, p in self.cameras.items()}
         q = parse_question(text, names.keys())
         keys = [names[n] for n in q.cameras] or None
@@ -385,6 +444,97 @@ class Engine:
             self.telegram.send_photo(chat_id, jpeg, f"{_fmt_clock(event['ts'])} — {event['description']}")
         app_logger.log("info", "question_answered", period=q.period, groups=groups, cameras=q.cameras,
                        matches=len(events), component="engine", action="answer_question")
+
+    # ------------------------------------------------------ household vehicles (web)
+    VEHICLE_KINDS = ("car", "sedan", "suv", "pickup", "van", "minivan", "motorcycle")
+
+    def household_view(self) -> Dict[str, Any]:
+        store = self.household
+        refs: Dict[int, List[Dict[str, Any]]] = {}
+        for s in store.sightings(labelled=True, limit=5000):
+            refs.setdefault(s["vehicle_id"], []).append({"id": s["id"], "night": bool(s["night"])})
+        vehicles = []
+        for v in store.vehicles():
+            spot = self.presence.where_is(v.id) if self.presence is not None else None
+            vehicles.append({
+                "id": v.id, "name": v.name, "owner": v.owner, "aliases": v.aliases, "kind": v.kind,
+                "here": spot is not None,
+                "camera": self.cameras[spot[0]].display_name if spot and spot[0] in self.cameras else None,
+                "refs": refs.get(v.id, [])[:30], "ref_count": len(refs.get(v.id, [])),
+                "night_refs": sum(1 for r in refs.get(v.id, []) if r["night"]),
+            })
+        groups = [dict(g, count=len(g["ids"]), sample=g["ids"][:24]) for g in store.suggestion_groups()]
+        return {"tracking": self.presence is not None, "vehicles": vehicles, "groups": groups,
+                "kinds": list(self.VEHICLE_KINDS)}
+
+    def household_save(self, body: Dict[str, Any]) -> Tuple[bool, str]:
+        name = re.sub(r"\s+", " ", str(body.get("name") or "")).strip()
+        owner = re.sub(r"\s+", " ", str(body.get("owner") or "")).strip()
+        aliases = body.get("aliases") or []
+        if isinstance(aliases, str):
+            aliases = aliases.split(",")
+        aliases = [re.sub(r"\s+", " ", str(a)).strip() for a in aliases][:10]
+        kind = str(body.get("kind") or "car")
+        if not 1 <= len(name) <= 40 or not re.fullmatch(r"[\w '.\-]+", name):
+            return False, "give the vehicle a name (letters, numbers, spaces, ' . -; up to 40)"
+        if len(owner) > 30 or (owner and not re.fullmatch(r"[\w '.\-]+", owner)):
+            return False, "owner name: letters and spaces, up to 30"
+        if any(len(a) > 30 or not re.fullmatch(r"[\w '.\-]*", a) for a in aliases):
+            return False, "other names: letters and spaces, up to 30 each"
+        if kind not in self.VEHICLE_KINDS:
+            return False, "unknown vehicle kind"
+        vehicle_id = body.get("id")
+        if vehicle_id is not None:
+            if not isinstance(vehicle_id, int) or self.household.vehicle(vehicle_id) is None:
+                return False, "unknown vehicle"
+        new_id = self.household.save_vehicle(name, owner, [a for a in aliases if a], kind, vehicle_id)
+        app_logger.log("info", "household_vehicle_saved", vehicle=name, component="engine", action="household")
+        return True, str(new_id)
+
+    def household_delete(self, vehicle_id: int) -> Tuple[bool, str]:
+        if self.household.vehicle(vehicle_id) is None:
+            return False, "unknown vehicle"
+        self.household.delete_vehicle(vehicle_id)
+        if self.presence is not None:
+            self.presence.forget_identities()
+        return True, "deleted"
+
+    def household_assign(self, body: Dict[str, Any]) -> Tuple[bool, str]:
+        """Label photos: {"ids": [...], "vehicle": <id> | "ignore" | "none"}."""
+        ids = body.get("ids")
+        if not isinstance(ids, list) or not ids or len(ids) > 2000 or not all(isinstance(i, int) for i in ids):
+            return False, "pick some photos"
+        target = body.get("vehicle")
+        if target == "ignore":
+            n = self.household.assign(ids, None, ignore=True)
+        elif target == "none":
+            n = self.household.assign(ids, None)
+        elif isinstance(target, int) and self.household.vehicle(target) is not None:
+            n = self.household.assign(ids, target)
+        else:
+            return False, "pick a vehicle"
+        if self.presence is not None:
+            self.presence.forget_identities()
+        return True, f"{n} photos updated"
+
+    def answer_household_question(self, hq) -> str:
+        from sentinel.engine.questions import VehicleStatus, answer_household
+
+        if self.presence is None:
+            return "Keeping track of the family's cars needs object recognition, which is off right now."
+        store = self.recording_store
+        statuses = {}
+        for v in self.household.vehicles():
+            arr = store.last_household_event(v.id, "arrived")
+            dep = store.last_household_event(v.id, "left")
+            arr_ts, dep_ts = (arr or {}).get("ts"), (dep or {}).get("ts")
+            spot = self.presence.where_is(v.id)
+            camera = self.cameras[spot[0]].display_name if spot and spot[0] in self.cameras else None
+            since = arr_ts if spot and arr_ts and (not dep_ts or arr_ts > dep_ts) else None
+            statuses[v.id] = VehicleStatus(v.name, spot is not None, camera, since, arr_ts, dep_ts)
+        unknown = [self.cameras[key].display_name for key, cars in self.presence.present().items()
+                   for p in cars if p.vehicle_id is None and key in self.cameras]
+        return answer_household(hq, statuses, unknown, page_url=str(self.settings.get("remote_web_url") or ""))
 
     def backfill_events_from_log(self) -> int:
         """One-off: import sightings logged before the events table existed (no photos)."""

@@ -10,7 +10,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 TELEGRAM_MAX_UPLOAD_BYTES = 49 * 1024 * 1024  # Bot API upload limit is 50 MB
@@ -37,6 +37,8 @@ class TelegramNotifier:
         self._pending_access_chat_ids: List[str] = []
         self._pending_video_queries: List[Tuple[str, str]] = []
         self._pending_questions: List[Tuple[str, str]] = []
+        # Extra question check supplied by the engine (knows the family's car/owner names).
+        self.question_filter: Optional[Callable[[str], bool]] = None
         self.update_settings(settings)
 
     @staticmethod
@@ -464,7 +466,7 @@ class TelegramNotifier:
 
             from sentinel.engine.questions import QUESTION_HELP, is_question
 
-            if is_question(text):
+            if is_question(text) or (self.question_filter is not None and self.question_filter(text)):
                 self._pending_questions.append((chat_id, text))
                 continue
 

@@ -14,7 +14,7 @@ import queue
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -54,6 +54,7 @@ class Track:
     best_box: Optional[Tuple[int, int, int, int]] = None  # the box in best_frame
     votes: Dict[str, float] = field(default_factory=dict)
     vehicle_type: Optional["VehicleType"] = None  # set by the CLIP classifier, if any
+    known_vehicle: Optional[Any] = None  # a household vehicle (sentinel.engine.household.Vehicle), if recognised
     # Closest (largest) view so far, for the vehicle-type check.
     big_frame: Optional[np.ndarray] = None
     big_box: Optional[Tuple[int, int, int, int]] = None
@@ -147,9 +148,10 @@ def vehicle_color(frame: np.ndarray, box: Tuple[int, int, int, int]) -> Optional
     crop = frame[y + h // 4: y + 3 * h // 4, x + w // 4: x + 3 * w // 4]
     if crop.size == 0:
         return None
-    # IR night images are greyscale: almost no saturation anywhere in the frame.
-    small = cv2.resize(frame, (64, 36), interpolation=cv2.INTER_AREA)
-    if float(cv2.cvtColor(small, cv2.COLOR_BGR2HSV)[..., 1].mean()) < 12.0:
+    # IR night images are greyscale: no colour to name.
+    from sentinel.detection.vehicle_type import is_greyscale
+
+    if is_greyscale(frame):
         return None
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV).reshape(-1, 3)
     hue, sat, val = (float(np.median(hsv[:, i])) for i in range(3))
@@ -176,7 +178,7 @@ def vehicle_color(frame: np.ndarray, box: Tuple[int, int, int, int]) -> Optional
 _EMOJI = {"person": "🚶", "car": "🚗", "truck": "🚚", "bus": "🚌", "motorcycle": "🏍️", "bicycle": "🚲",
           "dog": "🐕", "cat": "🐈", "bird": "🐦", "horse": "🦌", "cow": "🦌", "sheep": "🦌", "bear": "🐻",
           "delivery": "📦", "pickup": "🛻", "suv": "🚙", "minivan": "🚐", "van": "🚐", "school_bus": "🚌",
-          "garbage": "🚛"}
+          "garbage": "🚛", "sedan": "🚗"}
 _VEHICLE_NOUN = {"car": "car", "truck": "truck", "bus": "bus", "motorcycle": "motorcycle", "bicycle": "bicycle"}
 
 
@@ -190,6 +192,8 @@ def vehicle_phrase(track: Track, frame: np.ndarray) -> Tuple[str, str]:
     vt = track.vehicle_type
     if vt is not None and vt.delivery:
         return _EMOJI["delivery"], vt.phrase  # brand colours speak for themselves
+    if track.known_vehicle is not None:  # one of the family's cars: "Luke's Sierra"
+        return _EMOJI.get(track.known_vehicle.kind, _EMOJI["car"]), track.known_vehicle.name
     emoji = _EMOJI.get(track.label, "👀")
     noun = _VEHICLE_NOUN.get(track.label, "vehicle")
     if vt is not None and (vt.key != "motorcycle" or track.label == "motorcycle") and track.label != "bicycle":
@@ -224,16 +228,19 @@ def describe(track: Track, camera_name: str, zone_name: Optional[str], frame: np
         if track.label == "bicycle":
             return f"{emoji} Someone on a bicycle is {at}."
         emoji, thing = vehicle_phrase(track, frame)
-        a = _article(thing)
+        if track.known_vehicle is not None and not (track.vehicle_type and track.vehicle_type.delivery):
+            subject = thing[:1].upper() + thing[1:]  # a name: "Luke's Sierra", "The blue Civic"
+        else:
+            subject = f"{_article(thing)} {thing}"
         if moving and abs(dy) >= abs(dx):
             # Moving toward the camera reads as arriving, away as leaving.
             if zone_name:
                 place = f"the {zone_name} ({camera_name})"
-                return f"{emoji} {a} {thing} {'pulled into' if dy > 0 else 'is leaving'} {place}."
-            return f"{emoji} {a} {thing} {'pulled in' if dy > 0 else 'is leaving'} at the {camera_name}."
+                return f"{emoji} {subject} {'pulled into' if dy > 0 else 'is leaving'} {place}."
+            return f"{emoji} {subject} {'pulled in' if dy > 0 else 'is leaving'} at the {camera_name}."
         if moving:
-            return f"{emoji} {a} {thing} is driving past {past}."
-        return f"{emoji} {a} {thing} is {at}."
+            return f"{emoji} {subject} is driving past {past}."
+        return f"{emoji} {subject} is {at}."
 
     if track.label in ("dog", "cat", "bird", "bear"):
         return f"{emoji} A {track.label} is {at}."
@@ -393,6 +400,7 @@ class DetectionWorker:
                  vehicle_classifier: Optional["VehicleClassifier"] = None) -> None:
         self.detector = detector
         self.vehicle_classifier = vehicle_classifier  # runs on this thread via the camera callbacks
+        self.household = None  # HouseholdStore: names the family's own cars (set by the engine)
         # Slow extras (HD frame grabs) run on their own thread so detection never waits.
         self._jobs: "queue.Queue[Callable[[], None]]" = queue.Queue(maxsize=2)
         self._job_thread = threading.Thread(target=self._run_jobs, name="object-extras", daemon=True)

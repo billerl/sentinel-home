@@ -96,8 +96,11 @@ class _FakeClassifier(VehicleClassifier):
         self.available = True
         self.probs = probs
 
-    def probabilities(self, frame, box):
+    def probabilities(self, frame, box, embedding=None):
         return dict(self.probs)
+
+    def embed(self, crop):
+        return np.zeros(512, dtype=np.float32)
 
 
 class TestThresholds(unittest.TestCase):
@@ -171,7 +174,7 @@ class TestPipelineAndAlerts(unittest.TestCase):
 
     def test_vehicle_alert_names_the_delivery(self):
         clf = _FakeClassifier({"amazon": 0.8, "van": 0.2})
-        clf.classify = lambda frame, box: _vt("amazon")
+        clf.classify = lambda frame, box, embedding=None: _vt("amazon")
         self._drive(clf, [(100, 100, 60, 40), (150, 100, 60, 40)])
         self.assertEqual(len(self.events), 1)
         self.assertTrue(self.events[0].description.startswith("📦 An Amazon van"))
@@ -180,7 +183,7 @@ class TestPipelineAndAlerts(unittest.TestCase):
     def test_delivery_found_when_closer_sends_a_second_event(self):
         answers = iter([None, _vt("ups")])
         clf = _FakeClassifier({})
-        clf.classify = lambda frame, box: next(answers)
+        clf.classify = lambda frame, box, embedding=None: next(answers)
         self._drive(clf, [(100, 100, 60, 40), (150, 100, 60, 40), (160, 90, 100, 70)])
         self.assertEqual([e.alert_group for e in self.events], ["vehicle", "delivery"])
         self.assertTrue(self.events[1].description.startswith("📦 A UPS truck"))
@@ -244,7 +247,7 @@ class TestHDView(TestPipelineAndAlerts):
     def _setup_hd(self, hd_box):
         self.seen = []
         clf = _FakeClassifier({})
-        clf.classify = lambda frame, box: (self.seen.append((frame.shape, box)), _vt("ups"))[1]
+        clf.classify = lambda frame, box, embedding=None: (self.seen.append((frame.shape, box)), _vt("ups"))[1]
         hd_frame = np.full((H * 4, W * 4, 3), 90, dtype=np.uint8)
         self.pipeline.hd = _FakeHD(hd_frame)
         self.pipeline._last_hd_grab = 0.0

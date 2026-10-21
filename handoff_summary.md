@@ -59,6 +59,15 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     and classifies the sharp crop; the alert photo becomes an HD close-up. Adds ~3 s to those alerts;
     at most one grab per camera per 2 s, and skipped when two jobs are already queued.
   - `web.show_zones` (live-page "Zones: on/off" button) only hides the drawn outlines.
+  - Household vehicles (`sentinel/engine/household.py`, page `/vehicles`, DB `recorded_videos/household.db`,
+    photos in `recorded_videos/.household/`): the user names groups of photos; those become per-car CLIP
+    references (separately for day and infrared). `PresenceTracker` checks every camera once a minute:
+    parked = same spot in 2 scans, left = missing 3 scans; identity sticks to the parking spot, unknown
+    cars are retried each scan and their arrival is recorded (time = first seen) once named. Arrivals and
+    departures go into the events table (grp `household`) and answer "when did X get home / leave",
+    "is X home", "what cars are in the driveway". Infrared detection (`is_greyscale`) uses per-pixel
+    channel spread (IR ≈ 3, day 20+). CLIP separates cars well by day, poorly at night — rely on spot
+    stickiness and naming at dawn rather than lowering thresholds.
   - Live page on phones (≤760 px wide, or a short touch screen in landscape): page scrolls, cameras stack
     (two across in landscape), and "Live / Events" tabs at the bottom; Events adds a tap-friendly clip
     list (newest first) under the timeline bars. Desktop layout is unchanged.

@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <meta name="theme-color" content="#001525">
+  <title>Sentinel — Vehicles</title>
+  <style>
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; }
+    a { color: #00ffff; }
+    header { position: sticky; top: 0; z-index: 10; background: #1a1a1a; border-bottom: 1px solid #033; }
+    .bar { display: flex; align-items: center; gap: 12px; padding: 0 1rem; height: 44px; }
+    .bar a { text-decoration: none; font-size: 0.85rem; }
+    h1 { font-size: 0.95rem; margin: 0; flex: 1; color: #00ffff; }
+    main { max-width: 900px; margin: 0 auto; padding: 12px 16px 60px; }
+    section { margin: 18px 0 28px; }
+    h2 { font-size: 1rem; color: #00ffff; margin: 0 0 10px; border-bottom: 1px solid #033; padding-bottom: 6px; }
+    .intro { font-size: 0.85rem; line-height: 1.6; color: #9cc; margin: 4px 0 0; }
+    .card { background: #0b0b0b; border: 1px solid #033; border-radius: 6px; padding: 12px 14px; margin-bottom: 12px; }
+    .card.suggest { border-color: #0a5555; }
+    .head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+    .head .name { font-weight: 600; color: #fff; font-size: 1rem; flex: 1; min-width: 10rem; }
+    .meta { font-size: 0.78rem; color: #6aa; margin-top: 4px; }
+    .pill { display: inline-block; font-size: 0.72rem; padding: 2px 9px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+    .pill.on { color: #6f6; border-color: #2a5; } .pill.off { color: #999; border-color: #444; }
+    .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 6px; margin-top: 10px; }
+    .thumb { position: relative; aspect-ratio: 1; border-radius: 4px; overflow: hidden; cursor: pointer;
+             border: 2px solid transparent; background: #111; padding: 0; }
+    .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .thumb .moon { position: absolute; top: 2px; left: 3px; font-size: 0.8rem; text-shadow: 0 0 3px #000; }
+    .thumb .tick { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; border-radius: 50%;
+                   background: #00ffff; color: #000; font-size: 12px; line-height: 18px; text-align: center; font-weight: 700; }
+    .thumb.on { border-color: #00ffff; }
+    .thumb.off img { opacity: 0.3; }
+    .thumb.off .tick { background: #333; color: #777; }
+    .thumb.remove { border-color: #ff5555; }
+    .thumb.remove img { opacity: 0.45; }
+    .row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; margin-top: 10px; }
+    .field { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; flex: 1 1 160px; min-width: 0; }
+    .field span { color: #9cc; }
+    input[type=text], select {
+      background: #111; color: #e6ffff; border: 1px solid #066; border-radius: 4px;
+      padding: 7px 8px; font: inherit; font-size: 0.9rem; width: 100%; color-scheme: dark;
+    }
+    button {
+      background: rgba(0,255,255,0.15); color: #00ffff; border: 1px solid #00ffff;
+      padding: 7px 12px; border-radius: 4px; cursor: pointer; font: inherit; font-size: 0.85rem;
+    }
+    button.primary { background: #00ffff; color: #000; font-weight: 600; }
+    button.danger { border-color: #ff5555; color: #ff6b6b; background: rgba(255,85,85,0.1); }
+    button.link { background: none; border: 0; padding: 0; text-decoration: underline; color: #6cc; font-size: 0.78rem; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    .msg { font-size: 0.8rem; min-height: 1.2em; }
+    .msg.ok { color: #6f6; } .msg.err { color: #ff6b6b; }
+    .hint { color: #6aa; font-size: 0.78rem; line-height: 1.5; margin: 6px 0 0; }
+    .empty { color: #6aa; font-size: 0.85rem; padding: 6px 0; }
+    .suggestion { color: #ffd479; font-size: 0.82rem; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <a href="{{ url_for('index') }}">← Live</a>
+      <h1>Vehicles</h1>
+      <a href="{{ url_for('settings_page') }}">Settings</a>
+    </div>
+  </header>
+
+  <main>
+    <p class="intro">Name your family's cars so alerts say <i>“🛻 Luke's Sierra pulled into the Driveway”</i> and you can
+      ask Telegram <i>“When did Abigail get home?”</i>, <i>“Is Steph home?”</i> or <i>“What cars are in the driveway?”</i>.
+      Sentinel learns each car from photos you confirm below — the more (day and night), the better.</p>
+    <p class="intro" id="tracking-off" hidden>⚠️ Object recognition is off, so cars aren't being tracked right now.</p>
+
+    <section>
+      <h2>Your vehicles</h2>
+      <div id="vehicles"><div class="empty">Loading…</div></div>
+      <details class="card" id="add-box">
+        <summary style="cursor:pointer;color:#9ff">+ Add a vehicle</summary>
+        <div class="row">
+          <div class="field"><span>Name used in messages</span><input type="text" id="new-name" placeholder="Abigail's Fusion" maxlength="40"></div>
+          <div class="field"><span>Whose is it? (optional)</span><input type="text" id="new-owner" placeholder="Abigail" maxlength="30"></div>
+        </div>
+        <div class="row">
+          <div class="field"><span>Other names they go by (optional, commas)</span><input type="text" id="new-aliases" placeholder="Abby" maxlength="120"></div>
+          <div class="field" style="flex: 0 1 150px"><span>Kind</span><select id="new-kind"></select></div>
+        </div>
+        <div class="row"><button class="primary" onclick="addVehicle()">Add vehicle</button><span class="msg" id="add-msg"></span></div>
+        <p class="hint">For a car without an owner, use a name like <i>the blue Civic</i>.</p>
+      </details>
+    </section>
+
+    <section>
+      <h2>Cars Sentinel has seen</h2>
+      <p class="intro">Groups of similar-looking photos from your cameras. Untick any that don't belong, then say whose car it is.
+        Night groups (🌙, black and white) need naming too so cars are recognised after dark.</p>
+      <div id="groups"><div class="empty">Loading…</div></div>
+    </section>
+  </main>
+
+  <script>
+    var data = null;
+    var KIND_LABELS = { car: "Car", sedan: "Sedan", suv: "SUV", pickup: "Pickup truck", van: "Van", minivan: "Minivan", motorcycle: "Motorcycle" };
+
+    function $(id) { return document.getElementById(id); }
+    function el(tag, cls, text) {
+      var e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text != null) e.textContent = text;
+      return e;
+    }
+    async function api(url, body) {
+      var opts = body === undefined ? {} : {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+        body: JSON.stringify(body)
+      };
+      var r = await fetch(url, opts);
+      if (r.status === 401) { location.href = "/login"; throw new Error("signed out"); }
+      var d = await r.json().catch(function() { return {}; });
+      if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
+      return d;
+    }
+    function say(node, text, ok) { node.textContent = text; node.className = "msg" + (ok === undefined ? "" : ok ? " ok" : " err"); }
+    function fmtDay(ts) { return new Date(ts * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
+
+    function thumb(id, night, state) {
+      var b = el("button", "thumb " + state);
+      b.type = "button";
+      b.dataset.id = id;
+      var img = el("img");
+      img.loading = "lazy";
+      img.alt = "";
+      img.src = "/household/photos/" + id + ".jpg";
+      b.appendChild(img);
+      if (night) b.appendChild(el("span", "moon", "🌙"));
+      return b;
+    }
+
+    function kindSelect(select, value) {
+      select.innerHTML = "";
+      (data ? data.kinds : Object.keys(KIND_LABELS)).forEach(function(k) {
+        var o = el("option", null, KIND_LABELS[k] || k); o.value = k; select.appendChild(o);
+      });
+      select.value = value || "car";
+    }
+
+    // ---------------- known vehicles ----------------
+    function renderVehicles() {
+      var root = $("vehicles");
+      root.innerHTML = "";
+      if (!data.vehicles.length) {
+        root.appendChild(el("div", "empty", "No vehicles yet — add one below, or name a group of photos further down."));
+        $("add-box").open = true;
+        return;
+      }
+      data.vehicles.forEach(function(v) {
+        var card = el("div", "card");
+        var head = el("div", "head");
+        head.appendChild(el("span", "name", v.name));
+        head.appendChild(el("span", "pill " + (v.here ? "on" : "off"), v.here ? "Home" + (v.camera ? " · " + v.camera : "") : "Away"));
+        card.appendChild(head);
+        var bits = [];
+        if (v.owner) bits.push("Owner: " + v.owner);
+        if (v.aliases.length) bits.push("also: " + v.aliases.join(", "));
+        bits.push(KIND_LABELS[v.kind] || v.kind);
+        bits.push(v.ref_count + " photo" + (v.ref_count === 1 ? "" : "s") + (v.night_refs ? " (" + v.night_refs + " at night)" : " — none at night yet"));
+        card.appendChild(el("div", "meta", bits.join(" · ")));
+
+        var thumbs = el("div", "thumbs");
+        v.refs.forEach(function(r) {
+          var t = thumb(r.id, r.night, "");
+          t.title = "Tap to mark for removal";
+          t.onclick = function() { t.classList.toggle("remove"); removeBtn.disabled = !thumbs.querySelector(".remove"); };
+          thumbs.appendChild(t);
+        });
+        if (v.refs.length) card.appendChild(thumbs);
+
+        var row = el("div", "row");
+        var removeBtn = el("button", null, "Remove marked photos");
+        removeBtn.disabled = true;
+        var msg = el("span", "msg");
+        removeBtn.onclick = async function() {
+          var ids = Array.prototype.map.call(thumbs.querySelectorAll(".remove"), function(t) { return Number(t.dataset.id); });
+          try { await api("/api/household/assign", { ids: ids, vehicle: "none" }); await load(); }
+          catch (e) { say(msg, e.message, false); }
+        };
+        var editBtn = el("button", null, "Edit");
+        editBtn.onclick = function() { editForm(card, v); };
+        var delBtn = el("button", "danger", "Delete");
+        delBtn.onclick = function() {
+          if (delBtn.dataset.armed) {
+            api("/api/household/vehicles/" + v.id + "/delete", {}).then(load).catch(function(e) { say(msg, e.message, false); });
+          } else {
+            delBtn.dataset.armed = "1";
+            delBtn.textContent = "Tap again to delete " + v.name;
+          }
+        };
+        if (v.refs.length) row.appendChild(removeBtn);
+        row.appendChild(editBtn);
+        row.appendChild(delBtn);
+        row.appendChild(msg);
+        card.appendChild(row);
+        root.appendChild(card);
+      });
+    }
+
+    function editForm(card, v) {
+      if (card.querySelector(".edit")) return;
+      var box = el("div", "edit");
+      box.innerHTML =
+        '<div class="row"><div class="field"><span>Name used in messages</span><input type="text" maxlength="40" data-f="name"></div>' +
+        '<div class="field"><span>Whose is it?</span><input type="text" maxlength="30" data-f="owner"></div></div>' +
+        '<div class="row"><div class="field"><span>Other names (commas)</span><input type="text" maxlength="120" data-f="aliases"></div>' +
+        '<div class="field" style="flex: 0 1 150px"><span>Kind</span><select data-f="kind"></select></div></div>' +
+        '<div class="row"><button class="primary">Save</button><button>Cancel</button><span class="msg"></span></div>';
+      card.appendChild(box);
+      var f = function(n) { return box.querySelector('[data-f="' + n + '"]'); };
+      f("name").value = v.name; f("owner").value = v.owner; f("aliases").value = v.aliases.join(", ");
+      kindSelect(f("kind"), v.kind);
+      var buttons = box.querySelectorAll("button");
+      buttons[1].onclick = function() { box.remove(); };
+      buttons[0].onclick = async function() {
+        try {
+          await api("/api/household/vehicles", { id: v.id, name: f("name").value, owner: f("owner").value,
+                                                 aliases: f("aliases").value, kind: f("kind").value });
+          await load();
+        } catch (e) { say(box.querySelector(".msg"), e.message, false); }
+      };
+    }
+
+    async function addVehicle() {
+      try {
+        await api("/api/household/vehicles", { name: $("new-name").value, owner: $("new-owner").value,
+                                               aliases: $("new-aliases").value, kind: $("new-kind").value });
+        ["new-name", "new-owner", "new-aliases"].forEach(function(id) { $(id).value = ""; });
+        say($("add-msg"), "Added — now name some photos below", true);
+        await load();
+      } catch (e) { say($("add-msg"), e.message, false); }
+    }
+
+    // ---------------- suggestion groups ----------------
+    function renderGroups() {
+      var root = $("groups");
+      root.innerHTML = "";
+      if (!data.groups.length) {
+        root.appendChild(el("div", "empty", "Nothing new to name. Sentinel checks the cameras every minute and adds photos of parked cars here."));
+        return;
+      }
+      data.groups.forEach(function(g) {
+        var card = el("div", "card suggest");
+        var suggested = data.vehicles.find(function(v) { return v.id === g.suggested; });
+        var head = el("div", "head");
+        head.appendChild(el("span", "name", (g.night ? "🌙 Night · " : "") + g.count + " photo" + (g.count === 1 ? "" : "s")));
+        var cams = g.cameras.filter(function(c) { return c && c !== "Unknown camera"; });  // clips from before cameras had names
+        head.appendChild(el("span", "meta", (cams.length ? cams.join(", ") + " · " : "") + fmtDay(g.first) + (fmtDay(g.first) !== fmtDay(g.last) ? "–" + fmtDay(g.last) : "")));
+        card.appendChild(head);
+        if (suggested) card.appendChild(el("div", "suggestion", "Looks like " + suggested.name));
+
+        var thumbs = el("div", "thumbs");
+        g.sample.forEach(function(id) {
+          var t = thumb(id, g.night, "on");
+          t.appendChild(el("span", "tick", "✓"));
+          t.title = "Tap to leave this one out";
+          t.onclick = function() { t.classList.toggle("on"); t.classList.toggle("off"); };
+          thumbs.appendChild(t);
+        });
+        card.appendChild(thumbs);
+        if (g.count > g.sample.length) {
+          card.appendChild(el("p", "hint", "Showing " + g.sample.length + " of " + g.count + "; the rest stay here for next time."));
+        }
+
+        var row = el("div", "row");
+        var field = el("div", "field");
+        field.appendChild(el("span", null, "These are…"));
+        var select = el("select");
+        var first = el("option", null, "— choose —"); first.value = ""; select.appendChild(first);
+        data.vehicles.forEach(function(v) { var o = el("option", null, v.name); o.value = String(v.id); select.appendChild(o); });
+        var nw = el("option", null, "A new vehicle…"); nw.value = "new"; select.appendChild(nw);
+        var ign = el("option", null, "Not one of ours (hide)"); ign.value = "ignore"; select.appendChild(ign);
+        select.value = suggested ? String(suggested.id) : "";
+        field.appendChild(select);
+        row.appendChild(field);
+        var save = el("button", "primary", "Save");
+        var msg = el("span", "msg");
+        row.appendChild(save);
+        row.appendChild(msg);
+        card.appendChild(row);
+
+        var newBox = el("div", "row");
+        newBox.hidden = true;
+        newBox.innerHTML =
+          '<div class="field"><span>Name used in messages</span><input type="text" maxlength="40" placeholder="Luke\'s Sierra"></div>' +
+          '<div class="field"><span>Whose is it? (optional)</span><input type="text" maxlength="30" placeholder="Luke"></div>' +
+          '<div class="field" style="flex: 0 1 150px"><span>Kind</span><select></select></div>';
+        kindSelect(newBox.querySelector("select"), "car");
+        card.appendChild(newBox);
+        select.onchange = function() { newBox.hidden = select.value !== "new"; };
+
+        save.onclick = async function() {
+          var ids = Array.prototype.map.call(thumbs.querySelectorAll(".thumb.on"), function(t) { return Number(t.dataset.id); });
+          if (!ids.length) { say(msg, "Tick at least one photo", false); return; }
+          var target = select.value;
+          if (!target) { say(msg, "Choose whose car it is", false); return; }
+          save.disabled = true;
+          try {
+            if (target === "new") {
+              var inputs = newBox.querySelectorAll("input");
+              var r = await api("/api/household/vehicles", { name: inputs[0].value, owner: inputs[1].value,
+                                                             kind: newBox.querySelector("select").value });
+              target = Number(r.message);
+            } else if (target !== "ignore") {
+              target = Number(target);
+            }
+            await api("/api/household/assign", { ids: ids, vehicle: target });
+            await load();
+          } catch (e) { say(msg, e.message, false); save.disabled = false; }
+        };
+        root.appendChild(card);
+      });
+    }
+
+    async function load() {
+      try {
+        data = await api("/api/household");
+      } catch (e) {
+        $("vehicles").innerHTML = "";
+        $("vehicles").appendChild(el("div", "empty", "Couldn't load vehicles: " + e.message));
+        return;
+      }
+      $("tracking-off").hidden = data.tracking;
+      kindSelect($("new-kind"), $("new-kind").value);
+      renderVehicles();
+      renderGroups();
+    }
+    load();
+  </script>
+</body>
+</html>
