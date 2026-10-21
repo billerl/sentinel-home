@@ -13,7 +13,37 @@ Use this file as continuity across chats. At the **start** of a new session, ask
 
 ---
 
-## Current Status (code + behavior)
+## Current Status (October 2026 restructure — supersedes the Qt notes below)
+
+- **Headless engine.** The PySide6 GUI was removed. It only ever ran invisibly under `xvfb-run`.
+  `main.py` → `sentinel/engine/engine.py` (`Engine`) → one `CameraPipeline` thread per camera
+  profile (`sentinel/engine/camera.py`). The web viewer is the UI; Telegram is the remote control.
+- **Deploy:** `sentinel.service` runs `xvfb-run venv/bin/python main.py`. Xvfb is no longer
+  needed, but the unit still works with it. To deploy without sudo, SIGTERM the python process;
+  systemd restarts it in about 10 s, and SIGTERM finalizes in-progress clips.
+- **Web viewer:** listens on `127.0.0.1:8088` only and is reached through the Cloudflare tunnel.
+  - `/`: live grid plus the motion timeline and clip player.
+  - `/zones`: zone/line editor. It uses `/api/config/cameras`; POSTs need JSON plus the `X-Sentinel-Request: 1` header.
+  - Cameras get opaque per-process ids, so RTSP URLs never reach the browser.
+- **Recordings:**
+  - Files are `recorded_videos/YYYY-MM-DD/<camera-ip>_HHMMSS_ms.avi`, indexed in `recorded_videos/recordings.db` by `sentinel/recordings/store.py`.
+  - Retention: 30 days, plus a low-disk safety net that always keeps the last 24 hours.
+  - Clips are recorded clean, with no overlays, at the camera's real fps.
+  - Browsers get H.264 MP4 converted on demand with the bundled ffmpeg (`imageio-ffmpeg`).
+- **Motion quality:**
+  - Analysis runs at 320 px width.
+  - MOG2 shadows are thresholded away, and frames where more than 45% of the picture changes are ignored.
+  - Motion must persist for 3 frames.
+  - Zone test: the bottom-centre point is in the zone, or the box overlaps it by at least 30%.
+- **Cameras** (IPC-D3E43WD-S): main streams were set to 2560x1440 H.264 at 4 Mbps (not used yet).
+  Substreams are 640x360 at 12 fps and are used for live view and detection.
+- **Roadmap:**
+  - Phase 1 remainder: main-stream recording via ffmpeg `-c copy`, with a segment ring buffer for pre-roll.
+  - Phase 2: object detection (OpenVINO on the UHD 630, YOLOX/D-FINE).
+  - Phase 3: smart Telegram alerts (delivery vehicles via CLIP) and a "videos from <time range>" command.
+  - Phase 4: web UX (events list, settings pages).
+
+## Older status (Qt desktop era, kept for history)
 
 - **Desktop app** (PySide6 + OpenCV) — multi-session: each camera has its own `MotionDetector` and profile in `settings.json` → `camera_profiles`.
 - **RTSP** — discovery, sub-stream preference, per-host logins, reconnect timer when streams drop.

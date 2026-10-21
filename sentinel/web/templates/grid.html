@@ -196,6 +196,7 @@
   <header>
     <h1>Sentinel Live</h1>
     <button class="header-btn" id="tl-toggle" type="button" onclick="toggleTimeline()">Timeline</button>
+    <a class="header-btn" href="{{ url_for('zones_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Zones</a>
     <form method="post" action="{{ url_for('logout') }}" style="margin: 0;">
       <button class="logout" type="submit">Log out</button>
     </form>
@@ -268,6 +269,12 @@
       
       // High-quality MJPEG for focus
       img.src = "/stream?id=" + encodeURIComponent(camId);
+      img.onerror = function() {
+        // Stream ended (camera dropped or server restarted): retry while focused.
+        setTimeout(function() {
+          if (focusedCamId === camId) img.src = "/stream?id=" + encodeURIComponent(camId) + "&r=" + Date.now();
+        }, 3000);
+      };
       overlay.style.display = 'block';
       
       // Stop grid updates

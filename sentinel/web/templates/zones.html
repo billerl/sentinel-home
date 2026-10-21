@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sentinel — Zones</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #000; color: #00ffff;
+      margin: 0; min-height: 100vh;
+    }
+    header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 0 1rem; background: #1a1a1a; height: 40px;
+    }
+    header a { color: #00ffff; text-decoration: none; font-size: 0.8rem; }
+    h1 { font-size: 0.9rem; margin: 0; flex: 1; }
+    main { padding: 10px 16px 24px; max-width: 1200px; margin: 0 auto; }
+    button, select {
+      background: rgba(0,255,255,0.15); color: #00ffff;
+      border: 1px solid #00ffff; padding: 6px 12px; border-radius: 4px;
+      cursor: pointer; font: inherit; font-size: 0.8rem;
+    }
+    button.active { background: #00ffff; color: #000; }
+    button:disabled { opacity: 0.35; cursor: default; }
+    button.danger { border-color: #ff5555; color: #ff5555; background: rgba(255,85,85,0.1); }
+    button.primary { background: #00ffff; color: #000; font-weight: 600; }
+    select { color-scheme: dark; background: #111; }
+    #cams { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    #cams button .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; background: #3c3; }
+    #cams button .dot.off { background: #f44; }
+    .layout { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+    .stage-col { flex: 3 1 480px; min-width: 0; }
+    .side { flex: 1 1 260px; display: flex; flex-direction: column; gap: 12px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+    #stage {
+      position: relative; width: 100%; background: #111;
+      border: 1px solid #033; border-radius: 4px; overflow: hidden;
+      aspect-ratio: 16 / 9;
+    }
+    #stage img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; user-select: none; -webkit-user-drag: none; }
+    #stage svg { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+    #stage .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #6aa; }
+    .zone { fill: rgba(0,255,255,0.18); stroke: #00ffff; stroke-width: 2; vector-effect: non-scaling-stroke; cursor: pointer; }
+    .zone.selected { fill: rgba(0,255,255,0.32); stroke: #fff; }
+    .line { stroke: #ff4dff; stroke-width: 3; vector-effect: non-scaling-stroke; cursor: pointer; }
+    .line.selected { stroke: #fff; }
+    .line-hit { stroke: transparent; stroke-width: 18; vector-effect: non-scaling-stroke; cursor: pointer; }
+    .arrow { fill: #ff4dff; pointer-events: none; }
+    .draft { fill: rgba(255,255,0,0.15); stroke: #ff0; stroke-dasharray: 6 4; stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
+    .handle { fill: #000; stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; cursor: grab; }
+    .handle.first { fill: #ff0; }
+    .panel { background: #0b0b0b; border: 1px solid #033; border-radius: 4px; padding: 10px 12px; }
+    .panel h2 { font-size: 0.8rem; margin: 0 0 8px; color: #9ff; font-weight: 600; }
+    .panel label { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; margin: 6px 0; }
+    .panel input[type=range] { flex: 1; accent-color: #00ffff; }
+    .hint { color: #6aa; font-size: 0.75rem; line-height: 1.45; margin: 6px 0 0; }
+    #savebar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    #status { font-size: 0.8rem; color: #6aa; }
+    #status.err { color: #ff6b6b; }
+    #status.ok { color: #6f6; }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="{{ url_for('index') }}">← Live</a>
+    <h1>Zones &amp; lines</h1>
+  </header>
+  <main>
+    <div id="cams"></div>
+    <div class="layout">
+      <div class="stage-col">
+        <div class="toolbar">
+          <button type="button" id="tool-zone" onclick="startDraw('zone')">+ Zone</button>
+          <button type="button" id="tool-line" onclick="startDraw('line')">+ Line</button>
+          <button type="button" id="finish-zone" onclick="finishZone()" hidden>Finish zone</button>
+          <button type="button" id="cancel-draw" onclick="cancelDraw()" hidden>Cancel</button>
+          <button type="button" id="reverse-line" onclick="reverseLine()" hidden>Reverse direction</button>
+          <button type="button" id="delete-sel" class="danger" onclick="deleteSelected()" hidden>Delete</button>
+          <button type="button" onclick="refreshImage()">Refresh image</button>
+        </div>
+        <div id="stage">
+          <img id="snap" alt="">
+          <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+          <div class="msg" id="stage-msg">Loading…</div>
+        </div>
+        <p class="hint" id="draw-hint">
+          Motion only counts when the bottom of the moving object is inside a zone,
+          or when it crosses a line in the arrow's direction. With no zones and no
+          lines, the whole picture is watched. Drag the white dots to adjust a shape;
+          double-click a dot to remove it.
+        </p>
+      </div>
+      <div class="side">
+        <div class="panel">
+          <h2>Detection</h2>
+          <label>Sensitivity
+            <input type="range" id="sens" min="300" max="8000" step="50" oninput="onSens()">
+          </label>
+          <p class="hint" id="sens-hint"></p>
+          <label><input type="checkbox" id="rec" onchange="markDirty()"> Record clips on motion</label>
+          <label><input type="checkbox" id="nightbug" onchange="markDirty()"> Night bug filter</label>
+          <label>Lines trigger
+            <select id="direction" onchange="markDirty(); render()">
+              <option value="outside_to_inside">in arrow direction</option>
+              <option value="inside_to_outside">against arrow</option>
+              <option value="both">either direction</option>
+            </select>
+          </label>
+        </div>
+        <div class="panel">
+          <div id="savebar">
+            <button type="button" class="primary" id="save" onclick="save()" disabled>Save</button>
+            <button type="button" id="revert" onclick="revert()" disabled>Discard changes</button>
+            <span id="status"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    var cams = [];          // from /api/config/cameras
+    var cam = null;         // selected camera config (saved state)
+    var draft = null;       // editable copy: {active_zones, entry_lines, ...}
+    var dirty = false;
+    var tool = null;        // null | 'zone' | 'line'
+    var drawing = [];       // points of the shape being drawn
+    var selected = null;    // {kind: 'zone'|'line', index}
+    var drag = null;        // {kind, index, point}
+    var imgW = 640, imgH = 360;
+
+    var svg = document.getElementById("svg");
+    var NS = "http://www.w3.org/2000/svg";
+
+    function setStatus(text, cls) {
+      var el = document.getElementById("status");
+      el.textContent = text || "";
+      el.className = cls || "";
+    }
+
+    function clone(o) { return JSON.parse(JSON.stringify(o)); }
+
+    async function loadCams(selectKey) {
+      try {
+        var r = await fetch("/api/config/cameras");
+        if (r.status === 401) { location.href = "/login"; return; }
+        cams = await r.json();
+      } catch (e) {
+        setStatus("Could not load cameras", "err");
+        return;
+      }
+      renderCamButtons();
+      var key = selectKey || (cam && cam.key) || (cams[0] && cams[0].key);
+      if (key) selectCam(key, true);
+    }
+
+    function renderCamButtons() {
+      var root = document.getElementById("cams");
+      root.innerHTML = "";
+      cams.forEach(function(c) {
+        var b = document.createElement("button");
+        b.type = "button";
+        var dot = document.createElement("span");
+        dot.className = "dot" + (c.online ? "" : " off");
+        b.appendChild(dot);
+        b.appendChild(document.createTextNode(c.name));
+        b.className = cam && cam.key === c.key ? "active" : "";
+        b.onclick = function() { selectCam(c.key, false); };
+        root.appendChild(b);
+      });
+    }
+
+    function selectCam(key, force) {
+      if (dirty && !force) {
+        setStatus("Save or discard your changes first.", "err");
+        return;
+      }
+      cam = cams.find(function(c) { return c.key === key; });
+      if (!cam) return;
+      draft = clone({
+        active_zones: cam.active_zones || [],
+        entry_lines: cam.entry_lines || [],
+        entry_direction: cam.entry_direction || "outside_to_inside",
+        min_contour_area: cam.min_contour_area || 2000,
+        recording_enabled: cam.recording_enabled !== false,
+        night_bug_filter_enabled: cam.night_bug_filter_enabled !== false
+      });
+      dirty = false;
+      cancelDraw();
+      selected = null;
+      syncControls();
+      renderCamButtons();
+      refreshImage();
+      updateButtons();
+      setStatus("");
+    }
+
+    function syncControls() {
+      document.getElementById("sens").value = 8300 - draft.min_contour_area;
+      document.getElementById("rec").checked = draft.recording_enabled;
+      document.getElementById("nightbug").checked = draft.night_bug_filter_enabled;
+      document.getElementById("direction").value = draft.entry_direction;
+      sensHint();
+    }
+
+    function sensHint() {
+      var pct = (draft.min_contour_area / (imgW * imgH) * 100).toFixed(2);
+      document.getElementById("sens-hint").textContent =
+        "Ignores moving things smaller than " + draft.min_contour_area + " px² (" + pct + "% of the picture). Higher sensitivity catches smaller movement.";
+    }
+
+    function onSens() {
+      draft.min_contour_area = 8300 - Number(document.getElementById("sens").value);
+      sensHint();
+      markDirty();
+    }
+
+    function refreshImage() {
+      if (!cam) return;
+      var img = document.getElementById("snap");
+      var msg = document.getElementById("stage-msg");
+      msg.textContent = "Loading…";
+      msg.hidden = false;
+      img.onload = function() {
+        imgW = img.naturalWidth; imgH = img.naturalHeight;
+        document.getElementById("stage").style.aspectRatio = imgW + " / " + imgH;
+        msg.hidden = true;
+        sensHint();
+        render();
+      };
+      img.onerror = function() {
+        msg.textContent = cam.online ? "Could not load image" : "Camera offline — zones can still be edited";
+        msg.hidden = false;
+        render();
+      };
+      img.src = "/api/config/cameras/" + encodeURIComponent(cam.key) + "/snapshot.jpg?t=" + Date.now();
+    }
+
+    // ---------------- drawing ----------------
+    function px(p) { return [p[0] * imgW, p[1] * imgH]; }
+    function handleR() {
+      var rect = svg.getBoundingClientRect();
+      return rect.width ? 9 * imgW / rect.width : 9;
+    }
+
+    function el(name, attrs, parent) {
+      var e = document.createElementNS(NS, name);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      (parent || svg).appendChild(e);
+      return e;
+    }
+
+    function render() {
+      svg.setAttribute("viewBox", "0 0 " + imgW + " " + imgH);
+      svg.setAttribute("preserveAspectRatio", "none");
+      svg.innerHTML = "";
+      if (!draft) return;
+      var r = handleR();
+
+      draft.active_zones.forEach(function(zone, zi) {
+        var isSel = selected && selected.kind === "zone" && selected.index === zi;
+        var poly = el("polygon", {
+          points: zone.map(function(p) { return px(p).join(","); }).join(" "),
+          class: "zone" + (isSel ? " selected" : "")
+        });
+        poly.dataset.kind = "zone"; poly.dataset.index = zi;
+      });
+
+      draft.entry_lines.forEach(function(line, li) {
+        var isSel = selected && selected.kind === "line" && selected.index === li;
+        var a = px(line[0]), b = px(line[1]);
+        var hit = el("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], class: "line-hit" });
+        hit.dataset.kind = "line"; hit.dataset.index = li;
+        el("line", { x1: a[0], y1: a[1], x2: b[0], y2: b[1], class: "line" + (isSel ? " selected" : ""), "pointer-events": "none" });
+        drawArrows(a, b, r);
+      });
+
+      if (selected) {
+        var pts = selected.kind === "zone" ? draft.active_zones[selected.index] : draft.entry_lines[selected.index];
+        (pts || []).forEach(function(p, pi) {
+          var c = px(p);
+          var h = el("circle", { cx: c[0], cy: c[1], r: r, class: "handle" });
+          h.dataset.kind = selected.kind; h.dataset.index = selected.index; h.dataset.point = pi;
+        });
+      }
+
+      if (tool && drawing.length) {
+        var dpts = drawing.map(function(p) { return px(p).join(","); }).join(" ");
+        el(tool === "zone" ? "polygon" : "polyline", { points: dpts, class: "draft" });
+        drawing.forEach(function(p, i) {
+          var c = px(p);
+          el("circle", { cx: c[0], cy: c[1], r: r * 0.8, class: "handle" + (i === 0 ? " first" : ""), "pointer-events": "none" });
+        });
+      }
+    }
+
+    // Allowed crossing goes from the line's positive side to its negative side
+    // (see MotionDetector._crossing_allowed); in image coordinates that is the
+    // normal (dy, -dx).
+    function drawArrows(a, b, r) {
+      var dx = b[0] - a[0], dy = b[1] - a[1];
+      var len = Math.hypot(dx, dy) || 1;
+      var nx = dy / len, ny = -dx / len;
+      var mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+      var dir = draft.entry_direction;
+      if (dir === "outside_to_inside" || dir === "both") arrow(mx, my, nx, ny, r);
+      if (dir === "inside_to_outside" || dir === "both") arrow(mx, my, -nx, -ny, r);
+    }
+
+    function arrow(x, y, nx, ny, r) {
+      var s = r * 2.4;
+      var tipX = x + nx * s * 1.6, tipY = y + ny * s * 1.6;
+      var bx = x + nx * s * 0.4, by = y + ny * s * 0.4;
+      var px_ = -ny * s * 0.7, py_ = nx * s * 0.7;
+      el("polygon", {
+        points: [tipX, tipY, bx + px_, by + py_, bx - px_, by - py_].join(","),
+        class: "arrow"
+      });
+    }
+
+    function eventPoint(e) {
+      var rect = svg.getBoundingClientRect();
+      var x = (e.clientX - rect.left) / rect.width;
+      var y = (e.clientY - rect.top) / rect.height;
+      return [Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y))];
+    }
+
+    function nearFirstPoint(p) {
+      if (drawing.length < 3) return false;
+      var rect = svg.getBoundingClientRect();
+      var dx = (p[0] - drawing[0][0]) * rect.width, dy = (p[1] - drawing[0][1]) * rect.height;
+      return Math.hypot(dx, dy) < 16;
+    }
+
+    svg.addEventListener("pointerdown", function(e) {
+      if (!draft) return;
+      var p = eventPoint(e);
+      var t = e.target.dataset || {};
+      if (tool) {
+        if (tool === "zone" && nearFirstPoint(p)) { finishZone(); return; }
+        drawing.push(p);
+        if (tool === "line" && drawing.length === 2) {
+          draft.entry_lines.push(drawing);
+          selected = { kind: "line", index: draft.entry_lines.length - 1 };
+          markDirty();
+          cancelDraw();
+          return;
+        }
+        render();
+        updateButtons();
+        return;
+      }
+      if (t.point !== undefined) {
+        drag = { kind: t.kind, index: Number(t.index), point: Number(t.point) };
+        svg.setPointerCapture(e.pointerId);
+        return;
+      }
+      if (t.kind) {
+        selected = { kind: t.kind, index: Number(t.index) };
+      } else {
+        selected = null;
+      }
+      render();
+      updateButtons();
+    });
+
+    svg.addEventListener("pointermove", function(e) {
+      if (!drag) return;
+      var pts = drag.kind === "zone" ? draft.active_zones[drag.index] : draft.entry_lines[drag.index];
+      pts[drag.point] = eventPoint(e);
+      markDirty(true);
+      render();
+    });
+
+    svg.addEventListener("pointerup", function() { drag = null; });
+    svg.addEventListener("pointercancel", function() { drag = null; });
+
+    svg.addEventListener("dblclick", function(e) {
+      var t = e.target.dataset || {};
+      if (t.point === undefined || t.kind !== "zone") return;
+      var zone = draft.active_zones[Number(t.index)];
+      if (zone.length <= 3) { setStatus("A zone needs at least 3 points.", "err"); return; }
+      zone.splice(Number(t.point), 1);
+      markDirty();
+      render();
+    });
+
+    function startDraw(kind) {
+      tool = kind;
+      drawing = [];
+      selected = null;
+      setStatus(kind === "zone"
+        ? "Click to add corners. Click the yellow first point (or Finish) to close the zone."
+        : "Click two points for the line.", "");
+      render();
+      updateButtons();
+    }
+
+    function finishZone() {
+      if (tool !== "zone" || drawing.length < 3) return;
+      draft.active_zones.push(drawing);
+      selected = { kind: "zone", index: draft.active_zones.length - 1 };
+      markDirty();
+      cancelDraw();
+    }
+
+    function cancelDraw() {
+      tool = null;
+      drawing = [];
+      render();
+      updateButtons();
+      if (!dirty) setStatus("");
+    }
+
+    function deleteSelected() {
+      if (!selected) return;
+      var list = selected.kind === "zone" ? draft.active_zones : draft.entry_lines;
+      list.splice(selected.index, 1);
+      selected = null;
+      markDirty();
+      render();
+    }
+
+    function reverseLine() {
+      if (!selected || selected.kind !== "line") return;
+      draft.entry_lines[selected.index].reverse();
+      markDirty();
+      render();
+    }
+
+    function updateButtons() {
+      document.getElementById("tool-zone").classList.toggle("active", tool === "zone");
+      document.getElementById("tool-line").classList.toggle("active", tool === "line");
+      document.getElementById("finish-zone").hidden = !(tool === "zone");
+      document.getElementById("finish-zone").disabled = drawing.length < 3;
+      document.getElementById("cancel-draw").hidden = !tool;
+      document.getElementById("delete-sel").hidden = !selected;
+      document.getElementById("reverse-line").hidden = !(selected && selected.kind === "line");
+      document.getElementById("save").disabled = !dirty;
+      document.getElementById("revert").disabled = !dirty;
+    }
+
+    function markDirty(quiet) {
+      dirty = true;
+      draft.recording_enabled = document.getElementById("rec").checked;
+      draft.night_bug_filter_enabled = document.getElementById("nightbug").checked;
+      draft.entry_direction = document.getElementById("direction").value;
+      if (!quiet) setStatus("Unsaved changes", "");
+      updateButtons();
+    }
+
+    function revert() {
+      dirty = false;
+      selectCam(cam.key, true);
+    }
+
+    async function save() {
+      if (!cam || !dirty) return;
+      document.getElementById("save").disabled = true;
+      setStatus("Saving…", "");
+      try {
+        var r = await fetch("/api/config/cameras/" + encodeURIComponent(cam.key), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+          body: JSON.stringify(draft)
+        });
+        var body = await r.json().catch(function() { return {}; });
+        if (r.status === 401) { location.href = "/login"; return; }
+        if (!r.ok) throw new Error(body.error || ("HTTP " + r.status));
+        dirty = false;
+        await loadCams(cam.key);
+        setStatus("Saved — detection updated", "ok");
+      } catch (e) {
+        setStatus("Save failed: " + e.message, "err");
+        updateButtons();
+      }
+    }
+
+    document.addEventListener("keydown", function(e) {
+      if (e.key === "Escape") cancelDraw();
+      if ((e.key === "Delete" || e.key === "Backspace") && selected && !tool && e.target === document.body) deleteSelected();
+      if (e.key === "Enter" && tool === "zone") finishZone();
+    });
+    window.addEventListener("resize", render);
+    window.addEventListener("beforeunload", function(e) {
+      if (dirty) { e.preventDefault(); e.returnValue = ""; }
+    });
+
+    loadCams();
+  </script>
+</body>
+</html>

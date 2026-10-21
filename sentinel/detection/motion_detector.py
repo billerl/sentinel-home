@@ -78,6 +78,18 @@ class MotionDetector:
         self.night_bug_start_hour = 20
         self.night_bug_end_hour = 6
 
+        # Motion quality filters
+        self.min_motion_frames = 3  # consecutive frames with motion before triggering
+        self.motion_streak = 0
+        self.global_change_ratio = 0.45  # more foreground than this = lighting change
+        self.zone_overlap_ratio = 0.3
+        self._zone_mask_key = None
+        self._zone_mask_cache: Optional[np.ndarray] = None
+        self._dilate_kernel = np.ones((3, 3), np.uint8)
+        # Analyse motion at reduced size (boxes/areas are scaled back to full frame).
+        # 320 px wide is plenty for motion blobs and ~4x cheaper than 640.
+        self.analysis_width = 320
+
         # Lightweight centroid tracking for line crossing
         self.tracks: Dict[int, Dict[str, Any]] = {}
         self.next_track_id = 1
@@ -117,6 +129,7 @@ class MotionDetector:
     def set_active_zones(self, zones: List[List[List[float]]]) -> None:
         with self._lock:
             self.active_zones = zones or []
+            self._zone_mask_key = None
 
     def set_entry_lines(self, lines: List[List[List[float]]]) -> None:
         with self._lock:
@@ -496,6 +509,32 @@ class MotionDetector:
                 return True
         return False
 
+    def _zone_mask(self, width: int, height: int) -> Optional[np.ndarray]:
+        """Filled mask of all active zones at this frame size (cached)."""
+        key = (width, height, id(self.active_zones))
+        if self._zone_mask_key != key:
+            mask = np.zeros((height, width), dtype=np.uint8)
+            for zone in self.active_zones:
+                poly = self._denormalize_points(zone, width, height)
+                if len(poly) >= 3:
+                    cv2.fillPoly(mask, [poly], 255)
+            self._zone_mask_key = key
+            self._zone_mask_cache = mask
+        return self._zone_mask_cache
+
+    def _box_in_active_zone(self, x: int, y: int, w: int, h: int, width: int, height: int) -> bool:
+        """Box counts as in-zone if its ground point (bottom-centre) is inside a zone
+        or enough of the box overlaps the zones."""
+        if not self.active_zones:
+            return True
+        mask = self._zone_mask(width, height)
+        foot_x = min(width - 1, max(0, x + w // 2))
+        foot_y = min(height - 1, max(0, y + h - 1))
+        if mask[foot_y, foot_x]:
+            return True
+        overlap = cv2.countNonZero(mask[y:y + h, x:x + w]) / float(max(1, w * h))
+        return overlap >= self.zone_overlap_ratio
+
     @staticmethod
     def _line_side(
         point: Tuple[int, int],
@@ -714,35 +753,50 @@ class MotionDetector:
                     raise RuntimeError("Failed to read frame from camera")
                 self.consecutive_read_failures = 0
 
-                # Make copies for different uses
-                raw_frame = frame.copy()
-                self.last_raw_frame = raw_frame.copy()
-                recording_frame = frame.copy()
-                
-                # Process frame for motion detection
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                blurred = cv2.GaussianBlur(gray, (21, 21), 0)
-                fgmask = self.fgbg.apply(blurred)
-                kernel = np.ones((5, 5), np.uint8)
-                fgmask = cv2.dilate(fgmask, kernel, iterations=2)
-                contours, _ = cv2.findContours(
-                    fgmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-                )
-
-                # Filter contours by size and draw rectangles
-                motion_detected = False
-                motion_rects = []
-                gated_motion_detected = False
+                raw_frame = frame
+                self.last_raw_frame = raw_frame
+                annotated = frame.copy()
                 frame_h, frame_w = frame.shape[:2]
 
+                # Process frame for motion detection (at analysis_width)
+                scale = 1.0
+                small = frame
+                if frame_w > self.analysis_width:
+                    scale = frame_w / float(self.analysis_width)
+                    small = cv2.resize(
+                        frame,
+                        (self.analysis_width, max(1, int(round(frame_h / scale)))),
+                        interpolation=cv2.INTER_AREA,
+                    )
+                area_scale = scale * scale
+                gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+                blurred = cv2.GaussianBlur(gray, (11, 11), 0)
+                fgmask = self.fgbg.apply(blurred)
+                # MOG2 marks shadow pixels 127; keep only real foreground (255) so
+                # moving shadows from clouds and trees don't count as motion.
+                _, fgmask = cv2.threshold(fgmask, 200, 255, cv2.THRESH_BINARY)
+
+                contours = []
+                fg_ratio = cv2.countNonZero(fgmask) / float(max(1, fgmask.shape[0] * fgmask.shape[1]))
+                if fg_ratio < self.global_change_ratio:
+                    fgmask = cv2.dilate(fgmask, self._dilate_kernel, iterations=2)
+                    contours, _ = cv2.findContours(
+                        fgmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                    )
+                # else: most of the scene changed at once (cloud, IR switch,
+                # headlights sweeping) - that is lighting, not an object.
+
+                candidate_rects = []
                 for contour in contours:
-                    contour_area = cv2.contourArea(contour)
+                    contour_area = cv2.contourArea(contour) * area_scale
                     if contour_area < self.min_contour_area:
                         continue
 
                     (x, y, w, h) = cv2.boundingRect(contour)
+                    x, y = int(x * scale), int(y * scale)
+                    w, h = int(round(w * scale)), int(round(h * scale))
                     centroid = (x + w // 2, y + h // 2)
-                    in_active_zone = self._point_in_active_zone(centroid, frame_w, frame_h)
+                    in_active_zone = self._box_in_active_zone(x, y, w, h, frame_w, frame_h)
 
                     track_id = self._assign_track(centroid)
                     if self._night_bug_filter_active() and self._is_bug_like_motion(
@@ -766,15 +820,21 @@ class MotionDetector:
                         should_trigger = in_active_zone
                     else:
                         should_trigger = crossed_line
-                    if not should_trigger:
-                        continue
+                    if should_trigger:
+                        candidate_rects.append((x, y, w, h))
 
-                    motion_rects.append((x, y, w, h))
+                self._cleanup_old_tracks()
 
-                    # Draw rectangle and label on annotated/recording frame
-                    cv2.rectangle(recording_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                # Persistence: a single noisy frame (rain drop, insect flash) is not
+                # enough; require motion in several consecutive frames.
+                self.motion_streak = self.motion_streak + 1 if candidate_rects else 0
+                gated_motion_detected = self.motion_streak >= self.min_motion_frames
+                motion_rects = candidate_rects if gated_motion_detected else []
+
+                for (x, y, w, h) in motion_rects:
+                    cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 0), 2)
                     cv2.putText(
-                        recording_frame,
+                        annotated,
                         "Motion Detected",
                         (x, y - 10),
                         cv2.FONT_HERSHEY_SIMPLEX,
@@ -782,14 +842,10 @@ class MotionDetector:
                         (0, 255, 0),
                         2,
                     )
-                    motion_detected = True
-                    gated_motion_detected = True
 
-                self._cleanup_old_tracks()
-
-                # Handle recording based on motion detection
+                # Recordings get the clean camera frame; overlays are display-only.
                 recording_status, _ = self.check_recording_status(
-                    gated_motion_detected, recording_frame
+                    gated_motion_detected, raw_frame
                 )
 
                 # Add recording indicator to the frame if recording
@@ -799,7 +855,7 @@ class MotionDetector:
 
                     # Add recording indicator with time remaining
                     cv2.putText(
-                        recording_frame,
+                        annotated,
                         f"REC {remaining_time:.1f}s",
                         (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX,
@@ -809,9 +865,9 @@ class MotionDetector:
                     )
 
                     # Add red circle as recording indicator
-                    cv2.circle(recording_frame, (30, 50), 8, (0, 0, 255), -1)
+                    cv2.circle(annotated, (30, 50), 8, (0, 0, 255), -1)
 
-                return recording_frame, raw_frame, motion_rects, gated_motion_detected, recording_status
+                return annotated, raw_frame, motion_rects, gated_motion_detected, recording_status
         except Exception as e:
             with self._lock:
                 print(f"Error in motion detection: {e}")

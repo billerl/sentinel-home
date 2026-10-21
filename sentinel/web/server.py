@@ -73,10 +73,12 @@ class WebServer:
         settings_manager: "SettingsManager",
         frame_broker: FrameBroker,
         recording_store: Optional["RecordingStore"] = None,
+        engine: Optional[Any] = None,
     ) -> None:
         self._settings = settings_manager
         self._broker = frame_broker
         self._recordings = recording_store
+        self._engine = engine
         self._thread: Optional[threading.Thread] = None
         self._auth: Optional[WebAuthManager] = None
         self._limiter: Optional[_StreamLimiter] = None
@@ -128,12 +130,21 @@ class WebServer:
 
         app = Flask(__name__, template_folder=_template_dir())
         app.secret_key = auth_cfg["session_secret"]
+        app.config["MAX_CONTENT_LENGTH"] = 256 * 1024  # forms and config JSON only
+
+        @app.after_request
+        def _security_headers(resp):
+            resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+            resp.headers.setdefault("X-Frame-Options", "DENY")
+            resp.headers.setdefault("Referrer-Policy", "same-origin")
+            return resp
         self._app = app
         broker = self._broker
         settings = self._settings
         auth = self._auth
         limiter = self._limiter
         recordings = self._recordings
+        engine = self._engine
 
         def _loggable_username(typed: str) -> str:
             # People sometimes type their password into the username box; only
@@ -302,15 +313,10 @@ class WebServer:
             camera_id = request.args.get("id", "")
             if not camera_id:
                 return "Missing id", 400
-            frame, _ = broker.get_latest(camera_id)
-            if frame is None:
+            jpeg, _ = broker.get_latest_jpeg(camera_id)
+            if jpeg is None:
                 return "Not found", 404
-            wcfg = settings.settings.get("web", {})
-            q = int(wcfg.get("jpeg_quality", 80))
-            ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, q])
-            if not ok:
-                return "Encode error", 500
-            resp = Response(buf.tobytes(), mimetype="image/jpeg")
+            resp = Response(jpeg, mimetype="image/jpeg")
             resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
             resp.headers["Pragma"] = "no-cache"
             return resp
@@ -324,7 +330,10 @@ class WebServer:
             camera_id = request.args.get("id", "")
             if not camera_id:
                 return Response("Missing id", status=400)
+            if broker.get_latest(camera_id)[0] is None:
+                return Response("Camera not found or offline", status=404)
             ip = _client_ip(request.remote_addr or "", request.headers)
+            token = _session_token()
             if limiter is None or not limiter.try_acquire(ip):
                 return "Too many concurrent streams", 503
 
@@ -335,15 +344,25 @@ class WebServer:
 
             def generate():
                 last_ts = 0.0
+                last_frame_at = time.monotonic()
+                next_auth_check = time.monotonic() + 5.0
                 try:
                     while True:
+                        now = time.monotonic()
+                        if now >= next_auth_check:
+                            # End streams whose session was logged out or expired.
+                            if auth is None or not auth.validate_session(token, ip):
+                                return
+                            next_auth_check = now + 5.0
+                        if now - last_frame_at > 20.0:
+                            return  # camera went away; the page reconnects
                         jpeg, ts = broker.get_latest_jpeg(camera_id)
                         if jpeg is None:
                             time.sleep(0.1)
                             continue
-                        
                         # Only send if it's a new frame
                         if ts > last_ts:
+                            last_frame_at = now
                             header = (
                                 f"--frame\r\n"
                                 f"Content-Type: image/jpeg\r\n"
@@ -363,6 +382,66 @@ class WebServer:
             resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
             resp.headers["Pragma"] = "no-cache"
             resp.headers["X-Accel-Buffering"] = "no"
+            return resp
+
+        # ------------------------------------------------ camera settings / zones
+        def _write_request_ok() -> bool:
+            # JSON + custom header: browsers won't send either cross-site without a
+            # CORS preflight (which we never grant), so this blocks CSRF.
+            return request.is_json and request.headers.get("X-Sentinel-Request") == "1"
+
+        @app.route("/zones")
+        def zones_page():
+            redir = _require_session()
+            if redir:
+                return redir
+            return render_template("zones.html")
+
+        @app.route("/api/config/cameras")
+        def api_camera_configs():
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            if engine is None:
+                return jsonify({"error": "configuration unavailable"}), 503
+            return jsonify(engine.camera_configs())
+
+        @app.route("/api/config/cameras/<key>", methods=["POST"])
+        def api_update_camera_config(key: str):
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            if engine is None:
+                return jsonify({"error": "configuration unavailable"}), 503
+            if not _write_request_ok():
+                return jsonify({"error": "bad request"}), 400
+            body = request.get_json(silent=True)
+            if not isinstance(body, dict):
+                return jsonify({"error": "expected a JSON object"}), 400
+            ok, message = engine.update_camera_config(key, body)
+            if not ok:
+                return jsonify({"error": message}), 400
+            app_logger.log(
+                "info", "web_camera_config_saved", camera_ip=key, fields=sorted(body),
+                ip=_client_ip(request.remote_addr or "", request.headers),
+                component="web_server", action="update_camera_config",
+            )
+            return jsonify({"ok": True})
+
+        @app.route("/api/config/cameras/<key>/snapshot.jpg")
+        def api_camera_snapshot(key: str):
+            """Clean frame (no overlays) for drawing zones on."""
+            redir = _require_session()
+            if redir:
+                return redir
+            frame = engine.camera_snapshot(key) if engine is not None else None
+            if frame is None:
+                return "Camera offline", 404
+            ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            if not ok:
+                return "Encode error", 500
+            resp = Response(buf.tobytes(), mimetype="image/jpeg")
+            resp.headers["Cache-Control"] = "no-store"
             return resp
 
         @app.route("/api/recordings")

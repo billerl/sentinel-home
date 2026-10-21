@@ -33,6 +33,7 @@ class FrameBroker:
         self._names: Dict[str, str] = {}
         self._ts: Dict[str, float] = {}
         self._last_jpeg_quality: Dict[str, int] = {}
+        self._jpeg_ts: Dict[str, float] = {}
 
     def web_id(self, camera_id: str) -> str:
         """Opaque, stable-per-process id for a camera, safe to expose to browsers."""
@@ -45,7 +46,8 @@ class FrameBroker:
         frame_bgr: np.ndarray,
         jpeg_quality: Optional[int] = None,
     ) -> None:
-        """Store latest frame and optionally pre-encode to JPEG for web clients."""
+        """Store the latest frame. JPEG encoding happens lazily, only when a web
+        client asks for it, so idle cameras cost no encoding work."""
         host = urlparse(camera_id).hostname or display_name
         camera_id = self.web_id(camera_id)
         with self._lock:
@@ -53,14 +55,7 @@ class FrameBroker:
             self._frames[camera_id] = np.ascontiguousarray(frame_bgr).copy()
             self._names[camera_id] = display_name
             self._ts[camera_id] = time.monotonic()
-
-            if jpeg_quality is not None:
-                ok, buf = cv2.imencode(
-                    ".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality]
-                )
-                if ok:
-                    self._jpegs[camera_id] = buf.tobytes()
-                    self._last_jpeg_quality[camera_id] = jpeg_quality
+            self._last_jpeg_quality[camera_id] = int(jpeg_quality or 80)
 
     def unpublish(self, camera_id: str) -> None:
         camera_id = self.web_id(camera_id)
@@ -71,6 +66,7 @@ class FrameBroker:
             self._names.pop(camera_id, None)
             self._ts.pop(camera_id, None)
             self._last_jpeg_quality.pop(camera_id, None)
+            self._jpeg_ts.pop(camera_id, None)
 
     def clear(self) -> None:
         with self._lock:
@@ -80,6 +76,7 @@ class FrameBroker:
             self._names.clear()
             self._ts.clear()
             self._last_jpeg_quality.clear()
+            self._jpeg_ts.clear()
 
     def get_latest(self, camera_id: str) -> Tuple[Optional[np.ndarray], float]:
         """Return (frame, monotonic_ts) or (None, 0.0) for a ``web_id``."""
@@ -89,11 +86,26 @@ class FrameBroker:
             return frame, ts
 
     def get_latest_jpeg(self, camera_id: str) -> Tuple[Optional[bytes], float]:
-        """Return (jpeg_bytes, monotonic_ts) or (None, 0.0) for a ``web_id``."""
+        """Return (jpeg_bytes, monotonic_ts) or (None, 0.0) for a ``web_id``.
+
+        Encodes the latest frame on first request and caches it, so any number
+        of viewers share one encode per frame."""
         with self._lock:
-            jpeg = self._jpegs.get(camera_id)
+            frame = self._frames.get(camera_id)
+            if frame is None:
+                return None, 0.0
             ts = self._ts.get(camera_id, 0.0)
-            return jpeg, ts
+            if self._jpeg_ts.get(camera_id) != ts:
+                ok, buf = cv2.imencode(
+                    ".jpg",
+                    frame,
+                    [cv2.IMWRITE_JPEG_QUALITY, self._last_jpeg_quality.get(camera_id, 80)],
+                )
+                if not ok:
+                    return None, 0.0
+                self._jpegs[camera_id] = buf.tobytes()
+                self._jpeg_ts[camera_id] = ts
+            return self._jpegs[camera_id], ts
 
     def list_cameras(self) -> List[Tuple[str, str]]:
         """Stable list of (web_id, display_name), ordered by display name."""

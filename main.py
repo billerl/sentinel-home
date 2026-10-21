@@ -1,41 +1,32 @@
 #!/usr/bin/env python3
 """
-Sentinel Home - Motion Detection Application
-Entry point script for launching the application.
+Sentinel Home - headless home security engine.
+
+Runs the cameras, recordings, Telegram bot and web viewer. The web viewer
+(see settings.json "web") is the user interface.
 """
 
 import signal
 import sys
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication
-from sentinel.app import MotionDetectionApp
+
+from sentinel.engine import Engine
 
 
-def main():
-    """Application entry point."""
-    app = QApplication(sys.argv)
+def main() -> int:
+    engine = Engine()
 
-    # Create and show the main application window
-    motion_app = MotionDetectionApp()
-    motion_app.show()
-
-    # systemd stops the service with SIGTERM: close the window so closeEvent
-    # finalizes in-progress recordings instead of the process dying mid-clip.
+    # systemd stops the service with SIGTERM; finish clips and save settings first.
     def _shutdown(signum, _frame):
         print(f"Received signal {signum}, shutting down")
-        motion_app.main_window.close()
-        app.quit()
+        engine.stop()
 
     signal.signal(signal.SIGTERM, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
-    # Qt's event loop blocks Python signal handlers; wake the interpreter regularly.
-    signal_timer = QTimer()
-    signal_timer.timeout.connect(lambda: None)
-    signal_timer.start(500)
 
-    # Start the application event loop
-    sys.exit(app.exec())
+    engine.start()
+    engine.wait()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

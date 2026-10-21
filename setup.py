@@ -19,9 +19,9 @@ setup(
         "opencv-python>=4.5.0",
         "numpy>=1.20.0",
         "pyttsx3>=2.90",
-        "PySide6>=6.0.0",
         "Flask>=3.0.0",
         "bcrypt>=4.0.0",
+        "imageio-ffmpeg>=0.5.0",
     ],
     entry_points={
         "console_scripts": [
