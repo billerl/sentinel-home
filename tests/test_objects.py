@@ -81,8 +81,10 @@ class TestTrackerLearning(unittest.TestCase):
         jitter = [(300, 100, 40, 120), (322, 96, 30, 110), (305, 104, 45, 125)]  # ~20 px wobble
         ready = []
         for i, box in enumerate(jitter):
-            ready += t.update([Detection("person", 0.6, box)], GREY, 1000.0 + i, _always)
-        self.assertEqual(ready, [])  # still + uncertain (< 0.65) -> not reported
+            ready += t.update([Detection("person", 0.7, box)], GREY, 1000.0 + i, _always)
+        self.assertEqual(len(ready), 1)
+        self.assertTrue(ready[0].is_still(W))
+        self.assertEqual(describe(ready[0], "Front Door", None, GREY, W), "🚶 Someone is at the Front Door.")
 
     def test_person_called_dog_is_not_a_second_event(self):
         t = CameraObjectTracker("cam")
@@ -92,11 +94,34 @@ class TestTrackerLearning(unittest.TestCase):
             ready += t.update([Detection("person", 0.8, box), Detection("dog", 0.6, box)], GREY, 1000.0 + i, _always)
         self.assertEqual([r.label for r in ready], ["person"])
 
-    def test_uncertain_motionless_person_needs_more_evidence(self):
+    def test_uncertain_person_needs_three_sightings(self):
+        # e.g. someone sitting on a dark porch, scored ~0.5 by the small model
+        t = CameraObjectTracker("cam")
+        after_two = []
+        for i in range(2):
+            after_two += t.update([Detection("person", 0.5, (300, 100, 40, 120))], GREY, 1000.0 + i, _always)
+        self.assertEqual(after_two, [])
+        third = t.update([Detection("person", 0.5, (300, 100, 40, 120))], GREY, 1002.0, _always)
+        self.assertEqual([r.label for r in third], ["person"])
+
+    def test_below_minimum_never_reports(self):
         t = CameraObjectTracker("cam")
         ready = []
+        for i in range(5):
+            ready += t.update([Detection("person", 0.4, (300, 100, 40, 120))], GREY, 1000.0 + i, _always)
+        self.assertEqual(ready, [])
+
+    def test_static_spots_persist(self):
+        import tempfile
+        path = os.path.join(tempfile.mkdtemp(), "mem.json")
+        t = CameraObjectTracker("cam", path)
+        _feed(t, [(300, 100, 40, 120)] * 3, label="person")
+        t.update([], GREY, 2000.0, _always)  # expire -> remembered + saved
+        again = CameraObjectTracker("cam", path)
+        self.assertEqual(len(again.static_spots), 1)
+        ready = []
         for i in range(3):
-            ready += t.update([Detection("person", 0.55, (300, 100, 40, 120))], GREY, 1000.0 + i, _always)
+            ready += again.update([Detection("person", 0.8, (302, 101, 40, 120))], GREY, 3000.0 + i, _always)
         self.assertEqual(ready, [])
 
 

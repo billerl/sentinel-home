@@ -8,6 +8,8 @@ block on inference. Tracks turn into at most one event each.
 """
 
 import itertools
+import json
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -23,8 +25,11 @@ MIN_HITS = 2
 VEHICLE_MIN_TRAVEL = 0.03  # fraction of frame width a vehicle must move to count as arriving/leaving
 STATIC_MEMORY_SECONDS = 7 * 86400
 # Minimum best score per group before a track can alert. Tuned on real footage:
-# every "person" under ~0.62 was a fan/stand misread in a dim garage.
-MIN_SCORE = {"person": 0.62, "animal": 0.6, "vehicle": 0.5}
+# a person sitting on a porch at night scored 0.40-0.52 with the tiny model, while
+# a fan in a dim garage scored 0.53-0.65 (handled by static-spot learning + zones).
+MIN_SCORE = {"person": 0.45, "animal": 0.6, "vehicle": 0.5}
+CONFIDENT_SCORE = 0.62  # below this, a track needs EXTRA_HITS sightings
+EXTRA_HITS = 3
 
 
 @dataclass
@@ -181,12 +186,42 @@ class CameraObjectTracker:
 
     _ids = itertools.count(1)
 
-    def __init__(self, camera_key: str) -> None:
+    def __init__(self, camera_key: str, memory_path: Optional[str] = None) -> None:
         self.camera_key = camera_key
         self.tracks: List[Track] = []
         # Places where a never-moving "person"/"animal" was detected before: usually a
         # coat, fan or sack the model misreads. [box, sightings, last_seen]
         self.static_spots: List[List] = []
+        self.memory_path = memory_path
+        self.person_min_score = MIN_SCORE["person"]
+        self._load_memory()
+
+    def _load_memory(self) -> None:
+        if not self.memory_path:
+            return
+        try:
+            with open(self.memory_path) as handle:
+                data = json.load(handle).get(self.camera_key, [])
+            self.static_spots = [[tuple(box), int(n), float(ts)] for box, n, ts in data]
+        except (OSError, ValueError, TypeError):
+            self.static_spots = []
+
+    def _save_memory(self) -> None:
+        if not self.memory_path:
+            return
+        try:
+            with open(self.memory_path) as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            data = {}
+        data[self.camera_key] = [[list(box), n, ts] for box, n, ts in self.static_spots]
+        tmp = self.memory_path + ".tmp"
+        try:
+            with open(tmp, "w") as handle:
+                json.dump(data, handle)
+            os.replace(tmp, self.memory_path)
+        except OSError:
+            pass
 
     def update(self, detections: List[Detection], frame: np.ndarray, now: float,
                in_zone: Callable[[Tuple[int, int, int, int]], bool]) -> List[Track]:
@@ -228,8 +263,11 @@ class CameraObjectTracker:
         frame_w = frame.shape[1]
         ready: List[Track] = []
         for track in self.tracks:
-            if track.reported or track.hits < MIN_HITS or track.best_score < MIN_SCORE.get(track.group, 0.5):
+            min_score = self.person_min_score if track.group == "person" else MIN_SCORE.get(track.group, 0.5)
+            if track.reported or track.hits < MIN_HITS or track.best_score < min_score:
                 continue
+            if track.best_score < CONFIDENT_SCORE and track.hits < EXTRA_HITS:
+                continue  # unsure: wait for another sighting
             if not in_zone(track.box):
                 continue
             if track.group == "vehicle":
@@ -248,8 +286,6 @@ class CameraObjectTracker:
                     track.reported = True  # the small model sometimes calls a person a dog
                     continue
                 if track.is_still(frame_w):
-                    if track.best_score < 0.65:
-                        continue  # a motionless, uncertain "person" needs more evidence
                     if any(self._matches_spot(track.box, spot[0]) for spot in self.static_spots):
                         track.reported = True  # learned scenery; stay quiet
                         continue
@@ -280,8 +316,10 @@ class CameraObjectTracker:
             if self._matches_spot(box, spot[0]):
                 spot[1] += 1
                 spot[2] = now
-                return
-        self.static_spots.append([box, 1, now])
+                break
+        else:
+            self.static_spots.append([box, 1, now])
+        self._save_memory()
 
 
 # ------------------------------------------------------------------ worker
@@ -328,7 +366,8 @@ class DetectionWorker:
                 frame, ts, callback = self._slots.pop(key)
             started = time.time()
             try:
-                detections = self.detector.detect(frame)
+                # Low floor so tracks stay continuous; alerting needs a higher best score.
+                detections = self.detector.detect(frame, min_score=0.3)
             except Exception:
                 detections = []
             self.inference_ms = 0.8 * self.inference_ms + 0.2 * (time.time() - started) * 1000

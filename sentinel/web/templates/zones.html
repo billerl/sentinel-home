@@ -107,6 +107,11 @@
             <input type="range" id="sens" min="300" max="8000" step="50" oninput="onSens()">
           </label>
           <p class="hint" id="sens-hint"></p>
+          <label>Person certainty
+            <input type="range" id="pscore" min="0.3" max="0.9" step="0.01" oninput="onPersonScore()">
+            <span id="pscore-val" style="min-width:2.5em;text-align:right"></span>
+          </label>
+          <p class="hint">How sure the recogniser must be before alerting about a person. Lower catches people in the dark or far away; higher avoids things like coats or fans being mistaken for people.</p>
           <label><input type="checkbox" id="rec" onchange="markDirty()"> Record clips on motion</label>
           <label><input type="checkbox" id="nightbug" onchange="markDirty()"> Night bug filter</label>
           <label>Lines trigger
@@ -194,7 +199,8 @@
         entry_direction: cam.entry_direction || "outside_to_inside",
         min_contour_area: cam.min_contour_area || 2000,
         recording_enabled: cam.recording_enabled !== false,
-        night_bug_filter_enabled: cam.night_bug_filter_enabled !== false
+        night_bug_filter_enabled: cam.night_bug_filter_enabled !== false,
+        person_min_score: cam.person_min_score == null ? 0.45 : cam.person_min_score
       });
       dirty = false;
       cancelDraw();
@@ -211,6 +217,8 @@
       document.getElementById("rec").checked = draft.recording_enabled;
       document.getElementById("nightbug").checked = draft.night_bug_filter_enabled;
       document.getElementById("direction").value = draft.entry_direction;
+      document.getElementById("pscore").value = draft.person_min_score;
+      document.getElementById("pscore-val").textContent = Math.round(draft.person_min_score * 100) + "%";
       sensHint();
     }
 
@@ -218,6 +226,12 @@
       var pct = (draft.min_contour_area / (imgW * imgH) * 100).toFixed(2);
       document.getElementById("sens-hint").textContent =
         "Ignores moving things smaller than " + draft.min_contour_area + " px² (" + pct + "% of the picture). Higher sensitivity catches smaller movement.";
+    }
+
+    function onPersonScore() {
+      draft.person_min_score = Number(document.getElementById("pscore").value);
+      document.getElementById("pscore-val").textContent = Math.round(draft.person_min_score * 100) + "%";
+      markDirty();
     }
 
     function onSens() {

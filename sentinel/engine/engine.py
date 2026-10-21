@@ -74,6 +74,8 @@ EDITABLE_PROFILE_FIELDS = {
     "recording_enabled": bool,
     "night_bug_filter_enabled": bool,
     "hd_recording": bool,
+    # Lower = recognises people in poorer conditions (night, far away) but more false alarms.
+    "person_min_score": lambda v: round(max(0.3, min(0.9, float(v))), 2),
 }
 
 

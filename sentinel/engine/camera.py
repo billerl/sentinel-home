@@ -97,7 +97,11 @@ class CameraPipeline:
         if detection_worker is not None:
             from sentinel.engine.objects import CameraObjectTracker
 
-            self.tracker = CameraObjectTracker(self.host)
+            memory = None
+            if recording_store is not None:
+                memory = os.path.join(recording_store.root, ".object_memory.json")
+            self.tracker = CameraObjectTracker(self.host, memory)
+            self.tracker.person_min_score = float(profile.get("person_min_score", self.tracker.person_min_score))
 
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -126,6 +130,8 @@ class CameraPipeline:
         d.set_active_zones(profile.get("active_zones", []))
         d.set_entry_lines(profile.get("entry_lines", []))
         d.set_entry_direction(profile.get("entry_direction", "outside_to_inside"))
+        if getattr(self, "tracker", None) is not None and "person_min_score" in profile:
+            self.tracker.person_min_score = float(profile["person_min_score"])
         d.set_night_bug_filter(
             bool(profile.get("night_bug_filter_enabled", True)),
             int(profile.get("night_bug_start_hour", 20)),
