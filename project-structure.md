@@ -11,6 +11,9 @@ sentinel-home/                         # repository root
 ├── project-structure.md               # This file
 ├── handoff_summary.md                 # Cross-session continuity for contributors
 ├── tools/build_vehicle_prompts.py     # Rebuilds the CLIP vehicle-type text embeddings
+├── tools/replay_detections.py        # Replays recorded clips through detection (tune thresholds)
+├── tools/dev_harness.py              # Login-free test copy of the web UI on :18091 (dev only)
+├── CLAUDE.md                          # Working notes for Claude Code sessions
 ├── models/                            # Piper `.onnx` + `.onnx.json` voice models (local, not all in git)
 ├── tests/                             # Unit tests (`venv/bin/python -m unittest discover -s tests`)
 ├── captured_images/                   # Saved snapshots (gitignored)
