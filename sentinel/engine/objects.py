@@ -22,6 +22,9 @@ TRACK_TTL_SECONDS = 8.0
 MIN_HITS = 2
 VEHICLE_MIN_TRAVEL = 0.03  # fraction of frame width a vehicle must move to count as arriving/leaving
 STATIC_MEMORY_SECONDS = 7 * 86400
+# Minimum best score per group before a track can alert. Tuned on real footage:
+# every "person" under ~0.62 was a fan/stand misread in a dim garage.
+MIN_SCORE = {"person": 0.62, "animal": 0.6, "vehicle": 0.5}
 
 
 @dataclass
@@ -54,6 +57,14 @@ class Track:
     def travel(self) -> Tuple[float, float]:
         (x0, y0), (x1, y1) = self.center(0), self.center(-1)
         return x1 - x0, y1 - y0
+
+    def is_still(self, frame_width: int) -> bool:
+        """Hasn't really moved: less than ~one body width (box jitter on a static
+        object can be tens of pixels) and less than 3% of the frame."""
+        dx, dy = self.travel()
+        widths = sorted(b[2] for _, b in self.boxes)
+        limit = max(frame_width * VEHICLE_MIN_TRAVEL, widths[len(widths) // 2])
+        return max(abs(dx), abs(dy)) < limit
 
 
 @dataclass
@@ -125,7 +136,10 @@ def describe(track: Track, camera_name: str, zone_name: Optional[str], frame: np
     """One short sentence about what was seen, e.g. 'A red car pulled into the Driveway (Garage).'"""
     emoji = _EMOJI.get(track.label, "👀")
     dx, dy = track.travel()
-    moving = max(abs(dx), abs(dy)) > frame_width * VEHICLE_MIN_TRAVEL
+    if track.group == "vehicle":
+        moving = max(abs(dx), abs(dy)) > frame_width * VEHICLE_MIN_TRAVEL
+    else:
+        moving = not track.is_still(frame_width)
     # "in the Driveway (Garage)" with a named zone, otherwise "at the Front Door"
     at = f"in the {zone_name} ({camera_name})" if zone_name else f"at the {camera_name}"
     past = f"the {zone_name} ({camera_name})" if zone_name else f"the {camera_name}"
@@ -214,25 +228,31 @@ class CameraObjectTracker:
         frame_w = frame.shape[1]
         ready: List[Track] = []
         for track in self.tracks:
-            if track.reported or track.hits < MIN_HITS or track.best_score < 0.5:
+            if track.reported or track.hits < MIN_HITS or track.best_score < MIN_SCORE.get(track.group, 0.5):
                 continue
             if not in_zone(track.box):
                 continue
-            dx, dy = track.travel()
-            still = max(abs(dx), abs(dy)) < frame_w * VEHICLE_MIN_TRAVEL
-            if track.group != "vehicle" and still:
-                if track.best_score < 0.65:
-                    continue  # a motionless, uncertain "person" needs more evidence
-                if any(_iou(track.box, spot[0]) > 0.6 for spot in self.static_spots):
-                    track.reported = True  # learned scenery; stay quiet
-                    continue
             if track.group == "vehicle":
-                if still:
+                dx, dy = track.travel()
+                if max(abs(dx), abs(dy)) < frame_w * VEHICLE_MIN_TRAVEL:
                     # A parked vehicle re-detected when something else moves: after a few
                     # sightings without moving, retire it silently.
                     if track.hits >= 4:
                         track.reported = True
                     continue
+            else:
+                if track.group == "animal" and any(
+                    t.group == "person" and now - t.last_seen < 1.0 and _iou(t.box, track.box) > 0.3
+                    for t in self.tracks
+                ):
+                    track.reported = True  # the small model sometimes calls a person a dog
+                    continue
+                if track.is_still(frame_w):
+                    if track.best_score < 0.65:
+                        continue  # a motionless, uncertain "person" needs more evidence
+                    if any(self._matches_spot(track.box, spot[0]) for spot in self.static_spots):
+                        track.reported = True  # learned scenery; stay quiet
+                        continue
             track.reported = True
             ready.append(track)
 
@@ -244,16 +264,20 @@ class CameraObjectTracker:
         for t in self.tracks:
             if now - t.last_seen < TRACK_TTL_SECONDS:
                 alive.append(t)
-            elif t.group != "vehicle" and t.hits >= MIN_HITS:
-                tdx, tdy = t.travel()
-                if max(abs(tdx), abs(tdy)) < frame_w * VEHICLE_MIN_TRAVEL:
-                    self._remember_static(t.box, now)
+            elif t.group != "vehicle" and t.hits >= MIN_HITS and t.is_still(frame_w):
+                self._remember_static(t.box, now)
         self.tracks = alive
         self.static_spots = [s for s in self.static_spots if now - s[2] < STATIC_MEMORY_SECONDS]
 
+    @staticmethod
+    def _matches_spot(box: Tuple[int, int, int, int], spot: Tuple[int, int, int, int]) -> bool:
+        cx, cy = box[0] + box[2] / 2.0, box[1] + box[3] / 2.0
+        inside = spot[0] <= cx <= spot[0] + spot[2] and spot[1] <= cy <= spot[1] + spot[3]
+        return inside or _iou(box, spot) > 0.4
+
     def _remember_static(self, box: Tuple[int, int, int, int], now: float) -> None:
         for spot in self.static_spots:
-            if _iou(box, spot[0]) > 0.6:
+            if self._matches_spot(box, spot[0]):
                 spot[1] += 1
                 spot[2] = now
                 return

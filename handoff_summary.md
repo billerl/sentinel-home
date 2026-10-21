@@ -37,11 +37,28 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   - Zone test: the bottom-centre point is in the zone, or the box overlaps it by at least 30%.
 - **Cameras** (IPC-D3E43WD-S): main streams were set to 2560x1440 H.264 at 4 Mbps (not used yet).
   Substreams are 640x360 at 12 fps and are used for live view and detection.
-- **Roadmap:**
-  - Phase 1 remainder: main-stream recording via ffmpeg `-c copy`, with a segment ring buffer for pre-roll.
-  - Phase 2: object detection (OpenVINO on the UHD 630, YOLOX/D-FINE).
-  - Phase 3: smart Telegram alerts (delivery vehicles via CLIP) and a "videos from <time range>" command.
-  - Phase 4: web UX (events list, settings pages).
+- **HD clips** (`sentinel/recordings/hd_recorder.py`):
+  - ffmpeg copies each main stream into 2 s **Matroska** segments in `/dev/shm/sentinel-buffer/<ip>`.
+  - MPEG-TS segments from these cameras segfault the bundled static ffmpeg 7.0.2 when read back.
+  - Finished clips are joined into `<clip>_hd.mp4` with 5 s pre-roll and 3 s post-roll. `recordings.hd_path` stores it; playback and Telegram prefer it.
+- **Object detection:**
+  - `sentinel/detection/objects.py` runs YOLOX-tiny ONNX on OpenVINO, CPU only. The user isn't in the `render` group and there's no OpenCL runtime.
+  - `sentinel/engine/objects.py` has a single `DetectionWorker` thread and a per-camera `CameraObjectTracker`.
+  - Tracker rules: 2 hits needed; distance fallback for matching fast movers; label voting; vehicles must move; motionless people need score ≥ 0.65; learned static spots.
+  - It also writes the plain-English `describe()` text.
+  - Models live in `models/detector/` (gitignored); download them from the YOLOX GitHub releases.
+- **Alerts:**
+  - `alert_mode` is `objects` by default: a Telegram photo plus a natural sentence, then the clip.
+  - The per-camera/per-type cooldown is `object_alert_cooldown`.
+  - The user's `telegram_motion_alerts` was **off**; it was left off.
+- **Telegram commands added:** `access` (remote-access guide) and `videos <when> [people|vehicles|animals] [camera]` (`sentinel/engine/queries.py`).
+- **Web:** `/settings` covers status, cameras, detection, Telegram, recording, audio, remote access, password and help.
+- **Replay tool idea:** run the detector and tracker over a sample of a day's clips to check accuracy before changing thresholds.
+- **Known issues for the user:**
+  - The Rear Door camera (.11) looks at carport rafters, with an orange object against the lens.
+  - The Garage camera clock is about 33 min slow (enable NTP on the cameras; needs admin).
+  - The Cinnamon desktop in the xrdp session idles at about 300% CPU.
+- **Next ideas:** delivery-vehicle recognition (CLIP zero-shot on vehicle crops), running detection on HD frames, a web events list with thumbnails, and an LLM/VLM chat ("did anyone come by?").
 
 ## Older status (Qt desktop era, kept for history)
 

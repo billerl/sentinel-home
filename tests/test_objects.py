@@ -76,6 +76,22 @@ class TestTrackerLearning(unittest.TestCase):
         walk = _feed(t, [(200 + 40 * i, 100, 40, 120) for i in range(3)], label="person", start=4000.0)
         self.assertEqual(len(walk), 1)
 
+    def test_jittering_box_is_not_walking(self):
+        t = CameraObjectTracker("cam")
+        jitter = [(300, 100, 40, 120), (322, 96, 30, 110), (305, 104, 45, 125)]  # ~20 px wobble
+        ready = []
+        for i, box in enumerate(jitter):
+            ready += t.update([Detection("person", 0.6, box)], GREY, 1000.0 + i, _always)
+        self.assertEqual(ready, [])  # still + uncertain (< 0.65) -> not reported
+
+    def test_person_called_dog_is_not_a_second_event(self):
+        t = CameraObjectTracker("cam")
+        ready = []
+        for i in range(3):
+            box = (100 + 60 * i, 100, 40, 120)
+            ready += t.update([Detection("person", 0.8, box), Detection("dog", 0.6, box)], GREY, 1000.0 + i, _always)
+        self.assertEqual([r.label for r in ready], ["person"])
+
     def test_uncertain_motionless_person_needs_more_evidence(self):
         t = CameraObjectTracker("cam")
         ready = []
