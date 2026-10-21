@@ -18,6 +18,7 @@ from flask import (
     render_template,
     request,
     send_file,
+    send_from_directory,
     url_for,
 )
 
@@ -63,6 +64,18 @@ def _template_dir() -> str:
     import os
 
     return os.path.join(os.path.dirname(__file__), "templates")
+
+
+def _register_static_types() -> None:
+    import mimetypes
+
+    mimetypes.add_type("application/manifest+json", ".webmanifest")  # not in every system table
+
+
+def _static_dir() -> str:
+    import os
+
+    return os.path.join(os.path.dirname(__file__), "static")  # icons + web app manifest (public)
 
 
 class WebServer:
@@ -128,7 +141,8 @@ class WebServer:
             int(cfg.get("max_concurrent_streams_per_session", 2)),
         )
 
-        app = Flask(__name__, template_folder=_template_dir())
+        _register_static_types()
+        app = Flask(__name__, template_folder=_template_dir(), static_folder=_static_dir())
         app.secret_key = auth_cfg["session_secret"]
         app.config["MAX_CONTENT_LENGTH"] = 256 * 1024  # forms and config JSON only
 
@@ -138,6 +152,12 @@ class WebServer:
             resp.headers.setdefault("X-Frame-Options", "DENY")
             resp.headers.setdefault("Referrer-Policy", "same-origin")
             return resp
+        @app.route("/favicon.ico")
+        def favicon():
+            # Browsers ask for this before (and without) logging in.
+            return send_from_directory(_static_dir(), "favicon.ico", mimetype="image/vnd.microsoft.icon",
+                                       max_age=7 * 86400)
+
         self._app = app
         broker = self._broker
         settings = self._settings

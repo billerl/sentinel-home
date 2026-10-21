@@ -13,7 +13,7 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     package_data={
-        "sentinel.web": ["templates/*.html"],
+        "sentinel.web": ["templates/*.html", "static/*"],
     },
     install_requires=[
         "opencv-python>=4.5.0",
