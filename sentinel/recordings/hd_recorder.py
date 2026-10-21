@@ -39,9 +39,25 @@ def main_stream_url(sub_url: str) -> Optional[str]:
 
 
 def default_buffer_root() -> str:
+    # SENTINEL_BUFFER_ROOT lets a second (test) engine run without touching the live buffers.
+    override = os.environ.get("SENTINEL_BUFFER_ROOT")
+    if override:
+        return override
     return "/dev/shm/sentinel-buffer" if os.path.isdir("/dev/shm") else os.path.join(
         tempfile.gettempdir(), "sentinel-buffer"
     )
+
+
+def _die_with_parent() -> None:
+    """Linux: SIGTERM ffmpeg if Sentinel dies without stopping it, so it can't keep holding a
+    camera stream (cameras allow only a few sessions and refuse the rest)."""
+    try:
+        import ctypes
+        import signal
+
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
+    except Exception:
+        pass
 
 
 class HDRecorder:
@@ -147,9 +163,11 @@ class HDRecorder:
         while not self._stop.is_set():
             started = time.time()
             try:
+                os.makedirs(self.buffer_dir, exist_ok=True)  # in case it was removed underneath us
                 self._proc = subprocess.Popen(
                     self._ffmpeg_cmd(ffmpeg),
                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                    preexec_fn=_die_with_parent if os.name == "posix" else None,
                 )
             except OSError as e:
                 self.last_error = str(e)

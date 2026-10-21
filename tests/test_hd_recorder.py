@@ -9,8 +9,22 @@ import tempfile
 import time
 import unittest
 
-from sentinel.recordings.hd_recorder import HDRecorder, main_stream_url
+from sentinel.recordings.hd_recorder import HDRecorder, default_buffer_root, main_stream_url
 from sentinel.recordings.store import find_ffmpeg
+
+
+class TestBufferRoot(unittest.TestCase):
+    def test_env_override_keeps_a_second_engine_off_the_live_buffers(self):
+        old = os.environ.get("SENTINEL_BUFFER_ROOT")
+        os.environ["SENTINEL_BUFFER_ROOT"] = "/tmp/elsewhere"
+        try:
+            self.assertEqual(default_buffer_root(), "/tmp/elsewhere")
+            self.assertTrue(HDRecorder("rtsp://x/main/", "cam").buffer_dir.startswith("/tmp/elsewhere/"))
+        finally:
+            if old is None:
+                del os.environ["SENTINEL_BUFFER_ROOT"]
+            else:
+                os.environ["SENTINEL_BUFFER_ROOT"] = old
 
 
 class TestMainStreamUrl(unittest.TestCase):

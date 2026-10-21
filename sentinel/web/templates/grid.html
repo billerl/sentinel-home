@@ -15,6 +15,7 @@
       padding: 0;
       overflow: hidden;
       height: 100vh;
+      height: 100dvh;  /* phones: excludes the browser's own toolbars */
       display: flex;
       flex-direction: column;
     }
@@ -178,6 +179,66 @@
     }
     #tl-empty { color: #6aa; padding: 8px 0; }
 
+    /* ---- Clip list (phones; see the mobile layout below) ---- */
+    #tl-list { display: none; margin-top: 8px; }
+    .ev {
+      display: flex; align-items: center; gap: 10px; width: 100%;
+      padding: 10px 8px; margin: 0; border: 0; border-bottom: 1px solid #142424;
+      border-radius: 0; background: none; text-align: left; font-size: 0.9rem; color: #cff;
+    }
+    .ev .sw { flex: none; width: 10px; height: 34px; border-radius: 3px; background: #8a8a8a; }
+    .ev .sw.g-person { background: #ff4d6d; } .ev .sw.g-vehicle { background: #4da3ff; }
+    .ev .sw.g-animal { background: #5fd38a; } .ev .sw.g-delivery { background: #b98cff; }
+    .ev .sw.clip-request { background: #ffb020; }
+    .ev .t { flex: none; width: 4.6em; font-variant-numeric: tabular-nums; color: #00ffff; }
+    .ev .what { flex: 1; min-width: 0; }
+    .ev .what b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ev .what span { color: #7aa; font-size: 0.8rem; }
+    .ev.playing { background: #0d2a2a; }
+    #tl-more { width: 100%; margin-top: 8px; }
+
+    /* ---- Bottom tabs (phones only) ---- */
+    #tabs { display: none; }
+
+    /* ---- Phone layout: page scrolls, cameras stack, timeline gets its own tab ---- */
+    @media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
+      body { overflow: auto; height: auto; min-height: 100vh; display: block;
+             padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)); }
+      header { position: sticky; top: 0; height: auto; min-height: 40px; flex-wrap: wrap;
+               gap: 6px; padding: 6px 10px; }
+      header h1 { flex: 1 0 100%; font-size: 0.95rem; }
+      .header-btn { margin-right: 0; font-size: 0.8rem; padding: 5px 10px; }
+      #tl-toggle { display: none; }
+      .logout { font-size: 0.8rem; padding: 5px 10px; }
+      #grid { display: grid; grid-template-columns: 1fr; grid-auto-rows: auto; overflow: visible; }
+      .tile { aspect-ratio: 16 / 9; }
+      #timeline { max-height: none; overflow: visible; border-top: 0; font-size: 0.8rem; }
+      #tl-toolbar button { padding: 6px 10px; font-size: 0.8rem; }
+      #tl-summary { margin-left: 0; }
+      #tl-labels { width: 72px; }
+      #tl-list { display: block; }
+      body.tab-live #timeline { display: none; }
+      body.tab-events #grid { display: none; }
+      #tabs {
+        display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 900;
+        background: #141414; border-top: 1px solid #044;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+      #tabs button {
+        flex: 1; height: 56px; border: 0; border-radius: 0; background: none;
+        color: #6aa; font-size: 0.95rem;
+      }
+      #tabs button.active { color: #00ffff; background: #0b2222; box-shadow: inset 0 3px 0 #00ffff; }
+    }
+    @media (max-height: 500px) and (pointer: coarse) and (orientation: landscape) {
+      /* Short screen: header scrolls away, slimmer tabs, cameras two across. */
+      body { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px)); }
+      header { position: static; }
+      header h1 { flex: 1; }
+      #tabs button { height: 40px; }
+      #grid { grid-template-columns: 1fr 1fr; }
+    }
+
     /* ---- Clip player ---- */
     #player-overlay {
       display: none;
@@ -247,7 +308,13 @@
       </div>
     </div>
     <div id="tl-empty" hidden>No motion recorded on this day.</div>
+    <div id="tl-list" aria-label="Clips, newest first"></div>
   </section>
+
+  <nav id="tabs" aria-label="View">
+    <button type="button" data-tab="live" onclick="setTab('live')">📹 Live</button>
+    <button type="button" data-tab="events" onclick="setTab('events')">🕒 Events</button>
+  </nav>
 
   <div id="player-overlay">
     <div id="player-header">
@@ -339,7 +406,7 @@
         // Staggered snapshot updates for the grid (1.5s interval)
         // This is MUCH more stable for mobile than multiple concurrent MJPEG streams.
         gridTimers[c.id] = setInterval(function() {
-          if (!focusedCamId && !playerOpen) updateTile(c.id, img);
+          if (!focusedCamId && !playerOpen && !(isPhone() && currentTab === "events")) updateTile(c.id, img);
         }, 1500 + (Math.random() * 500));
       });
     }
@@ -441,6 +508,72 @@
     }
     loadZonesState();
 
+    // ---------------- Phone layout ----------------
+    var PHONE_QUERY = window.matchMedia("(max-width: 760px), (max-height: 500px) and (pointer: coarse)");
+    var currentTab = "live";
+    function isPhone() { return PHONE_QUERY.matches; }
+
+    function setTab(tab) {
+      currentTab = tab;
+      document.body.classList.toggle("tab-live", tab === "live");
+      document.body.classList.toggle("tab-events", tab === "events");
+      document.querySelectorAll("#tabs button").forEach(function(b) { b.classList.toggle("active", b.dataset.tab === tab); });
+      store("sentinel.tab", tab);
+      if (isPhone()) {
+        document.getElementById("timeline").hidden = false;  // the tab decides on phones
+        window.scrollTo(0, 0);
+        if (tab === "events" && tl) applyZoom(true);  // it had no width while hidden
+        if (tab === "live") liveCams.forEach(function(c, i) {
+          var img = document.querySelectorAll("#grid .tile img")[i];
+          if (img) updateTile(c.id, img);  // refresh right away, not on the next tick
+        });
+      }
+    }
+
+    var LIST_PAGE = 50;
+    var listShown = LIST_PAGE;
+    function renderList() {
+      var root = document.getElementById("tl-list");
+      root.innerHTML = "";
+      var clips = visibleClips().slice().reverse();
+      clips.slice(0, listShown).forEach(function(clip) {
+        var row = document.createElement("button");
+        row.type = "button";
+        row.className = "ev" + (playingClip && playingClip.id === clip.id ? " playing" : "");
+        row.dataset.id = clip.id;
+        var sw = document.createElement("span");
+        sw.className = "sw " + (clip.reason === "telegram_clip_request" ? "clip-request" : "g-" + clipGroup(clip));
+        var t = document.createElement("span");
+        t.className = "t";
+        t.textContent = fmtOffset(clip.s);
+        var what = document.createElement("span");
+        what.className = "what";
+        var title = document.createElement("b");
+        title.textContent = cameraName(clip.cam);
+        var detail = document.createElement("span");
+        var bits = [];
+        if (clip.labels && clip.labels.length) bits.push(clip.labels.join(", "));
+        else if (clip.reason === "telegram_clip_request") bits.push("requested clip");
+        else bits.push("motion");
+        bits.push(Math.max(1, Math.round(clip.e - clip.s)) + "s");
+        if (clip.hd) bits.push("HD");
+        detail.textContent = bits.join(" · ");
+        what.appendChild(title);
+        what.appendChild(detail);
+        row.appendChild(sw); row.appendChild(t); row.appendChild(what);
+        row.onclick = function() { openClip(clip); };
+        root.appendChild(row);
+      });
+      if (clips.length > listShown) {
+        var more = document.createElement("button");
+        more.type = "button";
+        more.id = "tl-more";
+        more.textContent = "Show more (" + (clips.length - listShown) + " older)";
+        more.onclick = function() { listShown += LIST_PAGE; renderList(); };
+        root.appendChild(more);
+      }
+    }
+
     function toggleTimeline(show) {
       var el = document.getElementById("timeline");
       if (typeof show !== "boolean") show = el.hidden;
@@ -511,6 +644,8 @@
         (frag[clip.cam] = frag[clip.cam] || document.createDocumentFragment()).appendChild(mark);
       });
       Object.keys(frag).forEach(function(k) { trackByCam[k].appendChild(frag[k]); });
+      if (scrollToFocus) listShown = LIST_PAGE;
+      renderList();
 
       var nowLine = document.getElementById("tl-now");
       if (tl.now_offset != null) {
@@ -589,9 +724,10 @@
       document.getElementById("player-prev").disabled = idx <= 0;
       document.getElementById("player-next").disabled = idx < 0 || idx >= list.length - 1;
 
-      document.querySelectorAll(".tl-mark.playing").forEach(function(m) { m.classList.remove("playing"); });
-      var mark = document.querySelector('.tl-mark[data-id="' + clip.id + '"]');
-      if (mark) mark.classList.add("playing");
+      document.querySelectorAll(".tl-mark.playing, .ev.playing").forEach(function(m) { m.classList.remove("playing"); });
+      document.querySelectorAll('.tl-mark[data-id="' + clip.id + '"], .ev[data-id="' + clip.id + '"]').forEach(function(m) {
+        m.classList.add("playing");
+      });
       document.getElementById("player-next").focus();
     }
 
@@ -638,6 +774,11 @@
       var z = Number(recall("sentinel.timelineZoom"));
       if (z === 1 || z === 4 || z === 24) tlZoom = z;
       toggleTimeline(recall("sentinel.timeline") !== "0");
+      setTab(recall("sentinel.tab") === "events" ? "events" : "live");
+      PHONE_QUERY.addEventListener("change", function() {
+        if (isPhone()) setTab(currentTab);
+        else toggleTimeline(recall("sentinel.timeline") !== "0");  // back to the desktop preference
+      });
       loadTimeline(null);
       window.addEventListener("resize", function() { if (tl) applyZoom(false); });
       // Keep today's timeline current.

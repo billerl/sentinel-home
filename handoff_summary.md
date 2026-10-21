@@ -59,6 +59,13 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     and classifies the sharp crop; the alert photo becomes an HD close-up. Adds ~3 s to those alerts;
     at most one grab per camera per 2 s, and skipped when two jobs are already queued.
   - `web.show_zones` (live-page "Zones: on/off" button) only hides the drawn outlines.
+  - Live page on phones (≤760 px wide, or a short touch screen in landscape): page scrolls, cameras stack
+    (two across in landscape), and "Live / Events" tabs at the bottom; Events adds a tap-friendly clip
+    list (newest first) under the timeline bars. Desktop layout is unchanged.
+  - HD ffmpeg processes die with Sentinel (PR_SET_PDEATHSIG) and the buffer folder is recreated if
+    missing. Run any second/test engine with `SENTINEL_BUFFER_ROOT` set: two engines sharing
+    /dev/shm/sentinel-buffer wipe each other's buffers, and orphaned ffmpeg hold camera sessions (the
+    cameras then refuse new RTSP sessions with "500 Internal Server Error").
 - **Alerts:**
   - `alert_mode` is `objects` by default: a Telegram photo plus a natural sentence, then the clip.
   - The per-camera/per-type cooldown is `object_alert_cooldown`.
