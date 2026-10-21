@@ -75,7 +75,7 @@
   <main>
     <p class="intro">Name your family's cars so alerts say <i>“🛻 Luke's Sierra pulled into the Driveway”</i> and you can
       ask Telegram <i>“When did Abigail get home?”</i>, <i>“Is Steph home?”</i> or <i>“What cars are in the driveway?”</i>.
-      Sentinel learns each car from photos you confirm below — the more (day and night), the better.</p>
+      Name each of your cars once below — about five minutes — and Sentinel takes it from there.</p>
     <p class="intro" id="tracking-off" hidden>⚠️ Object recognition is off, so cars aren't being tracked right now.</p>
 
     <section>
@@ -98,8 +98,10 @@
 
     <section>
       <h2>Cars Sentinel has seen</h2>
-      <p class="intro">Groups of similar-looking photos from your cameras. Untick any that don't belong, then say whose car it is.
-        Night groups (🌙, black and white) need naming too so cars are recognised after dark.</p>
+      <p class="intro">Your regular cars — ones seen on at least two different days. Visitors, delivery vans and other one-off
+        vehicles are left out automatically. For each group, untick any photo that isn't that car, then say whose it is.
+        You don't need to name every group: once a car has a name, Sentinel files new photos of it by itself (including
+        night photos, learned when it's parked as it gets dark), and this list shrinks.</p>
       <div id="groups"><div class="empty">Loading…</div></div>
     </section>
   </main>
@@ -250,14 +252,16 @@
       var root = $("groups");
       root.innerHTML = "";
       if (!data.groups.length) {
-        root.appendChild(el("div", "empty", "Nothing new to name. Sentinel checks the cameras every minute and adds photos of parked cars here."));
+        root.appendChild(el("div", "empty", data.vehicles.length
+          ? "All caught up — nothing needs naming. Sentinel keeps learning your cars by itself."
+          : "Nothing to name yet. Sentinel checks the cameras every minute; your regular cars appear here after they've been seen on two different days."));
         return;
       }
       data.groups.forEach(function(g) {
         var card = el("div", "card suggest");
         var suggested = data.vehicles.find(function(v) { return v.id === g.suggested; });
         var head = el("div", "head");
-        head.appendChild(el("span", "name", (g.night ? "🌙 Night · " : "") + g.count + " photo" + (g.count === 1 ? "" : "s")));
+        head.appendChild(el("span", "name", g.count + " photo" + (g.count === 1 ? "" : "s") + " · seen on " + g.days + " days"));
         var cams = g.cameras.filter(function(c) { return c && c !== "Unknown camera"; });  // clips from before cameras had names
         head.appendChild(el("span", "meta", (cams.length ? cams.join(", ") + " · " : "") + fmtDay(g.first) + (fmtDay(g.first) !== fmtDay(g.last) ? "–" + fmtDay(g.last) : "")));
         card.appendChild(head);
@@ -283,7 +287,7 @@
         var first = el("option", null, "— choose —"); first.value = ""; select.appendChild(first);
         data.vehicles.forEach(function(v) { var o = el("option", null, v.name); o.value = String(v.id); select.appendChild(o); });
         var nw = el("option", null, "A new vehicle…"); nw.value = "new"; select.appendChild(nw);
-        var ign = el("option", null, "Not one of ours (hide)"); ign.value = "ignore"; select.appendChild(ign);
+        var ign = el("option", null, "Not ours — visitor, neighbour, RV… (hide)"); ign.value = "ignore"; select.appendChild(ign);
         select.value = suggested ? String(suggested.id) : "";
         field.appendChild(select);
         row.appendChild(field);

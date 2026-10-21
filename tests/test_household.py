@@ -56,18 +56,40 @@ class TestMatching(unittest.TestCase):
         self.assertIsNone(self.store.identify(unit(96, night_look, 0.008), False)[0])  # daytime refs don't look like that
 
     def test_groups_and_labelling(self):
-        ids = [self.store.add_sighting(time.time(), "cam", "Garage", COLOUR, (0, 0, 90, 70), unit(50 + i, SIERRA, 0.008))
-               for i in range(3)]
+        day = 86400
+        ids = [self.store.add_sighting(time.time() - i * day, "cam", "Garage", COLOUR, (0, 0, 90, 70),
+                                       unit(50 + i, FUSION, 0.006)) for i in range(3)]
         ids.append(self.store.add_sighting(time.time(), "cam", "Garage", COLOUR, (0, 0, 90, 70), unit(77)))
         groups = self.store.suggestion_groups()
-        big = max(groups, key=lambda g: len(g["ids"]))
-        self.assertEqual(sorted(big["ids"]), sorted(ids[:3]))
-        self.assertEqual(big["suggested"], self.sierra)
+        self.assertEqual(len(groups), 1)  # the one-off car (seen on one day) isn't asked about
+        self.assertEqual(sorted(groups[0]["ids"]), sorted(ids[:3]))
+        self.assertEqual(groups[0]["days"], 3)
         self.assertTrue(os.path.isfile(self.store.crop_path(ids[0])))
-        self.store.assign([ids[3]], None, ignore=True)
-        self.assertEqual(sum(len(g["ids"]) for g in self.store.suggestion_groups()), 3)
-        self.store.assign(ids[:3], self.sierra)
+        self.store.assign(ids[:3], self.fusion)
         self.assertEqual(self.store.suggestion_groups(), [])
+
+    def test_night_photos_are_not_asked_about(self):
+        for i in range(3):
+            self.store.add_sighting(time.time() - i * 86400, "cam", "Garage", NIGHT, (0, 0, 90, 70), unit(80 + i, unit(8), 0.005))
+        self.assertEqual(self.store.suggestion_groups(), [])
+
+    def test_clear_matches_are_filed_automatically(self):
+        sure = self.store.add_sighting(time.time(), "cam", "Garage", COLOUR, (0, 0, 90, 70), unit(60, SIERRA, 0.004))
+        unsure = self.store.add_sighting(time.time(), "cam", "Garage", COLOUR, (0, 0, 90, 70), unit(61))
+        self.assertEqual(self.store.auto_file(), 1)
+        labelled = {s["id"]: s["vehicle_id"] for s in self.store.sightings(labelled=True)}
+        self.assertEqual(labelled.get(sure), self.sierra)
+        self.assertNotIn(unsure, labelled)
+
+    def test_not_ours_hides_look_alikes(self):
+        rv = unit(70)
+        first = self.store.add_sighting(time.time(), "cam", "Front Door", COLOUR, (0, 0, 90, 70), rv)
+        self.store.assign([first], None, ignore=True)
+        later = [self.store.add_sighting(time.time() - i * 86400, "cam", "Front Door", COLOUR, (0, 0, 90, 70),
+                                         unit(71 + i, rv, 0.005)) for i in range(3)]
+        self.assertEqual(self.store.auto_file(), 3)
+        self.assertEqual(self.store.suggestion_groups(), [])
+        self.assertEqual([s for s in self.store.sightings() if s["id"] in later], [])
 
 
 class _Det:
@@ -141,6 +163,15 @@ class TestPresence(unittest.TestCase):
         self.clf.next = unit(41, SIERRA, 0.008)  # morning: colour again
         self.scan([self.BOX])
         self.assertEqual(self.changes, [("arrived", "Luke's Sierra", 1060.0)])
+
+    def test_known_parked_car_files_its_night_photo(self):
+        self.scan([]); self.scan([self.BOX]); self.scan([self.BOX])  # recognised by day
+        self.clf.next = unit(62)  # dusk: infrared look it has never seen
+        self.scan([self.BOX], NIGHT)
+        night_refs = [s for s in self.store.sightings(labelled=True) if s["night"]]
+        self.assertEqual(len(night_refs), 1)
+        self.assertEqual(night_refs[0]["vehicle_id"], self.sierra)
+        self.assertEqual(self.store.identify(unit(63, unit(62), 0.004), True)[0], self.sierra)  # next night: known
 
     def test_small_far_vehicles_are_ignored(self):
         self.scan([]); self.scan([(600, 10, 20, 15)]); self.scan([(600, 10, 20, 15)])

@@ -43,6 +43,14 @@ TOP_K = 3
 GROUP_SIMILARITY = 0.88
 GROUP_SIMILARITY_NIGHT = 0.92
 
+# Filing photos without asking: a photo this close to one named car (and clearly not
+# another) becomes a reference automatically; the page only shows what's left.
+AUTO_MATCH = 0.92
+AUTO_MARGIN = 0.04
+IGNORE_SIMILARITY = 0.90  # looks like something marked "not ours" -> hidden too
+MAX_REFS_PER_LIGHT = 80  # per car, per day/night: plenty, and keeps matching fast
+MIN_DAYS = 2  # only cars seen on this many different days are suggested (skips visitors, deliveries)
+
 SCAN_INTERVAL = 60.0
 CONFIRM_SCANS = 2  # seen this many scans in a row = parked
 LEAVE_SCANS = 3  # missing this many scans in a row = left
@@ -106,6 +114,9 @@ class HouseholdStore:
                 " camera_key TEXT NOT NULL, camera_name TEXT NOT NULL DEFAULT '', box TEXT NOT NULL, night INTEGER NOT NULL,"
                 " embedding BLOB NOT NULL, vehicle_id INTEGER, ignored INTEGER NOT NULL DEFAULT 0)"
             )
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(sightings)")}
+            if "auto" not in columns:  # filed automatically (not by the user)
+                conn.execute("ALTER TABLE sightings ADD COLUMN auto INTEGER NOT NULL DEFAULT 0")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=30)
@@ -143,14 +154,14 @@ class HouseholdStore:
     # ----------------------------------------------------------- sightings
     def add_sighting(self, ts: float, camera_key: str, camera_name: str, frame: np.ndarray,
                      box: Tuple[int, int, int, int], embedding: np.ndarray,
-                     vehicle_id: Optional[int] = None) -> int:
+                     vehicle_id: Optional[int] = None, auto: bool = False) -> int:
         night = is_greyscale(frame)
         with self._lock, self._connect() as conn:
             cur = conn.execute(
-                "INSERT INTO sightings (ts, camera_key, camera_name, box, night, embedding, vehicle_id)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO sightings (ts, camera_key, camera_name, box, night, embedding, vehicle_id, auto)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (ts, camera_key, camera_name, json.dumps(list(map(int, box))), int(night),
-                 embedding.astype(np.float32).tobytes(), vehicle_id),
+                 embedding.astype(np.float32).tobytes(), vehicle_id, int(auto)),
             )
             sid = int(cur.lastrowid)
         crop = crop_for_clip(frame, box, pad=0.08)
@@ -174,6 +185,51 @@ class HouseholdStore:
                                [vehicle_id, int(ignore)] + ids)
         self._ref_cache = None
         return cur.rowcount
+
+    def ref_count(self, vehicle_id: int, night: bool) -> int:
+        with self._connect() as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM sightings WHERE vehicle_id = ? AND night = ?",
+                                    (vehicle_id, int(night))).fetchone()[0])
+
+    def ignored_embeddings(self) -> np.ndarray:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT embedding FROM sightings WHERE ignored = 1").fetchall()
+        return np.array([np.frombuffer(r[0], dtype=np.float32) for r in rows]) if rows else np.zeros((0, 512), np.float32)
+
+    def auto_file(self) -> int:
+        """File unlabelled photos that clearly match a named car (or something marked
+        "not ours"), so the Vehicles page only asks about the rest. Returns how many."""
+        if not self._references():
+            return 0
+        ignored = self.ignored_embeddings()
+        filed: Dict[Tuple[int, bool], List[int]] = {}
+        hidden: List[int] = []
+        for s in self.sightings(labelled=False, limit=MAX_UNLABELLED):
+            e = s["embedding"]
+            if len(ignored) and float((ignored @ e).max()) >= IGNORE_SIMILARITY:
+                hidden.append(s["id"])
+                continue
+            scores = sorted(self.scores(e, bool(s["night"])).items(), key=lambda kv: -kv[1])
+            if not scores:
+                continue
+            best_id, best = scores[0]
+            runner = scores[1][1] if len(scores) > 1 else 0.0
+            if best >= AUTO_MATCH and best - runner >= AUTO_MARGIN:
+                filed.setdefault((best_id, bool(s["night"])), []).append(s["id"])
+        n = 0
+        for (vid, night), ids in filed.items():
+            room = MAX_REFS_PER_LIGHT - self.ref_count(vid, night)
+            if room > 0:
+                with self._lock, self._connect() as conn:
+                    marks = ",".join("?" * len(ids[:room]))
+                    conn.execute(f"UPDATE sightings SET vehicle_id = ?, auto = 1 WHERE id IN ({marks})",
+                                 [vid] + ids[:room])
+                n += len(ids[:room])
+        if hidden:
+            self.assign(hidden, None, ignore=True)
+        if n:
+            self._ref_cache = None
+        return n + len(hidden)
 
     def sightings(self, labelled: Optional[bool] = None, limit: int = 2000) -> List[Dict[str, Any]]:
         sql = "SELECT * FROM sightings WHERE ignored = 0"
@@ -238,10 +294,12 @@ class HouseholdStore:
             return best_id, best
         return None, best
 
-    def suggestion_groups(self, limit: int = 20) -> List[Dict[str, Any]]:
-        """Unlabelled sightings grouped by look (biggest groups first), each with the
-        known vehicle it most resembles, for the Vehicles page."""
-        items = self.sightings(labelled=False, limit=MAX_UNLABELLED)
+    def suggestion_groups(self, limit: int = 8, min_days: int = MIN_DAYS) -> List[Dict[str, Any]]:
+        """Daytime photos not yet filed, grouped by look, for the Vehicles page. Only groups
+        seen on ``min_days`` different days (the family's regular cars, not visitors or
+        deliveries), most frequent first, each with the named car it most resembles.
+        Night photos aren't asked about: they're filed from cars recognised by day."""
+        items = [s for s in self.sightings(labelled=False, limit=MAX_UNLABELLED) if not s["night"]]
         if not items:
             return []
         vecs = np.array([s["embedding"] for s in items])
@@ -264,14 +322,16 @@ class HouseholdStore:
             else:
                 groups.append([i])
         centroids = [vecs[g].mean(0) for g in groups]
-        order = sorted(range(len(groups)), key=lambda g: -len(groups[g]))[:limit]
+        days = [len({time.strftime("%Y-%m-%d", time.localtime(items[i]["ts"])) for i in g}) for g in groups]
+        order = [g for g in sorted(range(len(groups)), key=lambda g: (-days[g], -len(groups[g])))
+                 if days[g] >= min_days][:limit]
         out = []
         for g in order:
             members = [items[i] for i in groups[g]]
             centroid = centroids[g] / (np.linalg.norm(centroids[g]) or 1)
             night = sum(m["night"] for m in members) > len(members) / 2
             vid, score = self.identify(centroid, night)
-            out.append({"ids": [m["id"] for m in members], "night": night, "suggested": vid,
+            out.append({"ids": [m["id"] for m in members], "night": night, "suggested": vid, "days": days[g],
                         "cameras": sorted({m["camera_name"] for m in members}),
                         "first": min(m["ts"] for m in members), "last": max(m["ts"] for m in members)})
         return out
@@ -332,6 +392,8 @@ class PresenceTracker:
                 except Exception:
                     pass
             self._save()
+            if int(time.time()) % 3600 < self.interval:
+                self.store.auto_file()
             if int(time.time()) % 86400 < self.interval:
                 self.store.prune()
             self._stop.wait(self.interval)
@@ -384,8 +446,14 @@ class PresenceTracker:
                     # Unknown so far (e.g. arrived in the dark): try again every scan.
                     p.vehicle_id, _ = self.store.identify(embedding, night)
                 if photo_due:
-                    # Photo for the Vehicles page; it only becomes a reference once the user confirms it.
-                    self.store.add_sighting(now, key, cam.display_name, frame, p.box, embedding)
+                    if p.vehicle_id is not None and p.confirmed and \
+                            self.store.ref_count(p.vehicle_id, night) < MAX_REFS_PER_LIGHT:
+                        # A car we already know, parked in the same spot: its photo (including the
+                        # first infrared one at dusk) is filed under it without asking.
+                        self.store.add_sighting(now, key, cam.display_name, frame, p.box, embedding,
+                                                vehicle_id=p.vehicle_id, auto=True)
+                    else:
+                        self.store.add_sighting(now, key, cam.display_name, frame, p.box, embedding)
                     p.last_photo, p.last_night = now, night
             if p.seen >= CONFIRM_SCANS:
                 p.confirmed = True

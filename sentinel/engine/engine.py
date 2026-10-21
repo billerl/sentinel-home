@@ -450,6 +450,7 @@ class Engine:
 
     def household_view(self) -> Dict[str, Any]:
         store = self.household
+        store.auto_file()  # only ask about photos it can't file by itself
         refs: Dict[int, List[Dict[str, Any]]] = {}
         for s in store.sightings(labelled=True, limit=5000):
             refs.setdefault(s["vehicle_id"], []).append({"id": s["id"], "night": bool(s["night"])})
@@ -463,7 +464,7 @@ class Engine:
                 "refs": refs.get(v.id, [])[:30], "ref_count": len(refs.get(v.id, [])),
                 "night_refs": sum(1 for r in refs.get(v.id, []) if r["night"]),
             })
-        groups = [dict(g, count=len(g["ids"]), sample=g["ids"][:24]) for g in store.suggestion_groups()]
+        groups = [dict(g, count=len(g["ids"]), sample=g["ids"][:16]) for g in store.suggestion_groups()]
         return {"tracking": self.presence is not None, "vehicles": vehicles, "groups": groups,
                 "kinds": list(self.VEHICLE_KINDS)}
 
