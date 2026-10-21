@@ -100,7 +100,6 @@ class Engine:
         self.detection_worker = None
         self.detector_error: Optional[str] = None
         self._object_alert_times: Dict[Tuple[str, str], float] = {}
-        self.recent_objects: List[Dict[str, Any]] = []
         self._last_description: Dict[str, Tuple[float, str]] = {}
         self._video_query_lock = threading.Lock()
 
@@ -158,10 +157,11 @@ class Engine:
     def _init_objects(self) -> None:
         if not self.settings.get("object_detection_enabled", True):
             return
-        from sentinel.detection.objects import ObjectDetector
+        from sentinel.detection.objects import MODELS_DIR, ObjectDetector
         from sentinel.engine.objects import DetectionWorker
 
-        model = os.path.join("models", "detector", f"{self.settings.get('detector_model', 'yolox_tiny')}.onnx")
+        model = os.path.join(MODELS_DIR, f"{self.settings.get('detector_model', 'yolox_tiny')}.onnx")
+        started = time.time()
         detector = ObjectDetector(model)
         if not detector.available:
             self.detector_error = detector.error
@@ -170,6 +170,8 @@ class Engine:
             return
         self.detection_worker = DetectionWorker(detector)
         self.detection_worker.start()
+        app_logger.log("info", "object_detector_ready", model=os.path.basename(model),
+                       load_ms=int((time.time() - started) * 1000), component="engine", action="init_objects")
 
     def objects_active(self) -> bool:
         return self.detection_worker is not None and self.settings.get("alert_mode", "objects") == "objects"
@@ -238,10 +240,6 @@ class Engine:
         """A person/vehicle/animal was recognised (runs on the detection thread)."""
         group = event.track.group
         self._last_description[pipeline.host] = (event.timestamp, event.description)
-        self.recent_objects = ([{
-            "time": event.timestamp, "camera": pipeline.display_name, "label": event.track.label,
-            "group": group, "zone": event.zone_name, "text": event.description,
-        }] + self.recent_objects)[:50]
         app_logger.log("info", "object_detected", camera_display=pipeline.display_name,
                        label=event.track.label, zone=event.zone_name, score=round(event.track.best_score, 2),
                        description=event.description, component="engine", action="on_object")
@@ -664,6 +662,6 @@ class Engine:
                 "model": self.settings.get("detector_model"),
                 "inference_ms": round(self.detection_worker.inference_ms) if self.detection_worker else None,
                 "error": self.detector_error,
-                "recent": self.recent_objects[:15],
+                "recent": admin.recent_objects(),
             },
         }

@@ -72,7 +72,10 @@ def _alert_groups(value: Any) -> List[str]:
     return [g for g in allowed if g in value]
 
 
-def available_detector_models(models_dir: str = os.path.join("models", "detector")) -> List[str]:
+def available_detector_models(models_dir: Optional[str] = None) -> List[str]:
+    from sentinel.detection.objects import MODELS_DIR
+
+    models_dir = models_dir or MODELS_DIR
     return sorted(os.path.splitext(os.path.basename(p))[0] for p in glob.glob(os.path.join(models_dir, "*.onnx")))
 
 
@@ -241,6 +244,7 @@ class CpuMeter:
 _NOISY_EVENTS = {
     "camera_connect_attempt", "camera_connect_success", "connect_camera_source",
     "camera_read_error", "web_server_start",
+    "object_detected",  # shown under "Recently seen" instead
 }
 
 # Plain-English labels for the status page.
@@ -252,6 +256,9 @@ EVENT_LABELS = {
     "camera_removed": "Camera removed",
     "camera_config_updated": "Camera settings changed",
     "engine_started": "Sentinel started",
+    "object_detector_ready": "Object detection ready",
+    "object_detector_unavailable": "Object detection unavailable",
+    "object_detected": "Recognised",
     "engine_stopped": "Sentinel stopped",
     "recording_maintenance": "Old clips cleaned up",
     "recording_maintenance_failed": "Clip cleanup failed",
@@ -267,6 +274,40 @@ EVENT_LABELS = {
     "recording_transcode_failed": "Clip conversion failed",
     "telegram_command_failed": "Telegram command failed",
 }
+
+
+def _log_tail(log_path: str, max_bytes: int) -> List[Dict[str, Any]]:
+    try:
+        with open(log_path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - max_bytes))
+            lines = handle.read().decode("utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    records = []
+    for line in lines:
+        try:
+            records.append(json.loads(line))
+        except ValueError:
+            continue
+    return records
+
+
+def recent_objects(log_path: str = "sentinel_events.log", limit: int = 15) -> List[Dict[str, Any]]:
+    """Most recent recognised objects (from the event log, so they survive restarts)."""
+    out = []
+    for record in reversed(_log_tail(log_path, 256 * 1024)):
+        if record.get("event") != "object_detected":
+            continue
+        try:
+            ts = time.mktime(time.strptime(record["timestamp"], "%Y-%m-%dT%H:%M:%S"))
+        except (KeyError, ValueError):
+            continue
+        out.append({"time": ts, "camera": record.get("camera_display"), "label": record.get("label"),
+                    "text": record.get("description", "")})
+        if len(out) >= limit:
+            break
+    return out
 
 
 def recent_events(log_path: str = "sentinel_events.log", limit: int = 25) -> List[Dict[str, Any]]:

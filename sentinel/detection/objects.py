@@ -36,7 +36,10 @@ CLASS_GROUPS = {
 }
 WATCHED_CLASSES = frozenset(CLASS_GROUPS)
 
-DEFAULT_MODEL = os.path.join("models", "detector", "yolox_s.onnx")
+# Repository root, so models are found whatever the working directory is.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+MODELS_DIR = os.path.join(PROJECT_ROOT, "models", "detector")
+DEFAULT_MODEL = os.path.join(MODELS_DIR, "yolox_tiny.onnx")
 
 
 @dataclass
