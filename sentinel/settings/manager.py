@@ -106,6 +106,8 @@ class SettingsManager:
             "object_alert_groups": ["person", "vehicle", "delivery", "animal"],
             # Recognise delivery vans (UPS, FedEx, Amazon, USPS, DHL) and vehicle types with CLIP.
             "vehicle_types_enabled": True,
+            # Where object detection runs: "auto" (Intel GPU if usable, else CPU), "GPU" or "CPU".
+            "inference_device": "auto",
             "object_alert_cooldown": 60,
             # Shown in the Help page and the Telegram "access" reply
             "remote_web_url": "",

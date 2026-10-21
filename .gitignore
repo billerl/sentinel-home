@@ -50,3 +50,4 @@ cloudflare-tunnel-notes.local.md
 # Downloaded detection models (see installation-guide.md)
 models/detector/
 models/classifier/
+models/.ov_cache/

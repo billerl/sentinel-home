@@ -172,6 +172,33 @@ class TestDescribe(unittest.TestCase):
         self.assertIsNone(vehicle_color(GREY, (10, 10, 50, 50)))
 
 
+class _FakeCore:
+    def __init__(self, devices, gpu_fails=False):
+        self.available_devices = devices
+        self.gpu_fails = gpu_fails
+        self.compiled_on = []
+
+    def set_property(self, props):
+        pass
+
+    def compile_model(self, model, device, config):
+        if device == "GPU" and self.gpu_fails:
+            raise RuntimeError("no GPU driver")
+        self.compiled_on.append(device)
+        return "compiled-" + device
+
+
+class TestDeviceChoice(unittest.TestCase):
+    def test_auto_prefers_gpu_and_falls_back(self):
+        from sentinel.detection.objects import compile_for_device
+        self.assertEqual(compile_for_device(_FakeCore(["CPU", "GPU"]), "m")[1], "GPU")
+        self.assertEqual(compile_for_device(_FakeCore(["CPU"]), "m")[1], "CPU")
+        self.assertEqual(compile_for_device(_FakeCore(["CPU", "GPU"], gpu_fails=True), "m")[1], "CPU")
+        self.assertEqual(compile_for_device(_FakeCore(["CPU", "GPU"]), "m", "CPU")[1], "CPU")
+        with self.assertRaises(RuntimeError):  # asked for the GPU explicitly: say so
+            compile_for_device(_FakeCore(["CPU", "GPU"], gpu_fails=True), "m", "GPU")
+
+
 class _FakeDetector:
     def __init__(self):
         self.calls = 0

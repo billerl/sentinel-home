@@ -42,6 +42,32 @@ WATCHED_CLASSES = frozenset(c for c in CLASS_GROUPS if c in COCO_CLASSES)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MODELS_DIR = os.path.join(PROJECT_ROOT, "models", "detector")
 DEFAULT_MODEL = os.path.join(MODELS_DIR, "yolox_tiny.onnx")
+# Compiled-model cache: compiling for the Intel GPU takes ~20 s per model, loading from here <1 s.
+OV_CACHE_DIR = os.path.join(PROJECT_ROOT, "models", ".ov_cache")
+DEVICES = ("auto", "GPU", "CPU")
+
+
+def compile_for_device(core, model, device: str = "auto", threads: int = 2):
+    """Compile an OpenVINO model on the integrated GPU when possible, else the CPU.
+
+    "auto" prefers the GPU (an Intel UHD 630 runs YOLOX-tiny ~12x faster than two CPU
+    threads and takes that work off the CPU). Returns (compiled_model, device_used).
+    """
+    device = device.upper() if device and device.lower() != "auto" else "auto"
+    try:
+        os.makedirs(OV_CACHE_DIR, exist_ok=True)
+        core.set_property({"CACHE_DIR": OV_CACHE_DIR})
+    except Exception:
+        pass
+    if device in ("auto", "GPU") and "GPU" in core.available_devices:
+        try:
+            return core.compile_model(model, "GPU", {"PERFORMANCE_HINT": "LATENCY"}), "GPU"
+        except Exception:
+            if device == "GPU":
+                raise
+    return core.compile_model(
+        model, "CPU", {"PERFORMANCE_HINT": "LATENCY", "INFERENCE_NUM_THREADS": str(threads)}
+    ), "CPU"
 
 
 @dataclass
@@ -63,8 +89,9 @@ class Detection:
 class ObjectDetector:
     """Thread-safe YOLOX detector. ``available`` is False if OpenVINO or the model is missing."""
 
-    def __init__(self, model_path: str = DEFAULT_MODEL, threads: int = 2) -> None:
+    def __init__(self, model_path: str = DEFAULT_MODEL, threads: int = 2, device: str = "CPU") -> None:
         self.model_path = model_path
+        self.device = None  # "GPU" or "CPU" once loaded
         self.available = False
         self.error: Optional[str] = None
         self._lock = threading.Lock()
@@ -80,9 +107,7 @@ class ObjectDetector:
             model = core.read_model(model_path)
             shape = model.inputs[0].get_partial_shape()
             self._input_size = (int(shape[2].get_length()), int(shape[3].get_length()))
-            self._compiled = core.compile_model(
-                model, "CPU", {"PERFORMANCE_HINT": "LATENCY", "INFERENCE_NUM_THREADS": str(threads)}
-            )
+            self._compiled, self.device = compile_for_device(core, model, device, threads)
             self._request = self._compiled.create_infer_request()
             self._build_grids()
             self.available = True

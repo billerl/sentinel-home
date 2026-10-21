@@ -164,7 +164,8 @@ class Engine:
 
         model = os.path.join(MODELS_DIR, f"{self.settings.get('detector_model', 'yolox_tiny')}.onnx")
         started = time.time()
-        detector = ObjectDetector(model)
+        device = str(self.settings.get("inference_device", "auto"))
+        detector = ObjectDetector(model, device=device)
         if not detector.available:
             self.detector_error = detector.error
             app_logger.log("error", "object_detector_unavailable", error_message=detector.error,
@@ -174,15 +175,16 @@ class Engine:
         if self.settings.get("vehicle_types_enabled", True):
             from sentinel.detection.vehicle_type import VehicleClassifier
 
-            classifier = VehicleClassifier()
+            classifier = VehicleClassifier(device=device)
             if not classifier.available:
                 app_logger.log("warning", "vehicle_classifier_unavailable", error_message=classifier.error,
                                component="engine", action="init_objects")
                 classifier = None
         self.detection_worker = DetectionWorker(detector, vehicle_classifier=classifier)
         self.detection_worker.start()
-        app_logger.log("info", "object_detector_ready", model=os.path.basename(model),
+        app_logger.log("info", "object_detector_ready", model=os.path.basename(model), device=detector.device,
                        vehicle_types=classifier is not None,
+                       classifier_device=classifier.device if classifier is not None else None,
                        load_ms=int((time.time() - started) * 1000), component="engine", action="init_objects")
 
     def objects_active(self) -> bool:
@@ -676,6 +678,7 @@ class Engine:
             "objects": {
                 "enabled": self.detection_worker is not None,
                 "model": self.settings.get("detector_model"),
+                "device": self.detection_worker.detector.device if self.detection_worker else None,
                 "inference_ms": round(self.detection_worker.inference_ms) if self.detection_worker else None,
                 "error": self.detector_error,
                 "recent": admin.recent_objects(),

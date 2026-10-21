@@ -23,7 +23,7 @@ from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 
-from sentinel.detection.objects import PROJECT_ROOT
+from sentinel.detection.objects import PROJECT_ROOT, compile_for_device
 
 CLASSIFIER_DIR = os.path.join(PROJECT_ROOT, "models", "classifier")
 VISION_MODEL = os.path.join(CLASSIFIER_DIR, "clip_vit_b32_vision.onnx")
@@ -98,8 +98,9 @@ class VehicleClassifier:
     """Thread-safe. ``available`` is False when OpenVINO, the model or the prompts are missing."""
 
     def __init__(self, model_path: str = VISION_MODEL, prompts_path: str = PROMPTS_FILE,
-                 threads: int = 2) -> None:
+                 threads: int = 2, device: str = "CPU") -> None:
         self.available = False
+        self.device = None
         self.error: Optional[str] = None
         self._lock = threading.Lock()
         try:
@@ -117,9 +118,7 @@ class VehicleClassifier:
             core = ov.Core()
             model = core.read_model(model_path)
             model.reshape([1, 3, 224, 224])
-            self._compiled = core.compile_model(
-                model, "CPU", {"PERFORMANCE_HINT": "LATENCY", "INFERENCE_NUM_THREADS": str(threads)}
-            )
+            self._compiled, self.device = compile_for_device(core, model, device, threads)
             self._request = self._compiled.create_infer_request()
             self.available = True
         except Exception as e:  # ImportError, missing file, bad model

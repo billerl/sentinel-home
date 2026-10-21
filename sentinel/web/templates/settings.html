@@ -143,6 +143,13 @@
             </select>
           </div>
           <div class="field" style="flex: 0 1 220px"><span>Model</span><select data-key="detector_model" id="model-select"></select></div>
+          <div class="field" style="flex: 0 1 220px"><span>Run detection on</span>
+            <select data-key="inference_device">
+              <option value="auto">Automatic (graphics chip if available)</option>
+              <option value="GPU">Intel graphics chip</option>
+              <option value="CPU">CPU</option>
+            </select>
+          </div>
           <div class="field" style="flex: 0 1 220px"><span>Repeat alerts per camera after (s)</span><input type="number" min="0" max="3600" data-key="object_alert_cooldown"></div>
         </div>
         <div class="row" id="groups">
@@ -152,7 +159,7 @@
           <label><input type="checkbox" value="delivery"> Deliveries</label>
           <label><input type="checkbox" value="animal"> Animals</label>
         </div>
-        <p class="hint">Clips are still recorded for all motion; this only decides what you're told about. Parked cars don't alert — a vehicle has to move. <b>Vehicles</b> includes deliveries; untick it and keep <b>Deliveries</b> to hear only about delivery vans. <b>yolox_tiny</b> is quick; <b>yolox_s</b> is more accurate but uses more CPU. Turning recognition on/off or changing the model applies after Sentinel restarts.</p>
+        <p class="hint">Clips are still recorded for all motion; this only decides what you're told about. Parked cars don't alert — a vehicle has to move. <b>Vehicles</b> includes deliveries; untick it and keep <b>Deliveries</b> to hear only about delivery vans. <b>yolox_tiny</b> is quick; <b>yolox_s</b> is more accurate but uses more CPU. Turning recognition on/off, changing the model or where it runs applies after Sentinel restarts. The Intel graphics chip runs detection about 12× faster than the CPU and frees the CPU for more cameras.</p>
         <div class="save-row"><button class="primary" onclick="saveSection('detection')">Save</button><span class="msg" id="msg-detection"></span></div>
       </div>
     </section>
@@ -341,7 +348,7 @@
                   "reconnect_interval_seconds", "feed_fps", "web.max_fps", "web.show_zones"],
       audio: ["volume", "speech_speed", "voice_id"],
       access: ["remote_web_url", "remote_rdp_user"],
-      detection: ["object_detection_enabled", "vehicle_types_enabled", "alert_mode", "detector_model", "object_alert_cooldown"]
+      detection: ["object_detection_enabled", "vehicle_types_enabled", "alert_mode", "detector_model", "inference_device", "object_alert_cooldown"]
     };
 
     function $(id) { return document.getElementById(id); }
@@ -589,7 +596,7 @@
           stat("Telegram", s.telegram.enabled ? (s.telegram.configured ? "On" : "Not set up") : "Off", "") +
           stat("Oldest clip", s.recordings.oldest || "—", "") +
           stat("Object detection", s.objects.enabled ? "On" : "Off",
-               s.objects.enabled ? (s.objects.model + (s.objects.inference_ms ? " · " + s.objects.inference_ms + " ms" : ""))
+               s.objects.enabled ? (s.objects.model + (s.objects.device ? " on " + (s.objects.device === "GPU" ? "Intel graphics" : "CPU") : "") + (s.objects.inference_ms ? " · " + s.objects.inference_ms + " ms" : ""))
                                  : (s.objects.error || "enable under Detection"));
         var otbody = $("objects").querySelector("tbody");
         otbody.innerHTML = s.objects.recent.length ? "" : '<tr><td colspan="2" class="hint">Nothing recognised yet.</td></tr>';

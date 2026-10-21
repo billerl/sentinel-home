@@ -113,6 +113,7 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "voice_id": _voice,
     "object_detection_enabled": _bool,
     "vehicle_types_enabled": _bool,
+    "inference_device": lambda v: _choice(v, ("auto", "GPU", "CPU")),
     "detector_model": _detector_model,
     "alert_mode": lambda v: _choice(v, ("objects", "motion")),
     "object_alert_groups": _alert_groups,
