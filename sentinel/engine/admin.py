@@ -66,9 +66,9 @@ def _choice(value: Any, options: tuple) -> str:
 
 
 def _alert_groups(value: Any) -> List[str]:
-    allowed = ("person", "vehicle", "animal")
+    allowed = ("person", "vehicle", "delivery", "animal")
     if not isinstance(value, list) or any(v not in allowed for v in value):
-        raise ValueError("choose from person, vehicle, animal")
+        raise ValueError("choose from person, vehicle, delivery, animal")
     return [g for g in allowed if g in value]
 
 
@@ -112,6 +112,7 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "speech_speed": _num(80, 350, int),
     "voice_id": _voice,
     "object_detection_enabled": _bool,
+    "vehicle_types_enabled": _bool,
     "detector_model": _detector_model,
     "alert_mode": lambda v: _choice(v, ("objects", "motion")),
     "object_alert_groups": _alert_groups,

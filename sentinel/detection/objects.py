@@ -33,8 +33,10 @@ CLASS_GROUPS = {
     "bicycle": "vehicle", "car": "vehicle", "motorcycle": "vehicle", "bus": "vehicle", "truck": "vehicle",
     "dog": "animal", "cat": "animal", "horse": "animal", "sheep": "animal", "cow": "animal",
     "bear": "animal", "bird": "animal",
+    # Not a detector class: added to clip labels when CLIP recognises a delivery vehicle.
+    "delivery": "delivery",
 }
-WATCHED_CLASSES = frozenset(CLASS_GROUPS)
+WATCHED_CLASSES = frozenset(c for c in CLASS_GROUPS if c in COCO_CLASSES)
 
 # Repository root, so models are found whatever the working directory is.
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

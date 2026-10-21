@@ -129,6 +129,7 @@
       <h2>Alerts &amp; object detection</h2>
       <div class="card">
         <div class="row"><label><input type="checkbox" data-key="object_detection_enabled"> Recognise people, vehicles and animals</label></div>
+        <div class="row"><label><input type="checkbox" data-key="vehicle_types_enabled"> Recognise delivery vans (UPS, FedEx, Amazon, USPS, DHL) and vehicle types (pickup, SUV, school bus…)</label></div>
         <div class="row">
           <div class="field" style="flex: 0 1 260px"><span>Send alerts for</span>
             <select data-key="alert_mode">
@@ -143,9 +144,10 @@
           <span style="color:#9cc">Alert on:</span>
           <label><input type="checkbox" value="person"> People</label>
           <label><input type="checkbox" value="vehicle"> Vehicles</label>
+          <label><input type="checkbox" value="delivery"> Deliveries</label>
           <label><input type="checkbox" value="animal"> Animals</label>
         </div>
-        <p class="hint">Clips are still recorded for all motion; this only decides what you're told about. Parked cars don't alert — a vehicle has to move. <b>yolox_tiny</b> is quick; <b>yolox_s</b> is more accurate but uses more CPU. Turning recognition on/off or changing the model applies after Sentinel restarts.</p>
+        <p class="hint">Clips are still recorded for all motion; this only decides what you're told about. Parked cars don't alert — a vehicle has to move. <b>Vehicles</b> includes deliveries; untick it and keep <b>Deliveries</b> to hear only about delivery vans. <b>yolox_tiny</b> is quick; <b>yolox_s</b> is more accurate but uses more CPU. Turning recognition on/off or changing the model applies after Sentinel restarts.</p>
         <div class="save-row"><button class="primary" onclick="saveSection('detection')">Save</button><span class="msg" id="msg-detection"></span></div>
       </div>
     </section>
@@ -248,7 +250,7 @@
         <summary>Getting around</summary>
         <ul>
           <li><b>Live</b> — all cameras. Tap one for full screen; tap again to go back.</li>
-          <li><b>Timeline</b> (under the cameras) — a mark for every clip, coloured by what was in it: <b style="color:#ff4d6d">people</b>, <b style="color:#4da3ff">vehicles</b>, <b style="color:#5fd38a">animals</b>, grey for motion with nothing recognised, orange for clips you requested from Telegram. The buttons next to the zoom filter by type. Tap a mark to play it. Use <b>◀ ▶</b> or the date box to change day, <b>24h / 6h / 1h</b> to zoom, and <b>▶ Latest clip</b> to jump to the newest. In the player, <b>Previous / Next</b> step through that camera's clips.</li>
+          <li><b>Timeline</b> (under the cameras) — a mark for every clip, coloured by what was in it: <b style="color:#ff4d6d">people</b>, <b style="color:#4da3ff">vehicles</b>, <b style="color:#5fd38a">animals</b>, <b style="color:#b98cff">deliveries</b>, grey for motion with nothing recognised, orange for clips you requested from Telegram. The buttons next to the zoom filter by type. Tap a mark to play it. Use <b>◀ ▶</b> or the date box to change day, <b>24h / 6h / 1h</b> to zoom, and <b>▶ Latest clip</b> to jump to the newest. In the player, <b>Previous / Next</b> step through that camera's clips.</li>
           <li><b>Zones</b> — tell Sentinel which parts of each picture matter.</li>
           <li><b>Settings</b> — this page.</li>
         </ul>
@@ -274,6 +276,7 @@
         <ul>
           <li>Leaves, shadows, rain, insects and cloud changes are ignored because they aren't recognised objects.</li>
           <li>Parked cars don't alert; a vehicle has to move.</li>
+          <li><b>Deliveries:</b> when a vehicle alerts, Sentinel takes a closer look and names UPS, FedEx, Amazon, USPS mail and DHL vans — <i>“📦 An Amazon van pulled in at the Front Door”</i> — and other types like pickup trucks, SUVs and school buses. It looks again as the vehicle comes closer, so a van that stops at the curb may get a second “📦” message. It recognises them by shape and colours, so an unmarked rental van won't be called a delivery, and at night (black-and-white picture) it only names one when it's very sure.</li>
           <li>Each camera repeats an alert for the same kind of thing at most once per cooldown (60 s by default).</li>
           <li>Name your zones in <a href="{{ url_for('zones_page') }}">Zones</a> so messages say where (“in the Driveway”).</li>
           <li>Colours are only mentioned in daylight — night (infrared) video is black and white.</li>
@@ -291,7 +294,7 @@
         <ul>
           <li><span class="cmd">Status</span> — cameras, recording and alert settings.</li>
           <li><span class="cmd">Clip</span> — record about 10 seconds from every camera and send it.</li>
-          <li><span class="cmd">Videos last 2 hours</span>, <span class="cmd">Videos today</span>, <span class="cmd">Videos yesterday</span>, <span class="cmd">Videos 2pm-4pm</span>, <span class="cmd">Videos since 8am</span> — send recorded clips from that time (up to 8; the ones where something was recognised come first). Add <i>people</i>, <i>vehicles</i> or <i>animals</i> and/or a camera name: <span class="cmd">Videos today people front door</span>.</li>
+          <li><span class="cmd">Videos last 2 hours</span>, <span class="cmd">Videos today</span>, <span class="cmd">Videos yesterday</span>, <span class="cmd">Videos 2pm-4pm</span>, <span class="cmd">Videos since 8am</span> — send recorded clips from that time (up to 8; the ones where something was recognised come first). Add <i>people</i>, <i>vehicles</i>, <i>deliveries</i> or <i>animals</i> and/or a camera name: <span class="cmd">Videos today people front door</span>, <span class="cmd">Videos yesterday deliveries</span>.</li>
           <li><span class="cmd">Access</span> (or <span class="cmd">remote</span>, <span class="cmd">connect</span>, <span class="cmd">web</span>, <span class="cmd">link</span>) — how to reach Sentinel remotely.</li>
           <li><span class="cmd">Pause 30</span> — no alerts to this chat for 30 minutes. <span class="cmd">Resume</span> undoes it.</li>
           <li><span class="cmd">Enable recording</span> / <span class="cmd">Disable recording</span> — motion recording on all cameras.</li>

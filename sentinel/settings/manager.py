@@ -102,7 +102,9 @@ class SettingsManager:
             "object_detection_enabled": True,
             "detector_model": "yolox_tiny",
             "alert_mode": "objects",
-            "object_alert_groups": ["person", "vehicle", "animal"],
+            "object_alert_groups": ["person", "vehicle", "delivery", "animal"],
+            # Recognise delivery vans (UPS, FedEx, Amazon, USPS, DHL) and vehicle types with CLIP.
+            "vehicle_types_enabled": True,
             "object_alert_cooldown": 60,
             # Shown in the Help page and the Telegram "access" reply
             "remote_web_url": "",

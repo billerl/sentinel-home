@@ -10,6 +10,7 @@ sentinel-home/                         # repository root
 ├── installation-guide.md              # Installation + troubleshooting
 ├── project-structure.md               # This file
 ├── handoff_summary.md                 # Cross-session continuity for contributors
+├── tools/build_vehicle_prompts.py     # Rebuilds the CLIP vehicle-type text embeddings
 ├── models/                            # Piper `.onnx` + `.onnx.json` voice models (local, not all in git)
 ├── tests/                             # Unit tests (`venv/bin/python -m unittest discover -s tests`)
 ├── captured_images/                   # Saved snapshots (gitignored)
@@ -25,6 +26,9 @@ sentinel-home/                         # repository root
     │                                  #   recording, clip requests, reconnect with backoff)
     ├── detection/
     │   ├── motion_detector.py         # Capture + MOG2 motion analysis, zones/lines, clip writing
+    │   ├── objects.py                 # YOLOX object detector (OpenVINO)
+    │   ├── vehicle_type.py            # CLIP zero-shot vehicle type / delivery-company recognition
+    │   ├── vehicle_prompts.npz        # Precomputed CLIP text embeddings (tools/build_vehicle_prompts.py)
     │   └── network_discovery.py       # RTSP discovery / resolve / endpoints
     ├── recordings/
     │   └── store.py                   # Clip index (SQLite), retention, MP4 transcoding for browsers

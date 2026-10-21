@@ -296,7 +296,7 @@ class CameraPipeline:
 
     def _handle_detections(self, detections, frame: np.ndarray, ts: float) -> None:
         """Runs on the detection worker thread."""
-        from sentinel.engine.objects import ObjectEvent, describe
+        from sentinel.engine.objects import wants_type_check
 
         h, w = frame.shape[:2]
 
@@ -308,27 +308,68 @@ class CameraPipeline:
         confirmed = [t for t in self.tracker.tracks if t.hits >= 2 and t.best_score >= 0.5]
         if self.detector.recording:
             self._clip_labels.update(t.label for t in confirmed)
+        classifier = getattr(self._detections, "vehicle_classifier", None)
         for track in ready:
-            x, y, bw, bh = track.box
-            zone = self.zone_name_at((x + bw // 2, y + bh), w, h)
-            companions = sum(1 for t in confirmed if t is not track and t.group == track.group == "person")
-            source = track.best_frame if track.best_frame is not None else frame
-            snapshot = source.copy()
-            cv2.rectangle(snapshot, (x, y), (x + bw, y + bh), (0, 200, 255), 2)
-            cv2.putText(snapshot, track.label, (x, max(12, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 2)
-            event = ObjectEvent(
-                camera_key=self.host,
-                camera_name=self.display_name,
-                track=track,
-                zone_name=zone,
-                description=describe(track, self.display_name, zone, source, w, companions),
-                snapshot=snapshot,
-                timestamp=ts,
-            )
-            if self.detector.recording:
-                self._clip_labels.add(track.label)
-            if self._on_object is not None:
-                self._on_object(self, event)
+            if classifier is not None and wants_type_check(track):
+                self._check_vehicle_type(classifier, track)
+            self._report_track(track, confirmed, ts)
+        if classifier is None:
+            return
+        # Vehicles that already alerted get another look as they come closer: a van that
+        # pulls up to the curb is much easier to recognise than when it first appeared.
+        for track in self.tracker.tracks:
+            if track.alerted and track.type_checks and wants_type_check(track):
+                if self._check_vehicle_type(classifier, track):
+                    self._report_track(track, confirmed, ts)
+
+    def _check_vehicle_type(self, classifier, track) -> bool:
+        """Classify the track's best crop; True if it just turned out to be a delivery."""
+        box = track.big_box
+        try:
+            vt = classifier.classify(track.big_frame, box)
+        except Exception as e:  # never let the classifier break detection
+            app_logger.log("error", "vehicle_classifier_failed", error_message=str(e),
+                           camera_display=self.display_name, component="camera", action="classify")
+            vt = None
+        track.type_checks += 1
+        track.type_checked_area = box[2] * box[3]
+        if vt is None:
+            return False
+        newly_delivery = vt.delivery and not (track.vehicle_type and track.vehicle_type.delivery)
+        track.vehicle_type = vt
+        if vt.delivery and self.detector.recording:
+            self._clip_labels.add("delivery")
+        return newly_delivery and track.alerted
+
+    def _report_track(self, track, confirmed, ts: float) -> None:
+        from sentinel.engine.objects import ObjectEvent, describe
+
+        source = track.best_frame
+        h, w = source.shape[:2]
+        x, y, bw, bh = track.best_box or track.box
+        zone = self.zone_name_at((x + bw // 2, y + bh), w, h)
+        companions = sum(1 for t in confirmed if t is not track and t.group == track.group == "person")
+        vt = track.vehicle_type
+        tag = vt.phrase if vt is not None and vt.delivery else track.label
+        snapshot = source.copy()
+        cv2.rectangle(snapshot, (x, y), (x + bw, y + bh), (0, 200, 255), 2)
+        cv2.putText(snapshot, tag, (x, max(12, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 2)
+        event = ObjectEvent(
+            camera_key=self.host,
+            camera_name=self.display_name,
+            track=track,
+            zone_name=zone,
+            description=describe(track, self.display_name, zone, source, w, companions),
+            snapshot=snapshot,
+            timestamp=ts,
+        )
+        track.alerted = True
+        if self.detector.recording:
+            self._clip_labels.add(track.label)
+            if vt is not None and vt.delivery:
+                self._clip_labels.add("delivery")
+        if self._on_object is not None:
+            self._on_object(self, event)
 
     def _start_requested_clip(self, frame: Optional[np.ndarray]) -> None:
         with self._lock:

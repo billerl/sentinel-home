@@ -167,6 +167,7 @@
     .tl-mark.g-person { background: #ff4d6d; }
     .tl-mark.g-vehicle { background: #4da3ff; }
     .tl-mark.g-animal { background: #5fd38a; }
+    .tl-mark.g-delivery { background: #b98cff; }
     .tl-legend { display: inline-flex; gap: 4px; flex-wrap: wrap; }
     .tl-legend button { display: inline-flex; align-items: center; gap: 5px; }
     .tl-legend .sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
@@ -229,6 +230,7 @@
         <button type="button" data-filter="all" class="active" onclick="setFilter('all')">All</button>
         <button type="button" data-filter="person" onclick="setFilter('person')"><span class="sw" style="background:#ff4d6d"></span>People</button>
         <button type="button" data-filter="vehicle" onclick="setFilter('vehicle')"><span class="sw" style="background:#4da3ff"></span>Vehicles</button>
+        <button type="button" data-filter="delivery" onclick="setFilter('delivery')"><span class="sw" style="background:#b98cff"></span>Deliveries</button>
         <button type="button" data-filter="animal" onclick="setFilter('animal')"><span class="sw" style="background:#5fd38a"></span>Animals</button>
       </span>
       <span id="tl-summary"></span>
@@ -367,10 +369,11 @@
     var tlFilter = "all";
     var GROUPS = { person: "person", bicycle: "vehicle", car: "vehicle", motorcycle: "vehicle", bus: "vehicle",
                    truck: "vehicle", dog: "animal", cat: "animal", horse: "animal", sheep: "animal", cow: "animal",
-                   bear: "animal", bird: "animal" };
+                   bear: "animal", bird: "animal", delivery: "delivery" };
 
     function clipGroup(clip) {
       var groups = (clip.labels || []).map(function(l) { return GROUPS[l]; });
+      if (groups.indexOf("delivery") >= 0) return "delivery";  // usually has a driver in it too
       if (groups.indexOf("person") >= 0) return "person";
       if (groups.indexOf("vehicle") >= 0) return "vehicle";
       if (groups.indexOf("animal") >= 0) return "animal";

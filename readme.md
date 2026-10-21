@@ -60,6 +60,9 @@ venv/bin/pip install -r requirements-piper.txt   # optional
 # object detection model (Apache-2.0)
 mkdir -p models/detector && curl -L -o models/detector/yolox_tiny.onnx \
   https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx
+# optional: delivery-van / vehicle-type recognition (CLIP ViT-B/32, MIT)
+mkdir -p models/classifier && curl -L -o models/classifier/clip_vit_b32_vision.onnx \
+  https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model.onnx
 venv/bin/python -m sentinel.web.set_password     # web viewer login
 venv/bin/python main.py
 ```

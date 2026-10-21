@@ -170,9 +170,19 @@ class Engine:
             app_logger.log("error", "object_detector_unavailable", error_message=detector.error,
                            component="engine", action="init_objects")
             return
-        self.detection_worker = DetectionWorker(detector)
+        classifier = None
+        if self.settings.get("vehicle_types_enabled", True):
+            from sentinel.detection.vehicle_type import VehicleClassifier
+
+            classifier = VehicleClassifier()
+            if not classifier.available:
+                app_logger.log("warning", "vehicle_classifier_unavailable", error_message=classifier.error,
+                               component="engine", action="init_objects")
+                classifier = None
+        self.detection_worker = DetectionWorker(detector, vehicle_classifier=classifier)
         self.detection_worker.start()
         app_logger.log("info", "object_detector_ready", model=os.path.basename(model),
+                       vehicle_types=classifier is not None,
                        load_ms=int((time.time() - started) * 1000), component="engine", action="init_objects")
 
     def objects_active(self) -> bool:
@@ -240,12 +250,16 @@ class Engine:
 
     def _on_object(self, pipeline: CameraPipeline, event) -> None:
         """A person/vehicle/animal was recognised (runs on the detection thread)."""
-        group = event.track.group
+        group = event.alert_group
         self._last_description[pipeline.host] = (event.timestamp, event.description)
+        vt = event.track.vehicle_type
         app_logger.log("info", "object_detected", camera_display=pipeline.display_name,
                        label=event.track.label, zone=event.zone_name, score=round(event.track.best_score, 2),
+                       vehicle_type=vt.key if vt else None, type_prob=round(vt.prob, 2) if vt else None,
                        description=event.description, component="engine", action="on_object")
-        if not self.objects_active() or group not in self.settings.get("object_alert_groups", []):
+        wanted = self.settings.get("object_alert_groups", [])
+        # Deliveries are vehicles too: "Vehicles" covers them, "Deliveries" alone means only those.
+        if not self.objects_active() or not (group in wanted or (group == "delivery" and "vehicle" in wanted)):
             return
         key = (pipeline.host, group)
         cooldown = float(self.settings.get("object_alert_cooldown", 60))

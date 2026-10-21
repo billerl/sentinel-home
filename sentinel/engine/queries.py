@@ -11,6 +11,8 @@ from typing import Iterable, List, Optional, Set, Tuple
 _GROUP_WORDS = {
     "person": ("people", "person", "persons", "someone", "humans"),
     "vehicle": ("vehicle", "vehicles", "car", "cars", "truck", "trucks", "van", "vans"),
+    "delivery": ("delivery", "deliveries", "package", "packages", "parcel", "parcels", "ups", "fedex",
+                 "amazon", "usps", "mail", "mailman", "postman", "dhl"),
     "animal": ("animal", "animals", "dog", "dogs", "cat", "cats", "deer"),
 }
 _TIME = r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?"
@@ -21,8 +23,9 @@ VIDEO_QUERY_HELP = (
     "- Videos today / Videos yesterday\n"
     "- Videos 2pm-4pm (or Videos from 14:00 to 16:00)\n"
     "- Videos since 8am\n"
-    "Add people, vehicles or animals, or a camera name, to narrow it down:\n"
-    "- Videos today people front door"
+    "Add people, vehicles, deliveries or animals, or a camera name, to narrow it down:\n"
+    "- Videos today people front door\n"
+    "- Videos yesterday deliveries"
 )
 
 
@@ -65,6 +68,8 @@ def parse_video_query(text: str, camera_names: Iterable[str] = (), now: Optional
     t = re.sub(r"^(videos?|recordings?|footage|clips)\s*", "", t)
 
     groups = {g for g, words in _GROUP_WORDS.items() if any(re.search(rf"\b{w}\b", t) for w in words)}
+    if "delivery" in groups:
+        groups.discard("vehicle")  # "amazon van" means deliveries, not every van
     cameras = [name for name in camera_names if name and name.lower() in t]
     for name in cameras:
         t = t.replace(name.lower(), " ")

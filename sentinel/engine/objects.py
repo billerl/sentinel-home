@@ -19,6 +19,7 @@ import cv2
 import numpy as np
 
 from sentinel.detection.objects import Detection, ObjectDetector
+from sentinel.detection.vehicle_type import VehicleClassifier, VehicleType
 
 TRACK_TTL_SECONDS = 8.0
 MIN_HITS = 2
@@ -30,6 +31,10 @@ STATIC_MEMORY_SECONDS = 7 * 86400
 MIN_SCORE = {"person": 0.45, "animal": 0.6, "vehicle": 0.5}
 CONFIDENT_SCORE = 0.62  # below this, a track needs EXTRA_HITS sightings
 EXTRA_HITS = 3
+# Vehicle type (CLIP) is checked when a vehicle first alerts, then again as it comes
+# closer (box area grown by TYPE_RECHECK_GROWTH), up to TYPE_MAX_CHECKS times.
+TYPE_MAX_CHECKS = 3
+TYPE_RECHECK_GROWTH = 1.6
 
 
 @dataclass
@@ -42,9 +47,21 @@ class Track:
     boxes: List[Tuple[float, Tuple[int, int, int, int]]] = field(default_factory=list)
     best_score: float = 0.0
     hits: int = 0
-    reported: bool = False
+    reported: bool = False  # the tracker has decided about it (alerted or retired)
+    alerted: bool = False  # an event was sent for it
     best_frame: Optional[np.ndarray] = None
+    best_box: Optional[Tuple[int, int, int, int]] = None  # the box in best_frame
     votes: Dict[str, float] = field(default_factory=dict)
+    vehicle_type: Optional["VehicleType"] = None  # set by the CLIP classifier, if any
+    # Closest (largest) view so far, for the vehicle-type check.
+    big_frame: Optional[np.ndarray] = None
+    big_box: Optional[Tuple[int, int, int, int]] = None
+    type_checks: int = 0
+    type_checked_area: int = 0
+
+    def see(self, frame: np.ndarray, box: Tuple[int, int, int, int]) -> None:
+        if self.big_box is None or box[2] * box[3] > self.big_box[2] * self.big_box[3]:
+            self.big_frame, self.big_box = frame, box
 
     def vote(self, label: str, score: float) -> None:
         """Small models flip between e.g. car/truck/bus; the label is the score-weighted majority."""
@@ -81,6 +98,27 @@ class ObjectEvent:
     description: str
     snapshot: np.ndarray  # frame with the object boxed
     timestamp: float
+    alert_group: str = ""  # 'delivery' for recognised delivery vehicles, else the track's group
+
+    def __post_init__(self) -> None:
+        # Fixed at creation: the track keeps changing after the event is sent.
+        if not self.alert_group:
+            vt = self.track.vehicle_type
+            self.alert_group = "delivery" if vt is not None and vt.delivery else self.track.group
+
+
+def wants_type_check(track: Track) -> bool:
+    """An alerted vehicle not yet known to be a delivery that is now clearly bigger than when last checked."""
+    if track.group != "vehicle" or track.label == "bicycle" or track.big_box is None:
+        return False
+    if track.vehicle_type is not None and track.vehicle_type.delivery:
+        return False
+    if track.type_checks == 0:
+        return True
+    if track.type_checks >= TYPE_MAX_CHECKS:
+        return False
+    _, _, w, h = track.big_box
+    return w * h >= TYPE_RECHECK_GROWTH * track.type_checked_area
 
 
 def _iou(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> float:
@@ -132,8 +170,30 @@ def vehicle_color(frame: np.ndarray, box: Tuple[int, int, int, int]) -> Optional
 
 
 _EMOJI = {"person": "🚶", "car": "🚗", "truck": "🚚", "bus": "🚌", "motorcycle": "🏍️", "bicycle": "🚲",
-          "dog": "🐕", "cat": "🐈", "bird": "🐦", "horse": "🦌", "cow": "🦌", "sheep": "🦌", "bear": "🐻"}
+          "dog": "🐕", "cat": "🐈", "bird": "🐦", "horse": "🦌", "cow": "🦌", "sheep": "🦌", "bear": "🐻",
+          "delivery": "📦", "pickup": "🛻", "suv": "🚙", "minivan": "🚐", "van": "🚐", "school_bus": "🚌",
+          "garbage": "🚛"}
 _VEHICLE_NOUN = {"car": "car", "truck": "truck", "bus": "bus", "motorcycle": "motorcycle", "bicycle": "bicycle"}
+
+
+def _article(thing: str) -> str:
+    # "an SUV", "an Amazon van", "an orange car", but "a UPS truck"
+    return "An" if thing.startswith("SUV") or thing[0].lower() in "aeio" else "A"
+
+
+def vehicle_phrase(track: Track, frame: np.ndarray) -> Tuple[str, str]:
+    """(emoji, noun phrase) for a vehicle track, e.g. ('📦', 'UPS truck') or ('🛻', 'red pickup truck')."""
+    vt = track.vehicle_type
+    if vt is not None and vt.delivery:
+        return _EMOJI["delivery"], vt.phrase  # brand colours speak for themselves
+    emoji = _EMOJI.get(track.label, "👀")
+    noun = _VEHICLE_NOUN.get(track.label, "vehicle")
+    if vt is not None and (vt.key != "motorcycle" or track.label == "motorcycle") and track.label != "bicycle":
+        noun, emoji = vt.phrase, _EMOJI.get(vt.key, _EMOJI["car"])
+    elif track.label in ("bus", "truck", "motorcycle") and track.best_score < 0.7:
+        noun, emoji = "vehicle", _EMOJI["car"]  # the small model often mistakes cars for these
+    color = vehicle_color(frame, track.best_box or track.box)
+    return emoji, f"{color} {noun}" if color else noun
 
 
 def describe(track: Track, camera_name: str, zone_name: Optional[str], frame: np.ndarray,
@@ -159,12 +219,8 @@ def describe(track: Track, camera_name: str, zone_name: Optional[str], frame: np
     if track.group == "vehicle":
         if track.label == "bicycle":
             return f"{emoji} Someone on a bicycle is {at}."
-        noun = _VEHICLE_NOUN.get(track.label, "vehicle")
-        if track.label in ("bus", "truck", "motorcycle") and track.best_score < 0.7:
-            noun, emoji = "vehicle", _EMOJI["car"]  # the small model often mistakes cars for these
-        color = vehicle_color(frame, track.box)
-        thing = f"{color} {noun}" if color else noun
-        a = "An" if thing[0] in "aeiou" else "A"
+        emoji, thing = vehicle_phrase(track, frame)
+        a = _article(thing)
         if moving and abs(dy) >= abs(dx):
             # Moving toward the camera reads as arriving, away as leaving.
             if zone_name:
@@ -247,6 +303,7 @@ class CameraObjectTracker:
             if best is not None:
                 unmatched.remove(best)
                 track.vote(best.label, best.score)
+                track.see(frame, best.box)
                 track.boxes.append((now, best.box))
                 track.boxes = track.boxes[-30:]
                 track.last_seen = now
@@ -254,10 +311,12 @@ class CameraObjectTracker:
                 if best.score > track.best_score:
                     track.best_score = best.score
                     track.best_frame = frame
+                    track.best_box = best.box
         for det in unmatched:
             track = Track(next(self._ids), det.label, det.group, now, now,
-                          [(now, det.box)], det.score, 1, best_frame=frame)
+                          [(now, det.box)], det.score, 1, best_frame=frame, best_box=det.box)
             track.vote(det.label, det.score)
+            track.see(frame, det.box)
             self.tracks.append(track)
 
         frame_w = frame.shape[1]
@@ -326,8 +385,10 @@ class CameraObjectTracker:
 class DetectionWorker:
     """One thread running the detector over the newest frame from each camera."""
 
-    def __init__(self, detector: ObjectDetector, min_interval: float = 0.5) -> None:
+    def __init__(self, detector: ObjectDetector, min_interval: float = 0.5,
+                 vehicle_classifier: Optional["VehicleClassifier"] = None) -> None:
         self.detector = detector
+        self.vehicle_classifier = vehicle_classifier  # runs on this thread via the camera callbacks
         self.min_interval = min_interval
         self._slots: Dict[str, Tuple[np.ndarray, float, Callable]] = {}
         self._last_run: Dict[str, float] = {}

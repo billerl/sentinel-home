@@ -47,6 +47,12 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   - Tracker rules: 2 hits needed; distance fallback for matching fast movers; label voting; vehicles must move; motionless people need score ≥ 0.65; learned static spots.
   - It also writes the plain-English `describe()` text.
   - Models live in `models/detector/` (gitignored); download them from the YOLOX GitHub releases.
+  - Delivery / vehicle-type recognition: `sentinel/detection/vehicle_type.py` runs the CLIP ViT-B/32 image
+    encoder (`models/classifier/clip_vit_b32_vision.onnx`, gitignored, see readme) on each alerting
+    vehicle's largest crop and compares it with precomputed text embeddings
+    (`sentinel/detection/vehicle_prompts.npz`). After editing `VEHICLE_TYPES`, rebuild them with
+    `tools/build_vehicle_prompts.py`. Recognised deliveries add a `delivery` clip label and alert group;
+    vehicles are re-checked (up to 3 times) as they get closer, which can send a second "📦" alert.
 - **Alerts:**
   - `alert_mode` is `objects` by default: a Telegram photo plus a natural sentence, then the clip.
   - The per-camera/per-type cooldown is `object_alert_cooldown`.
