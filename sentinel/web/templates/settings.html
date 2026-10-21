@@ -82,6 +82,7 @@
     <nav>
       <a href="#status">Status</a>
       <a href="#cameras">Cameras</a>
+      <a href="#detection">Detection</a>
       <a href="#telegram">Telegram</a>
       <a href="#recording">Recording</a>
       <a href="#audio">Audio</a>
@@ -96,6 +97,8 @@
     <section id="status">
       <h2>Status</h2>
       <div class="grid" id="stats"></div>
+      <h3>Recently seen</h3>
+      <div class="card table-wrap"><table id="objects"><thead><tr><th>Time</th><th>What</th></tr></thead><tbody></tbody></table></div>
       <h3>Recent events</h3>
       <div class="card table-wrap"><table id="events"><thead><tr><th>Time</th><th>Event</th><th>Camera</th><th>Detail</th></tr></thead><tbody></tbody></table></div>
     </section>
@@ -119,6 +122,32 @@
         <p class="hint">Use the camera's <b>substream</b> (low resolution) — it's used for live view and motion detection. The default path works for the current cameras.</p>
         <div class="save-row"><button class="primary" onclick="addCamera()">Add camera</button><span class="msg" id="nc-msg"></span></div>
       </details>
+    </section>
+
+    <!-- ======================= DETECTION ======================= -->
+    <section id="detection">
+      <h2>Alerts &amp; object detection</h2>
+      <div class="card">
+        <div class="row"><label><input type="checkbox" data-key="object_detection_enabled"> Recognise people, vehicles and animals</label></div>
+        <div class="row">
+          <div class="field" style="flex: 0 1 260px"><span>Send alerts for</span>
+            <select data-key="alert_mode">
+              <option value="objects">Recognised objects only (fewer false alarms)</option>
+              <option value="motion">Any motion</option>
+            </select>
+          </div>
+          <div class="field" style="flex: 0 1 220px"><span>Model</span><select data-key="detector_model" id="model-select"></select></div>
+          <div class="field" style="flex: 0 1 220px"><span>Repeat alerts per camera after (s)</span><input type="number" min="0" max="3600" data-key="object_alert_cooldown"></div>
+        </div>
+        <div class="row" id="groups">
+          <span style="color:#9cc">Alert on:</span>
+          <label><input type="checkbox" value="person"> People</label>
+          <label><input type="checkbox" value="vehicle"> Vehicles</label>
+          <label><input type="checkbox" value="animal"> Animals</label>
+        </div>
+        <p class="hint">Clips are still recorded for all motion; this only decides what you're told about. Parked cars don't alert — a vehicle has to move. <b>yolox_tiny</b> is quick; <b>yolox_s</b> is more accurate but uses more CPU. Turning recognition on/off or changing the model applies after Sentinel restarts.</p>
+        <div class="save-row"><button class="primary" onclick="saveSection('detection')">Save</button><span class="msg" id="msg-detection"></span></div>
+      </div>
     </section>
 
     <!-- ======================= TELEGRAM ======================= -->
@@ -219,7 +248,7 @@
         <summary>Getting around</summary>
         <ul>
           <li><b>Live</b> — all cameras. Tap one for full screen; tap again to go back.</li>
-          <li><b>Timeline</b> (under the cameras) — a red mark for every motion clip, an orange mark for clips you requested from Telegram. Tap a mark to play it. Use <b>◀ ▶</b> or the date box to change day, <b>24h / 6h / 1h</b> to zoom, and <b>▶ Latest clip</b> to jump to the newest. In the player, <b>Previous / Next</b> step through that camera's clips.</li>
+          <li><b>Timeline</b> (under the cameras) — a mark for every clip, coloured by what was in it: <b style="color:#ff4d6d">people</b>, <b style="color:#4da3ff">vehicles</b>, <b style="color:#5fd38a">animals</b>, grey for motion with nothing recognised, orange for clips you requested from Telegram. The buttons next to the zoom filter by type. Tap a mark to play it. Use <b>◀ ▶</b> or the date box to change day, <b>24h / 6h / 1h</b> to zoom, and <b>▶ Latest clip</b> to jump to the newest. In the player, <b>Previous / Next</b> step through that camera's clips.</li>
           <li><b>Zones</b> — tell Sentinel which parts of each picture matter.</li>
           <li><b>Settings</b> — this page.</li>
         </ul>
@@ -232,10 +261,23 @@
           <li><b>+ Zone</b>: tap each corner of the area to watch, then tap the yellow first point (or <b>Finish zone</b>).</li>
           <li><b>+ Line</b>: tap two points. The arrow shows which way someone must cross to trigger; <b>Reverse direction</b> flips it, or set “Lines trigger” to either direction.</li>
           <li>Drag the white dots to adjust; double-click a dot to remove it; select a shape and press <b>Delete</b> to remove it.</li>
+          <li>Select a zone and type a name (e.g. <i>Driveway</i>, <i>Patio</i>) — alerts will use it.</li>
           <li>Press <b>Save</b>. Changes apply immediately.</li>
         </ol>
         <p>Something counts as motion when the <b>bottom</b> of the moving object (where it touches the ground) is inside a zone, or it crosses a line. No zones and no lines means the whole picture is watched. Keep trees, roads and sky out of zones to cut false alerts.</p>
         <p><b>Sensitivity</b> sets the smallest movement that counts. If leaves or insects trigger clips, lower it; if people are missed, raise it.</p>
+      </details>
+
+      <details>
+        <summary>Alerts and object detection</summary>
+        <p>Sentinel recognises <b>people, vehicles</b> (car, truck, bus, motorcycle, bicycle) and <b>animals</b> (dog, cat, bird, and larger animals like deer) whenever something moves. With “Recognised objects only” selected under <a href="#detection">Detection</a>, you get a Telegram photo with a short description — for example <i>“🚗 A red car pulled into the Driveway (Garage)”</i> or <i>“🚶 Someone is at the Front Door”</i> — followed by the clip if clips are turned on.</p>
+        <ul>
+          <li>Leaves, shadows, rain, insects and cloud changes are ignored because they aren't recognised objects.</li>
+          <li>Parked cars don't alert; a vehicle has to move.</li>
+          <li>Each camera repeats an alert for the same kind of thing at most once per cooldown (60 s by default).</li>
+          <li>Name your zones in <a href="{{ url_for('zones_page') }}">Zones</a> so messages say where (“in the Driveway”).</li>
+          <li>Colours are only mentioned in daylight — night (infrared) video is black and white.</li>
+        </ul>
       </details>
 
       <details>
@@ -249,6 +291,7 @@
         <ul>
           <li><span class="cmd">Status</span> — cameras, recording and alert settings.</li>
           <li><span class="cmd">Clip</span> — record about 10 seconds from every camera and send it.</li>
+          <li><span class="cmd">Videos last 2 hours</span>, <span class="cmd">Videos today</span>, <span class="cmd">Videos yesterday</span>, <span class="cmd">Videos 2pm-4pm</span>, <span class="cmd">Videos since 8am</span> — send recorded clips from that time (up to 8; the ones where something was recognised come first). Add <i>people</i>, <i>vehicles</i> or <i>animals</i> and/or a camera name: <span class="cmd">Videos today people front door</span>.</li>
           <li><span class="cmd">Access</span> (or <span class="cmd">remote</span>, <span class="cmd">connect</span>, <span class="cmd">web</span>, <span class="cmd">link</span>) — how to reach Sentinel remotely.</li>
           <li><span class="cmd">Pause 30</span> — no alerts to this chat for 30 minutes. <span class="cmd">Resume</span> undoes it.</li>
           <li><span class="cmd">Enable recording</span> / <span class="cmd">Disable recording</span> — motion recording on all cameras.</li>
@@ -261,6 +304,7 @@
 
       <details>
         <summary>Recordings and storage</summary>
+        <p>Each clip is recorded twice: a small copy from the camera's substream, and — when the camera's main stream is available — a sharp <b>high-resolution</b> copy that starts <b>5 seconds before</b> the motion (kept in a short rolling buffer in memory). Playback and Telegram use the high-res copy when there is one (shown as “HD” in the player).</p>
         <p>Sentinel records a clip when motion is detected and keeps clips for the number of days set under <a href="#recording">Recording</a> (30 by default). If the disk gets nearly full it deletes the oldest clips first, but never the last 24 hours. Clips are stored on the PC in <code>recorded_videos/</code>, one folder per day.</p>
       </details>
 
@@ -286,7 +330,8 @@
                   "night_bug_start_hour", "night_bug_end_hour", "auto_reconnect_enabled",
                   "reconnect_interval_seconds", "feed_fps", "web.max_fps"],
       audio: ["volume", "speech_speed", "voice_id"],
-      access: ["remote_web_url", "remote_rdp_user"]
+      access: ["remote_web_url", "remote_rdp_user"],
+      detection: ["object_detection_enabled", "alert_mode", "detector_model", "object_alert_cooldown"]
     };
 
     function $(id) { return document.getElementById(id); }
@@ -315,6 +360,15 @@
         else el.value = val == null ? "" : val;
         if (el.type === "range") el.dispatchEvent(new Event("input"));
       });
+      var ms = $("model-select");
+      ms.innerHTML = "";
+      (settings.detector_models || []).forEach(function(name) {
+        var o = document.createElement("option"); o.value = name; o.textContent = name; ms.appendChild(o);
+      });
+      ms.value = v.detector_model || "";
+      document.querySelectorAll("#groups input").forEach(function(i) {
+        i.checked = (v.object_alert_groups || []).indexOf(i.value) >= 0;
+      });
       $("token-state").textContent = settings.secrets.telegram_bot_token ? "(set)" : "(not set)";
       $("web-user").textContent = settings.web_username || "?";
       var sel = $("voice-select");
@@ -340,6 +394,10 @@
       var body = {};
       SECTIONS[name].forEach(function(k) { body[k] = readField(k); });
       if (name === "telegram" && $("tg-token").value.trim()) body.telegram_bot_token = $("tg-token").value.trim();
+      if (name === "detection") {
+        body.object_alert_groups = Array.prototype.filter.call(
+          document.querySelectorAll("#groups input"), function(i) { return i.checked; }).map(function(i) { return i.value; });
+      }
       say("msg-" + name, "Saving…");
       try {
         await api("/api/settings", body);
@@ -519,7 +577,17 @@
           stat("CPU", s.cpu_percent == null ? "…" : s.cpu_percent + "%", "Sentinel process (100% = 1 core)") +
           stat("Uptime", fmtUptime(s.uptime_seconds), "since last restart") +
           stat("Telegram", s.telegram.enabled ? (s.telegram.configured ? "On" : "Not set up") : "Off", "") +
-          stat("Oldest clip", s.recordings.oldest || "—", "");
+          stat("Oldest clip", s.recordings.oldest || "—", "") +
+          stat("Object detection", s.objects.enabled ? "On" : "Off",
+               s.objects.enabled ? (s.objects.model + (s.objects.inference_ms ? " · " + s.objects.inference_ms + " ms" : ""))
+                                 : (s.objects.error || "enable under Detection"));
+        var otbody = $("objects").querySelector("tbody");
+        otbody.innerHTML = s.objects.recent.length ? "" : '<tr><td colspan="2" class="hint">Nothing recognised yet.</td></tr>';
+        s.objects.recent.forEach(function(o) {
+          var tr = document.createElement("tr");
+          tr.innerHTML = '<td>' + esc(fmtTime(new Date(o.time * 1000).toISOString())) + '</td><td style="white-space:normal">' + esc(o.text) + '</td>';
+          otbody.appendChild(tr);
+        });
         var tbody = $("events").querySelector("tbody");
         tbody.innerHTML = "";
         s.events.forEach(function(e) {

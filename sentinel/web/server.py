@@ -620,6 +620,7 @@ class WebServer:
                             "e": round(c["end_ts"] - day_start, 1),
                             "reason": c["reason"],
                             "hd": bool(c.get("hd_path")),
+                            "labels": (c.get("labels") or "").split(",") if c.get("labels") else [],
                         }
                         for c in clips
                     ],

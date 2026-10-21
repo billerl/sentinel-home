@@ -52,6 +52,11 @@ def _clean_lines(value: Any) -> List[List[List[float]]]:
     return [l for l in lines if len(l) == 2][:8]
 
 
+def _clean_zone_names(value: Any) -> List[str]:
+    names = value if isinstance(value, list) else []
+    return [re.sub(r"\s+", " ", str(n)).strip()[:30] for n in names][:16]
+
+
 def _display_name(value: Any) -> Optional[str]:
     text = re.sub(r"\s+", " ", str(value)).strip()
     return text[:60] if text else None
@@ -61,6 +66,7 @@ EDITABLE_PROFILE_FIELDS = {
     "display": _display_name,
     "enabled": bool,
     "active_zones": _clean_zones,
+    "zone_names": _clean_zone_names,
     "entry_lines": _clean_lines,
     "entry_direction": lambda v: v if v in _ENTRY_DIRECTIONS else None,
     "min_contour_area": lambda v: max(100, min(50000, int(v))),
@@ -91,6 +97,12 @@ class Engine:
         self._command_thread: Optional[threading.Thread] = None
         self.started_at = time.time()
         self._cpu = admin.CpuMeter()
+        self.detection_worker = None
+        self.detector_error: Optional[str] = None
+        self._object_alert_times: Dict[Tuple[str, str], float] = {}
+        self.recent_objects: List[Dict[str, Any]] = []
+        self._last_description: Dict[str, Tuple[float, str]] = {}
+        self._video_query_lock = threading.Lock()
 
     # ------------------------------------------------------------------ setup
     def _init_audio(self):
@@ -139,7 +151,28 @@ class Engine:
             on_motion=self._on_motion,
             on_clip=self._on_clip,
             on_status=self._on_camera_status,
+            detection_worker=self.detection_worker,
+            on_object=self._on_object,
         )
+
+    def _init_objects(self) -> None:
+        if not self.settings.get("object_detection_enabled", True):
+            return
+        from sentinel.detection.objects import ObjectDetector
+        from sentinel.engine.objects import DetectionWorker
+
+        model = os.path.join("models", "detector", f"{self.settings.get('detector_model', 'yolox_tiny')}.onnx")
+        detector = ObjectDetector(model)
+        if not detector.available:
+            self.detector_error = detector.error
+            app_logger.log("error", "object_detector_unavailable", error_message=detector.error,
+                           component="engine", action="init_objects")
+            return
+        self.detection_worker = DetectionWorker(detector)
+        self.detection_worker.start()
+
+    def objects_active(self) -> bool:
+        return self.detection_worker is not None and self.settings.get("alert_mode", "objects") == "objects"
 
     def _build_cameras(self) -> None:
         for camera_id, profile in self._camera_profiles().items():
@@ -153,6 +186,7 @@ class Engine:
         self._started = True
         self.recording_store.start_maintenance(lambda: self.settings)
         self._init_web()
+        self._init_objects()
         self._build_cameras()
         if not self.cameras:
             print("No cameras configured (settings.json camera_profiles is empty).")
@@ -174,6 +208,8 @@ class Engine:
         self._stop.set()
         for pipeline in self.cameras.values():
             pipeline.stop()
+        if self.detection_worker is not None:
+            self.detection_worker.stop()
         self.telegram.cleanup()
         self.recording_store.stop()
         if self.audio is not None:
@@ -198,7 +234,34 @@ class Engine:
                     chat_id, f"Sentinel: {pipeline.display_name} is offline; clip not recorded."
                 )
 
+    def _on_object(self, pipeline: CameraPipeline, event) -> None:
+        """A person/vehicle/animal was recognised (runs on the detection thread)."""
+        group = event.track.group
+        self._last_description[pipeline.host] = (event.timestamp, event.description)
+        self.recent_objects = ([{
+            "time": event.timestamp, "camera": pipeline.display_name, "label": event.track.label,
+            "group": group, "zone": event.zone_name, "text": event.description,
+        }] + self.recent_objects)[:50]
+        app_logger.log("info", "object_detected", camera_display=pipeline.display_name,
+                       label=event.track.label, zone=event.zone_name, score=round(event.track.best_score, 2),
+                       description=event.description, component="engine", action="on_object")
+        if not self.objects_active() or group not in self.settings.get("object_alert_groups", []):
+            return
+        key = (pipeline.host, group)
+        cooldown = float(self.settings.get("object_alert_cooldown", 60))
+        if event.timestamp - self._object_alert_times.get(key, 0.0) < cooldown:
+            return
+        self._object_alert_times[key] = event.timestamp
+        if self.audio is not None:
+            self.audio.trigger_alert(event.description.split(" ", 1)[1])  # drop the emoji
+        if self.settings.get("telegram_motion_alerts", True):
+            ok, jpeg = cv2.imencode(".jpg", event.snapshot, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            if ok:
+                self.telegram.trigger_photo_alert(event.description, jpeg.tobytes())
+
     def _on_motion(self, pipeline: CameraPipeline) -> None:
+        if self.objects_active():
+            return  # alerts come from recognised objects instead (see _on_object)
         if self.audio is not None:
             self.audio.trigger_alert()
         if self.settings.get("telegram_motion_alerts", True) and not self.telegram.include_video:
@@ -214,11 +277,21 @@ class Engine:
                 bypass_cooldown=True,
             )
             return
-        if self.settings.get("telegram_motion_alerts", True) and self.telegram.include_video:
-            self.telegram.trigger_alert(
-                message=f"Sentinel: motion detected on {pipeline.display_name}.",
-                video_path=path,
-            )
+        if not (self.settings.get("telegram_motion_alerts", True) and self.telegram.include_video):
+            return
+        if self.objects_active():
+            groups = set(self.settings.get("object_alert_groups", []))
+            from sentinel.detection.objects import CLASS_GROUPS
+
+            if not any(CLASS_GROUPS.get(label) in groups for label in pipeline.last_clip_labels):
+                return  # nothing worth a clip (no recognised object)
+            _, text = self._last_description.get(pipeline.host, (0.0, f"Activity at the {pipeline.display_name}."))
+            self.telegram.trigger_alert(message=f"{text} (clip)", video_path=path, bypass_cooldown=True)
+            return
+        self.telegram.trigger_alert(
+            message=f"Sentinel: motion detected on {pipeline.display_name}.",
+            video_path=path,
+        )
 
     # ------------------------------------------------------- telegram control
     def _command_loop(self) -> None:
@@ -230,6 +303,10 @@ class Engine:
                     self.telegram.reply_to_chat(chat_id, admin.access_message(self.settings))
                 for chat_id, changes in self.telegram.consume_remote_feature_commands():
                     self.apply_feature_toggles(chat_id, changes)
+                for chat_id, text in self.telegram.consume_video_queries():
+                    threading.Thread(
+                        target=self.answer_video_query, args=(chat_id, text), name="video-query", daemon=True
+                    ).start()
                 clip_chats = self.telegram.consume_clip_requests()
                 if clip_chats:
                     self._request_clips(clip_chats)
@@ -238,6 +315,50 @@ class Engine:
                     "error", "telegram_command_failed", error_message=str(e),
                     component="engine", action="command_loop",
                 )
+
+    def answer_video_query(self, chat_id: str, text: str, max_clips: int = 8) -> None:
+        """Reply to 'videos <when> [people|vehicles|animals] [camera]' with matching clips."""
+        from sentinel.detection.objects import CLASS_GROUPS
+        from sentinel.engine.queries import parse_video_query
+
+        names = {p.display_name: key for key, p in self.cameras.items()}
+        query, error = parse_video_query(text, names.keys())
+        if query is None:
+            self.telegram.reply_to_chat(chat_id, error)
+            return
+        clips = self.recording_store.query(query.start, query.end)
+        if query.cameras:
+            keys = {names[n] for n in query.cameras}
+            clips = [c for c in clips if c["camera_key"] in keys]
+        if query.groups:
+            clips = [c for c in clips
+                     if any(CLASS_GROUPS.get(l) in query.groups for l in (c.get("labels") or "").split(","))]
+        what = (" with " + "/".join(sorted(query.groups))) if query.groups else ""
+        where = (" on " + ", ".join(query.cameras)) if query.cameras else ""
+        if not clips:
+            self.telegram.reply_to_chat(chat_id, f"No recorded clips{what}{where} ({query.label}).")
+            return
+        chosen = clips
+        if len(clips) > max_clips:
+            # Prefer clips where something was recognised, then the most recent.
+            labelled = [c for c in clips if c.get("labels")]
+            pool = labelled if len(labelled) >= max_clips else clips
+            chosen = sorted(pool, key=lambda c: c["start_ts"])[-max_clips:]
+            note = (f"Found {len(clips)} clips{what}{where} ({query.label}). Sending the {len(chosen)} most recent"
+                    f"{' with something recognised' if pool is labelled else ''}. Ask for a shorter time range for others.")
+        else:
+            note = f"Sending {len(chosen)} clip{'s' if len(chosen) > 1 else ''}{what}{where} ({query.label})."
+        self.telegram.reply_to_chat(chat_id, note)
+        with self._video_query_lock:
+            for clip in chosen:
+                record = self.recording_store.get(clip["id"]) or clip
+                path = self.recording_store.hd_absolute_path(record) or self.recording_store.web_playable_path(clip["id"])
+                when = time.strftime("%a %H:%M:%S", time.localtime(clip["start_ts"]))
+                labels = (clip.get("labels") or "").replace(",", ", ")
+                camera = self.cameras[clip["camera_key"]].display_name if clip["camera_key"] in self.cameras else clip["camera_name"]
+                caption = f"{camera} · {when}" + (f" · {labels}" if labels else "")
+                if not path or not self.telegram.send_video(chat_id, path, caption):
+                    self.telegram.reply_to_chat(chat_id, f"{caption}: couldn't send this clip.")
 
     def _request_clips(self, chat_ids: List[str]) -> None:
         live = [p for p in self.cameras.values() if p.connected and p.profile.get("enabled", True)]
@@ -466,6 +587,7 @@ class Engine:
             "values": values,
             "secrets": {key: bool(self.settings.get(key)) for key in admin.WRITE_ONLY_SETTINGS},
             "voices": admin.available_voices(),
+            "detector_models": admin.available_detector_models(),
         }
 
     def update_settings(self, changes: Dict[str, Any]) -> Tuple[bool, str]:
@@ -537,4 +659,11 @@ class Engine:
             "telegram": {"enabled": self.telegram.enabled, "configured": self.telegram.is_configured()},
             "remote": admin.remote_access_info(self.settings),
             "events": admin.recent_events(),
+            "objects": {
+                "enabled": self.detection_worker is not None,
+                "model": self.settings.get("detector_model"),
+                "inference_ms": round(self.detection_worker.inference_ms) if self.detection_worker else None,
+                "error": self.detector_error,
+                "recent": self.recent_objects[:15],
+            },
         }

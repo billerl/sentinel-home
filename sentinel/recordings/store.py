@@ -98,6 +98,9 @@ class RecordingStore:
             if "hd_path" not in columns:
                 # High-res MP4 from the main stream (see hd_recorder.py), when available.
                 conn.execute("ALTER TABLE recordings ADD COLUMN hd_path TEXT")
+            if "labels" not in columns:
+                # Comma-separated objects seen during the clip, e.g. "person,car".
+                conn.execute("ALTER TABLE recordings ADD COLUMN labels TEXT")
 
     def _abs(self, rel_path: str) -> str:
         return os.path.join(self.root, rel_path)
@@ -157,6 +160,13 @@ class RecordingStore:
                 (self._rel(hd_path), size, recording_id),
             )
 
+    def set_labels(self, recording_id: int, labels: List[str]) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE recordings SET labels = ? WHERE id = ?",
+                (",".join(sorted(set(labels))) or None, recording_id),
+            )
+
     def hd_absolute_path(self, record: Dict[str, Any]) -> Optional[str]:
         rel = record.get("hd_path")
         if not rel:
@@ -171,7 +181,7 @@ class RecordingStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, path, camera_key, camera_name, start_ts, end_ts, reason, hd_path
+                SELECT id, path, camera_key, camera_name, start_ts, end_ts, reason, hd_path, labels
                 FROM recordings WHERE start_ts >= ? AND start_ts < ?
                 ORDER BY start_ts
                 """,

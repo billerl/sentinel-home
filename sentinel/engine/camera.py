@@ -9,7 +9,7 @@ engine through callbacks; it never touches Telegram, audio or the web directly.
 import os
 import threading
 import time
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import cv2
@@ -21,6 +21,7 @@ from sentinel.logging_utils import app_logger, redact
 from sentinel.recordings.hd_recorder import HDRecorder, main_stream_url
 
 if TYPE_CHECKING:
+    from sentinel.engine.objects import DetectionWorker, ObjectEvent
     from sentinel.recordings import RecordingStore
     from sentinel.web.frame_broker import FrameBroker
 
@@ -72,6 +73,8 @@ class CameraPipeline:
         on_motion: Callable[["CameraPipeline"], None],
         on_clip: Callable[["CameraPipeline", str, str, List[str]], None],
         on_status: Callable[["CameraPipeline", bool, Optional[str]], None],
+        detection_worker: Optional["DetectionWorker"] = None,
+        on_object: Optional[Callable[["CameraPipeline", "ObjectEvent"], None]] = None,
     ) -> None:
         self.camera_id = camera_id
         self.source = source
@@ -87,12 +90,21 @@ class CameraPipeline:
         self._on_motion = on_motion
         self._on_clip = on_clip
         self._on_status = on_status
+        self._detections = detection_worker
+        self._on_object = on_object
+        self._clip_labels: set = set()
+        self.tracker = None
+        if detection_worker is not None:
+            from sentinel.engine.objects import CameraObjectTracker
+
+            self.tracker = CameraObjectTracker(self.host)
 
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
         self._pending_clip_chats: List[str] = []
         self._clip_chats: List[str] = []
+        self.last_clip_labels: List[str] = []
         self._last_publish = 0.0
         self.connected = False
         self._status_known = False
@@ -228,6 +240,8 @@ class CameraPipeline:
 
             self._start_requested_clip(raw)
             self._publish(annotated, raw)
+            if self._detections is not None and raw is not None and self.detector.motion_streak > 0:
+                self._detections.submit(self.host, raw, self._handle_detections)
             if motion:
                 self._on_motion(self)
             self._deliver_completed_clip()
@@ -245,6 +259,10 @@ class CameraPipeline:
         if reason == CLIP_REQUEST_REASON:
             chats, self._clip_chats = self._clip_chats, []
         span = self.detector.last_completed_span
+        if span and span[2] is not None and self._clip_labels and self._store is not None:
+            self._store.set_labels(span[2], sorted(self._clip_labels))
+        labels, self._clip_labels = sorted(self._clip_labels), set()
+        self.last_clip_labels = labels
         hd = self.hd
         if hd is not None and hd.running and span and span[2] is not None:
             start_ts, end_ts, record_id = span
@@ -258,6 +276,53 @@ class CameraPipeline:
             if hd.request_clip(start_ts, end_ts, hd_out, _done):
                 return
         self._on_clip(self, path, reason, chats)
+
+    # ------------------------------------------------------------ objects
+    def zone_name_at(self, point: Tuple[int, int], width: int, height: int) -> Optional[str]:
+        names = self.profile.get("zone_names") or []
+        for i, zone in enumerate(self.profile.get("active_zones") or []):
+            if i >= len(names) or not names[i]:
+                continue
+            poly = np.array([[int(px * width), int(py * height)] for px, py in zone], dtype=np.int32)
+            if len(poly) >= 3 and cv2.pointPolygonTest(poly, (float(point[0]), float(point[1])), False) >= 0:
+                return names[i]
+        return None
+
+    def _handle_detections(self, detections, frame: np.ndarray, ts: float) -> None:
+        """Runs on the detection worker thread."""
+        from sentinel.engine.objects import ObjectEvent, describe
+
+        h, w = frame.shape[:2]
+
+        def in_zone(box) -> bool:
+            with self.detector._lock:
+                return self.detector._box_in_active_zone(*box, w, h)
+
+        ready = self.tracker.update(detections, frame, ts, in_zone)
+        confirmed = [t for t in self.tracker.tracks if t.hits >= 2 and t.best_score >= 0.5]
+        if self.detector.recording:
+            self._clip_labels.update(t.label for t in confirmed)
+        for track in ready:
+            x, y, bw, bh = track.box
+            zone = self.zone_name_at((x + bw // 2, y + bh), w, h)
+            companions = sum(1 for t in confirmed if t is not track and t.group == track.group == "person")
+            source = track.best_frame if track.best_frame is not None else frame
+            snapshot = source.copy()
+            cv2.rectangle(snapshot, (x, y), (x + bw, y + bh), (0, 200, 255), 2)
+            cv2.putText(snapshot, track.label, (x, max(12, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 2)
+            event = ObjectEvent(
+                camera_key=self.host,
+                camera_name=self.display_name,
+                track=track,
+                zone_name=zone,
+                description=describe(track, self.display_name, zone, source, w, companions),
+                snapshot=snapshot,
+                timestamp=ts,
+            )
+            if self.detector.recording:
+                self._clip_labels.add(track.label)
+            if self._on_object is not None:
+                self._on_object(self, event)
 
     def _start_requested_clip(self, frame: Optional[np.ndarray]) -> None:
         with self._lock:

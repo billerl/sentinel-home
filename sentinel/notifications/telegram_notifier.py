@@ -13,6 +13,9 @@ import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 
 
+TELEGRAM_MAX_UPLOAD_BYTES = 49 * 1024 * 1024  # Bot API upload limit is 50 MB
+
+
 class TelegramNotifier:
     """Sends Telegram Bot API alerts with cooldown and recipient pause controls."""
 
@@ -32,6 +35,7 @@ class TelegramNotifier:
         self._pending_remote_commands: List[Tuple[str, Dict[str, bool]]] = []
         self._pending_detailed_status_chat_ids: List[str] = []
         self._pending_access_chat_ids: List[str] = []
+        self._pending_video_queries: List[Tuple[str, str]] = []
         self.update_settings(settings)
 
     @staticmethod
@@ -44,6 +48,7 @@ class TelegramNotifier:
             "Information:\n"
             "- Status — cameras, recording and Telegram options summary\n"
             "- Access — how to reach Sentinel remotely (web link, Tailscale, Remote Desktop)\n"
+            "- Videos <when> — send recorded clips, e.g. Videos last 2 hours, Videos 2pm-4pm people\n"
             "- Help — this message\n\n"
             "Clip:\n"
             "- Clip — record ~10s per connected camera and upload\n\n"
@@ -166,7 +171,7 @@ class TelegramNotifier:
         )
 
     def _send_video_to_chat(self, chat_id: str, video_path: str, caption: str) -> bool:
-        if not os.path.exists(video_path):
+        if not os.path.exists(video_path) or os.path.getsize(video_path) > TELEGRAM_MAX_UPLOAD_BYTES:
             return False
         boundary = f"sentinel-{int(time.time() * 1000)}"
         with open(video_path, "rb") as video_file:
@@ -181,11 +186,12 @@ class TelegramNotifier:
             parts.append(f"{value}\r\n".encode("utf-8"))
 
         filename = os.path.basename(video_path)
+        content_type = "video/mp4" if filename.lower().endswith(".mp4") else "video/x-msvideo"
         parts.append(f"--{boundary}\r\n".encode("utf-8"))
         parts.append(
             (
                 f'Content-Disposition: form-data; name="video"; filename="{filename}"\r\n'
-                "Content-Type: video/mp4\r\n\r\n"
+                f"Content-Type: {content_type}\r\n\r\n"
             ).encode("utf-8")
         )
         parts.append(video_bytes)
@@ -200,10 +206,54 @@ class TelegramNotifier:
             method="POST",
         )
         try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                return 200 <= int(response.status) < 300
+        except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+            return False
+
+    def _send_photo_to_chat(self, chat_id: str, jpeg: bytes, caption: str) -> bool:
+        boundary = f"sentinel-{int(time.time() * 1000)}"
+        parts: List[bytes] = []
+        for name, value in [("chat_id", chat_id), ("caption", caption)]:
+            parts.append(f"--{boundary}\r\n".encode("utf-8"))
+            parts.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+            parts.append(f"{value}\r\n".encode("utf-8"))
+        parts.append(f"--{boundary}\r\n".encode("utf-8"))
+        parts.append(
+            b'Content-Disposition: form-data; name="photo"; filename="sentinel.jpg"\r\n'
+            b"Content-Type: image/jpeg\r\n\r\n"
+        )
+        parts.append(jpeg)
+        parts.append(b"\r\n")
+        parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+        request = urllib.request.Request(
+            self._api_url("sendPhoto"),
+            data=b"".join(parts),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        try:
             with urllib.request.urlopen(request, timeout=20) as response:
                 return 200 <= int(response.status) < 300
-        except (urllib.error.URLError, TimeoutError, ValueError):
+        except (urllib.error.URLError, TimeoutError, ValueError, OSError):
             return False
+
+    def trigger_photo_alert(self, caption: str, jpeg: bytes) -> bool:
+        """Send a snapshot with a caption to every unpaused chat (async). The caller
+        applies its own cooldown; the global text-alert cooldown is not used."""
+        if not self.enabled or not self.is_configured():
+            return False
+
+        def _send() -> None:
+            now_ts = time.time()
+            for chat_id in self.chat_ids:
+                if self._is_paused(chat_id, now_ts):
+                    continue
+                if not self._send_photo_to_chat(chat_id, jpeg, caption):
+                    self._send_message_to_chat(chat_id, caption)
+
+        threading.Thread(target=_send, daemon=True).start()
+        return True
 
     def _is_paused(self, chat_id: str, now_ts: float) -> bool:
         paused_until = self.paused_until_by_chat.get(chat_id, 0.0)
@@ -302,6 +352,15 @@ class TelegramNotifier:
         normalized = re.sub(r"\s+", " ", normalized)
         return normalized in cls._ACCESS_PHRASES
 
+    def consume_video_queries(self) -> List[Tuple[str, str]]:
+        """Return and clear (chat_id, text) requests for recorded videos."""
+        pending, self._pending_video_queries = self._pending_video_queries, []
+        return pending
+
+    def send_video(self, chat_id: str, video_path: str, caption: str) -> bool:
+        """Synchronously send one video (used for query replies)."""
+        return self._send_video_to_chat(chat_id, video_path, caption)
+
     def consume_access_requests(self) -> List[str]:
         """Return and clear chat IDs that asked how to access Sentinel remotely."""
         chats = list(dict.fromkeys(self._pending_access_chat_ids))
@@ -384,6 +443,12 @@ class TelegramNotifier:
 
             if self._is_access_request(text):
                 self._pending_access_chat_ids.append(chat_id)
+                continue
+
+            from sentinel.engine.queries import is_video_query
+
+            if is_video_query(text):
+                self._pending_video_queries.append((chat_id, text))
                 continue
 
             if re.match(r"^help$", text, flags=re.IGNORECASE):

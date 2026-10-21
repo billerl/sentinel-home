@@ -22,6 +22,7 @@ setup(
         "Flask>=3.0.0",
         "bcrypt>=4.0.0",
         "imageio-ffmpeg>=0.5.0",
+        "openvino>=2024.0",
     ],
     entry_points={
         "console_scripts": [

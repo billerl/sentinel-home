@@ -46,3 +46,6 @@ cloudflare-tunnel-notes.local.md
 
 # Portable git toolchain (local only)
 .tools/
+
+# Downloaded detection models (see installation-guide.md)
+models/detector/

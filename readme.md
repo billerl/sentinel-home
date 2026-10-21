@@ -21,14 +21,21 @@ viewer with a live camera grid, a DVR-style motion timeline, and a zone editor.
 - **Zones and entry lines:** draw them per camera in the web viewer (`/zones`). Motion counts
   when the bottom of the moving object is inside a zone, or when it crosses a line in the chosen
   direction.
+- **Object detection:** people, vehicles and animals are recognised with YOLOX on OpenVINO
+  (free, runs locally on the CPU, only while something moves). Alerts read naturally, for
+  example *"🚗 A red car pulled into the Driveway (Garage)"*, and come with a snapshot. Parked cars
+  don't alert.
 - **Recording:** motion-triggered clips, organized by day and camera, indexed for fast
   searching, and cleaned up automatically after 30 days (configurable), with a low-disk safety net.
+  A **1440p copy with 5 s pre-roll** is cut from each camera's main stream (ffmpeg stream copy
+  from a RAM ring buffer, about 2% CPU per camera).
 - **Web viewer:** live MJPEG grid, a motion timeline per camera with a built-in clip player,
   and the zone/line editor. It uses a bcrypt login with lockout, never exposes camera
   credentials, and is meant to be reached through a Cloudflare Tunnel or Tailscale.
-- **Telegram:** motion alerts (text or clips). Commands: **pause / resume / status / clip /
-  help**, plus **enable/disable** phrases for recording, motion alerts, clips, the night bug
-  filter, and auto-reconnect (see `installation-guide.md`).
+- **Telegram:** alerts with a snapshot and clip. Commands: **status / clip / pause / resume /
+  help**, **videos** *(time range, e.g. "videos 2pm-4pm people")*, **access** *(how to reach
+  Sentinel remotely)*, plus **enable/disable** phrases for recording, motion alerts, clips, the
+  night bug filter, and auto-reconnect.
 - **Resilience:** each camera runs in its own thread and reconnects on its own with backoff.
   On shutdown (SIGTERM), clips in progress are finalized.
 - **Audio alerts (optional):** Piper neural TTS or pyttsx3. This is skipped entirely when the
@@ -50,6 +57,9 @@ cd sentinel-home
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 venv/bin/pip install -r requirements-piper.txt   # optional
+# object detection model (Apache-2.0)
+mkdir -p models/detector && curl -L -o models/detector/yolox_tiny.onnx \
+  https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx
 venv/bin/python -m sentinel.web.set_password     # web viewer login
 venv/bin/python main.py
 ```

@@ -54,6 +54,7 @@
     .draft { fill: rgba(255,255,0,0.15); stroke: #ff0; stroke-dasharray: 6 4; stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
     .handle { fill: #000; stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; cursor: grab; }
     .handle.first { fill: #ff0; }
+    .zone-label { fill: #fff; paint-order: stroke; stroke: #000; stroke-width: 3px; font: 600 14px system-ui, sans-serif; pointer-events: none; }
     .panel { background: #0b0b0b; border: 1px solid #033; border-radius: 4px; padding: 10px 12px; }
     .panel h2 { font-size: 0.8rem; margin: 0 0 8px; color: #9ff; font-weight: 600; }
     .panel label { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; margin: 6px 0; }
@@ -82,6 +83,8 @@
           <button type="button" id="cancel-draw" onclick="cancelDraw()" hidden>Cancel</button>
           <button type="button" id="reverse-line" onclick="reverseLine()" hidden>Reverse direction</button>
           <button type="button" id="delete-sel" class="danger" onclick="deleteSelected()" hidden>Delete</button>
+          <input type="text" id="zone-name" placeholder="Name this zone (e.g. Driveway)" maxlength="30" hidden
+                 oninput="renameZone(this.value)" style="background:#111;color:#e6ffff;border:1px solid #066;border-radius:4px;padding:5px 8px;font:inherit;font-size:0.8rem;">
           <button type="button" onclick="refreshImage()">Refresh image</button>
         </div>
         <div id="stage">
@@ -93,7 +96,8 @@
           Motion only counts when the bottom of the moving object is inside a zone,
           or when it crosses a line in the arrow's direction. With no zones and no
           lines, the whole picture is watched. Drag the white dots to adjust a shape;
-          double-click a dot to remove it.
+          double-click a dot to remove it. Select a zone to give it a name — alerts use it
+          (“A car pulled into the Driveway”).
         </p>
       </div>
       <div class="side">
@@ -185,6 +189,7 @@
       if (!cam) return;
       draft = clone({
         active_zones: cam.active_zones || [],
+        zone_names: (cam.zone_names || []).slice(),
         entry_lines: cam.entry_lines || [],
         entry_direction: cam.entry_direction || "outside_to_inside",
         min_contour_area: cam.min_contour_area || 2000,
@@ -270,6 +275,14 @@
           class: "zone" + (isSel ? " selected" : "")
         });
         poly.dataset.kind = "zone"; poly.dataset.index = zi;
+        var name = draft.zone_names[zi];
+        if (name) {
+          var cx = 0, cy = 0;
+          zone.forEach(function(p) { cx += p[0]; cy += p[1]; });
+          var t = el("text", { x: cx / zone.length * imgW, y: cy / zone.length * imgH, class: "zone-label", "text-anchor": "middle",
+                               "font-size": (14 * imgW / (svg.getBoundingClientRect().width || imgW)) });
+          t.textContent = name;
+        }
       });
 
       draft.entry_lines.forEach(function(line, li) {
@@ -405,6 +418,8 @@
     function finishZone() {
       if (tool !== "zone" || drawing.length < 3) return;
       draft.active_zones.push(drawing);
+      draft.zone_names.length = draft.active_zones.length - 1;
+      draft.zone_names.push("");
       selected = { kind: "zone", index: draft.active_zones.length - 1 };
       markDirty();
       cancelDraw();
@@ -422,8 +437,18 @@
       if (!selected) return;
       var list = selected.kind === "zone" ? draft.active_zones : draft.entry_lines;
       list.splice(selected.index, 1);
+      if (selected.kind === "zone") draft.zone_names.splice(selected.index, 1);
       selected = null;
       markDirty();
+      render();
+    }
+
+    function renameZone(value) {
+      if (!selected || selected.kind !== "zone") return;
+      while (draft.zone_names.length < draft.active_zones.length) draft.zone_names.push("");
+      draft.zone_names[selected.index] = value;
+      markDirty(true);
+      setStatus("Unsaved changes", "");
       render();
     }
 
@@ -442,6 +467,10 @@
       document.getElementById("cancel-draw").hidden = !tool;
       document.getElementById("delete-sel").hidden = !selected;
       document.getElementById("reverse-line").hidden = !(selected && selected.kind === "line");
+      var nameBox = document.getElementById("zone-name");
+      var zoneSel = selected && selected.kind === "zone" && !tool;
+      nameBox.hidden = !zoneSel;
+      if (zoneSel && document.activeElement !== nameBox) nameBox.value = draft.zone_names[selected.index] || "";
       document.getElementById("save").disabled = !dirty;
       document.getElementById("revert").disabled = !dirty;
     }

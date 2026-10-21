@@ -59,6 +59,30 @@ def available_voices(models_dir: str = "models") -> List[str]:
     )
 
 
+def _choice(value: Any, options: tuple) -> str:
+    if value not in options:
+        raise ValueError("choose one of: " + ", ".join(options))
+    return value
+
+
+def _alert_groups(value: Any) -> List[str]:
+    allowed = ("person", "vehicle", "animal")
+    if not isinstance(value, list) or any(v not in allowed for v in value):
+        raise ValueError("choose from person, vehicle, animal")
+    return [g for g in allowed if g in value]
+
+
+def available_detector_models(models_dir: str = os.path.join("models", "detector")) -> List[str]:
+    return sorted(os.path.splitext(os.path.basename(p))[0] for p in glob.glob(os.path.join(models_dir, "*.onnx")))
+
+
+def _detector_model(value: Any) -> str:
+    text = str(value)
+    if text not in available_detector_models():
+        raise ValueError("unknown model")
+    return text
+
+
 def _voice(value: Any) -> str:
     text = str(value)
     if text and text not in available_voices():
@@ -84,6 +108,11 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "volume": _num(0, 1),
     "speech_speed": _num(80, 350, int),
     "voice_id": _voice,
+    "object_detection_enabled": _bool,
+    "detector_model": _detector_model,
+    "alert_mode": lambda v: _choice(v, ("objects", "motion")),
+    "object_alert_groups": _alert_groups,
+    "object_alert_cooldown": _num(0, 3600, int),
     "remote_web_url": _url,
     "remote_rdp_user": _username,
     "web.max_fps": _num(1, 20, int),

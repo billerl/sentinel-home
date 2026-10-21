@@ -97,6 +97,13 @@ class SettingsManager:
             "recording_retention_enabled": True,
             "recording_retention_days": 30,
             "recording_min_free_percent": 10,
+            # Object detection (YOLOX on OpenVINO). alert_mode "objects" alerts only
+            # when a person/vehicle/animal is recognised; "motion" alerts on any motion.
+            "object_detection_enabled": True,
+            "detector_model": "yolox_tiny",
+            "alert_mode": "objects",
+            "object_alert_groups": ["person", "vehicle", "animal"],
+            "object_alert_cooldown": 60,
             # Shown in the Help page and the Telegram "access" reply
             "remote_web_url": "",
             "remote_rdp_user": "",
