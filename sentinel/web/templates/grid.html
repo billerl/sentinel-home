@@ -36,9 +36,13 @@
     
     #grid {
       flex: 1;
+      min-height: 0;
       display: grid;
+      /* Columns/rows are sized by layoutGrid() so every camera is as large as possible. */
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
       grid-auto-rows: 1fr;
+      justify-content: center;
+      align-content: center;
       gap: 2px;
       background: #111;
       padding: 2px;
@@ -270,7 +274,7 @@
 <body>
   <header>
     <h1>Sentinel Live</h1>
-    <button class="header-btn" id="tl-toggle" type="button" onclick="toggleTimeline()">Timeline</button>
+    <button class="header-btn" id="tl-toggle" type="button" onclick="toggleTimeline()" title="Show or hide the timeline (T). Hidden = bigger cameras.">Timeline: on</button>
     <button class="header-btn" id="zones-toggle" type="button" onclick="toggleZones()" title="Show or hide the zone outlines on the live view (detection is unaffected)" hidden>Zones: on</button>
     <a class="header-btn" href="{{ url_for('zones_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Zones</a>
     <a class="header-btn" href="{{ url_for('settings_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Settings</a>
@@ -402,6 +406,10 @@
         h2.textContent = c.display;
         
         var img = document.createElement('img');
+        img.onload = function() {
+          var aspect = img.naturalWidth / img.naturalHeight;
+          if (aspect > 0.5 && aspect < 3 && Math.abs(aspect - camAspect) > 0.01) { camAspect = aspect; layoutGrid(); }
+        };
         img.src = "/snapshot.jpg?id=" + encodeURIComponent(c.id);
         
         tile.appendChild(h2);
@@ -414,6 +422,7 @@
           if (!focusedCamId && !playerOpen && !(isPhone() && currentTab === "events")) updateTile(c.id, img);
         }, 1500 + (Math.random() * 500));
       });
+      setTimeout(layoutGrid, 0);  // after the page script has finished setting up
     }
 
     (function boot() {
@@ -583,9 +592,42 @@
       var el = document.getElementById("timeline");
       if (typeof show !== "boolean") show = el.hidden;
       el.hidden = !show;
-      document.getElementById("tl-toggle").classList.toggle("active", show);
+      var btn = document.getElementById("tl-toggle");
+      btn.classList.toggle("active", show);
+      btn.textContent = show ? "Timeline: on" : "Timeline: off";
       store("sentinel.timeline", show ? "1" : "0");
+      layoutGrid();
+      if (show && tl) applyZoom(false);  // it had no width while hidden
     }
+
+    // Desktop grid: try every column count and keep the one where each camera picture
+    // (16:9, or the cameras' real shape once known) is largest in the space available.
+    var camAspect = 16 / 9;
+    function layoutGrid() {
+      var grid = document.getElementById("grid");
+      var n = grid.children.length;
+      if (isPhone() || !n) {
+        grid.style.gridTemplateColumns = grid.style.gridAutoRows = "";
+        return;
+      }
+      var gap = 2, pad = 4;
+      var W = grid.clientWidth - pad, H = grid.clientHeight - pad;
+      if (W <= 0 || H <= 0) return;
+      var best = null;
+      for (var cols = 1; cols <= n; cols++) {
+        var rows = Math.ceil(n / cols);
+        var w = Math.min((W - gap * (cols - 1)) / cols, ((H - gap * (rows - 1)) / rows) * camAspect);
+        if (!best || w > best.w + 0.5) best = { cols: cols, w: w };
+      }
+      var tw = Math.floor(best.w), th = Math.floor(best.w / camAspect);
+      grid.style.gridTemplateColumns = "repeat(" + best.cols + ", " + tw + "px)";
+      grid.style.gridAutoRows = th + "px";
+    }
+    window.addEventListener("resize", layoutGrid);
+    document.addEventListener("keydown", function(e) {
+      if ((e.key === "t" || e.key === "T") && !e.ctrlKey && !e.metaKey && !e.altKey && !playerOpen && !focusedCamId
+          && !/^(INPUT|SELECT|TEXTAREA)$/.test((e.target.tagName || "")) && !isPhone()) toggleTimeline();
+    });
 
     function shiftDay(dir) {
       if (!tl) return;
@@ -783,6 +825,7 @@
       PHONE_QUERY.addEventListener("change", function() {
         if (isPhone()) setTab(currentTab);
         else toggleTimeline(recall("sentinel.timeline") !== "0");  // back to the desktop preference
+        layoutGrid();
       });
       loadTimeline(null);
       window.addEventListener("resize", function() { if (tl) applyZoom(false); });
