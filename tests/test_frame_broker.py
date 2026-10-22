@@ -61,5 +61,21 @@ class TestFrameBroker(unittest.TestCase):
         self.assertTrue(np.all(got[:, :, 0] == got[0, 0, 0]))
 
 
+
+class TestSmallSnapshots(unittest.TestCase):
+    def test_tile_sized_copies(self):
+        import cv2
+        from sentinel.web.frame_broker import FrameBroker
+
+        b = FrameBroker()
+        b.publish("rtsp://u:p@10.0.0.9/s", "Garage", np.zeros((720, 1280, 3), dtype=np.uint8))
+        wid = b.web_id("rtsp://u:p@10.0.0.9/s")
+        full, _ = b.get_latest_jpeg(wid)
+        small, _ = b.get_latest_jpeg(wid, 400)
+        self.assertEqual(cv2.imdecode(np.frombuffer(small, np.uint8), 1).shape[:2], (270, 480))  # rounded up to 480
+        self.assertEqual(cv2.imdecode(np.frombuffer(full, np.uint8), 1).shape[:2], (720, 1280))
+        self.assertIs(b.get_latest_jpeg(wid, 400)[0], small)  # cached until the next frame
+        self.assertEqual(b.get_latest_jpeg(wid, 3000)[0], full)  # bigger than any copy: full size
+
 if __name__ == "__main__":
     unittest.main()

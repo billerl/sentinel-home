@@ -334,7 +334,11 @@ class WebServer:
             camera_id = request.args.get("id", "")
             if not camera_id:
                 return "Missing id", 400
-            jpeg, _ = broker.get_latest_jpeg(camera_id)
+            try:
+                max_width = max(0, min(4000, int(request.args.get("w", "0"))))
+            except ValueError:
+                max_width = 0
+            jpeg, _ = broker.get_latest_jpeg(camera_id, max_width or None)
             if jpeg is None:
                 return "Not found", 404
             resp = Response(jpeg, mimetype="image/jpeg")

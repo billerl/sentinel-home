@@ -34,6 +34,7 @@ class FrameBroker:
         self._ts: Dict[str, float] = {}
         self._last_jpeg_quality: Dict[str, int] = {}
         self._jpeg_ts: Dict[str, float] = {}
+        self._small: Dict[Tuple[str, int], Tuple[bytes, float]] = {}  # (camera, width) -> (jpeg, frame ts)
 
     def web_id(self, camera_id: str) -> str:
         """Opaque, stable-per-process id for a camera, safe to expose to browsers."""
@@ -85,16 +86,34 @@ class FrameBroker:
             ts = self._ts.get(camera_id, 0.0)
             return frame, ts
 
-    def get_latest_jpeg(self, camera_id: str) -> Tuple[Optional[bytes], float]:
+    SMALL_WIDTHS = (320, 480, 640, 960)
+
+    def get_latest_jpeg(self, camera_id: str, max_width: Optional[int] = None) -> Tuple[Optional[bytes], float]:
         """Return (jpeg_bytes, monotonic_ts) or (None, 0.0) for a ``web_id``.
 
         Encodes the latest frame on first request and caches it, so any number
-        of viewers share one encode per frame."""
+        of viewers share one encode per frame. ``max_width`` asks for a smaller
+        copy (rounded up to one of SMALL_WIDTHS) so small grid tiles, e.g. on a
+        phone, don't download full-size pictures."""
         with self._lock:
             frame = self._frames.get(camera_id)
             if frame is None:
                 return None, 0.0
             ts = self._ts.get(camera_id, 0.0)
+            if max_width:
+                width = next((w for w in self.SMALL_WIDTHS if w >= max_width), None)
+                if width is not None and width < frame.shape[1]:
+                    cached = self._small.get((camera_id, width))
+                    if cached is None or cached[1] != ts:
+                        height = int(round(frame.shape[0] * width / frame.shape[1]))
+                        ok, buf = cv2.imencode(
+                            ".jpg", cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA),
+                            [cv2.IMWRITE_JPEG_QUALITY, self._last_jpeg_quality.get(camera_id, 80)],
+                        )
+                        if not ok:
+                            return None, 0.0
+                        cached = self._small[(camera_id, width)] = (buf.tobytes(), ts)
+                    return cached[0], ts
             if self._jpeg_ts.get(camera_id) != ts:
                 ok, buf = cv2.imencode(
                     ".jpg",

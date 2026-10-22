@@ -59,6 +59,13 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     and classifies the sharp crop; the alert photo becomes an HD close-up. Adds ~3 s to those alerts;
     at most one grab per camera per 2 s, and skipped when two jobs are already queued.
   - `web.show_zones` (live-page "Zones: on/off" button) only hides the drawn outlines.
+  - Camera substreams were raised to 1280x720 @12 fps, 2048 kbps VBR (2026-10-22): sharper live view and
+    car close-ups; engine ~95% of one core (was ~43% at 640x360). If more cameras need the headroom,
+    drop substreams back to 640x360 first. The grid asks `/snapshot.jpg?w=` for tile-sized JPEGs
+    (rounded to 320/480/640/960, capped at 1.5x device pixels) so phones don't pull full frames.
+  - Camera settings changed via ISAPI with the admin logins (not stored): OSD names, NTP hourly with
+    correct Eastern DST, HLC on the Garage camera. Smart supplement light (IR + white light on events)
+    was already on. No SD cards installed.
   - Household vehicles (`sentinel/engine/household.py`, page `/vehicles`, DB `recorded_videos/household.db`,
     photos in `recorded_videos/.household/`): the user names groups of photos; those become per-car CLIP
     references (separately for day and infrared). `PresenceTracker` checks every camera once a minute:

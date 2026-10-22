@@ -383,8 +383,16 @@
       applyCameras(liveCams);
     }
 
+    // Ask for a picture about as wide as the tile is on screen (the server rounds it to a few sizes).
+    function tileWidthParam(imgElement) {
+      // Capped at 1.5x: phones are ~3x and would otherwise pull full-size pictures every refresh
+      // (about 2 GB an hour on mobile data). Full screen uses the full-resolution stream.
+      var w = Math.ceil((imgElement.clientWidth || 640) * Math.min(window.devicePixelRatio || 1, 1.5));
+      return "&w=" + w;
+    }
+
     function updateTile(camId, imgElement) {
-      var url = "/snapshot.jpg?id=" + encodeURIComponent(camId) + "&t=" + Date.now();
+      var url = "/snapshot.jpg?id=" + encodeURIComponent(camId) + tileWidthParam(imgElement) + "&t=" + Date.now();
       var loader = new Image();
       loader.onload = function() { imgElement.src = url; };
       loader.src = url;
