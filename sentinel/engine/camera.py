@@ -318,8 +318,6 @@ class CameraPipeline:
             with self.detector._lock:
                 return self.detector._box_in_active_zone(*box, w, h)
 
-        from sentinel.engine.objects import VEHICLE_MIN_TRAVEL
-
         ready = self.tracker.update(detections, frame, ts, in_zone)
         confirmed = [t for t in self.tracker.tracks if t.hits >= 2 and t.best_score >= 0.5]
         checker = getattr(self._detections, "subject_checker", None)
@@ -331,11 +329,14 @@ class CameraPipeline:
             # A parked car seen while the wind moves the trees doesn't make it a "car" clip.
             self._clip_labels.update(
                 t.label for t in confirmed
-                if t.group != "vehicle" or max(map(abs, t.travel())) >= w * VEHICLE_MIN_TRAVEL)
+                if t.group != "vehicle" or t.vehicle_moved(w))
         classifier = getattr(self._detections, "vehicle_classifier", None)
+        presence = getattr(self._detections, "presence", None)
         for track in ready:
             if track.not_a_subject:
                 continue  # a bin or a fan, not a person
+            if track.group == "vehicle" and presence is not None and self._is_parked_car(presence, track):
+                continue
             if classifier is not None and wants_type_check(track):
                 if self._check_in_hd_later(classifier, track, confirmed, ts, first=True):
                     continue  # reported once the HD look is done
@@ -423,6 +424,17 @@ class CameraPipeline:
         bx, by, bw2, bh2 = best.box
         return big, (bx + rx0, by + ry0, bw2, bh2)
 
+    def _is_parked_car(self, presence, track) -> bool:
+        """A car the driveway check already knows is parked here: people opening doors or walking
+        around it shouldn't make it alert. It still alerts once it has driven out of its spot."""
+        spot = presence.parked_spot(self.host, track.boxes[0][1])
+        if spot is None:
+            return False
+        if presence.parked_spot(self.host, track.box, min_iou=0.3) is spot:
+            track.reported = False  # still in its spot: look again on the next detection
+            return True
+        return False  # it started in a parked spot and has left it: "… is leaving"
+
     def _check_subject(self, checker, track) -> None:
         """CLIP second opinion on a person/animal track: relabel it (a "person" that's really a
         cat) or mark it as an object (a bin) so it never alerts."""
@@ -457,10 +469,12 @@ class CameraPipeline:
             embedding = classifier.embed(crop_for_clip(frame, box))
             vt = classifier.classify(frame, box, embedding)
             household = getattr(self._detections, "household", None)
-            if household is not None and track.known_vehicle is None and not (vt and vt.delivery):
+            if household is not None and track.known_vehicle is None:
                 vehicle_id, _ = household.identify(embedding, is_greyscale(frame))
                 if vehicle_id is not None:
                     track.known_vehicle = household.vehicle(vehicle_id)
+            if vt is not None and vt.delivery and track.known_vehicle is not None:
+                vt = None  # one of the family's cars, not an Amazon van
         except Exception as e:  # never let the classifier break detection
             app_logger.log("error", "vehicle_classifier_failed", error_message=str(e),
                            camera_display=self.display_name, component="camera", action="classify")

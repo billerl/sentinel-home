@@ -120,6 +120,8 @@ class Engine:
         # Open "whose car is this?" questions: sighting id -> {camera, parked, messages, ts}
         self._car_asks: Dict[int, Dict[str, Any]] = {}
         self._car_ask_days: Dict[str, int] = {}  # date -> questions sent
+        # Photo alert waiting for its clip: camera host -> (time, sentence). One clip per alert.
+        self._clip_for_alert: Dict[str, Tuple[float, str]] = {}
         self._last_description: Dict[str, Tuple[float, str]] = {}
         self._video_query_lock = threading.Lock()
 
@@ -224,6 +226,7 @@ class Engine:
                 state_path=os.path.join(self.household.crops_dir, "presence.json"),
                 on_unknown=self._ask_whose_car,
             )
+            self.detection_worker.presence = self.presence
         app_logger.log("info", "object_detector_ready", model=os.path.basename(model), device=detector.device,
                        vehicle_types=classifier is not None,
                        classifier_device=classifier.device if classifier is not None else None,
@@ -346,6 +349,7 @@ class Engine:
             self.audio.trigger_alert(event.description.split(" ", 1)[1])  # drop the emoji
         if self.settings.get("telegram_motion_alerts", True) and jpeg:
             self.telegram.trigger_photo_alert(event.description, jpeg)
+            self._clip_for_alert[pipeline.host] = (event.timestamp, event.description)
 
     def _on_household_change(self, kind: str, pipeline, vehicle, ts: float, jpeg: Optional[bytes]) -> None:
         """A family car parked ('arrived') or drove off ('left'); kept for "when did X get home?"."""
@@ -385,17 +389,12 @@ class Engine:
         if not (self.settings.get("telegram_motion_alerts", True) and self.telegram.include_video):
             return
         if self.objects_active():
-            groups = set(self.settings.get("object_alert_groups", []))
-            from sentinel.detection.objects import CLASS_GROUPS
-
-            if not any(CLASS_GROUPS.get(label) in groups for label in pipeline.last_clip_labels):
-                return  # nothing worth a clip (no recognised object)
-            # Only reuse an alert sentence from this clip, not one from hours ago.
-            ts, text = self._last_description.get(pipeline.host, (0.0, ""))
-            if time.time() - ts > 180:
-                seen = ", ".join(sorted(set(pipeline.last_clip_labels))) or "motion"
-                text = f"🎥 Activity at the {pipeline.display_name} ({seen})." 
-            self.telegram.trigger_alert(message=f"{text} (clip)", video_path=path, bypass_cooldown=True)
+            # Only clips that go with a photo alert (which has its own per-camera cooldown):
+            # people loading a car used to send a clip every half-minute.
+            pending = self._clip_for_alert.pop(pipeline.host, None)
+            if pending is None or time.time() - pending[0] > 180:
+                return
+            self.telegram.trigger_alert(message=f"{pending[1]} (clip)", video_path=path, bypass_cooldown=True)
             return
         self.telegram.trigger_alert(
             message=f"Sentinel: motion detected on {pipeline.display_name}.",

@@ -25,6 +25,12 @@ from sentinel.detection.vehicle_type import VehicleClassifier, VehicleType
 TRACK_TTL_SECONDS = 8.0
 MIN_HITS = 2
 VEHICLE_MIN_TRAVEL = 0.03  # fraction of frame width a vehicle must move to count as arriving/leaving
+# ... and this fraction of its own size: opening a parked car's door widens its box and shifts its
+# centre by a fifth of its width or so, which used to read as "A car is driving past".
+VEHICLE_MIN_OWN_TRAVEL = 0.35
+# A car driving straight towards or away from the camera mostly changes size, not position
+# (an opening door adds only ~25% to the box).
+VEHICLE_MIN_AREA_CHANGE = 1.5
 STATIC_MEMORY_SECONDS = 7 * 86400
 # Minimum best score per group before a track can alert. Tuned on real footage:
 # a person sitting on a porch at night scored 0.40-0.52 with the tiny model, while
@@ -87,6 +93,18 @@ class Track:
     def travel(self) -> Tuple[float, float]:
         (x0, y0), (x1, y1) = self.center(0), self.center(-1)
         return x1 - x0, y1 - y0
+
+    def vehicle_moved(self, frame_width: int) -> bool:
+        """Really drove (not box jitter or a door opening): moved 3% of the frame and a third of its
+        size, or its box area changed 1.5x (coming straight at the camera or driving away from it)."""
+        dx, dy = self.travel()
+        sizes = sorted(max(b[2], b[3]) for _, b in self.boxes)
+        limit = max(frame_width * VEHICLE_MIN_TRAVEL, VEHICLE_MIN_OWN_TRAVEL * sizes[len(sizes) // 2])
+        if max(abs(dx), abs(dy)) >= limit:
+            return True
+        areas = [b[2] * b[3] for _, b in self.boxes]
+        first, last = max(1, areas[0]), max(1, areas[-1])
+        return max(first, last) / min(first, last) >= VEHICLE_MIN_AREA_CHANGE
 
     def is_still(self, frame_width: int) -> bool:
         """Hasn't really moved: less than ~one body width (box jitter on a static
@@ -231,7 +249,7 @@ def describe(track: Track, camera_name: str, zone_name: Optional[str], frame: np
     emoji = _EMOJI.get(track.label, "👀")
     dx, dy = track.travel()
     if track.group == "vehicle":
-        moving = max(abs(dx), abs(dy)) > frame_width * VEHICLE_MIN_TRAVEL
+        moving = track.vehicle_moved(frame_width)
     else:
         moving = not track.is_still(frame_width)
     # "in the Driveway (Garage)" with a named zone, otherwise "at the Front Door"
@@ -364,11 +382,9 @@ class CameraObjectTracker:
                 continue
             if track.group == "vehicle":
                 dx, dy = track.travel()
-                if max(abs(dx), abs(dy)) < frame_w * VEHICLE_MIN_TRAVEL:
-                    # A parked vehicle re-detected when something else moves: after a few
-                    # sightings without moving, retire it silently.
-                    if track.hits >= 4:
-                        track.reported = True
+                if not track.vehicle_moved(frame_w):
+                    # Parked (or just jiggling: people at its doors). Keep watching rather than
+                    # retiring it, so it still alerts if it starts to drive off.
                     continue
             else:
                 if track.group == "animal" and any(
@@ -424,6 +440,7 @@ class DetectionWorker:
         self.vehicle_classifier = vehicle_classifier  # runs on this thread via the camera callbacks
         self.household = None  # HouseholdStore: names the family's own cars (set by the engine)
         self.subject_checker = None  # SubjectChecker: second opinion on people/animals (set by the engine)
+        self.presence = None  # PresenceTracker: which cars are parked where (set by the engine)
         # Slow extras (HD frame grabs) run on their own thread so detection never waits.
         self._jobs: "queue.Queue[Callable[[], None]]" = queue.Queue(maxsize=2)
         self._job_thread = threading.Thread(target=self._run_jobs, name="object-extras", daemon=True)

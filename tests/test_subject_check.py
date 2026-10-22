@@ -97,5 +97,61 @@ class TestPipeline(unittest.TestCase):
         self.assertEqual(self.p._clip_labels, {"car"})  # a car that moved does
 
 
+
+class TestParkedAndDoors(TestPipeline):
+    def test_door_opening_is_not_driving(self):
+        from sentinel.engine.objects import Track
+        parked = Track(1, "truck", "vehicle", 0, 0, [(0, (500, 100, 300, 400)), (1, (450, 100, 350, 400))], 0.8, 2)
+        self.assertFalse(parked.vehicle_moved(1280))  # box widened by an opening door: centre moved 25 px
+        driving = Track(2, "car", "vehicle", 0, 0, [(0, (100, 100, 300, 200)), (1, (300, 100, 300, 200))], 0.8, 2)
+        self.assertTrue(driving.vehicle_moved(1280))
+
+    def test_parked_car_stays_quiet_until_it_leaves(self):
+        from sentinel.engine.household import Parked
+        spot = Parked((300, 150, 200, 120), 0, 0, seen=3, confirmed=True)
+        presence = types.SimpleNamespace(parked_spot=lambda key, box, min_iou=0.4: spot if (
+            max(0, min(box[0] + box[2], 500) - max(box[0], 300)) * max(0, min(box[1] + box[3], 270) - max(box[1], 150))
+            / float(box[2] * box[3] + 200 * 120 - max(0, min(box[0] + box[2], 500) - max(box[0], 300))
+                    * max(0, min(box[1] + box[3], 270) - max(box[1], 150)))) >= min_iou else None)
+        self.p._detections = types.SimpleNamespace(subject_checker=None, vehicle_classifier=None, presence=presence)
+        jiggle = [(300, 150, 200, 120), (380, 150, 200, 120), (300, 150, 200, 120), (385, 152, 200, 120)]
+        for i, b in enumerate(jiggle):  # people around it, doors opening: the box jumps about
+            self.p._handle_detections([Detection("car", 0.8, b)], GREY, 2000.0 + i)
+        self.assertEqual(self.events, [])
+        for i, x in enumerate((420, 470)):  # drives out of the spot
+            self.p._handle_detections([Detection("car", 0.8, (x, 150, 200, 120))], GREY, 2010.0 + i)
+        self.assertEqual(len(self.events), 1)  # one alert, once it has left the spot
+
+
+class TestClipPerAlert(unittest.TestCase):
+    def setUp(self):
+        from sentinel.engine import Engine
+        from sentinel.settings.manager import SettingsManager
+
+        self.dir = tempfile.mkdtemp(prefix="sentinel-clips-")
+        self.old_cwd = os.getcwd()
+        os.chdir(self.dir)
+        sm = SettingsManager(settings_file=os.path.join(self.dir, "settings.json"))
+        sm.settings.update({"telegram_motion_alerts": True, "alert_mode": "objects"})
+        self.e = Engine(sm)
+        self.e.detection_worker = object()
+        self.e.telegram.include_video = True
+        self.sent = []
+        self.e.telegram.trigger_alert = lambda message, video_path=None, **kw: self.sent.append(message)
+        self.cam = types.SimpleNamespace(host="192.168.0.9", display_name="Garage", last_clip_labels=["car"])
+
+    def tearDown(self):
+        os.chdir(self.old_cwd)
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_only_clips_that_go_with_an_alert(self):
+        import time as _t
+        self.e._on_clip(self.cam, "a.mp4", "motion", [])
+        self.assertEqual(self.sent, [])  # labelled "car" but no alert went out: no clip
+        self.e._clip_for_alert["192.168.0.9"] = (_t.time(), "🛻 Luke's Truck pulled into the Driveway (Garage).")
+        self.e._on_clip(self.cam, "b.mp4", "motion", [])
+        self.e._on_clip(self.cam, "c.mp4", "motion", [])
+        self.assertEqual(self.sent, ["🛻 Luke's Truck pulled into the Driveway (Garage). (clip)"])  # once
+
 if __name__ == "__main__":
     unittest.main()

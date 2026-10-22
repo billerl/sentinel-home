@@ -395,8 +395,12 @@ class PresenceTracker:
                     frame = cam.snapshot()
                     if frame is not None:
                         self.scan(cam, frame, time.time())
-                except Exception:
-                    pass
+                except Exception as e:
+                    from sentinel.logging_utils import app_logger
+
+                    app_logger.log("error", "presence_scan_failed", error_message=str(e),
+                                   camera_display=getattr(cam, "display_name", ""), component="household",
+                                   action="scan")
             self._save()
             if int(time.time()) % 3600 < self.interval:
                 self.store.auto_file()
@@ -494,6 +498,13 @@ class PresenceTracker:
             for cars in self.parked.values():
                 for p in cars:
                     p.vehicle_id = None
+
+    def parked_spot(self, camera_key: str, box: Tuple[int, int, int, int], min_iou: float = 0.4) -> Optional[Parked]:
+        """The parked car (confirmed) that ``box`` sits on, if any."""
+        with self._lock:
+            spots = [p for p in self.parked.get(camera_key, []) if p.confirmed]
+        best = max(spots, key=lambda p: _iou(p.box, box), default=None)
+        return best if best is not None and _iou(best.box, box) >= min_iou else None
 
     def where_is(self, vehicle_id: int) -> Optional[Tuple[str, Parked]]:
         for key, cars in self.present().items():

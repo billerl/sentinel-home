@@ -278,6 +278,31 @@ if __name__ == "__main__":
     unittest.main()
 
 
+
+class TestFamilyCarIsNotADelivery(unittest.TestCase):
+    def test_known_car_overrides_delivery_guess(self):
+        from sentinel.engine.objects import Track
+        from sentinel.detection.vehicle_type import VehicleType
+        from sentinel.engine.camera import CameraPipeline
+
+        d = tempfile.mkdtemp(prefix="sentinel-fam-")
+        self.addCleanup(shutil.rmtree, d, True)
+        store = HouseholdStore(d)
+        truck = store.save_vehicle("Luke's Truck", "Luke", [], "pickup")
+        for i in range(3):
+            store.add_sighting(0, "cam", "Garage", COLOUR, (10, 10, 100, 80), unit(10 + i, SIERRA, 0.008), truck)
+        clf = types.SimpleNamespace(embed=lambda crop: unit(55, SIERRA, 0.008),
+                                    classify=lambda f, b, e=None: VehicleType("amazon", "Amazon van", True, 0.61, {}))
+        pipe = CameraPipeline.__new__(CameraPipeline)
+        pipe._detections = types.SimpleNamespace(household=store)
+        pipe.detector = types.SimpleNamespace(recording=False)
+        pipe._clip_labels, pipe.display_name = set(), "Garage"
+        t = Track(1, "car", "vehicle", 0, 0, [(0, (10, 10, 100, 80))], 0.8, 2)
+        t.see(COLOUR, (10, 10, 100, 80), 0)
+        pipe._check_vehicle_type(clf, t)
+        self.assertEqual(t.known_vehicle.name, "Luke's Truck")
+        self.assertIsNone(t.vehicle_type)  # not "An Amazon van"
+
 class TestAskWhoseCar(unittest.TestCase):
     BOX = (100, 100, 200, 150)
 

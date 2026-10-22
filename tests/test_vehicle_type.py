@@ -282,7 +282,7 @@ class TestHDView(TestPipelineAndAlerts):
 
     def test_near_vehicle_skips_hd(self):
         worker = self._setup_hd((0, 0, 10, 10))
-        self._go([(100, 100, 200, 120), (130, 100, 200, 120)])
+        self._go([(100, 100, 200, 120), (180, 100, 200, 120)])
         self.assertEqual(worker.jobs, 0)
         self.assertEqual(self.pipeline.hd.asked, [])
         self.assertEqual(len(self.events), 1)
