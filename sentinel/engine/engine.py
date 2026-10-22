@@ -849,29 +849,56 @@ class Engine:
             pipeline.start()
         return True, "reconnecting"
 
-    def add_camera(self, spec: Dict[str, Any]) -> Tuple[bool, str]:
-        """Add an RTSP camera from {name, host, port, path, username, password}."""
+    @staticmethod
+    def _camera_spec(spec: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], str]:
+        """Validate the Add-a-camera form: (fields, "") or (None, error message)."""
         host = str(spec.get("host", "")).strip()
         if not re.fullmatch(r"[A-Za-z0-9.\-]{1,253}", host):
-            return False, "enter the camera's IP address or hostname"
-        if host in self.cameras:
-            return False, "that camera is already added"
+            return None, "enter the camera's IP address or hostname"
         try:
             port = int(spec.get("port") or 554)
         except (TypeError, ValueError):
-            return False, "port must be a number"
+            return None, "port must be a number"
         if not 1 <= port <= 65535:
-            return False, "port must be 1-65535"
-        path = str(spec.get("path") or "/").strip()
-        if not path.startswith("/") or re.search(r"\s", path):
-            return False, "stream path must start with /"
-        name = _display_name(spec.get("name") or "") or f"Camera {host}"
+            return None, "port must be 1-65535"
+        paths = {}
+        for key, default in (("path", "/"), ("main_path", "")):
+            value = str(spec.get(key) or default).strip()
+            if value and (not value.startswith("/") or re.search(r"\s", value) or len(value) > 200):
+                return None, "stream paths must start with / and have no spaces"
+            paths[key] = value
         user = str(spec.get("username") or "")
         password = str(spec.get("password") or "")
         auth = ""
         if user:
             auth = quote(user, safe="") + (":" + quote(password, safe="") if password else "") + "@"
-        source = f"rtsp://{auth}{host}:{port}{path}"
+        source = f"rtsp://{auth}{host}:{port}{paths['path']}"
+        main_source = f"rtsp://{auth}{host}:{port}{paths['main_path']}" if paths["main_path"] else None
+        return {"host": host, "port": port, "path": paths["path"], "user": user, "password": password,
+                "source": source, "main_source": main_source,
+                "name": _display_name(spec.get("name") or "") or f"Camera {host}"}, ""
+
+    def test_camera(self, spec: Dict[str, Any]) -> Dict[str, Any]:
+        """Try a camera before adding it (Settings → Add a camera → Test connection)."""
+        from sentinel.engine.camera_probe import guess_main_source, probe_camera
+
+        fields, error = self._camera_spec(spec)
+        if fields is None:
+            return {"ok": False, "message": error}
+        result = probe_camera(fields["host"], fields["port"], fields["path"], fields["user"], fields["password"],
+                              fields["source"], fields["main_source"] or guess_main_source(fields["source"]))
+        app_logger.log("info", "camera_tested", camera_ip=fields["host"], ok=result["ok"],
+                       component="engine", action="test_camera")
+        return result
+
+    def add_camera(self, spec: Dict[str, Any]) -> Tuple[bool, str]:
+        """Add an RTSP camera from {name, host, port, path, main_path, username, password}."""
+        fields, error = self._camera_spec(spec)
+        if fields is None:
+            return False, error
+        host, name, source = fields["host"], fields["name"], fields["source"]
+        if host in self.cameras:
+            return False, "that camera is already added"
         profile = {
             "source": source,
             "display": name,
@@ -886,6 +913,8 @@ class Engine:
             "night_bug_start_hour": int(self.settings.get("night_bug_start_hour", 20)),
             "night_bug_end_hour": int(self.settings.get("night_bug_end_hour", 6)),
         }
+        if fields["main_source"]:
+            profile["record_source"] = fields["main_source"]  # high-res stream given by hand
         with self._lock:
             self._camera_profiles()[source] = profile
             self.settings["camera_profiles"] = self._camera_profiles()

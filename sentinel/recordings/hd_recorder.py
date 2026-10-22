@@ -30,11 +30,23 @@ POST_ROLL_SECONDS = 3.0
 _SEGMENT_RE = re.compile(r"^(\d{14})\.mkv$")
 
 
+# (substream pattern, main-stream replacement) for common camera brands.
+_MAIN_STREAM_PATTERNS = (
+    (r"/sub/", "/main/"),                          # Anpviz / Hikvision-OEM: /h264/ch1/sub/av_stream
+    (r"subtype=1", "subtype=0"),                    # Amcrest / Dahua / Lorex: /cam/realmonitor?...&subtype=1
+    (r"/(\d)02(?=$|[/?])", r"/\g<1>01"),            # Hikvision / Annke: /Streaming/Channels/102
+    (r"(Preview_\d+_)sub(?=$|[/?])", r"\g<1>main"),  # Reolink: /h264Preview_01_sub
+    (r"/media/video2(?=$|[/?])", "/media/video1"),  # Uniview
+    (r"stream2(?=$|[/?])", "stream1"),              # TP-Link Tapo
+    (r"videoSub(?=$|[/?])", "videoMain"),           # Foscam
+)
+
+
 def main_stream_url(sub_url: str) -> Optional[str]:
-    """Best-guess main-stream URL for common substream paths."""
-    for sub, main in (("/sub/", "/main/"), ("subtype=1", "subtype=0"), ("/102", "/101"), ("stream2", "stream1")):
-        if sub in sub_url:
-            return sub_url.replace(sub, main, 1)
+    """Best-guess main-stream (high-res) URL for common substream paths, else None."""
+    for pattern, main in _MAIN_STREAM_PATTERNS:
+        if re.search(pattern, sub_url):
+            return re.sub(pattern, main, sub_url, count=1)
     return None
 
 

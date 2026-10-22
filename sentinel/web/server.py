@@ -478,6 +478,22 @@ class WebServer:
                 return jsonify({"error": "expected a JSON object"}), 400
             return _result(*engine.add_camera(body))
 
+        @app.route("/api/config/cameras/test", methods=["POST"])
+        def api_test_camera():
+            err = _config_guard()
+            if err:
+                return err
+            body = request.get_json(silent=True)
+            if not isinstance(body, dict):
+                return jsonify({"error": "expected a JSON object"}), 400
+            result = dict(engine.test_camera(body))
+            jpeg = result.pop("jpeg", None)
+            if jpeg:
+                import base64
+
+                result["snapshot"] = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()
+            return jsonify(result)
+
         @app.route("/api/config/cameras/<key>/delete", methods=["POST"])
         def api_remove_camera(key: str):
             err = _config_guard()

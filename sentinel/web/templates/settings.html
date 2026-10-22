@@ -116,17 +116,45 @@
       <details id="add-cam">
         <summary>+ Add a camera</summary>
         <div class="row">
+          <div class="field" style="flex: 1 1 100%"><span>Camera brand</span>
+            <select id="nc-brand" onchange="brandChanged()">
+              <option value="anpviz">Anpviz (like the current cameras)</option>
+              <option value="hikvision">Hikvision, Annke, HiWatch</option>
+              <option value="reolink">Reolink (turn on RTSP in the Reolink app first)</option>
+              <option value="dahua">Amcrest, Dahua, Lorex</option>
+              <option value="uniview">Uniview</option>
+              <option value="tapo">TP-Link Tapo (use the camera account from the Tapo app)</option>
+              <option value="foscam">Foscam</option>
+              <option value="other">Other — I'll type the stream path</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
           <div class="field"><span>Name</span><input type="text" id="nc-name" placeholder="Driveway"></div>
           <div class="field"><span>IP address / hostname</span><input type="text" id="nc-host" placeholder="192.168.0.12"></div>
           <div class="field" style="flex: 0 1 90px"><span>Port</span><input type="number" id="nc-port" value="554"></div>
         </div>
         <div class="row">
-          <div class="field"><span>Stream path</span><input type="text" id="nc-path" value="/h264/ch1/sub/av_stream"></div>
           <div class="field"><span>Username</span><input type="text" id="nc-user" autocomplete="off"></div>
           <div class="field"><span>Password</span><input type="password" id="nc-pass" autocomplete="new-password"></div>
         </div>
-        <p class="hint">Use the camera's <b>substream</b> (low resolution) — it's used for live view and motion detection. The default path works for the current cameras.</p>
-        <div class="save-row"><button class="primary" onclick="addCamera()">Add camera</button><span class="msg" id="nc-msg"></span></div>
+        <details style="background:none;border:0;padding:0;margin:4px 0 0">
+          <summary style="font-size:0.8rem">Stream paths (filled in from the brand)</summary>
+          <div class="row">
+            <div class="field"><span>Stream path (low-res “substream”, for live view and detection)</span><input type="text" id="nc-path" value="/h264/ch1/sub/av_stream"></div>
+            <div class="field"><span>High-res stream path for HD clips (optional — leave blank to guess)</span><input type="text" id="nc-main" placeholder="e.g. /h264Preview_01_main"></div>
+          </div>
+        </details>
+        <p class="hint">The camera has to be wired or on Wi-Fi with <b>RTSP</b> available — most brands do; Ring, Blink, Arlo, Nest and most battery cameras don't. Press <b>Test connection</b> first: it shows a picture from the camera, or says what's wrong.</p>
+        <div class="save-row">
+          <button onclick="testCamera()" id="nc-test">Test connection</button>
+          <button class="primary" onclick="addCamera()">Add camera</button>
+          <span class="msg" id="nc-msg"></span>
+        </div>
+        <div id="nc-result" hidden style="margin-top:10px">
+          <img id="nc-snap" alt="" style="max-width:min(100%, 480px);border-radius:4px;display:block" hidden>
+          <p class="hint" id="nc-hd"></p>
+        </div>
       </details>
     </section>
 
@@ -529,11 +557,42 @@
       } catch (e) { $("cam-list").textContent = "Could not load cameras: " + e.message; }
     }
 
-    async function addCamera() {
-      var body = {
+    var BRAND_PATHS = {
+      anpviz: "/h264/ch1/sub/av_stream", hikvision: "/Streaming/Channels/102", reolink: "/h264Preview_01_sub",
+      dahua: "/cam/realmonitor?channel=1&subtype=1", uniview: "/media/video2", tapo: "/stream2", foscam: "/videoSub"
+    };
+    function brandChanged() {
+      var brand = $("nc-brand").value;
+      $("nc-path").value = BRAND_PATHS[brand] || "";
+      $("nc-main").value = "";
+      if (brand === "other") { $("nc-path").closest("details").open = true; $("nc-path").focus(); }
+    }
+
+    function cameraForm() {
+      return {
         name: $("nc-name").value, host: $("nc-host").value, port: Number($("nc-port").value),
-        path: $("nc-path").value, username: $("nc-user").value, password: $("nc-pass").value
+        path: $("nc-path").value, main_path: $("nc-main").value,
+        username: $("nc-user").value, password: $("nc-pass").value
       };
+    }
+
+    async function testCamera() {
+      say("nc-msg", "Testing… (up to 20 seconds)");
+      $("nc-test").disabled = true;
+      $("nc-result").hidden = true;
+      try {
+        var r = await api("/api/config/cameras/test", cameraForm());
+        say("nc-msg", r.message, r.ok);
+        $("nc-snap").hidden = !r.snapshot;
+        if (r.snapshot) $("nc-snap").src = r.snapshot;
+        $("nc-hd").textContent = r.hd_message || "";
+        $("nc-result").hidden = !(r.snapshot || r.hd_message);
+      } catch (e) { say("nc-msg", e.message, false); }
+      $("nc-test").disabled = false;
+    }
+
+    async function addCamera() {
+      var body = cameraForm();
       say("nc-msg", "Adding…");
       try {
         await api("/api/config/cameras", body);

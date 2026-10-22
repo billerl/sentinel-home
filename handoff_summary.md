@@ -66,6 +66,12 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   - Camera settings changed via ISAPI with the admin logins (not stored): OSD names, NTP hourly with
     correct Eastern DST, HLC on the Garage camera. Smart supplement light (IR + white light on events)
     was already on. No SD cards installed.
+  - Other camera brands: the Add-a-camera form has a brand menu (paths in `camera_probe.BRAND_PATHS` and the
+    page's BRAND_PATHS), an optional high-res path (saved as `record_source`), and "Test connection"
+    (`camera_probe.probe_camera`: TCP reach, one RTSP DESCRIBE with digest/basic auth for clear
+    401/404 answers, then a real frame). `main_stream_url` guesses high-res paths for Anpviz/Hikvision,
+    Dahua/Amcrest, Reolink, Uniview, Tapo and Foscam. These Anpviz cameras answer unknown paths with the
+    main stream, so the probe warns when the "substream" is wider than 1280 px.
   - Household vehicles (`sentinel/engine/household.py`, page `/vehicles`, DB `recorded_videos/household.db`,
     photos in `recorded_videos/.household/`): the user names groups of photos; those become per-car CLIP
     references (separately for day and infrared). `PresenceTracker` checks every camera once a minute:
