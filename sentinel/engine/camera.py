@@ -318,12 +318,24 @@ class CameraPipeline:
             with self.detector._lock:
                 return self.detector._box_in_active_zone(*box, w, h)
 
+        from sentinel.engine.objects import VEHICLE_MIN_TRAVEL
+
         ready = self.tracker.update(detections, frame, ts, in_zone)
         confirmed = [t for t in self.tracker.tracks if t.hits >= 2 and t.best_score >= 0.5]
+        checker = getattr(self._detections, "subject_checker", None)
+        for track in confirmed + [t for t in ready if t not in confirmed]:
+            if track.group in ("person", "animal") and not track.subject_checked:
+                self._check_subject(checker, track)
+        confirmed = [t for t in confirmed if not t.not_a_subject]
         if self.detector.recording:
-            self._clip_labels.update(t.label for t in confirmed)
+            # A parked car seen while the wind moves the trees doesn't make it a "car" clip.
+            self._clip_labels.update(
+                t.label for t in confirmed
+                if t.group != "vehicle" or max(map(abs, t.travel())) >= w * VEHICLE_MIN_TRAVEL)
         classifier = getattr(self._detections, "vehicle_classifier", None)
         for track in ready:
+            if track.not_a_subject:
+                continue  # a bin or a fan, not a person
             if classifier is not None and wants_type_check(track):
                 if self._check_in_hd_later(classifier, track, confirmed, ts, first=True):
                     continue  # reported once the HD look is done
@@ -410,6 +422,31 @@ class CameraPipeline:
             return None  # probably a different vehicle
         bx, by, bw2, bh2 = best.box
         return big, (bx + rx0, by + ry0, bw2, bh2)
+
+    def _check_subject(self, checker, track) -> None:
+        """CLIP second opinion on a person/animal track: relabel it (a "person" that's really a
+        cat) or mark it as an object (a bin) so it never alerts."""
+        track.subject_checked = True
+        if checker is None:
+            return
+        try:
+            verdict = checker.check(track.best_frame, track.best_box or track.box, track.group, track.best_score)
+        except Exception as e:
+            app_logger.log("error", "subject_check_failed", error_message=str(e), camera_display=self.display_name,
+                           component="camera", action="subject_check")
+            return
+        if verdict is None or not verdict.kind:
+            return
+        app_logger.log("info", "subject_relabelled", camera_display=self.display_name, detector_label=track.label,
+                       verdict=verdict.kind, probability=round(verdict.probs.get(verdict.kind, 0.0), 2),
+                       component="camera", action="subject_check")
+        if verdict.kind == "object":
+            track.not_a_subject = True
+            return
+        track.detector_group = track.group
+        track.label = verdict.kind
+        track.group = "person" if verdict.kind == "person" else "animal"
+        track.votes = {verdict.kind: 1e9}  # later detections keep the corrected label
 
     def _check_vehicle_type(self, classifier, track, view=None) -> bool:
         """Classify the track's closest view (HD if given); True if it just turned out to be a delivery."""

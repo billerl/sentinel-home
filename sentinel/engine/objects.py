@@ -55,6 +55,9 @@ class Track:
     votes: Dict[str, float] = field(default_factory=dict)
     vehicle_type: Optional["VehicleType"] = None  # set by the CLIP classifier, if any
     known_vehicle: Optional[Any] = None  # a household vehicle (sentinel.engine.household.Vehicle), if recognised
+    subject_checked: bool = False  # CLIP second opinion done (person/animal tracks)
+    not_a_subject: bool = False  # CLIP says it's an object (bin, fan, coat...): never alert or label
+    detector_group: Optional[str] = None  # what the detector calls it, if CLIP relabelled it (still matches)
     # Closest (largest) view so far, for the vehicle-type check.
     big_frame: Optional[np.ndarray] = None
     big_box: Optional[Tuple[int, int, int, int]] = None
@@ -178,7 +181,7 @@ def vehicle_color(frame: np.ndarray, box: Tuple[int, int, int, int]) -> Optional
 _EMOJI = {"person": "🚶", "car": "🚗", "truck": "🚚", "bus": "🚌", "motorcycle": "🏍️", "bicycle": "🚲",
           "dog": "🐕", "cat": "🐈", "bird": "🐦", "horse": "🦌", "cow": "🦌", "sheep": "🦌", "bear": "🐻",
           "delivery": "📦", "pickup": "🛻", "suv": "🚙", "minivan": "🚐", "van": "🚐", "school_bus": "🚌",
-          "garbage": "🚛", "sedan": "🚗"}
+          "garbage": "🚛", "sedan": "🚗", "deer": "🦌"}
 _VEHICLE_NOUN = {"car": "car", "truck": "truck", "bus": "bus", "motorcycle": "motorcycle", "bicycle": "bicycle"}
 
 
@@ -261,7 +264,7 @@ def describe(track: Track, camera_name: str, zone_name: Optional[str], frame: np
             return f"{emoji} {subject} is driving past {past}."
         return f"{emoji} {subject} is {at}."
 
-    if track.label in ("dog", "cat", "bird", "bear"):
+    if track.label in ("dog", "cat", "bird", "bear", "deer"):
         return f"{emoji} A {track.label} is {at}."
     return f"{emoji} An animal (looks like a {track.label}, maybe a deer) is {at}."
 
@@ -320,8 +323,8 @@ class CameraObjectTracker:
             _, _, tw, th = track.box
             reach = 1.5 * max(tw, th)  # how far it can plausibly move between samples (~0.5 s)
             for det in unmatched:
-                if det.group != track.group:
-                    continue
+                if det.group != track.group and det.group != track.detector_group:
+                    continue  # (a cat relabelled from "person" keeps collecting the detector's "person" boxes)
                 overlap = _iou(det.box, track.box)
                 dx = det.box[0] + det.box[2] / 2.0 - tx
                 dy = det.box[1] + det.box[3] / 2.0 - ty
@@ -420,6 +423,7 @@ class DetectionWorker:
         self.detector = detector
         self.vehicle_classifier = vehicle_classifier  # runs on this thread via the camera callbacks
         self.household = None  # HouseholdStore: names the family's own cars (set by the engine)
+        self.subject_checker = None  # SubjectChecker: second opinion on people/animals (set by the engine)
         # Slow extras (HD frame grabs) run on their own thread so detection never waits.
         self._jobs: "queue.Queue[Callable[[], None]]" = queue.Queue(maxsize=2)
         self._job_thread = threading.Thread(target=self._run_jobs, name="object-extras", daemon=True)

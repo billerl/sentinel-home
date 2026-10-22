@@ -201,6 +201,11 @@ class Engine:
         self.detection_worker = DetectionWorker(detector, vehicle_classifier=classifier)
         self.detection_worker.household = self.household
         if classifier is not None:
+            from sentinel.detection.subject_check import SubjectChecker
+
+            checker = SubjectChecker(classifier)
+            self.detection_worker.subject_checker = checker if checker.available else None
+        if classifier is not None:
             coarse = {"car": "car", "suv": "suv", "pickup": "pickup", "minivan": "van", "van": "van"}
 
             def _body(embedding):
@@ -385,7 +390,11 @@ class Engine:
 
             if not any(CLASS_GROUPS.get(label) in groups for label in pipeline.last_clip_labels):
                 return  # nothing worth a clip (no recognised object)
-            _, text = self._last_description.get(pipeline.host, (0.0, f"Activity at the {pipeline.display_name}."))
+            # Only reuse an alert sentence from this clip, not one from hours ago.
+            ts, text = self._last_description.get(pipeline.host, (0.0, ""))
+            if time.time() - ts > 180:
+                seen = ", ".join(sorted(set(pipeline.last_clip_labels))) or "motion"
+                text = f"🎥 Activity at the {pipeline.display_name} ({seen})." 
             self.telegram.trigger_alert(message=f"{text} (clip)", video_path=path, bypass_cooldown=True)
             return
         self.telegram.trigger_alert(

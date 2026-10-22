@@ -33,6 +33,7 @@ CLASS_GROUPS = {
     "bicycle": "vehicle", "car": "vehicle", "motorcycle": "vehicle", "bus": "vehicle", "truck": "vehicle",
     "dog": "animal", "cat": "animal", "horse": "animal", "sheep": "animal", "cow": "animal",
     "bear": "animal", "bird": "animal",
+    "deer": "animal",  # not a detector class: the CLIP second opinion can relabel to it
     # Not a detector class: added to clip labels when CLIP recognises a delivery vehicle.
     "delivery": "delivery",
 }
