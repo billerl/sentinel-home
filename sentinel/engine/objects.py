@@ -204,6 +204,24 @@ def vehicle_phrase(track: Track, frame: np.ndarray) -> Tuple[str, str]:
     return emoji, f"{color} {noun}" if color else noun
 
 
+_IN_PLACES = {"yard", "backyard", "driveway", "drive", "garden", "garage", "lawn", "carport", "field", "lot"}
+_ON_PLACES = {"porch", "deck", "patio", "street", "road", "sidewalk", "steps", "stoop", "walkway", "path"}
+
+
+def _place(zone_name: Optional[str], camera_name: str) -> str:
+    """'the Driveway (Garage)'; just 'the Back Yard' when the zone is named after its camera."""
+    if not zone_name or zone_name.strip().lower() == camera_name.strip().lower():
+        return f"the {zone_name or camera_name}"
+    return f"the {zone_name} ({camera_name})"
+
+
+def _preposition(name: str) -> str:
+    """in the Back Yard, on the Porch, at the Front Door."""
+    words = name.lower().split()
+    last = words[-1] if words else ""
+    return "in" if last in _IN_PLACES else "on" if last in _ON_PLACES else "at"
+
+
 def describe(track: Track, camera_name: str, zone_name: Optional[str], frame: np.ndarray,
              frame_width: int, companions: int = 0) -> str:
     """One short sentence about what was seen, e.g. 'A red car pulled into the Driveway (Garage).'"""
@@ -214,8 +232,9 @@ def describe(track: Track, camera_name: str, zone_name: Optional[str], frame: np
     else:
         moving = not track.is_still(frame_width)
     # "in the Driveway (Garage)" with a named zone, otherwise "at the Front Door"
-    at = f"in the {zone_name} ({camera_name})" if zone_name else f"at the {camera_name}"
-    past = f"the {zone_name} ({camera_name})" if zone_name else f"the {camera_name}"
+    # (A bare camera name keeps "at": "in the Garage" would sound like inside it.)
+    at = f"{_preposition(zone_name) if zone_name else 'at'} {_place(zone_name, camera_name)}"
+    past = _place(zone_name, camera_name)
 
     if track.group == "person":
         if companions:
@@ -235,8 +254,8 @@ def describe(track: Track, camera_name: str, zone_name: Optional[str], frame: np
         if moving and abs(dy) >= abs(dx):
             # Moving toward the camera reads as arriving, away as leaving.
             if zone_name:
-                place = f"the {zone_name} ({camera_name})"
-                return f"{emoji} {subject} {'pulled into' if dy > 0 else 'is leaving'} {place}."
+                arriving = "pulled into" if _preposition(zone_name) == "in" else "pulled up at"
+                return f"{emoji} {subject} {arriving if dy > 0 else 'is leaving'} {past}."
             return f"{emoji} {subject} {'pulled in' if dy > 0 else 'is leaving'} at the {camera_name}."
         if moving:
             return f"{emoji} {subject} is driving past {past}."
