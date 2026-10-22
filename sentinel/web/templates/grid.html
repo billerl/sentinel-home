@@ -275,6 +275,7 @@
   <header>
     <h1>Sentinel Live</h1>
     <button class="header-btn" id="tl-toggle" type="button" onclick="toggleTimeline()" title="Show or hide the timeline (T). Hidden = bigger cameras.">Timeline: on</button>
+    <button class="header-btn" id="saver-toggle" type="button" onclick="toggleDataSaver()" title="Smaller, less frequent pictures for phone hotspots and mobile data (remembered on this device)">Data saver: off</button>
     <button class="header-btn" id="zones-toggle" type="button" onclick="toggleZones()" title="Show or hide the zone outlines on the live view (detection is unaffected)" hidden>Zones: on</button>
     <a class="header-btn" href="{{ url_for('zones_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Zones</a>
     <a class="header-btn" href="{{ url_for('settings_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Settings</a>
@@ -355,12 +356,53 @@
     var focusedCamId = null;
     var gridTimers = {};
 
+    // ---------------- Data saver (per device) ----------------
+    // Grid: 480 px pictures every ~5 s instead of tile-sized ones every ~1.75 s (about 0.1 GB/hour
+    // instead of 0.4-1.3). Full screen: one sharp picture per second instead of live video.
+    var dataSaver = false;
+    try { dataSaver = localStorage.getItem("sentinel.dataSaver") === "1"; } catch (e) {}
+    var focusTimer = null;
+
+    function showDataSaver() {
+      var b = document.getElementById("saver-toggle");
+      b.textContent = dataSaver ? "Data saver: on" : "Data saver: off";
+      b.classList.toggle("active", dataSaver);
+    }
+    function toggleDataSaver() {
+      dataSaver = !dataSaver;
+      try { localStorage.setItem("sentinel.dataSaver", dataSaver ? "1" : "0"); } catch (e) {}
+      showDataSaver();
+      if (focusedCamId) openFocus(focusedCamId, document.getElementById("focus-title").textContent);
+      else applyCameras(liveCams);  // restart the grid refresh at the new pace
+    }
+
     function openFocus(camId, displayName) {
       focusedCamId = camId;
       var overlay = document.getElementById('focus-overlay');
       var img = document.getElementById('focus-img');
       document.getElementById('focus-title').textContent = displayName;
-      
+      clearInterval(focusTimer);
+      focusTimer = null;
+      overlay.style.display = 'block';
+      Object.values(gridTimers).forEach(clearInterval);  // stop grid updates
+      gridTimers = {};
+
+      if (dataSaver) {
+        // One picture a second, at most 960 px wide.
+        img.onerror = null;
+        var w = Math.min(960, Math.ceil(window.innerWidth * Math.min(window.devicePixelRatio || 1, 1.5)));
+        var refresh = function() {
+          if (focusedCamId !== camId) return;
+          var url = "/snapshot.jpg?id=" + encodeURIComponent(camId) + "&w=" + w + "&t=" + Date.now();
+          var loader = new Image();
+          loader.onload = function() { if (focusedCamId === camId) img.src = url; };
+          loader.src = url;
+        };
+        refresh();
+        focusTimer = setInterval(refresh, 1000);
+        return;
+      }
+
       // High-quality MJPEG for focus
       img.src = "/stream?id=" + encodeURIComponent(camId);
       img.onerror = function() {
@@ -369,14 +411,12 @@
           if (focusedCamId === camId) img.src = "/stream?id=" + encodeURIComponent(camId) + "&r=" + Date.now();
         }, 3000);
       };
-      overlay.style.display = 'block';
-      
-      // Stop grid updates
-      Object.values(gridTimers).forEach(clearInterval);
-      gridTimers = {};
     }
 
     function closeFocus() {
+      clearInterval(focusTimer);
+      focusTimer = null;
+      document.getElementById('focus-img').onerror = null;
       document.getElementById('focus-img').src = "";
       document.getElementById('focus-overlay').style.display = 'none';
       focusedCamId = null;
@@ -388,6 +428,7 @@
       // Capped at 1.5x: phones are ~3x and would otherwise pull full-size pictures every refresh
       // (about 2 GB an hour on mobile data). Full screen uses the full-resolution stream.
       var w = Math.ceil((imgElement.clientWidth || 640) * Math.min(window.devicePixelRatio || 1, 1.5));
+      if (dataSaver) w = Math.min(w, 480);
       return "&w=" + w;
     }
 
@@ -418,7 +459,7 @@
           var aspect = img.naturalWidth / img.naturalHeight;
           if (aspect > 0.5 && aspect < 3 && Math.abs(aspect - camAspect) > 0.01) { camAspect = aspect; layoutGrid(); }
         };
-        img.src = "/snapshot.jpg?id=" + encodeURIComponent(c.id);
+        img.src = "/snapshot.jpg?id=" + encodeURIComponent(c.id) + (dataSaver ? "&w=480" : "");
         
         tile.appendChild(h2);
         tile.appendChild(img);
@@ -428,7 +469,7 @@
         // This is MUCH more stable for mobile than multiple concurrent MJPEG streams.
         gridTimers[c.id] = setInterval(function() {
           if (!focusedCamId && !playerOpen && !(isPhone() && currentTab === "events")) updateTile(c.id, img);
-        }, 1500 + (Math.random() * 500));
+        }, (dataSaver ? 5000 : 1500) + (Math.random() * 500));
       });
       setTimeout(layoutGrid, 0);  // after the page script has finished setting up
     }
@@ -529,6 +570,7 @@
       } catch (e) { showZonesState(!want); }
     }
     loadZonesState();
+    showDataSaver();
 
     // ---------------- Phone layout ----------------
     var PHONE_QUERY = window.matchMedia("(max-width: 760px), (max-height: 500px) and (pointer: coarse)");
