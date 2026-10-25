@@ -29,11 +29,13 @@ sentinel-home/                         # repository root
     │   │                              #   recording, clip requests, reconnect with backoff)
     │   ├── objects.py                 # Detection worker, tracking, plain-English descriptions
     │   ├── household.py               # Family cars: photo references, recognition, who's home
+    │   ├── weather.py                 # Weather tile data (Open-Meteo, server-side, cached 10 min)
     │   ├── questions.py               # Telegram questions ("did anyone come by?", "is Steph home?")
     │   ├── queries.py                 # "videos <when>" parsing
     │   └── admin.py                   # Settings schema, status, access message helpers
     ├── detection/
     │   ├── motion_detector.py         # Capture + MOG2 motion analysis, zones/lines, clip writing
+    │   ├── nuisance.py                # Mutes spots where motion never stops (web on the lens, branches)
     │   ├── objects.py                 # YOLOX object detector (OpenVINO)
     │   ├── vehicle_type.py            # CLIP zero-shot vehicle type / delivery-company recognition
     │   ├── vehicle_prompts.npz        # Precomputed CLIP text embeddings (tools/build_vehicle_prompts.py)
@@ -42,12 +44,14 @@ sentinel-home/                         # repository root
     │   └── store.py                   # Clip index (SQLite), retention, MP4 transcoding for browsers
     ├── web/                           # Web viewer = the user interface
     │   ├── server.py                  # Flask routes: login, live grid, MJPEG, timeline, zone editor API
-    │   ├── auth.py                    # Bcrypt login, sessions, lockout / backoff
+    │   ├── auth.py                    # Bcrypt login, sessions (saved as hashes in .web_sessions.json),
+    │   │                              #   lockout / backoff, QR sign-in pairing for TVs
     │   ├── frame_broker.py            # Latest frame per camera; opaque ids; lazy JPEG encoding
     │   ├── bind_util.py               # Refuse binding on camera-only subnets
     │   ├── set_password.py            # CLI: `python -m sentinel.web.set_password`
     │   ├── static/                    # Icons + web app manifest
-    │   └── templates/                 # login, grid (live + timeline + player), zones, settings, vehicles
+    │   └── templates/                 # login (+ QR), pair (phone approves a TV), grid (live + weather +
+    │                                  #   timeline + player), zones, settings, vehicles
     ├── notifications/
     │   └── telegram_notifier.py       # HTTPS Bot API, commands, clips
     ├── audio/

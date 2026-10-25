@@ -88,6 +88,24 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     missing. Run any second/test engine with `SENTINEL_BUFFER_ROOT` set: two engines sharing
     /dev/shm/sentinel-buffer wipe each other's buffers, and orphaned ffmpeg hold camera sessions (the
     cameras then refuse new RTSP sessions with "500 Internal Server Error").
+  - Tracker matching (`CameraObjectTracker.update`): overlap matches first for every track, then nearness
+    (reach = one vehicle length) for leftovers, never onto a box where another live track stands. Before
+    this, a parked car missed for a frame at night took its neighbour's box and "drove" across the
+    driveway (29 false alerts replayed from 2026-10-24/25; 3 real ones after).
+  - Never-ending motion (`sentinel/detection/nuisance.py`): a 16x9 grid; a cell active in 30 of the last
+    90 ten-second slots is muted (motion wholly inside muted cells doesn't start recordings), unmuted after
+    5 quiet minutes or at once when the object detector reports a real subject there (`note_subject`, which
+    also starts a recording). Object detection still runs on muted motion (`activity_streak`). Made for a
+    spider web swinging in front of the Garage lens in IR (~1500 clips one night).
+  - Weather tile (`sentinel/engine/weather.py`, settings `weather_location`/`weather_units`, `/api/weather`):
+    Open-Meteo, free/no key, server-side, 10-min cache; shown only in a grid cell that would be empty.
+  - QR sign-in for the Fire TV: `/login` shows a QR on wide screens (`POST /login/pair`), a signed-in phone
+    approves at `/pair/<code>`, the TV's poll (`/login/pair/<code>`) gets the session cookie. Codes: one use,
+    3 min, bound to the requesting IP, 3 per IP. Sessions persist as SHA-256 token hashes in
+    `.web_sessions.json` (0600), so restarts don't sign anyone out. The grid reloads itself when
+    `X-Sentinel-Boot` changes (after an update) and has a Reload button (Fire TV has no F5).
+  - VLM evaluation (2026-10-25): Tencent WeVisOne-VL-2B on this CPU took 3.5–6.5 min per image (good
+    answers). Not usable without an NVIDIA GPU; YOLOX-tiny + CLIP stays.
 - **Alerts:**
   - `alert_mode` is `objects` by default: a Telegram photo plus a natural sentence, then the clip.
   - The per-camera/per-type cooldown is `object_alert_cooldown`.
