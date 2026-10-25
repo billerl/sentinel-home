@@ -8,7 +8,7 @@ import unittest
 from unittest import mock
 
 from sentinel.engine import assistant as am
-from sentinel.engine.assistant import Assistant, build_command, build_context
+from sentinel.engine.assistant import Assistant, build_command, build_context, split_command
 from sentinel.notifications.telegram_notifier import TelegramNotifier
 
 
@@ -114,6 +114,44 @@ class TestTelegramRouting(unittest.TestCase):
         self.assertEqual(n._sent, [])
         self.feed(n, "status")  # built-in commands still handled by Sentinel
         self.assertEqual(n.consume_free_text(), [])
+
+    def test_enable_alerts_means_messages(self):
+        for phrase in ("enable alerts", "Enable notifications", "disable motion alerts"):
+            changes, err = TelegramNotifier._parse_feature_toggle_command(phrase)
+            self.assertIsNone(err, phrase)
+            self.assertEqual(list(changes), ["messages"], phrase)
+        _, err = TelegramNotifier._parse_feature_toggle_command("enable lasers")
+        self.assertIn("alerts (messages)", err)
+
+    def test_photos_and_strangers_are_logged_not_silent(self):
+        n = self.notifier(True)
+        body = json.dumps({"ok": True, "result": [{"update_id": 2, "message": {"chat": {"id": 42}, "voice": {}}}]})
+        resp = mock.MagicMock()
+        resp.__enter__.return_value.read.return_value = body.encode()
+        with mock.patch("urllib.request.urlopen", return_value=resp):
+            n._process_pause_commands()
+        self.assertIn("typed messages", n._sent[0])
+
+    def test_half_known_command_goes_to_claude(self):
+        n = self.notifier(True)
+        self.feed(n, "enable lasers")
+        self.assertEqual(n.consume_free_text(), [("42", "enable lasers")])
+        self.assertEqual(n._sent, [])
+
+    def test_button_runs_only_real_commands_and_never_loops_to_claude(self):
+        self.assertTrue(TelegramNotifier.is_command("Enable messages"))
+        self.assertTrue(TelegramNotifier.is_command("pause 30"))
+        self.assertFalse(TelegramNotifier.is_command("rm -rf /"))
+        self.assertFalse(TelegramNotifier.is_command("enable lasers"))
+        n = self.notifier(True)
+        n.route_text("42", "enable lasers", from_button=True)
+        self.assertEqual(n.consume_free_text(), [])
+        self.assertIn("Unknown", n._sent[0])
+
+    def test_split_command(self):
+        self.assertEqual(split_command("Alerts are off.\nCOMMAND: Enable messages"),
+                         ("Alerts are off.", "Enable messages"))
+        self.assertEqual(split_command("Just chatting."), ("Just chatting.", None))
 
     def test_help_text_when_off(self):
         n = self.notifier(False)

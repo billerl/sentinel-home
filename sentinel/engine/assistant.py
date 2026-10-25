@@ -35,8 +35,10 @@ Rules:
 - Reply in plain, friendly language, 1-4 short sentences (a short list is fine when they ask for several things).
 - Never invent sightings, times or people. If the data can't answer the question, say so honestly.
 - Event times are local. "Today" means the date given as NOW.
-- You can't do anything yourself (no recording, no settings). If a Sentinel command would help, tell them the
-  exact message to send, from the COMMANDS section.
+- You can't do anything yourself. If one of Sentinel's COMMANDS does what they asked (e.g. "turn alerts back on"
+  -> Enable messages), say so in your reply and put that exact command alone on the LAST line as
+  "COMMAND: <command>". Sentinel shows it as a button; it only runs if they tap it. At most one command,
+  only from the COMMANDS list, never invented ones.
 - Family cars stand for their owners: "Stephanie's Edge got home" means Stephanie (Steph, Mom) got home.
 - Small talk is fine; keep it brief and steer back to what Sentinel can do.
 - No markdown formatting (Telegram shows it raw); emoji are fine."""
@@ -151,6 +153,15 @@ class Assistant:
                        output_tokens=usage.get("output_tokens"), error_message=None if ok else self.last_error,
                        component="assistant", action="ask")
         return reply if ok else None
+
+
+def split_command(reply: str) -> Tuple[str, Optional[str]]:
+    """Claude's reply without its last "COMMAND: ..." line, and that command (unchecked)."""
+    lines = reply.rstrip().split("\n")
+    if lines and lines[-1].strip().upper().startswith("COMMAND:"):
+        command = lines[-1].strip()[len("COMMAND:"):].strip().strip('"\'` ')
+        return "\n".join(lines[:-1]).rstrip(), command or None
+    return reply, None
 
 
 def _clock(ts: float) -> str:

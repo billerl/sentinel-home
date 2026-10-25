@@ -7,6 +7,7 @@ remote control. Replaces the old Qt MainWindow, which ran invisibly under Xvfb.
 
 import copy
 import os
+import itertools
 import re
 import threading
 import time
@@ -111,6 +112,8 @@ class Engine:
         self.telegram = TelegramNotifier(self.settings)
         self.weather = WeatherService(self.settings)
         self.assistant = Assistant(self.settings)
+        self._command_offers: Dict[int, Tuple[str, str, float]] = {}  # "Do it" buttons under Claude's replies
+        self._offer_ids = itertools.count(1)
         self.audio = self._init_audio()
         self.frame_broker = None
         self.web_server = None
@@ -596,6 +599,22 @@ class Engine:
 
     def handle_button(self, chat_id: str, message_id: int, data: str, callback_id: str) -> None:
         """A tap on one of our Telegram buttons."""
+        c = re.fullmatch(r"cmd:(\d+)(:no)?", data or "")
+        if c:
+            offer = self._command_offers.pop(int(c.group(1)), None)
+            if offer is None or offer[0] != chat_id or time.time() - offer[2] > 3600:
+                self.telegram.answer_button(callback_id, "That suggestion has expired")
+                return
+            command = offer[1]
+            if c.group(2):
+                self.telegram.answer_button(callback_id, "OK")
+                self.telegram.edit_text(chat_id, message_id, "OK, I left it as it is.")
+                return
+            self.telegram.answer_button(callback_id, "Done")
+            self.telegram.edit_text(chat_id, message_id, f"✅ Sent: {command}")
+            app_logger.log("info", "assistant_command_run", command=command, component="engine", action="button")
+            self.telegram.route_text(chat_id, command, from_button=True)  # exactly as if typed
+            return
         m = re.fullmatch(r"hh:(\d+):(\d+|x|s)", data or "")
         if not m:
             self.telegram.answer_button(callback_id)
@@ -659,7 +678,16 @@ class Engine:
         else:
             self.assistant.last_error = "today's limit of Claude questions is used up"
         if reply:
-            self.telegram.reply_to_chat(chat_id, reply)
+            from sentinel.engine.assistant import split_command
+
+            text_part, command = split_command(reply)
+            if command and self.telegram.is_command(command):
+                offer = next(self._offer_ids)
+                self._command_offers[offer] = (chat_id, command, time.time())
+                self.telegram.send_text_with_buttons(chat_id, text_part or reply, [[(f"✅ {command}", f"cmd:{offer}"),
+                                                                                    ("No thanks", f"cmd:{offer}:no")]])
+            else:
+                self.telegram.reply_to_chat(chat_id, text_part or reply)
             return
         fallback = ("Sorry, I didn't catch that. " + QUESTION_HELP if text.rstrip().endswith("?")
                     else self.telegram._commands_help_text())
