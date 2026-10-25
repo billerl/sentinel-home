@@ -41,6 +41,10 @@ class TelegramNotifier:
         self._pending_buttons: List[Tuple[str, int, str, str]] = []
         # Extra question check supplied by the engine (knows the family's car/owner names).
         self.question_filter: Optional[Callable[[str], bool]] = None
+        # When set and returning True, messages nothing else understood go to the engine (Claude)
+        # instead of getting the help text.
+        self.assistant_available: Optional[Callable[[], bool]] = None
+        self._pending_free_text: List[Tuple[str, str]] = []
         self.update_settings(settings)
 
     @staticmethod
@@ -410,6 +414,11 @@ class TelegramNotifier:
         pending, self._pending_questions = self._pending_questions, []
         return pending
 
+    def consume_free_text(self) -> List[Tuple[str, str]]:
+        """Return and clear (chat_id, text) messages none of the built-in commands understood."""
+        pending, self._pending_free_text = self._pending_free_text, []
+        return pending
+
     def send_photo(self, chat_id: str, jpeg: bytes, caption: str) -> bool:
         """Synchronously send one photo (used for question replies)."""
         return self._send_photo_to_chat(chat_id, jpeg, caption)
@@ -547,7 +556,9 @@ class TelegramNotifier:
 
             match = re.match(r"^pause\s+(\d{1,4})$", text, flags=re.IGNORECASE)
             if not match:
-                if text.endswith("?"):  # a question we didn't understand: show the kinds we do
+                if self.assistant_available is not None and self.assistant_available():
+                    self._pending_free_text.append((chat_id, text))
+                elif text.endswith("?"):  # a question we didn't understand: show the kinds we do
                     self._send_message_to_chat(chat_id, "Sorry, I didn't catch that. " + QUESTION_HELP
                                                + "\n\nSend Help for all commands.")
                 else:

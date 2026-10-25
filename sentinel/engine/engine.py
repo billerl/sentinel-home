@@ -19,6 +19,7 @@ import numpy as np
 from sentinel.constants import CAPTURE_DIR, VIDEO_DIR
 from sentinel.engine import admin
 from sentinel.engine.camera import CLIP_REQUEST_REASON, CameraPipeline, camera_host
+from sentinel.engine.assistant import Assistant, build_context
 from sentinel.engine.weather import WeatherService
 from sentinel.logging_utils import app_logger
 from sentinel.notifications import TelegramNotifier
@@ -109,6 +110,7 @@ class Engine:
         self.presence = None  # PresenceTracker, when object detection + CLIP are available
         self.telegram = TelegramNotifier(self.settings)
         self.weather = WeatherService(self.settings)
+        self.assistant = Assistant(self.settings)
         self.audio = self._init_audio()
         self.frame_broker = None
         self.web_server = None
@@ -274,6 +276,9 @@ class Engine:
             return household_question(text, self.household.vehicles()) is not None
 
         self.telegram.question_filter = _household_filter
+        self.telegram.assistant_available = self.assistant.enabled
+        if self.assistant.enabled():
+            threading.Thread(target=self._check_assistant, name="assistant-check", daemon=True).start()
         self._command_thread = threading.Thread(
             target=self._command_loop, name="telegram-commands", daemon=True
         )
@@ -420,6 +425,10 @@ class Engine:
                 for chat_id, text in self.telegram.consume_questions():
                     threading.Thread(
                         target=self.answer_question, args=(chat_id, text), name="question", daemon=True
+                    ).start()
+                for chat_id, text in self.telegram.consume_free_text():
+                    threading.Thread(
+                        target=self.answer_with_assistant, args=(chat_id, text), name="assistant", daemon=True
                     ).start()
                 for chat_id, message_id, data, callback_id in self.telegram.consume_button_presses():
                     self.handle_button(chat_id, message_id, data, callback_id)
@@ -617,6 +626,44 @@ class Engine:
             self.telegram.edit_caption(chat, mid, caption)
         app_logger.log("info", "household_answer", choice="named" if choice.isdigit() else choice,
                        component="engine", action="handle_button")
+
+    def _check_assistant(self) -> None:
+        ok, message = self.assistant.check_login()
+        app_logger.log("info" if ok else "warning", "assistant_ready" if ok else "assistant_unavailable",
+                       detail=message, component="assistant", action="check_login")
+
+    def assistant_context(self) -> str:
+        from sentinel.engine.questions import HouseholdQuestion
+
+        now = time.time()
+        events = self.recording_store.events(now - 48 * 3600, now + 1)
+        cameras = [(p.display_name, bool(p.connected)) for p in self.cameras.values()]
+        home = self.answer_household_question(HouseholdQuestion("list")) if self.presence is not None else ""
+        weather = self.weather.current() if self.settings.get("weather_location") else None
+        return build_context(now, events, cameras, home, self.household.vehicles(), weather,
+                             self.telegram._commands_help_text())
+
+    def answer_with_assistant(self, chat_id: str, text: str) -> None:
+        """A message none of the built-in commands understood: ask Claude (opt-in), else show help."""
+        from sentinel.engine.questions import QUESTION_HELP
+
+        app_logger.log("info", "telegram_not_understood", text=text[:200], component="engine",
+                       action="answer_with_assistant")  # to teach Sentinel the common ones later
+        reply = None
+        if self.assistant.remaining_today() > 0:
+            self.telegram.reply_to_chat(chat_id, "🤔 Let me think…")
+            try:
+                reply = self.assistant.ask(text, self.assistant_context())
+            except Exception as e:  # never let it break the command loop
+                self.assistant.last_error = str(e)
+        else:
+            self.assistant.last_error = "today's limit of Claude questions is used up"
+        if reply:
+            self.telegram.reply_to_chat(chat_id, reply)
+            return
+        fallback = ("Sorry, I didn't catch that. " + QUESTION_HELP if text.rstrip().endswith("?")
+                    else self.telegram._commands_help_text())
+        self.telegram.reply_to_chat(chat_id, f"(Claude couldn't help: {self.assistant.last_error}.)\n\n{fallback}")
 
     def answer_household_question(self, hq) -> str:
         from sentinel.engine.questions import VehicleStatus, answer_household

@@ -132,6 +132,9 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "web.max_fps": _num(1, 20, int),
     "web.show_zones": _bool,
     "weather_location": _place,
+    "assistant_enabled": _bool,
+    "assistant_daily_limit": _num(0, 200, int),
+    "assistant_model": lambda v: _choice(v or "sonnet", ("haiku", "sonnet")),
     "weather_units": lambda v: _choice(v or "fahrenheit", ("fahrenheit", "celsius")),
 }
 

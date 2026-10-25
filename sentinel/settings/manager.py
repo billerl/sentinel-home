@@ -114,6 +114,13 @@ class SettingsManager:
             "household_ask_start_hour": 8,
             "household_ask_end_hour": 21,
             "object_alert_cooldown": 60,
+            # Weather tile in the live grid's spare cell: town or ZIP ("" = off).
+            "weather_location": "",
+            "weather_units": "fahrenheit",
+            # Messages Sentinel doesn't understand go to Claude (the PC's signed-in subscription).
+            "assistant_enabled": False,
+            "assistant_daily_limit": 30,
+            "assistant_model": "sonnet",
             # Shown in the Help page and the Telegram "access" reply
             "remote_web_url": "",
             "remote_rdp_user": "",

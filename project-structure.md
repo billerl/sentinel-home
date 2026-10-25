@@ -30,6 +30,7 @@ sentinel-home/                         # repository root
     │   ├── objects.py                 # Detection worker, tracking, plain-English descriptions
     │   ├── household.py               # Family cars: photo references, recognition, who's home
     │   ├── weather.py                 # Weather tile data (Open-Meteo, server-side, cached 10 min)
+    │   ├── assistant.py               # Opt-in: Telegram messages Sentinel doesn't understand -> `claude -p`
     │   ├── questions.py               # Telegram questions ("did anyone come by?", "is Steph home?")
     │   ├── queries.py                 # "videos <when>" parsing
     │   └── admin.py                   # Settings schema, status, access message helpers

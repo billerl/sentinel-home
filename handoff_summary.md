@@ -104,6 +104,14 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     3 min, bound to the requesting IP, 3 per IP. Sessions persist as SHA-256 token hashes in
     `.web_sessions.json` (0600), so restarts don't sign anyone out. The grid reloads itself when
     `X-Sentinel-Boot` changes (after an update) and has a Reload button (Fire TV has no F5).
+  - Claude fallback (`sentinel/engine/assistant.py`, settings `assistant_enabled`/`assistant_daily_limit`/
+    `assistant_model`): messages none of the built-in parsers understood are queued (`consume_free_text`) and
+    answered by the official `claude -p` (user's own Max login on this PC; allowed for personal use of the
+    unmodified binary; `--bare` can't be used with a subscription login). Locked down: `--tools ""`, fixed
+    `--system-prompt`, `--max-turns 1`, no session files, empty MCP config, cwd ~/.cache/sentinel-assistant,
+    ANTHROPIC_API_KEY removed from env. Context = last 48 h of events (150 lines max), cars home, cameras,
+    weather, command list (~9k chars; ~5 s with Sonnet). Every miss is logged as `telegram_not_understood`
+    so common phrasings can be taught to the rule-based parser later.
   - VLM evaluation (2026-10-25): Tencent WeVisOne-VL-2B on this CPU took 3.5–6.5 min per image (good
     answers). Not usable without an NVIDIA GPU; YOLOX-tiny + CLIP stays.
 - **Alerts:**

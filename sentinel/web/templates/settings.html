@@ -210,6 +210,13 @@
         <div class="row">
           <div class="field" style="flex: 0 1 220px"><span>Minimum seconds between alerts</span><input type="number" min="0" max="3600" data-key="telegram_cooldown"></div>
         </div>
+        <div class="row"><label><input type="checkbox" data-key="assistant_enabled"> When Sentinel doesn't understand a message, ask Claude</label></div>
+        <p class="hint" style="margin-top:0">Uses the Claude subscription signed in on this PC (run <span class="cmd">claude</span> once to sign in). Only for messages Sentinel can't answer itself: the message and a text summary of the last 2 days of events, which cars are home and the weather go to Anthropic, never pictures. Claude can only reply; it can't change anything.</p>
+        <div class="row">
+          <div class="field" style="flex: 0 1 220px"><span>Claude questions per day (at most)</span><input type="number" min="0" max="200" data-key="assistant_daily_limit"></div>
+          <div class="field" style="flex: 0 1 220px"><span>Claude model</span>
+            <select data-key="assistant_model"><option value="sonnet">Sonnet (smarter)</option><option value="haiku">Haiku (faster)</option></select></div>
+        </div>
         <div class="save-row">
           <button class="primary" onclick="saveSection('telegram')">Save</button>
           <button onclick="telegramTest()">Send test message</button>
@@ -311,6 +318,7 @@
           <li><b>Live</b> — all cameras. Tap one for full screen; tap again to go back.</li>
           <li><b>Zones: on / off</b> (top of the live page) — shows or hides the zone outlines on the live view. Detection still uses the zones either way. It applies to everyone watching.</li>
           <li><b>Data saver: on / off</b> (top of the live page) — for phone hotspots and mobile data. The grid uses small pictures refreshed every ~5 seconds (about 0.1 GB an hour instead of 0.4–1.3 GB), and full screen shows one sharp picture a second instead of live video. It's remembered per device, so turning it on on your phone doesn't affect your computer.</li>
+          <li><b>Asking Claude</b> — if “ask Claude” is on under <a href="#telegram">Telegram</a>, any message Sentinel doesn't understand (“was it busy out back this afternoon?”, “did Abi leave before or after Steph got home?”) is answered by Claude from the last 2 days of events. You'll see “🤔 Let me think…” first; answers take about 10 seconds. It uses your Claude subscription, up to the daily limit you set.</li>
           <li><b>Weather</b> — with 3 cameras the grid has a spare space, which shows the weather (set your town or ZIP under <a href="#weather">Weather</a>). On a phone it's under the cameras. When it's windy it warns you to expect motion clips from trees.</li>
           <li><b>⟳ Reload</b> (top of the live page) — reloads the page, for TVs and browsers without F5. Open pages also reload themselves after Sentinel is updated.</li>
           <li><b>Signing in a TV (QR code)</b> — on a big screen the sign-in page shows a QR code. Scan it with your phone's camera (the phone must already be signed in), check the 4-letter code matches, and tap <b>Yes</b>. The TV stays signed in, even after Sentinel restarts. If the phone says the screen is on a <i>different internet connection</i>, only approve if you're standing in front of it.</li>
@@ -395,7 +403,8 @@
   <script>
     var settings = null;
     var SECTIONS = {
-      telegram: ["telegram_enabled", "telegram_chat_ids", "telegram_motion_alerts", "telegram_include_video", "telegram_cooldown"],
+      telegram: ["telegram_enabled", "telegram_chat_ids", "telegram_motion_alerts", "telegram_include_video", "telegram_cooldown",
+                 "assistant_enabled", "assistant_daily_limit", "assistant_model"],
       recording: ["recording_retention_enabled", "recording_retention_days", "recording_min_free_percent",
                   "night_bug_start_hour", "night_bug_end_hour", "auto_reconnect_enabled",
                   "reconnect_interval_seconds", "feed_fps", "web.max_fps", "web.show_zones"],
