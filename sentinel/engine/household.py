@@ -35,8 +35,13 @@ CROPS_DIRNAME = ".household"
 # Matching (cosine similarity between CLIP embeddings). Calibrated on the household's own
 # driveway footage: crops of the same parked car score ~0.90-0.97, different family cars
 # ~0.75-0.86.
-MATCH_MIN = 0.87
-MATCH_MARGIN = 0.025
+# Measured 2026-10-25 on the household's photos (each photo matched against the others taken more
+# than 2 h apart): 0.87/0.025 named 3 of 155 day photos wrongly and 4 of 17 photos of an unnamed
+# grey sedan as a family car; 0.88/0.03 named 1 wrongly and 3 of 17. A parked car also has to be
+# named the same twice in a row (IDENTIFY_AGREE) before it counts, since it's re-checked every scan.
+MATCH_MIN = 0.88
+MATCH_MARGIN = 0.03
+IDENTIFY_AGREE = 2
 TOP_K = 3
 # Every pair in a suggested group must be at least this alike. Infrared photos of different
 # cars look more alike to CLIP than daytime ones, so night groups need a higher bar.
@@ -59,6 +64,15 @@ LEAVE_SCANS = 3  # missing this many scans in a row = left
 MIN_BOX_FRACTION = 0.015  # ignore vehicles smaller than this share of the frame (far street)
 SIGHTING_EVERY = 3600.0  # keep a new photo of a parked car at most hourly (and on day/night change)
 MAX_UNLABELLED = 1500
+
+
+def _covers(person: Tuple[int, int, int, int], spot: Tuple[int, int, int, int]) -> bool:
+    """A person standing in front of (or loading) a parked car: most of them is over its spot."""
+    px, py, pw, ph = person
+    sx, sy, sw, sh = spot
+    ix = max(0, min(px + pw, sx + sw) - max(px, sx))
+    iy = max(0, min(py + ph, sy + sh) - max(py, sy))
+    return ix * iy >= 0.5 * pw * ph
 
 
 def _iou(a, b) -> float:
@@ -296,6 +310,14 @@ class HouseholdStore:
             return best_id, best
         return None, best
 
+    def confident(self, embedding: np.ndarray, night: bool) -> Optional[int]:
+        """The car this photo clearly is (strict bar, used before filing it as a reference)."""
+        scores = sorted(self.scores(embedding, night).items(), key=lambda kv: -kv[1])
+        if not scores:
+            return None
+        runner = scores[1][1] if len(scores) > 1 else 0.0
+        return scores[0][0] if scores[0][1] >= AUTO_MATCH and scores[0][1] - runner >= AUTO_MARGIN else None
+
     def suggestion_groups(self, limit: int = 8, min_days: int = MIN_DAYS) -> List[Dict[str, Any]]:
         """Daytime photos not yet filed, grouped by look, for the Vehicles page. Only groups
         seen on ``min_days`` different days (the family's regular cars, not visitors or
@@ -353,6 +375,9 @@ class Parked:
     announced: bool = False  # its arrival was reported (or it was already here at start)
     asked: bool = False  # we asked "whose car is this?" (only once per parking)
     ignored: bool = False  # the user said it's not ours
+    candidate: Optional[int] = None  # who it looked like at the last confident check ...
+    candidate_hits: int = 0  # ... and how many confident checks in a row agreed
+    day_sure: bool = False  # a daylight photo of this parking clearly matched its car (night photos may be filed)
 
 
 class PresenceTracker:
@@ -409,11 +434,14 @@ class PresenceTracker:
             self._stop.wait(self.interval)
 
     # ------------------------------------------------------------ scanning
-    def _vehicles_in(self, frame: np.ndarray) -> List[Tuple[int, int, int, int]]:
+    def _vehicles_in(self, frame: np.ndarray):
+        """(parked-size vehicle boxes, people boxes) in the frame."""
         h, w = frame.shape[:2]
         min_area = MIN_BOX_FRACTION * w * h
-        return [d.box for d in self.detector.detect(frame, min_score=0.45)
-                if d.group == "vehicle" and d.label not in ("bicycle", "motorcycle") and d.box[2] * d.box[3] >= min_area]
+        found = self.detector.detect(frame, min_score=0.45)
+        return ([d.box for d in found if d.group == "vehicle" and d.label not in ("bicycle", "motorcycle")
+                 and d.box[2] * d.box[3] >= min_area],
+                [d.box for d in found if d.group == "person"])
 
     def scan(self, cam, frame: np.ndarray, now: float) -> None:
         boxes = self._vehicles_in(frame)
@@ -426,6 +454,7 @@ class PresenceTracker:
         parked = self.parked.setdefault(key, [])
         baseline = key not in self._baseline  # first look after start: cars already here didn't "arrive"
         self._baseline.add(key)
+        boxes, people = boxes if isinstance(boxes, tuple) else (boxes, [])
         unmatched = list(boxes)
         for p in parked:
             best = max(unmatched, key=lambda b: _iou(b, p.box), default=None)
@@ -433,6 +462,12 @@ class PresenceTracker:
                 unmatched.remove(best)
                 p.box, p.last_seen, p.missed = best, now, 0
                 p.seen += 1
+            elif best is not None and _iou(best, p.box) > 0.2 or any(_covers(b, p.box) for b in people):
+                # Still there, just partly hidden (doors open, someone loading it, someone standing
+                # in front): don't let it "leave" and "arrive" again.
+                if best is not None and _iou(best, p.box) > 0.2:
+                    unmatched.remove(best)
+                p.last_seen, p.missed = now, 0
             else:
                 p.missed += 1
         for box in unmatched:
@@ -442,7 +477,7 @@ class PresenceTracker:
         for p in list(parked):
             if p.missed >= LEAVE_SCANS:
                 parked.remove(p)
-                if p.confirmed and p.vehicle_id is not None:
+                if p.confirmed and p.vehicle_id is not None and p.announced and not self._parked_elsewhere(p):
                     vehicle = self.store.vehicle(p.vehicle_id)
                     if vehicle is not None:
                         self.on_change("left", cam, vehicle, p.last_seen, None)
@@ -454,10 +489,22 @@ class PresenceTracker:
             if p.vehicle_id is None or photo_due:
                 embedding = self.classifier.embed(crop_for_clip(frame, p.box))
                 if p.vehicle_id is None and not p.ignored:
-                    # Unknown so far (e.g. arrived in the dark): try again every scan.
-                    p.vehicle_id, _ = self.store.identify(embedding, night)
+                    # Unknown so far (e.g. arrived in the dark): try again every scan, and name it once
+                    # two checks in a row agree (one lucky match would stick for the whole parking).
+                    guess, _ = self.store.identify(embedding, night)
+                    if guess is not None:
+                        p.candidate_hits = p.candidate_hits + 1 if guess == p.candidate else 1
+                        p.candidate = guess
+                        if p.candidate_hits >= IDENTIFY_AGREE:
+                            p.vehicle_id = guess
+                if not night and p.vehicle_id is not None and not p.day_sure:
+                    p.day_sure = self.store.confident(embedding, False) == p.vehicle_id
                 if photo_due:
-                    if p.vehicle_id is not None and p.confirmed and \
+                    # File the photo under the car only when this photo itself clearly is that car (by day),
+                    # or at night for a parking recognised clearly by day. Filing on the parking's identity
+                    # alone let one wrong guess grow: a grey sedan's photos ended up under the blue Edge.
+                    sure = p.day_sure if night else self.store.confident(embedding, False) == p.vehicle_id
+                    if p.vehicle_id is not None and p.confirmed and sure and \
                             self.store.ref_count(p.vehicle_id, night) < MAX_REFS_PER_LIGHT:
                         # A car we already know, parked in the same spot: its photo (including the
                         # first infrared one at dusk) is filed under it without asking.
@@ -476,10 +523,17 @@ class PresenceTracker:
                 self.on_unknown(cam, p, frame, sid, self.store.scores(embedding, night))
             if p.confirmed and p.vehicle_id is not None and not p.announced:
                 p.announced = True
+                if self._parked_elsewhere(p):
+                    continue  # already home (seen in another spot or by another camera)
                 vehicle = self.store.vehicle(p.vehicle_id)
                 if vehicle is not None:
                     ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     self.on_change("arrived", cam, vehicle, p.first_seen, jpeg.tobytes() if ok else None)
+
+    def _parked_elsewhere(self, p: "Parked") -> bool:
+        """Is p's car also in another (announced) parking spot right now?"""
+        return any(o is not p and o.vehicle_id == p.vehicle_id and o.confirmed and o.announced and not o.missed
+                   for cars in self.parked.values() for o in cars)
 
     # ---------------------------------------------------------------- state
     def present(self) -> Dict[str, List[Parked]]:
@@ -491,6 +545,7 @@ class PresenceTracker:
         with self._lock:
             parked.vehicle_id = vehicle_id
             parked.ignored = ignored
+            parked.day_sure = vehicle_id is not None  # the family said so: its night photos may be filed
 
     def forget_identities(self) -> None:
         """After the user relabels photos: re-identify parked cars on the next scan."""

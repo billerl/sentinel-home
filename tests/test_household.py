@@ -97,9 +97,10 @@ class _Det:
 
     def __init__(self):
         self.boxes = []
+        self.people = []
 
     def detect(self, frame, min_score=0.45):
-        return [Detection("car", 0.9, b) for b in self.boxes]
+        return [Detection("car", 0.9, b) for b in self.boxes] + [Detection("person", 0.9, b) for b in self.people]
 
 
 class _Clf:
@@ -162,10 +163,12 @@ class TestPresence(unittest.TestCase):
         self.assertEqual(self.tracker.present()["192.168.0.9"][0].vehicle_id, None)
         self.clf.next = unit(41, SIERRA, 0.008)  # morning: colour again
         self.scan([self.BOX])
+        self.assertEqual(self.changes, [])  # one match could be luck: wait for a second
+        self.scan([self.BOX])
         self.assertEqual(self.changes, [("arrived", "Luke's Sierra", 1060.0)])
 
     def test_known_parked_car_files_its_night_photo(self):
-        self.scan([]); self.scan([self.BOX]); self.scan([self.BOX])  # recognised by day
+        self.scan([]); self.scan([self.BOX]); self.scan([self.BOX]); self.scan([self.BOX])  # recognised by day
         self.clf.next = unit(62)  # dusk: infrared look it has never seen
         self.scan([self.BOX], NIGHT)
         night_refs = [s for s in self.store.sightings(labelled=True) if s["night"]]
@@ -186,6 +189,49 @@ class TestPresence(unittest.TestCase):
         again = PresenceTracker(self.store, self.det, self.clf, cameras=lambda: [self.cam],
                                 on_change=lambda *a: self.changes.append(a), state_path=path)
         self.assertIsNotNone(again.where_is(self.sierra))
+
+
+class TestPresenceFlipFlops(TestPresence):
+    """2026-10-25: cars 'got home' and 'left' over and over while parked in the Garage view."""
+
+    def test_doors_open_and_people_loading_dont_make_it_leave(self):
+        self.scan([]); self.scan([self.BOX]); self.scan([self.BOX])
+        doors_open = (60, 100, 290, 160)  # box much wider: IoU with the parked box ~0.6 -> 0.3
+        for _ in range(4):
+            self.scan([doors_open])
+        self.det.people = [(150, 120, 40, 100)]  # someone standing in front hides the car completely
+        for _ in range(4):
+            self.scan([])
+        self.det.people = []
+        self.scan([self.BOX])
+        self.assertEqual([c[0] for c in self.changes], ["arrived"])
+
+    def test_one_lucky_match_doesnt_name_a_car(self):
+        self.scan([])
+        looks = [unit(70), unit(41, SIERRA, 0.008), unit(71), unit(72)]  # matches the Sierra only once
+        for look in looks:
+            self.clf.next = look
+            self.scan([self.BOX])
+        self.assertEqual(self.changes, [])
+        self.assertIsNone(self.tracker.present()["192.168.0.9"][0].vehicle_id)
+
+    def test_same_car_in_two_spots_arrives_and_leaves_once(self):
+        other = (400, 100, 200, 150)
+        self.scan([]); self.scan([self.BOX]); self.scan([self.BOX])
+        self.scan([self.BOX, other]); self.scan([self.BOX, other]); self.scan([self.BOX, other])
+        self.assertEqual([c[0] for c in self.changes], ["arrived"])  # the second spot looks the same: not again
+        self.scan([self.BOX]); self.scan([self.BOX]); self.scan([self.BOX])  # that one went
+        self.assertEqual([c[0] for c in self.changes], ["arrived"])  # the car is still home
+        self.scan([]); self.scan([]); self.scan([])
+        self.assertEqual([c[0] for c in self.changes], ["arrived", "left"])
+
+    def test_unsure_photos_arent_filed_under_the_car(self):
+        self.scan([]); self.scan([self.BOX]); self.scan([self.BOX])  # the Sierra, recognised
+        filed = len([x for x in self.store.sightings(labelled=True) if x["vehicle_id"] == self.sierra])
+        self.clf.next = unit(80, SIERRA, 0.05)  # an hour later: only vaguely like it (another car in the spot?)
+        self.t += 3600
+        self.scan([self.BOX])
+        self.assertEqual(len([x for x in self.store.sightings(labelled=True) if x["vehicle_id"] == self.sierra]), filed)
 
 
 VEHICLES = [Vehicle(1, "Abigail's Fusion", "Abigail", ["Abby"], "sedan"),

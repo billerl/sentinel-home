@@ -112,6 +112,16 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     ANTHROPIC_API_KEY removed from env. Context = last 48 h of events (150 lines max), cars home, cameras,
     weather, command list (~9k chars; ~5 s with Sonnet). Every miss is logged as `telegram_not_understood`
     so common phrasings can be taught to the rule-based parser later.
+  - Presence flip-flops fixed (2026-10-25): a parked car partly hidden (box IoU 0.2–0.5, doors open) or
+    covered by a person no longer counts as missing; an unknown parked car is named only after
+    IDENTIFY_AGREE (2) confident checks in a row (it's re-checked every scan, so one lucky match used to
+    stick); MATCH_MIN/MARGIN raised to 0.88/0.03 (leave-out test on the household photos); "arrived"/"left"
+    only when the car isn't also parked in another spot. Photos are auto-filed only when the photo itself
+    passes the strict AUTO_MATCH bar (by day) or the parking was clearly recognised by day (night): filing on
+    the spot's identity alone had put 18 photos of an unnamed grey sunroof sedan under the blue Edge (and 2 of
+    a white Crown Vic under the Jeep). Those 20 were unfiled (vehicle_id NULL); backup
+    recorded_videos/household.db.bak-20261025. The grey sedan (middle spot, probably Abigail's Fusion from the
+    re-aimed camera's angle) is now unknown until the family names it.
   - VLM evaluation (2026-10-25): Tencent WeVisOne-VL-2B on this CPU took 3.5–6.5 min per image (good
     answers). Not usable without an NVIDIA GPU; YOLOX-tiny + CLIP stays.
 - **Alerts:**
