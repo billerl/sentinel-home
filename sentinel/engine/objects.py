@@ -335,24 +335,46 @@ class CameraObjectTracker:
         """Match detections to tracks; return tracks that just became reportable."""
         self._expire(now, frame.shape[1])
         unmatched = list(detections)
-        for track in self.tracks:
+        same_kind = lambda det, track: det.group == track.group or det.group == track.detector_group  # noqa: E731
+        # (a cat relabelled from "person" keeps collecting the detector's "person" boxes)
+        # First every track takes the box overlapping it; only then may a leftover track reach for
+        # a nearby box (a fast mover). Otherwise a parked car the detector missed for a frame grabs
+        # the neighbouring parked car's box and "drives" across the driveway (night IR, Garage).
+        pairs = sorted(((_iou(det.box, track.box), i, j) for i, track in enumerate(self.tracks)
+                        for j, det in enumerate(unmatched) if same_kind(det, track)), reverse=True)
+        matches: Dict[int, Detection] = {}
+        taken = set()
+        for overlap, i, j in pairs:
+            if overlap <= 0.25:
+                break
+            if i not in matches and j not in taken:
+                matches[i] = unmatched[j]
+                taken.add(j)
+        for i, track in enumerate(self.tracks):
+            if i in matches:
+                continue
             best, best_score = None, 0.0
             tx, ty = track.center()
             _, _, tw, th = track.box
-            reach = 1.5 * max(tw, th)  # how far it can plausibly move between samples (~0.5 s)
-            for det in unmatched:
-                if det.group != track.group and det.group != track.detector_group:
-                    continue  # (a cat relabelled from "person" keeps collecting the detector's "person" boxes)
-                overlap = _iou(det.box, track.box)
+            reach = 1.0 * max(tw, th)  # how far it can plausibly move between samples (~0.5 s)
+            for j, det in enumerate(unmatched):
+                if j in taken or not same_kind(det, track):
+                    continue
+                if any(other is not track and now - other.last_seen < 2.0 and _iou(det.box, other.box) > 0.5
+                       for other in self.tracks):
+                    continue  # that's where another object is standing
                 dx = det.box[0] + det.box[2] / 2.0 - tx
                 dy = det.box[1] + det.box[3] / 2.0 - ty
                 near = 1.0 - (dx * dx + dy * dy) ** 0.5 / reach
-                # Prefer overlap; fall back to nearness for fast movers whose boxes don't overlap.
-                score = overlap + 0.5 if overlap > 0.25 else (near if near > 0 else 0.0)
-                if score > best_score:
-                    best, best_score = det, score
+                if near > best_score:
+                    best, best_score, best_j = det, near, j
             if best is not None:
-                unmatched.remove(best)
+                matches[i] = best
+                taken.add(best_j)
+        unmatched = [det for j, det in enumerate(unmatched) if j not in taken]
+        for i, track in enumerate(self.tracks):
+            best = matches.get(i)
+            if best is not None:
                 track.vote(best.label, best.score)
                 track.see(frame, best.box, now)
                 track.boxes.append((now, best.box))

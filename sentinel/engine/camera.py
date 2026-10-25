@@ -260,7 +260,7 @@ class CameraPipeline:
 
             self._start_requested_clip(raw)
             self._publish(annotated, raw)
-            if self._detections is not None and raw is not None and self.detector.motion_streak > 0:
+            if self._detections is not None and raw is not None and self.detector.activity_streak > 0:
                 self._detections.submit(self.host, raw, self._handle_detections)
             if motion:
                 self._on_motion(self)
@@ -517,6 +517,7 @@ class CameraPipeline:
             timestamp=ts,
         )
         track.alerted = True
+        self.detector.note_subject(track.box, w, h)
         if self.detector.recording:
             self._clip_labels.add(track.label)
             if vt is not None and vt.delivery:

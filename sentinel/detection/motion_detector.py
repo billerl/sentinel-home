@@ -8,6 +8,7 @@ import numpy as np
 import time
 import threading
 from typing import Tuple, List, Optional, Union, Dict, Any
+from sentinel.detection.nuisance import NuisanceMap
 from sentinel.logging_utils import app_logger, redact
 
 # Import the constants
@@ -86,6 +87,12 @@ class MotionDetector:
         # Motion quality filters
         self.min_motion_frames = 3  # consecutive frames with motion before triggering
         self.motion_streak = 0
+        # Like motion_streak, but also counting motion in muted spots (the object detector
+        # still looks at those frames).
+        self.activity_streak = 0
+        # Spots where motion never stops (a web swinging in front of the lens) don't start recordings.
+        self.nuisance = NuisanceMap()
+        self._muted_logged = False
         self.global_change_ratio = 0.45  # more foreground than this = lighting change
         self.zone_overlap_ratio = 0.3
         self._zone_mask_key = None
@@ -617,6 +624,14 @@ class MotionDetector:
             return previous_side > 0 and current_side < 0
         return previous_side < 0 and current_side > 0
 
+    def note_subject(self, box: Tuple[int, int, int, int], frame_w: int, frame_h: int) -> None:
+        """The object detector saw something real here: unmute the spot and make sure it's recorded."""
+        with self._lock:
+            self.nuisance.clear(box, frame_w, frame_h)
+            if self.recording_enabled and not self.recording and self.feed_active:
+                self.last_motion_time = time.time()
+                self.start_recording((frame_w, frame_h))
+
     def _cleanup_old_tracks(self) -> None:
         now = time.time()
         stale = [
@@ -841,6 +856,19 @@ class MotionDetector:
                         candidate_rects.append((x, y, w, h))
 
                 self._cleanup_old_tracks()
+
+                self.nuisance.observe(candidate_rects, frame_w, frame_h)
+                self.activity_streak = self.activity_streak + 1 if candidate_rects else 0
+                muted = [r for r in candidate_rects if self.nuisance.is_muted(r, frame_w, frame_h)]
+                if muted:
+                    candidate_rects = [r for r in candidate_rects if r not in muted]
+                    if not self._muted_logged:
+                        self._muted_logged = True
+                        app_logger.log("info", "motion_spot_muted", camera_display=self.camera_name,
+                                       component="motion_detector", action="detect_motion",
+                                       cells=len(self.nuisance.muted_cells()))
+                elif self._muted_logged and not self.nuisance.muted_cells():
+                    self._muted_logged = False
 
                 # Persistence: a single noisy frame (rain drop, insect flash) is not
                 # enough; require motion in several consecutive frames.
