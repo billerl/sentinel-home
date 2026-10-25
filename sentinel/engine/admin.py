@@ -53,6 +53,13 @@ def _username(value: Any) -> str:
     return text
 
 
+def _place(value: Any) -> str:
+    text = " ".join(str(value if isinstance(value, str) else "").split())
+    if len(text) > 60 or re.search(r"[<>\"{}\\]", text):
+        raise ValueError("enter a town name or ZIP code")
+    return text
+
+
 def available_voices(models_dir: str = "models") -> List[str]:
     return sorted(
         os.path.splitext(os.path.basename(p))[0] for p in glob.glob(os.path.join(models_dir, "*.onnx"))
@@ -124,6 +131,8 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "remote_rdp_user": _username,
     "web.max_fps": _num(1, 20, int),
     "web.show_zones": _bool,
+    "weather_location": _place,
+    "weather_units": lambda v: _choice(v or "fahrenheit", ("fahrenheit", "celsius")),
 }
 
 # Secrets that may be replaced but are never sent back to the browser.

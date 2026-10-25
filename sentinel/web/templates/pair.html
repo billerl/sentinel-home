@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#001525">
+  <title>Sentinel — Sign in a screen</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #2e2e2e; color: #00ffff; margin: 0; min-height: 100vh;
+           display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .card { background: #3e3e3e; border: 1px solid #00ffff; border-radius: 8px; padding: 1.5rem; width: 100%; max-width: 380px; }
+    h1 { font-size: 1.2rem; margin: 0 0 1rem; }
+    p { color: #d8f6f6; line-height: 1.45; }
+    .code { font-size: 2.2rem; letter-spacing: 0.3em; font-weight: 700; text-align: center; color: #fff;
+            background: #2e2e2e; border-radius: 6px; padding: 0.4rem; margin: 0.5rem 0 1rem; }
+    .warn { background: #4a3a10; color: #ffd166; padding: 0.6rem; border-radius: 4px; }
+    .ok { color: #7dffa8; }
+    .err { background: #4a2020; color: #ff8888; padding: 0.6rem; border-radius: 4px; }
+    button { margin-top: 0.75rem; width: 100%; padding: 0.75rem; border: none; border-radius: 4px; font-weight: 600;
+             font-size: 1rem; cursor: pointer; }
+    .approve { background: #00ffff; color: #2e2e2e; }
+    .cancel { background: transparent; color: #9fd3ee; border: 1px solid #557; }
+  </style>
+</head>
+<body>
+  <div class="card" id="card">
+    {% if not pairing %}
+    <h1>Sign in a screen</h1>
+    <p class="err">This code has expired or was already used. Show a new QR code on the TV and scan it again.</p>
+    {% else %}
+    <h1>Sign in this {{ device }}?</h1>
+    <p>Check the TV shows the same code:</p>
+    <div class="code">{{ pairing.short }}</div>
+    {% if same_network %}
+    <p class="ok">✓ It's on the same internet connection as this phone.</p>
+    {% else %}
+    <p class="warn">⚠ This screen is on a different internet connection ({{ pairing.client_ip }}). Only approve if it's a screen you're standing in front of. Someone could send you a code to get into your cameras.</p>
+    {% endif %}
+    <button class="approve" id="approve">Yes, sign it in</button>
+    <button class="cancel" onclick="location.href='/'">No</button>
+    <p id="msg"></p>
+    {% endif %}
+  </div>
+  {% if pairing %}
+  <script>
+    document.getElementById("approve").onclick = async function() {
+      var msg = document.getElementById("msg");
+      this.disabled = true;
+      try {
+        var r = await fetch(location.pathname, { method: "POST",
+          headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" }, body: "{}" });
+        var data = await r.json().catch(function() { return {}; });
+        if (!r.ok) throw new Error(data.error || "Something went wrong");
+        document.getElementById("card").innerHTML = '<h1>Done</h1><p class="ok">The TV is signing in now. You can close this page.</p>';
+      } catch (e) {
+        msg.className = "err"; msg.textContent = e.message; this.disabled = false;
+      }
+    };
+  </script>
+  {% endif %}
+</body>
+</html>

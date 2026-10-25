@@ -60,9 +60,21 @@
       margin-top: 1rem;
       font-size: 0.9rem;
     }
+    .wrap { display: flex; gap: 1.5rem; align-items: stretch; flex-wrap: wrap; justify-content: center; padding: 16px; }
+    .wrap .card { width: 360px; max-width: 100%; }
+    .qr { text-align: center; display: flex; flex-direction: column; align-items: center; }
+    .qr h2 { font-size: 1.1rem; margin: 0 0 0.5rem; }
+    .qr p { color: #d8f6f6; margin: 0.25rem 0 0.75rem; font-size: 0.95rem; }
+    #qr-img svg { width: 240px; height: 240px; display: block; border-radius: 6px; }
+    #qr-short { font-size: 1.6rem; letter-spacing: 0.3em; font-weight: 700; color: #fff; margin-top: 0.6rem; }
+    #qr-show { background: transparent; color: #9fd3ee; border: 1px solid #557; }
+    /* Phones are the ones doing the scanning: keep the code one tap away instead of in the way. */
+    @media (max-width: 700px) { .qr.auto { display: none; } }
+    @media (min-width: 701px) { #qr-show { display: none; } }
   </style>
 </head>
 <body>
+  <div class="wrap">
   <div class="card">
     <h1>Sentinel Home</h1>
     {% if locked %}
@@ -82,6 +94,49 @@
       </label>
       <button type="submit">Sign in</button>
     </form>
+    <button type="button" id="qr-show" onclick="showQr()">Sign in with your phone instead (QR code)</button>
   </div>
+  <div class="card qr auto" id="qr-card">
+    <h2>Or scan with your phone</h2>
+    <p>Open your phone's camera, scan this, and tap <b>Yes</b> (your phone must already be signed in to Sentinel).</p>
+    <div id="qr-img">Getting a code…</div>
+    <div id="qr-short"></div>
+  </div>
+  </div>
+  <script>
+    var qrCode = null, qrStarted = 0, qrTimer = null;
+    async function newQr() {
+      try {
+        var r = await fetch("/login/pair", { method: "POST",
+          headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" }, body: "{}" });
+        var d = await r.json();
+        if (!r.ok) throw new Error(d.error || "unavailable");
+        qrCode = d.code; qrStarted = Date.now();
+        document.getElementById("qr-img").innerHTML = d.qr;
+        document.getElementById("qr-short").textContent = d.short;
+      } catch (e) {
+        qrCode = null;
+        document.getElementById("qr-img").textContent = "QR sign-in isn't available right now (" + e.message + ").";
+      }
+    }
+    async function pollQr() {
+      if (document.hidden) return;
+      if (!qrCode || Date.now() - qrStarted > 170000) { await newQr(); return; }  // codes last 3 minutes
+      try {
+        var r = await fetch("/login/pair/" + encodeURIComponent(qrCode));
+        var d = await r.json();
+        if (d.state === "approved") { clearInterval(qrTimer); location.href = "/"; }
+        else if (d.state === "expired") await newQr();
+      } catch (e) {}
+    }
+    function startQr() { if (!qrTimer) { newQr(); qrTimer = setInterval(pollQr, 2000); } }
+    function showQr() {
+      var card = document.getElementById("qr-card");
+      card.classList.remove("auto");
+      startQr();
+      card.scrollIntoView({ behavior: "smooth" });
+    }
+    if (getComputedStyle(document.getElementById("qr-card")).display !== "none") startQr();
+  </script>
 </body>
 </html>

@@ -10,6 +10,7 @@ It DOES connect to the real cameras: they allow only a few RTSP sessions, so kee
 short and check afterwards that no ffmpeg was left behind (`ps -eo ppid,args | grep ffmpeg`).
 """
 
+import json
 import os
 import shutil
 import sqlite3
@@ -50,6 +51,7 @@ sm = SettingsManager(settings_file="settings.json")
 sm.settings["web"].update({"enabled": True, "port": 18091, "bind_host": "127.0.0.1"})
 sm.settings["telegram_enabled"] = False  # never answer or alert from the harness
 sm.settings["recording_retention_enabled"] = False
+sm.settings.update(json.loads(os.environ.get("HARNESS_SETTINGS") or "{}"))  # e.g. '{"weather_location": "44883"}'
 engine = Engine(sm)
 engine.start()
 print(f"harness on http://127.0.0.1:18091 (work dir {WORK})", flush=True)

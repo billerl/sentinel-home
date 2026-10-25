@@ -19,6 +19,7 @@ import numpy as np
 from sentinel.constants import CAPTURE_DIR, VIDEO_DIR
 from sentinel.engine import admin
 from sentinel.engine.camera import CLIP_REQUEST_REASON, CameraPipeline, camera_host
+from sentinel.engine.weather import WeatherService
 from sentinel.logging_utils import app_logger
 from sentinel.notifications import TelegramNotifier
 from sentinel.recordings import RecordingStore
@@ -107,6 +108,7 @@ class Engine:
         self.household = HouseholdStore(VIDEO_DIR)
         self.presence = None  # PresenceTracker, when object detection + CLIP are available
         self.telegram = TelegramNotifier(self.settings)
+        self.weather = WeatherService(self.settings)
         self.audio = self._init_audio()
         self.frame_broker = None
         self.web_server = None

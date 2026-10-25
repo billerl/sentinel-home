@@ -11,6 +11,7 @@ import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import cv2
+import segno
 from flask import (
     Flask,
     Response,
@@ -65,6 +66,22 @@ def _template_dir() -> str:
     import os
 
     return os.path.join(os.path.dirname(__file__), "templates")
+
+
+# Changes every time Sentinel starts (an update means a restart).
+BOOT_ID = f"{int(time.time())}"
+
+
+def _device_name(user_agent: str) -> str:
+    """Rough, readable device type for the QR sign-in approval page."""
+    ua = user_agent or ""
+    for needle, name in (("AFT", "Fire TV"), ("Silk", "Fire TV / Fire tablet"), ("SMART-TV", "Smart TV"),
+                         ("Tizen", "Samsung TV"), ("Web0S", "LG TV"), ("CrKey", "Chromecast"),
+                         ("Android", "Android device"), ("iPhone", "iPhone"), ("iPad", "iPad"),
+                         ("Macintosh", "Mac"), ("Windows", "Windows PC"), ("Linux", "Linux PC")):
+        if needle in ua:
+            return name
+    return "Unknown device"
 
 
 def _register_static_types() -> None:
@@ -136,7 +153,8 @@ class WebServer:
             self._settings.settings["web"] = merged
             self._settings.save_settings(force=True)
 
-        self._auth = WebAuthManager(auth_cfg)
+        self._auth = WebAuthManager(auth_cfg, store_path=os.path.join(
+            os.path.dirname(os.path.abspath(self._settings.settings_file)), ".web_sessions.json"))
         self._limiter = _StreamLimiter(
             int(cfg.get("max_concurrent_streams", 4)),
             int(cfg.get("max_concurrent_streams_per_session", 2)),
@@ -186,6 +204,62 @@ class WebServer:
                 return redirect(url_for("login"))
             return None
 
+        def _set_session_cookie(resp, token: str, remember: bool) -> None:
+            secure = request.headers.get("X-Forwarded-Proto", "").lower() == "https" or request.is_secure
+            # "Keep me signed in": a year; otherwise the configured session length.
+            max_age = 365 * 86400 if remember else int(auth_cfg.get("session_max_days", 7)) * 86400
+            resp.set_cookie("sentinel_session", token, httponly=True, samesite="Lax", secure=secure,
+                            max_age=max_age, path="/")
+
+        # ---- QR sign-in: a TV shows a code, a signed-in phone scans it and approves ----
+        @app.route("/login/pair", methods=["POST"])
+        def login_pair_start():
+            if auth is None or not _write_request_ok():
+                return jsonify({"error": "bad request"}), 400
+            ip = _client_ip(request.remote_addr or "", request.headers)
+            made = auth.create_pairing(ip, request.headers.get("User-Agent", ""))
+            if made is None:
+                return jsonify({"error": "too many sign-in codes; wait a few minutes"}), 429
+            code, pairing = made
+            proto = (request.headers.get("X-Forwarded-Proto") or request.scheme).split(",")[0].strip()
+            url = f"{proto}://{request.host}/pair/{code}"
+            svg = segno.make(url, error="m").svg_inline(scale=6, dark="#000", light="#fff", border=2)
+            return jsonify({"code": code, "short": pairing.short, "qr": svg})
+
+        @app.route("/login/pair/<code>")
+        def login_pair_poll(code: str):
+            if auth is None:
+                return jsonify({"state": "expired"})
+            ip = _client_ip(request.remote_addr or "", request.headers)
+            state, token = auth.claim_pairing(code, ip)
+            resp = jsonify({"state": state})
+            if token:
+                _set_session_cookie(resp, token, True)
+                app_logger.log("info", "web_login_success", username=str(self._auth_cfg().get("username", "")),
+                               ip=ip, method="qr", user_agent=request.headers.get("User-Agent", ""),
+                               component="web_server", action="login_pair")
+            return resp
+
+        @app.route("/pair/<code>", methods=["GET", "POST"])
+        def pair_approve(code: str):
+            redir = _require_session()
+            if redir:
+                return redirect(url_for("login", next=f"/pair/{code}"))
+            pairing = auth.pairing(code)
+            if request.method == "POST":
+                if not _write_request_ok():
+                    return jsonify({"error": "bad request"}), 400
+                rec = auth.validate_session(_session_token(), _client_ip(request.remote_addr or "", request.headers))
+                if pairing is None or not auth.approve_pairing(code, rec.username):
+                    return jsonify({"error": "That code has expired. Show a new one on the TV."}), 400
+                app_logger.log("info", "web_pair_approved", ip=pairing.client_ip, user_agent=pairing.user_agent,
+                               component="web_server", action="pair")
+                return jsonify({"ok": True})
+            here = _client_ip(request.remote_addr or "", request.headers)
+            return render_template("pair.html", pairing=pairing, code=code,
+                                   same_network=pairing is not None and pairing.client_ip == here,
+                                   device=_device_name(pairing.user_agent) if pairing else "")
+
         @app.route("/login", methods=["GET", "POST"])
         def login():
             if auth is None:
@@ -233,29 +307,7 @@ class WebServer:
                 )
                 nxt = request.args.get("next") or url_for("index")
                 resp = redirect(nxt)
-                secure = (
-                    request.headers.get("X-Forwarded-Proto", "").lower() == "https"
-                    or request.is_secure
-                )
-                
-                # Check for "Remember me" checkbox
-                remember = request.form.get("remember") == "1"
-                if remember:
-                    # One year in seconds
-                    max_age = 365 * 86400
-                else:
-                    # Default session length (e.g., 7 days or as configured)
-                    max_age = int(auth_cfg.get("session_max_days", 7)) * 86400
-
-                resp.set_cookie(
-                    "sentinel_session",
-                    token,
-                    httponly=True,
-                    samesite="Lax",
-                    secure=secure,
-                    max_age=max_age,
-                    path="/",
-                )
+                _set_session_cookie(resp, token, request.form.get("remember") == "1")
                 return resp
 
             now_locked, ra = auth.record_failure(ip)
@@ -314,6 +366,7 @@ class WebServer:
             snapshot_interval_ms = max(40, min(500, int(1000 / max_fps)))
             return render_template(
                 "grid.html",
+                boot_id=BOOT_ID,
                 cameras=cams,
                 snapshot_interval_ms=snapshot_interval_ms,
             )
@@ -324,7 +377,18 @@ class WebServer:
             if redir:
                 return jsonify({"error": "unauthorized"}), 401
             cams = [{"id": cid, "display": disp} for cid, disp in broker.list_cameras()]
-            return jsonify(cams)
+            resp = jsonify(cams)
+            resp.headers["X-Sentinel-Boot"] = BOOT_ID  # open pages reload themselves after an update
+            return resp
+
+        @app.route("/api/weather")
+        def api_weather():
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            if engine is None:
+                return jsonify({"configured": False})
+            return jsonify(engine.weather.current())
 
         @app.route("/snapshot.jpg")
         def snapshot():

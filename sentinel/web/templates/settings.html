@@ -92,6 +92,7 @@
       <a href="#telegram">Telegram</a>
       <a href="#recording">Recording</a>
       <a href="#audio">Audio</a>
+      <a href="#weather">Weather</a>
       <a href="#access">Remote access</a>
       <a href="#security">Password</a>
       <a href="#help">Help</a>
@@ -259,6 +260,20 @@
       </div>
     </section>
 
+    <!-- ======================= WEATHER ======================= -->
+    <section id="weather">
+      <h2>Weather</h2>
+      <div class="card">
+        <p class="hint" style="margin-top:0">Shown in the live grid's spare space (and under the cameras on a phone). From the free Open-Meteo service: only this town's rough location is sent, never pictures.</p>
+        <div class="row">
+          <div class="field"><span>Town or ZIP code (empty = no weather)</span><input type="text" data-key="weather_location" placeholder="44883 or Tiffin, Ohio" maxlength="60"></div>
+          <div class="field" style="flex: 0 1 180px"><span>Temperature</span>
+            <select data-key="weather_units"><option value="fahrenheit">°F</option><option value="celsius">°C</option></select></div>
+        </div>
+        <div class="save-row"><button class="primary" onclick="saveSection('weather')">Save</button><span class="msg" id="msg-weather"></span></div>
+      </div>
+    </section>
+
     <!-- ======================= REMOTE ACCESS ======================= -->
     <section id="access">
       <h2>Remote access</h2>
@@ -296,6 +311,9 @@
           <li><b>Live</b> — all cameras. Tap one for full screen; tap again to go back.</li>
           <li><b>Zones: on / off</b> (top of the live page) — shows or hides the zone outlines on the live view. Detection still uses the zones either way. It applies to everyone watching.</li>
           <li><b>Data saver: on / off</b> (top of the live page) — for phone hotspots and mobile data. The grid uses small pictures refreshed every ~5 seconds (about 0.1 GB an hour instead of 0.4–1.3 GB), and full screen shows one sharp picture a second instead of live video. It's remembered per device, so turning it on on your phone doesn't affect your computer.</li>
+          <li><b>Weather</b> — with 3 cameras the grid has a spare space, which shows the weather (set your town or ZIP under <a href="#weather">Weather</a>). On a phone it's under the cameras. When it's windy it warns you to expect motion clips from trees.</li>
+          <li><b>⟳ Reload</b> (top of the live page) — reloads the page, for TVs and browsers without F5. Open pages also reload themselves after Sentinel is updated.</li>
+          <li><b>Signing in a TV (QR code)</b> — on a big screen the sign-in page shows a QR code. Scan it with your phone's camera (the phone must already be signed in), check the 4-letter code matches, and tap <b>Yes</b>. The TV stays signed in, even after Sentinel restarts. If the phone says the screen is on a <i>different internet connection</i>, only approve if you're standing in front of it.</li>
           <li><b>Timeline: on / off</b> (top of the live page, or press <b>T</b>) — hides the timeline so the cameras fill the screen; the grid always arranges the cameras as large as your window allows.</li>
           <li><b>Timeline</b> (under the cameras) — a mark for every clip, coloured by what was in it: <b style="color:#ff4d6d">people</b>, <b style="color:#4da3ff">vehicles</b>, <b style="color:#5fd38a">animals</b>, <b style="color:#b98cff">deliveries</b>, grey for motion with nothing recognised, orange for clips you requested from Telegram. The buttons next to the zoom filter by type. Tap a mark to play it. Use <b>◀ ▶</b> or the date box to change day, <b>24h / 6h / 1h</b> to zoom, and <b>▶ Latest clip</b> to jump to the newest. In the player, <b>Previous / Next</b> step through that camera's clips.</li>
           <li><b>Zones</b> — tell Sentinel which parts of each picture matter.</li>
@@ -383,6 +401,7 @@
                   "reconnect_interval_seconds", "feed_fps", "web.max_fps", "web.show_zones"],
       audio: ["volume", "speech_speed", "voice_id"],
       access: ["remote_web_url", "remote_rdp_user"],
+      weather: ["weather_location", "weather_units"],
       detection: ["object_detection_enabled", "household_ask_enabled", "household_ask_per_day", "vehicle_types_enabled", "alert_mode", "detector_model", "inference_device", "object_alert_cooldown"]
     };
 

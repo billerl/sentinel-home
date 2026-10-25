@@ -51,3 +51,7 @@ cloudflare-tunnel-notes.local.md
 models/detector/
 models/classifier/
 models/.ov_cache/
+
+# Signed-in web sessions (token hashes only)
+.web_sessions.json
+.web_sessions.json.tmp

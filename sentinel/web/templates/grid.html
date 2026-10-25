@@ -72,6 +72,25 @@
       object-fit: contain;
     }
 
+    /* Weather fills the grid's spare cell (3 cameras in a 2x2 grid). Sizes follow the tile. */
+    .tile.weather { cursor: default; container-type: size; background: linear-gradient(160deg, #0b2233, #05121c);
+                    color: #cfefff; justify-content: center; gap: 3cqh; padding: 9cqh 5cqw 4cqh; }
+    .tile.weather[hidden] { display: none; }
+    .wx-top { display: flex; align-items: center; gap: 3cqw; }
+    .wx-icon { font-size: 15cqh; line-height: 1; }
+    .wx-temp { font-size: 22cqh; font-weight: 600; color: #fff; line-height: 1; }
+    .wx-now { display: flex; flex-direction: column; font-size: 5.5cqh; gap: 1cqh; }
+    .wx-now b { font-size: 7cqh; color: #fff; }
+    .wx-meta { font-size: 5cqh; color: #9fd3ee; display: flex; flex-wrap: wrap; gap: 0.5em 1.2em; }
+    .wx-hours { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1cqw; text-align: center; }
+    .wx-hours div { background: rgba(255,255,255,0.06); border-radius: 6px; padding: 1.5cqh 0;
+                    display: flex; flex-direction: column; gap: 0.6cqh; font-size: 5cqh; }
+    .wx-hours .r { color: #7cc4ff; font-size: 4cqh; min-height: 1.2em; }
+    .wx-foot { font-size: 4cqh; color: #7aa3b8; }
+    .wx-windy { color: #ffd166; }
+    .wx-msg { font-size: 6cqh; color: #9fd3ee; text-align: center; }
+    .wx-msg a { color: #00ffff; }
+
     #focus-overlay {
       display: none;
       position: fixed;
@@ -277,6 +296,7 @@
     <button class="header-btn" id="tl-toggle" type="button" onclick="toggleTimeline()" title="Show or hide the timeline (T). Hidden = bigger cameras.">Timeline: on</button>
     <button class="header-btn" id="saver-toggle" type="button" onclick="toggleDataSaver()" title="Smaller, less frequent pictures for phone hotspots and mobile data (remembered on this device)">Data saver: off</button>
     <button class="header-btn" id="zones-toggle" type="button" onclick="toggleZones()" title="Show or hide the zone outlines on the live view (detection is unaffected)" hidden>Zones: on</button>
+    <button class="header-btn" type="button" onclick="location.reload()" title="Reload the page (for TVs and browsers without F5)">⟳ Reload</button>
     <a class="header-btn" href="{{ url_for('zones_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Zones</a>
     <a class="header-btn" href="{{ url_for('settings_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Settings</a>
     <form method="post" action="{{ url_for('logout') }}" style="margin: 0;">
@@ -439,6 +459,59 @@
       loader.src = url;
     }
 
+    // ---------------- Weather tile ----------------
+    var weatherTile = document.createElement("div");
+    weatherTile.className = "tile weather";
+    weatherTile.hidden = true;
+    var weather = null;  // last /api/weather answer
+
+    function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
+
+    function renderWeather() {
+      var w = weather;
+      if (!w) { weatherTile.innerHTML = ""; return; }
+      if (!w.configured) {
+        weatherTile.innerHTML = '<h2>Weather</h2><div class="wx-msg">Show the weather here: enter your town or ZIP code in ' +
+          '<a href="/settings#weather">Settings → Weather</a>.</div>';
+        return;
+      }
+      if (w.temp == null) {
+        weatherTile.innerHTML = '<h2>Weather</h2><div class="wx-msg">' + (w.error ? esc(w.error) : "Loading the weather…") + '</div>';
+        return;
+      }
+      var deg = "°";
+      var hours = (w.hours || []).map(function(h) {
+        return '<div><span>' + esc(h.label) + '</span><span>' + esc(h.icon) + '</span><span>' + esc(h.temp) + deg +
+          '</span><span class="r">' + (h.rain >= 20 ? "☔ " + esc(h.rain) + "%" : "") + '</span></div>';
+      }).join("");
+      weatherTile.innerHTML =
+        '<h2>Weather — ' + esc(w.place) + '</h2>' +
+        '<div class="wx-top"><div class="wx-icon">' + esc(w.icon) + '</div><div class="wx-temp">' + esc(w.temp) + deg + '</div>' +
+        '<div class="wx-now"><b>' + esc(w.words) + '</b><span>Feels like ' + esc(w.feels) + deg + '</span>' +
+        '<span>High ' + esc(w.high) + deg + ' · Low ' + esc(w.low) + deg + '</span></div></div>' +
+        '<div class="wx-meta"><span>💨 ' + esc(w.wind) + ' mph' + (w.gusts > w.wind + 4 ? ', gusts ' + esc(w.gusts) : '') + '</span>' +
+        '<span>💧 ' + esc(w.humidity) + '%</span><span>☔ ' + esc(w.rain_today) + '% today</span>' +
+        '<span>🌅 ' + esc(w.sunrise) + '</span><span>🌇 ' + esc(w.sunset) + '</span></div>' +
+        '<div class="wx-hours">' + hours + '</div>' +
+        '<div class="wx-foot">' + (w.windy ? '<span class="wx-windy">Windy: expect motion clips from trees. </span>' : '') +
+        'Updated ' + esc(w.updated) + '</div>';
+    }
+
+    async function loadWeather() {
+      var next = 10 * 60 * 1000;
+      try {
+        var r = await fetch("/api/weather");
+        if (r.ok) {
+          weather = await r.json();
+          if (weather.loading) next = 3000;
+          renderWeather();
+          layoutGrid();
+        }
+      } catch (e) { next = 60 * 1000; }
+      setTimeout(loadWeather, next);
+    }
+    loadWeather();
+
     function applyCameras(cams) {
       var root = document.getElementById("grid");
       liveCams = cams;
@@ -471,6 +544,7 @@
           if (!focusedCamId && !playerOpen && !(isPhone() && currentTab === "events")) updateTile(c.id, img);
         }, (dataSaver ? 5000 : 1500) + (Math.random() * 500));
       });
+      root.appendChild(weatherTile);
       setTimeout(layoutGrid, 0);  // after the page script has finished setting up
     }
 
@@ -481,10 +555,14 @@
       } catch (e) {}
     })();
 
+    var BOOT_ID = "{{ boot_id }}";
     async function refreshList() {
       if (focusedCamId) return;
       try {
         var r = await fetch("/api/cameras");
+        if (r.status === 401) { location.href = "/login"; return; }  // signed out (e.g. a TV left on)
+        var boot = r.headers.get("X-Sentinel-Boot");
+        if (boot && boot !== BOOT_ID) { if (!playerOpen) location.reload(); return; }  // Sentinel was updated: load the new page
         var cams = await r.json();
         var cur = liveCams.map(c => c.id).sort().join(",");
         var nxt = cams.map(c => c.id).sort().join(",");
@@ -655,9 +733,11 @@
     var camAspect = 16 / 9;
     function layoutGrid() {
       var grid = document.getElementById("grid");
-      var n = grid.children.length;
+      var n = grid.querySelectorAll(".tile:not(.weather)").length;
       if (isPhone() || !n) {
         grid.style.gridTemplateColumns = grid.style.gridAutoRows = "";
+        // Phones: under the cameras, once a place is set.
+        weatherTile.hidden = !(isPhone() && weather && weather.configured);
         return;
       }
       var gap = 2, pad = 4;
@@ -672,6 +752,8 @@
       var tw = Math.floor(best.w), th = Math.floor(best.w / camAspect);
       grid.style.gridTemplateColumns = "repeat(" + best.cols + ", " + tw + "px)";
       grid.style.gridAutoRows = th + "px";
+      // Only in a cell that would otherwise be empty: it never shrinks the cameras.
+      weatherTile.hidden = !weather || best.cols * Math.ceil(n / best.cols) <= n;
     }
     window.addEventListener("resize", layoutGrid);
     document.addEventListener("keydown", function(e) {
