@@ -6,6 +6,7 @@ remote control. Replaces the old Qt MainWindow, which ran invisibly under Xvfb.
 """
 
 import copy
+import json
 import os
 import itertools
 import re
@@ -129,7 +130,10 @@ class Engine:
         self._object_alert_times: Dict[Tuple[str, str], float] = {}
         # Open "whose car is this?" questions: sighting id -> {camera, parked, messages, ts}
         self._car_asks: Dict[int, Dict[str, Any]] = {}
-        self._car_ask_days: Dict[str, int] = {}  # date -> questions sent
+        self._car_ask_days: Dict[str, int] = self._load_ask_days()  # date -> questions sent (survives restarts)
+        # Car alerts with a "Wrong car?" button: id -> {camera, frame, box, caption, ts, named}
+        self._car_fixes: Dict[int, Dict[str, Any]] = {}
+        self._fix_ids = itertools.count(int(time.time()))  # unique across restarts: old buttons never hit a new alert
         # Photo alert waiting for its clip: camera host -> (time, sentence). One clip per alert.
         self._clip_for_alert: Dict[str, Tuple[float, str]] = {}
         self._last_description: Dict[str, Tuple[float, str]] = {}
@@ -363,8 +367,75 @@ class Engine:
         if self.audio is not None:
             self.audio.trigger_alert(event.description.split(" ", 1)[1])  # drop the emoji
         if self.settings.get("telegram_motion_alerts", True) and jpeg:
-            self.telegram.trigger_photo_alert(event.description, jpeg)
+            self.telegram.trigger_photo_alert(event.description, jpeg, self._car_fix_button(pipeline, event))
             self._clip_for_alert[pipeline.host] = (event.timestamp, event.description)
+
+    # ----------------------------------------------- "Wrong car?" under car alerts
+    CAR_FIX_KEEP = 40  # newest alerts that can still be corrected (each holds a camera frame)
+    CAR_FIX_HOURS = 24
+
+    def _car_fix_button(self, pipeline, event) -> Optional[List[List[Tuple[str, str]]]]:
+        """A button under a car alert so the family can say whose car it really was."""
+        track = event.track
+        frame, box = (track.big_frame, track.big_box) if track.big_box is not None else (track.best_frame, track.best_box)
+        if (event.alert_group != "vehicle" or track.label in ("bicycle", "motorcycle") or frame is None or box is None
+                or not self.household.vehicles() or getattr(self.detection_worker, "vehicle_classifier", None) is None):
+            return None
+        fix_id = next(self._fix_ids)
+        self._car_fixes[fix_id] = {"camera": pipeline, "frame": frame, "box": tuple(box), "caption": event.description,
+                                   "ts": event.timestamp, "named": track.known_vehicle.id if track.known_vehicle else None}
+        cutoff = time.time() - self.CAR_FIX_HOURS * 3600
+        for old in sorted(self._car_fixes)[:-self.CAR_FIX_KEEP] + [k for k, v in self._car_fixes.items() if v["ts"] < cutoff]:
+            self._car_fixes.pop(old, None)
+        return [[("✏️ Wrong car?" if track.known_vehicle else "🚗 Whose car is this?", f"fx:{fix_id}")]]
+
+    def _fix_car(self, chat_id: str, message_id: int, fix_id: int, choice: Optional[str], callback_id: str) -> None:
+        """Taps on "Wrong car?": show the family's cars, then file the photo under the one chosen."""
+        from sentinel.engine.household import sentence_case
+
+        fix = self._car_fixes.get(fix_id)
+        if fix is None:
+            self.telegram.answer_button(callback_id, "That alert is too old to correct")
+            self.telegram.edit_buttons(chat_id, message_id, [])
+            return
+        first = [[("✏️ Wrong car?" if fix["named"] else "🚗 Whose car is this?", f"fx:{fix_id}")]]
+        if choice is None:  # show the family's cars
+            names = [(sentence_case(v.name), f"fx:{fix_id}:{v.id}") for v in self.household.vehicles()
+                     if v.id != fix["named"]]
+            rows = [names[i:i + 2] for i in range(0, len(names), 2)]
+            rows.append([("Not ours", f"fx:{fix_id}:x"), ("Cancel", f"fx:{fix_id}:c")])
+            self.telegram.answer_button(callback_id)
+            self.telegram.edit_buttons(chat_id, message_id, rows)
+            return
+        if choice == "c":
+            self.telegram.answer_button(callback_id)
+            self.telegram.edit_buttons(chat_id, message_id, first)
+            return
+        vehicle = self.household.vehicle(int(choice)) if choice.isdigit() else None
+        if choice != "x" and vehicle is None:
+            self.telegram.answer_button(callback_id, "That car isn't on the list any more")
+            return
+        classifier = getattr(self.detection_worker, "vehicle_classifier", None)
+        if classifier is None:
+            self.telegram.answer_button(callback_id, "Car recognition is off right now")
+            return
+        from sentinel.detection.vehicle_type import crop_for_clip
+
+        self._car_fixes.pop(fix_id, None)
+        pipeline, frame, box = fix["camera"], fix["frame"], fix["box"]
+        embedding = classifier.embed(crop_for_clip(frame, box))
+        sid = self.household.add_sighting(fix["ts"], pipeline.host, pipeline.display_name, frame, box, embedding)
+        self.household.assign([sid], vehicle.id if vehicle else None, ignore=vehicle is None)
+        if self.presence is not None:  # still parked here? then that parking is this car from now on
+            parked = self.presence.parked_spot(pipeline.host, box)
+            if parked is not None:
+                self.presence.set_identity(parked, vehicle.id if vehicle else None, ignored=vehicle is None)
+        note = (f"✏️ Corrected: that was {sentence_case(vehicle.name)}. I'll remember." if vehicle
+                else "✏️ Corrected: not one of ours. I'll remember.")
+        self.telegram.answer_button(callback_id, "Thanks!")
+        self.telegram.edit_caption(chat_id, message_id, f"{fix['caption']}\n{note}")
+        app_logger.log("info", "car_corrected", choice="named" if vehicle else "x", component="engine",
+                       action="handle_button")
 
     def _on_household_change(self, kind: str, pipeline, vehicle, ts: float, jpeg: Optional[bytes]) -> None:
         """A family car parked ('arrived') or drove off ('left'); kept for "when did X get home?"."""
@@ -570,6 +641,25 @@ class Engine:
         return True, f"{n} photos updated"
 
     # ------------------------------------------------- "whose car is this?" (Telegram)
+    def _ask_days_path(self) -> str:
+        return os.path.join(self.household.crops_dir, "asks.json")
+
+    def _load_ask_days(self) -> Dict[str, int]:
+        try:
+            with open(self._ask_days_path()) as handle:
+                return {str(k): int(v) for k, v in json.load(handle).items()}
+        except (OSError, ValueError, TypeError, AttributeError):
+            return {}
+
+    def _save_ask_days(self) -> None:
+        try:
+            tmp = self._ask_days_path() + ".tmp"
+            with open(tmp, "w") as handle:
+                json.dump(self._car_ask_days, handle)
+            os.replace(tmp, self._ask_days_path())
+        except OSError:
+            pass
+
     def _ask_whose_car(self, pipeline, parked, frame, sighting_id: int, scores: Dict[int, float]) -> None:
         """A car has been parked a few minutes and we can't name it: ask, with a button per family car."""
         s = self.settings
@@ -603,6 +693,7 @@ class Engine:
                 sent.append((chat_id, message_id))
         if sent:
             self._car_ask_days = {today: self._car_ask_days.get(today, 0) + 1}
+            self._save_ask_days()
             self._car_asks[sighting_id] = {"parked": parked, "messages": sent, "ts": now}
             app_logger.log("info", "household_asked", camera_display=pipeline.display_name, component="engine",
                            action="ask_whose_car")
@@ -624,6 +715,10 @@ class Engine:
             self.telegram.edit_text(chat_id, message_id, f"✅ Sent: {command}")
             app_logger.log("info", "assistant_command_run", command=command, component="engine", action="button")
             self.telegram.route_text(chat_id, command, from_button=True)  # exactly as if typed
+            return
+        f = re.fullmatch(r"fx:(\d+)(?::(\d+|x|c))?", data or "")
+        if f:
+            self._fix_car(chat_id, message_id, int(f.group(1)), f.group(2), callback_id)
             return
         m = re.fullmatch(r"hh:(\d+):(\d+|x|s)", data or "")
         if not m:

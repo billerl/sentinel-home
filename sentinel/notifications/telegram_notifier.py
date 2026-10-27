@@ -299,9 +299,17 @@ class TelegramNotifier:
         return self._post_json(self._api_url("editMessageCaption"),
                                {"chat_id": chat_id, "message_id": message_id, "caption": caption})
 
-    def trigger_photo_alert(self, caption: str, jpeg: bytes) -> bool:
-        """Send a snapshot with a caption to every unpaused chat (async). The caller
-        applies its own cooldown; the global text-alert cooldown is not used."""
+    def edit_buttons(self, chat_id: str, message_id: int, buttons: List[List[Tuple[str, str]]]) -> bool:
+        """Swap a message's inline buttons (rows of (label, callback data)); [] removes them."""
+        return self._post_json(self._api_url("editMessageReplyMarkup"), {
+            "chat_id": chat_id, "message_id": message_id,
+            "reply_markup": {"inline_keyboard": [[{"text": t, "callback_data": d} for t, d in row] for row in buttons]},
+        })
+
+    def trigger_photo_alert(self, caption: str, jpeg: bytes,
+                            buttons: Optional[List[List[Tuple[str, str]]]] = None) -> bool:
+        """Send a snapshot with a caption (and optional inline buttons) to every unpaused chat
+        (async). The caller applies its own cooldown; the global text-alert cooldown is not used."""
         if not self.enabled or not self.is_configured():
             return False
 
@@ -309,6 +317,8 @@ class TelegramNotifier:
             now_ts = time.time()
             for chat_id in self.chat_ids:
                 if self._is_paused(chat_id, now_ts):
+                    continue
+                if buttons and self.send_photo_with_buttons(chat_id, jpeg, caption, buttons):
                     continue
                 if not self._send_photo_to_chat(chat_id, jpeg, caption):
                     self._send_message_to_chat(chat_id, caption)

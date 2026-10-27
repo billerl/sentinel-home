@@ -22,7 +22,7 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -52,7 +52,17 @@ GROUP_SIMILARITY_NIGHT = 0.92
 # another) becomes a reference automatically; the page only shows what's left.
 AUTO_MATCH = 0.92
 AUTO_MARGIN = 0.04
-IGNORE_SIMILARITY = 0.90  # looks like something marked "not ours" -> hidden too
+# Looks like something the user marked "not ours" (and more like it than any family car) -> hidden
+# too. Only the user's own marks count: hidden photos used to hide further photos, and since every
+# car on this driveway looks ~0.93 alike to CLIP, by 2026-10-27 ~100 family-car photos a day vanished.
+IGNORE_SIMILARITY = 0.90
+
+# Colour breaks ties CLIP can't: from above, a grey Fusion and a blue Edge score ~0.94 vs 0.94.
+# When the closest cars are within COLOUR_POOL of each other (by day), the one whose photos are
+# clearly closest in paint colour wins. Measured 2026-10-27 on the 140 photos the family named
+# (each against photos from other days): 38 right / 2 wrong without colour, 69 / 6 with it.
+COLOUR_POOL = 0.03
+COLOUR_MARGIN = 0.08
 MAX_REFS_PER_LIGHT = 80  # per car, per day/night: plenty, and keeps matching fast
 MIN_DAYS = 2  # only cars seen on this many different days are suggested (skips visitors, deliveries)
 
@@ -83,6 +93,26 @@ def _iou(a, b) -> float:
     inter = ix * iy
     union = aw * ah + bw * bh - inter
     return inter / union if union else 0.0
+
+
+def colour_signature(crop: np.ndarray) -> Optional[np.ndarray]:
+    """Rough paint colour of a square vehicle crop (as saved for sightings): a hue/saturation/brightness
+    histogram of its middle, unit length so two signatures compare with a dot product."""
+    if crop is None or crop.size == 0:
+        return None
+    if crop.shape[:2] != (224, 224):
+        crop = cv2.resize(crop, (224, 224), interpolation=cv2.INTER_AREA)
+    hsv = cv2.cvtColor(crop[56:168, 56:168], cv2.COLOR_BGR2HSV)
+    hist = cv2.calcHist([hsv], [0, 1, 2], None, [12, 4, 4], [0, 180, 0, 256, 0, 256]).ravel()
+    total = float(hist.sum())
+    return np.sqrt(hist / total).astype(np.float32) if total else None
+
+
+def crop_colour(frame: np.ndarray, box: Tuple[int, int, int, int]) -> Optional[np.ndarray]:
+    """Colour signature of a vehicle in a frame, cropped the way sightings are saved; None at night."""
+    if is_greyscale(frame):
+        return None
+    return colour_signature(crop_for_clip(frame, box, pad=0.08))
 
 
 def sentence_case(name: str) -> str:
@@ -116,6 +146,8 @@ class HouseholdStore:
         self.db_path = os.path.join(self.root, DB_NAME)
         self._lock = threading.RLock()
         self._ref_cache: Optional[Dict[int, Dict[bool, np.ndarray]]] = None
+        self._day_ref_ids: Dict[int, List[int]] = {}  # per car, its daytime reference photos (for colour)
+        self._colours: Dict[int, Optional[np.ndarray]] = {}  # sighting id -> colour signature (read lazily)
         # Optional embedding -> body type ("car", "suv", "pickup", "van"), from the CLIP
         # classifier; photos are only grouped with others of the same body type.
         self.body_of: Optional[Callable[[np.ndarray], str]] = None
@@ -191,13 +223,13 @@ class HouseholdStore:
         return os.path.join(self.crops_dir, f"{int(sighting_id)}.jpg")
 
     def assign(self, sighting_ids: List[int], vehicle_id: Optional[int], ignore: bool = False) -> int:
-        """Label sightings as a vehicle (references), as not ours (ignore), or clear the label."""
+        """The user labels sightings as a vehicle (references), as not ours (ignore), or clears the label."""
         ids = [int(i) for i in sighting_ids]
         if not ids:
             return 0
         marks = ",".join("?" * len(ids))
         with self._lock, self._connect() as conn:
-            cur = conn.execute(f"UPDATE sightings SET vehicle_id = ?, ignored = ? WHERE id IN ({marks})",
+            cur = conn.execute(f"UPDATE sightings SET vehicle_id = ?, ignored = ?, auto = 0 WHERE id IN ({marks})",
                                [vehicle_id, int(ignore)] + ids)
         self._ref_cache = None
         return cur.rowcount
@@ -209,7 +241,7 @@ class HouseholdStore:
 
     def ignored_embeddings(self) -> np.ndarray:
         with self._connect() as conn:
-            rows = conn.execute("SELECT embedding FROM sightings WHERE ignored = 1").fetchall()
+            rows = conn.execute("SELECT embedding FROM sightings WHERE ignored = 1 AND auto = 0").fetchall()
         return np.array([np.frombuffer(r[0], dtype=np.float32) for r in rows]) if rows else np.zeros((0, 512), np.float32)
 
     def auto_file(self) -> int:
@@ -222,10 +254,11 @@ class HouseholdStore:
         hidden: List[int] = []
         for s in self.sightings(labelled=False, limit=MAX_UNLABELLED):
             e = s["embedding"]
-            if len(ignored) and float((ignored @ e).max()) >= IGNORE_SIMILARITY:
+            scores = sorted(self.scores(e, bool(s["night"])).items(), key=lambda kv: -kv[1])
+            not_ours = float((ignored @ e).max()) if len(ignored) else 0.0
+            if not_ours >= IGNORE_SIMILARITY and not_ours >= (scores[0][1] if scores else 0.0) + AUTO_MARGIN:
                 hidden.append(s["id"])
                 continue
-            scores = sorted(self.scores(e, bool(s["night"])).items(), key=lambda kv: -kv[1])
             if not scores:
                 continue
             best_id, best = scores[0]
@@ -241,8 +274,10 @@ class HouseholdStore:
                     conn.execute(f"UPDATE sightings SET vehicle_id = ?, auto = 1 WHERE id IN ({marks})",
                                  [vid] + ids[:room])
                 n += len(ids[:room])
-        if hidden:
-            self.assign(hidden, None, ignore=True)
+        if hidden:  # hidden, but not a "not ours" reference itself (see IGNORE_SIMILARITY)
+            with self._lock, self._connect() as conn:
+                marks = ",".join("?" * len(hidden))
+                conn.execute(f"UPDATE sightings SET ignored = 1, auto = 1 WHERE id IN ({marks})", hidden)
         if n:
             self._ref_cache = None
         return n + len(hidden)
@@ -282,16 +317,42 @@ class HouseholdStore:
     def _references(self) -> Dict[int, Dict[bool, np.ndarray]]:
         if self._ref_cache is None:
             refs: Dict[int, Dict[bool, List[np.ndarray]]] = {}
+            day_ids: Dict[int, List[int]] = {}
             for s in self.sightings(labelled=True, limit=100000):
                 refs.setdefault(s["vehicle_id"], {}).setdefault(bool(s["night"]), []).append(s["embedding"])
+                if not s["night"]:
+                    day_ids.setdefault(s["vehicle_id"], []).append(s["id"])
+            self._day_ref_ids = day_ids
             self._ref_cache = {vid: {n: np.array(v) for n, v in by.items()} for vid, by in refs.items()}
         return self._ref_cache
 
-    def scores(self, embedding: np.ndarray, night: bool) -> Dict[int, float]:
-        """Per known vehicle: mean similarity of its TOP_K closest reference photos,
-        using photos taken in the same light (day/IR) when there are any."""
+    def _colour_of(self, sighting_id: int) -> Optional[np.ndarray]:
+        if sighting_id not in self._colours:
+            self._colours[sighting_id] = colour_signature(cv2.imread(self.crop_path(sighting_id)))
+        return self._colours[sighting_id]
+
+    def _colour_pick(self, colour: np.ndarray, candidates: List[int]) -> Optional[int]:
+        """The candidate whose daytime photos are clearly closest in paint colour, if one is."""
+        self._references()
+        closeness = []
+        for vid in candidates:
+            sigs = [c for c in (self._colour_of(i) for i in self._day_ref_ids.get(vid, [])) if c is not None]
+            if not sigs:
+                return None  # can't compare a car we have no daytime photos of
+            closeness.append((float(np.sort(np.array(sigs) @ colour)[::-1][:TOP_K].mean()), vid))
+        closeness.sort(reverse=True)
+        if len(closeness) > 1 and closeness[0][0] - closeness[1][0] >= COLOUR_MARGIN:
+            return closeness[0][1]
+        return None
+
+    def scores(self, embedding: np.ndarray, night: bool, exclude: Iterable[int] = ()) -> Dict[int, float]:
+        """Per known vehicle (except ``exclude``): mean similarity of its TOP_K closest reference
+        photos, using photos taken in the same light (day/IR) when there are any."""
         out = {}
+        skip = set(exclude)
         for vid, by_light in self._references().items():
+            if vid in skip:
+                continue
             refs = by_light.get(night)
             if refs is None or len(refs) == 0:
                 refs = np.concatenate(list(by_light.values()))
@@ -299,15 +360,22 @@ class HouseholdStore:
             out[vid] = float(sims.mean())
         return out
 
-    def identify(self, embedding: np.ndarray, night: bool) -> Tuple[Optional[int], float]:
-        """(vehicle id, similarity) when one known vehicle clearly matches, else (None, best)."""
-        scores = sorted(self.scores(embedding, night).items(), key=lambda kv: -kv[1])
+    def identify(self, embedding: np.ndarray, night: bool, exclude: Iterable[int] = (),
+                 colour: Optional[np.ndarray] = None) -> Tuple[Optional[int], float]:
+        """(vehicle id, similarity) when one known vehicle clearly matches, else (None, best).
+        ``exclude``: cars that can't be this one (parked somewhere else right now). ``colour``
+        (daytime crop_colour) settles near-ties between cars that are shaped alike."""
+        scores = sorted(self.scores(embedding, night, exclude).items(), key=lambda kv: -kv[1])
         if not scores:
             return None, 0.0
         best_id, best = scores[0]
         runner = scores[1][1] if len(scores) > 1 else 0.0
         if best >= MATCH_MIN and best - runner >= MATCH_MARGIN:
             return best_id, best
+        if best >= MATCH_MIN and colour is not None and not night:
+            pick = self._colour_pick(colour, [vid for vid, score in scores if score >= best - COLOUR_POOL])
+            if pick is not None:
+                return pick, dict(scores)[pick]
         return None, best
 
     def confident(self, embedding: np.ndarray, night: bool) -> Optional[int]:
@@ -491,7 +559,8 @@ class PresenceTracker:
                 if p.vehicle_id is None and not p.ignored:
                     # Unknown so far (e.g. arrived in the dark): try again every scan, and name it once
                     # two checks in a row agree (one lucky match would stick for the whole parking).
-                    guess, _ = self.store.identify(embedding, night)
+                    guess, _ = self.store.identify(embedding, night, exclude=self._home_except(p),
+                                                   colour=crop_colour(frame, p.box))
                     if guess is not None:
                         p.candidate_hits = p.candidate_hits + 1 if guess == p.candidate else 1
                         p.candidate = guess
@@ -529,6 +598,21 @@ class PresenceTracker:
                 if vehicle is not None:
                     ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     self.on_change("arrived", cam, vehicle, p.first_seen, jpeg.tobytes() if ok else None)
+
+    def _home_except(self, p: "Parked") -> set:
+        """Family cars parked in other spots right now: p can't be one of them."""
+        return {o.vehicle_id for cars in self.parked.values() for o in cars
+                if o is not p and o.vehicle_id is not None and o.confirmed and not o.missed}
+
+    def home_ids(self) -> set:
+        """Family cars parked in view right now."""
+        with self._lock:
+            return self._home_except(None)
+
+    def spots(self, camera_key: str) -> List[Parked]:
+        """Spots where the last check saw a parked car (named or not, confirmed or not)."""
+        with self._lock:
+            return [p for p in self.parked.get(camera_key, []) if not p.missed]
 
     def _parked_elsewhere(self, p: "Parked") -> bool:
         """Is p's car also in another (announced) parking spot right now?"""

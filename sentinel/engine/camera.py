@@ -335,7 +335,7 @@ class CameraPipeline:
         for track in ready:
             if track.not_a_subject:
                 continue  # a bin or a fan, not a person
-            if track.group == "vehicle" and presence is not None and self._is_parked_car(presence, track):
+            if track.group == "vehicle" and presence is not None and self._parked_car_stays(presence, track, detections):
                 continue
             if classifier is not None and wants_type_check(track):
                 if self._check_in_hd_later(classifier, track, confirmed, ts, first=True):
@@ -424,16 +424,30 @@ class CameraPipeline:
         bx, by, bw2, bh2 = best.box
         return big, (bx + rx0, by + ry0, bw2, bh2)
 
-    def _is_parked_car(self, presence, track) -> bool:
-        """A car the driveway check already knows is parked here: people opening doors or walking
-        around it shouldn't make it alert. It still alerts once it has driven out of its spot."""
-        spot = presence.parked_spot(self.host, track.boxes[0][1])
-        if spot is None:
+    def _parked_car_stays(self, presence, track, detections) -> bool:
+        """Parking spots (from the once-a-minute driveway check) decide whether a parked car moved.
+        Its box changing (doors opening, people loading it, the tracker hopping onto the next car)
+        doesn't count; only its spot going empty does. True = say nothing (yet)."""
+        from sentinel.engine.household import _covers, _iou
+
+        spots = [p for p in presence.spots(self.host) if p.first_seen < track.first_seen - 5]
+        if not spots:
             return False
-        if presence.parked_spot(self.host, track.box, min_iou=0.3) is spot:
-            track.reported = False  # still in its spot: look again on the next detection
+
+        def occupied(spot) -> bool:  # a car on it now, or someone standing in front of it
+            return any(d.group == "vehicle" and _iou(d.box, spot.box) > 0.3 or
+                       d.group == "person" and _covers(d.box, spot.box) for d in detections)
+
+        if any(occupied(p) for p in spots if _iou(p.box, track.box) >= 0.3):
+            track.reported = False  # still on a parked car's spot: look again on the next detection
             return True
-        return False  # it started in a parked spot and has left it: "… is leaving"
+        home = max(spots, key=lambda p: _iou(p.box, track.boxes[0][1]))
+        if _iou(home.box, track.boxes[0][1]) >= 0.3:  # it was the car parked there, and the spot is empty now
+            track.left_spot = True
+            household = getattr(self._detections, "household", None)
+            if home.vehicle_id is not None and household is not None:
+                track.known_vehicle = household.vehicle(home.vehicle_id)  # named while it stood still
+        return False
 
     def _check_subject(self, checker, track) -> None:
         """CLIP second opinion on a person/animal track: relabel it (a "person" that's really a
@@ -470,7 +484,12 @@ class CameraPipeline:
             vt = classifier.classify(frame, box, embedding)
             household = getattr(self._detections, "household", None)
             if household is not None and track.known_vehicle is None:
-                vehicle_id, _ = household.identify(embedding, is_greyscale(frame))
+                from sentinel.engine.household import crop_colour
+
+                presence = getattr(self._detections, "presence", None)
+                parked = presence.home_ids() if presence is not None else ()  # it isn't one of those
+                vehicle_id, _ = household.identify(embedding, is_greyscale(frame), exclude=parked,
+                                                   colour=crop_colour(frame, box))
                 if vehicle_id is not None:
                     track.known_vehicle = household.vehicle(vehicle_id)
             if vt is not None and vt.delivery and track.known_vehicle is not None:

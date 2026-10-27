@@ -106,21 +106,50 @@ class TestParkedAndDoors(TestPipeline):
         driving = Track(2, "car", "vehicle", 0, 0, [(0, (100, 100, 300, 200)), (1, (300, 100, 300, 200))], 0.8, 2)
         self.assertTrue(driving.vehicle_moved(1280))
 
-    def test_parked_car_stays_quiet_until_it_leaves(self):
-        from sentinel.engine.household import Parked
-        spot = Parked((300, 150, 200, 120), 0, 0, seen=3, confirmed=True)
-        presence = types.SimpleNamespace(parked_spot=lambda key, box, min_iou=0.4: spot if (
-            max(0, min(box[0] + box[2], 500) - max(box[0], 300)) * max(0, min(box[1] + box[3], 270) - max(box[1], 150))
-            / float(box[2] * box[3] + 200 * 120 - max(0, min(box[0] + box[2], 500) - max(box[0], 300))
-                    * max(0, min(box[1] + box[3], 270) - max(box[1], 150)))) >= min_iou else None)
-        self.p._detections = types.SimpleNamespace(subject_checker=None, vehicle_classifier=None, presence=presence)
+    def park(self, *spots):
+        """Spots the once-a-minute driveway check found (vehicle id or None for each box)."""
+        from sentinel.engine.household import Parked, Vehicle
+        parked = [Parked(box, 0, 0, seen=3, confirmed=True, vehicle_id=vid) for box, vid in spots]
+        presence = types.SimpleNamespace(spots=lambda key: parked, home_ids=lambda: set())
+        household = types.SimpleNamespace(vehicle=lambda vid: Vehicle(vid, "Luke's Truck", "Luke", [], "pickup"))
+        self.p._detections = types.SimpleNamespace(subject_checker=None, vehicle_classifier=None, presence=presence,
+                                                   household=household)
+
+    def test_parked_car_stays_quiet_until_its_spot_is_empty(self):
+        self.park(((300, 150, 200, 120), 4))
         jiggle = [(300, 150, 200, 120), (380, 150, 200, 120), (300, 150, 200, 120), (385, 152, 200, 120)]
         for i, b in enumerate(jiggle):  # people around it, doors opening: the box jumps about
             self.p._handle_detections([Detection("car", 0.8, b)], GREY, 2000.0 + i)
         self.assertEqual(self.events, [])
         for i, x in enumerate((420, 470)):  # drives out of the spot
             self.p._handle_detections([Detection("car", 0.8, (x, 150, 200, 120))], GREY, 2010.0 + i)
-        self.assertEqual(len(self.events), 1)  # one alert, once it has left the spot
+        self.assertEqual(self.events, ["🛻 Luke's Truck is leaving the Garage."])  # named by its spot
+
+    def test_tracker_hopping_to_the_next_parked_car_is_not_driving(self):
+        a, b = (100, 150, 200, 120), (280, 150, 200, 120)
+        self.park((a, None), (b, None))
+        frames = [[a], [a], [b], [b], [b]]  # at night the detector sees one car, then the other
+        for i, boxes in enumerate(frames):
+            self.p._handle_detections([Detection("car", 0.8, x) for x in boxes], GREY, 2000.0 + i)
+        self.assertEqual(self.events, [])
+
+    def test_someone_in_front_of_a_parked_car_keeps_it_parked(self):
+        spot = (300, 150, 200, 120)
+        self.park((spot, None))
+        frames = [[Detection("car", 0.8, spot)], [Detection("car", 0.8, spot)],
+                  [Detection("car", 0.8, (360, 150, 150, 120)), Detection("person", 0.9, (330, 160, 60, 100))],
+                  [Detection("person", 0.9, (330, 160, 60, 100))]]  # the car's box shrinks, then vanishes behind them
+        for i, dets in enumerate(frames):
+            self.p._handle_detections(dets, GREY, 2000.0 + i)
+        self.assertEqual([e for e in self.events if "Someone" not in e], [])  # the person, yes; the car, no
+
+    def test_arriving_car_still_alerts(self):
+        self.park(((40, 200, 150, 100), None))  # someone else parked on the left
+        for i, y in enumerate((20, 60, 100, 140)):  # a car comes down the driveway on the right
+            self.p._handle_detections([Detection("car", 0.8, (40, 200, 150, 100)),
+                                       Detection("car", 0.8, (420, y, 160, 100))], GREY, 2000.0 + i)
+        self.assertEqual(len(self.events), 1)
+        self.assertIn("pulled in", self.events[0])
 
 
 class TestClipPerAlert(unittest.TestCase):

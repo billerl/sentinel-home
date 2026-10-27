@@ -24,7 +24,8 @@ viewer with a live camera grid, a DVR-style motion timeline, and a zone editor.
 - **Object detection:** people, vehicles and animals are recognised with YOLOX on OpenVINO
   (free, runs locally on the CPU, only while something moves). Alerts read naturally, for
   example *"🚗 A red car pulled into the Driveway (Garage)"*, and come with a snapshot. Parked cars
-  don't alert.
+  don't alert: a car in a known parking spot only counts as leaving once its spot is empty. Car alerts
+  have a **Wrong car?** button in Telegram to say whose car it really was (or "Not ours").
 - **Recording:** motion-triggered clips, organized by day and camera, indexed for fast
   searching, and cleaned up automatically after 30 days (configurable), with a low-disk safety net.
   A **1440p copy with 5 s pre-roll** is cut from each camera's main stream (ffmpeg stream copy

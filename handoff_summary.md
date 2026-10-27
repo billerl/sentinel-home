@@ -153,6 +153,22 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     a white Crown Vic under the Jeep). Those 20 were unfiled (vehicle_id NULL); backup
     recorded_videos/household.db.bak-20261025. The grey sedan (middle spot, probably Abigail's Fusion from the
     re-aimed camera's angle) is now unknown until the family names it.
+  - Car fixes (2026-10-27, from the family's voice notes; backup ../checkpoints/pre-car-fixes/):
+    - Parking spots decide motion alerts (camera `_parked_car_stays`): a vehicle track on a spot the
+      presence check saw (before the track began) stays quiet while that spot is occupied (a car box IoU>0.3,
+      or a person covering it); one that started on a spot and left it says "X is leaving", named from the
+      spot. Was: box changes (all four doors open) read as "Luke's Truck is driving past" on a parked Mercedes.
+    - Naming: `identify(exclude=, colour=)`. Cars parked elsewhere are ruled out; near-ties by day are
+      settled by paint colour (`colour_signature`, HSV histogram of the crop's middle; COLOUR_POOL 0.03,
+      COLOUR_MARGIN 0.08). Leave-one-day-out on the 140 family-named day photos: 38 right/2 wrong -> 69/6.
+      A trained classifier (logistic regression on CLIP) was no better.
+    - "Not ours" snowball fixed: auto-hidden photos (ignored=1, auto=1) no longer hide more photos; only the
+      user's marks (auto=0) count, and only when closer than any family car by AUTO_MARGIN. It had hidden
+      18 -> 96 photos/day. 195 hidden since 2026-10-21 were given back (all night ones, plus clear family-car
+      day ones); 99 day ones kept as "not ours".
+    - The 3-a-day "whose car?" limit is kept in .household/asks.json (restarts used to reset it: 10 asks).
+    - Telegram car alerts carry "✏️ Wrong car?" / "🚗 Whose car is this?" (`fx:` buttons): pick a family car
+      or "Not ours"; the photo is filed as a user label and a still-parked spot takes the new identity.
   - VLM evaluation (2026-10-25): Tencent WeVisOne-VL-2B on this CPU took 3.5–6.5 min per image (good
     answers). Not usable without an NVIDIA GPU; YOLOX-tiny + CLIP stays.
 - **Alerts:**

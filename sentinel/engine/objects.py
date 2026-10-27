@@ -72,6 +72,7 @@ class Track:
     hd_view: Optional[Tuple[np.ndarray, Tuple[int, int, int, int]]] = None  # HD frame + box, if one was used
     type_checks: int = 0
     type_checked_area: int = 0
+    left_spot: bool = False  # a parked car whose parking spot is now empty: it's leaving
 
     def see(self, frame: np.ndarray, box: Tuple[int, int, int, int], now: float = 0.0) -> None:
         if self.big_box is None or box[2] * box[3] > self.big_box[2] * self.big_box[3]:
@@ -272,6 +273,8 @@ def describe(track: Track, camera_name: str, zone_name: Optional[str], frame: np
             subject = thing[:1].upper() + thing[1:]  # a name: "Luke's Sierra", "The blue Civic"
         else:
             subject = f"{_article(thing)} {thing}"
+        if track.left_spot:
+            return f"{emoji} {subject} is leaving {past}."
         if moving and abs(dy) >= abs(dx):
             # Moving toward the camera reads as arriving, away as leaving.
             if zone_name:

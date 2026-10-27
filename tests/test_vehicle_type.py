@@ -196,7 +196,7 @@ class TestPipelineAndAlerts(unittest.TestCase):
         sent = []
         self.engine.settings["object_alert_groups"] = groups
         self.engine.detection_worker = object()  # objects mode active
-        self.engine.telegram.trigger_photo_alert = lambda text, jpeg: sent.append(text)
+        self.engine.telegram.trigger_photo_alert = lambda text, jpeg, buttons=None: sent.append(text)
         self.engine._object_alert_times.clear()
         track = _track("truck", ARRIVING, vt)
         from sentinel.engine.objects import ObjectEvent

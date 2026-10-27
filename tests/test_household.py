@@ -92,6 +92,65 @@ class TestMatching(unittest.TestCase):
         self.assertEqual([s for s in self.store.sightings() if s["id"] in later], [])
 
 
+class TestLookAlikes(unittest.TestCase):
+    """Cars CLIP can't tell apart (same shape from above): colour and who's already parked decide."""
+
+    def setUp(self):
+        from sentinel.engine.household import crop_colour
+        self.crop_colour = crop_colour
+        self.dir = tempfile.mkdtemp(prefix="sentinel-hh-")
+        self.store = HouseholdStore(self.dir)
+        self.blue = np.zeros((360, 640, 3), np.uint8); self.blue[:] = (200, 70, 20)
+        self.red = np.zeros((360, 640, 3), np.uint8); self.red[:] = (20, 40, 200)
+        self.shape = unit(3)
+        self.edge = self.store.save_vehicle("Stephanie's Edge", "Stephanie", [], "suv")
+        self.fusion = self.store.save_vehicle("Abigail's Fusion", "Abigail", [], "sedan")
+        for i in range(4):
+            self.store.add_sighting(0, "cam", "Garage", self.blue, (10, 10, 100, 80), unit(10 + i, self.shape, 0.01), self.edge)
+            self.store.add_sighting(0, "cam", "Garage", self.red, (10, 10, 100, 80), unit(20 + i, self.shape, 0.01), self.fusion)
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_colour_breaks_a_tie(self):
+        look = unit(30, self.shape, 0.01)
+        self.assertIsNone(self.store.identify(look, False)[0])  # shape alone: too close to call
+        self.assertEqual(self.store.identify(look, False, colour=self.crop_colour(self.blue, (10, 10, 100, 80)))[0], self.edge)
+        self.assertEqual(self.store.identify(look, False, colour=self.crop_colour(self.red, (10, 10, 100, 80)))[0], self.fusion)
+        self.assertIsNone(self.crop_colour(NIGHT, (10, 10, 100, 80)))  # no colour in infrared
+        self.assertIsNone(self.store.identify(unit(31), False, colour=self.crop_colour(self.red, (10, 10, 100, 80)))[0])  # a stranger stays a stranger
+
+    def test_a_car_parked_elsewhere_is_ruled_out(self):
+        look = unit(30, self.shape, 0.01)
+        self.assertEqual(self.store.identify(look, False, exclude={self.edge})[0], self.fusion)
+
+
+class TestNotOursDoesntSnowball(TestMatching):
+    def test_hidden_photos_dont_hide_more(self):
+        stranger = unit(70)
+        first = self.store.add_sighting(time.time(), "cam", "Garage", COLOUR, (0, 0, 90, 70), stranger)
+        self.store.assign([first], None, ignore=True)
+        # Each photo is like the previous one but drifts away from the stranger the user marked.
+        chain, look = [], stranger
+        for i in range(6):
+            look = unit(200 + i, look, 0.0145)  # ~0.95 like the one before
+            chain.append(self.store.add_sighting(time.time(), "cam", "Garage", COLOUR, (0, 0, 90, 70), look))
+        self.assertLess(float(stranger @ look), 0.85)
+        for _ in range(6):  # hourly
+            self.store.auto_file()
+        visible = {s["id"] for s in self.store.sightings()}
+        self.assertIn(chain[-1], visible)  # far from what the user marked: not hidden by a hidden photo
+        self.assertEqual(len(self.store.ignored_embeddings()), 1)  # only the user's own mark counts
+
+    def test_family_car_isnt_hidden_by_a_look_alike_stranger(self):
+        stranger = unit(71, SIERRA, 0.02)  # a neighbour's truck, very like the Sierra
+        first = self.store.add_sighting(time.time(), "cam", "Garage", COLOUR, (0, 0, 90, 70), stranger)
+        self.store.assign([first], None, ignore=True)
+        mine = self.store.add_sighting(time.time(), "cam", "Garage", COLOUR, (0, 0, 90, 70), unit(72, SIERRA, 0.004))
+        self.store.auto_file()
+        self.assertEqual({s["id"]: s["vehicle_id"] for s in self.store.sightings(labelled=True)}.get(mine), self.sierra)
+
+
 class _Det:
     """Returns whatever boxes the test sets."""
 
@@ -454,6 +513,72 @@ class TestAskSkipsCutOffCars(TestAskWhoseCar):
         self.park_stranger()
         self.assertEqual(self.sent, [])
 
+    test_answer_names_it_and_records_the_arrival = None
+    test_not_ours_stops_questions_and_hides_it = None
+    test_limits = None
+    test_stale_or_foreign_buttons = None
+
+
+class TestWrongCarButton(TestAskWhoseCar):
+    """A car alert carries a button; the family says whose car it really was."""
+
+    def alert(self, named=None):
+        from sentinel.engine.objects import ObjectEvent, Track
+        track = Track(1, "car", "vehicle", 0, 0, [(0, self.BOX)], 0.9, 3, best_frame=COLOUR, best_box=self.BOX)
+        track.see(COLOUR, self.BOX)
+        track.known_vehicle = self.engine.household.vehicle(named) if named else None
+        event = ObjectEvent("192.168.0.9", "Garage", track, None, "🛻 Luke's Sierra is leaving the Garage.", COLOUR, time.time())
+        pipeline = types.SimpleNamespace(host="192.168.0.9", display_name="Garage")
+        return self.engine._car_fix_button(pipeline, event)
+
+    def setUp(self):
+        super().setUp()
+        self.clf.next = unit(95, FUSION, 0.004)
+        self.engine.detection_worker = types.SimpleNamespace(vehicle_classifier=self.clf)
+        self.buttons = []
+        self.engine.telegram.edit_buttons = lambda chat, mid, rows: self.buttons.append(rows)
+
+    def test_correct_the_name(self):
+        rows = self.alert(named=self.sierra)
+        self.assertEqual(rows[0][0][0], "✏️ Wrong car?")
+        self.engine.handle_button("111", 42, rows[0][0][1], "cb1")
+        choices = self.buttons[-1]
+        self.assertEqual([b[0] for b in choices[0]], ["Abigail's Fusion"])  # the car it was called isn't offered
+        self.assertEqual([b[0] for b in choices[-1]], ["Not ours", "Cancel"])
+        self.engine.handle_button("111", 42, choices[0][0][1], "cb2")
+        self.assertEqual(self.toasts[-1], "Thanks!")
+        self.assertIn("Corrected: that was Abigail's Fusion", self.edits[-1][2])
+        self.assertTrue(self.edits[-1][2].startswith("🛻 Luke's Sierra is leaving"))  # the alert itself is kept
+        filed = [s for s in self.engine.household.sightings(labelled=True) if s["auto"] == 0 and s["ts"] > 0]
+        self.assertEqual([s["vehicle_id"] for s in filed], [self.fusion])
+        self.engine.handle_button("111", 42, choices[0][0][1], "cb3")  # tapped twice
+        self.assertEqual(self.toasts[-1], "That alert is too old to correct")
+
+    def test_not_ours_and_cancel(self):
+        rows = self.alert()
+        self.assertEqual(rows[0][0][0], "🚗 Whose car is this?")
+        data = rows[0][0][1]
+        self.engine.handle_button("111", 42, data + ":c", "cb1")
+        self.assertEqual(self.buttons[-1], rows)  # back to the single button
+        self.engine.handle_button("111", 42, data + ":x", "cb2")
+        self.assertIn("not one of ours", self.edits[-1][2])
+        self.assertEqual(len(self.engine.household.ignored_embeddings()), 1)  # a "not ours" reference now
+
+    def test_no_button_without_family_cars_or_for_bicycles(self):
+        from sentinel.engine.objects import ObjectEvent, Track
+        bike = Track(2, "bicycle", "vehicle", 0, 0, [(0, self.BOX)], 0.9, 3, best_frame=COLOUR, best_box=self.BOX)
+        event = ObjectEvent("192.168.0.9", "Garage", bike, None, "🚲 Someone on a bicycle", COLOUR, time.time())
+        self.assertIsNone(self.engine._car_fix_button(types.SimpleNamespace(host="h", display_name="G"), event))
+
+    def test_ask_limit_survives_a_restart(self):
+        from sentinel.engine import Engine
+        self.engine.settings["household_ask_per_day"] = 1
+        self.park_stranger()
+        self.assertEqual(len(self.sent), 1)
+        again = Engine(self.engine.settings_manager)
+        self.assertEqual(again._car_ask_days, self.engine._car_ask_days)
+
+    test_asks_once_with_likeliest_first = None
     test_answer_names_it_and_records_the_arrival = None
     test_not_ours_stops_questions_and_hides_it = None
     test_limits = None

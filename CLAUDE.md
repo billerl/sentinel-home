@@ -67,7 +67,8 @@ timeline, natural-language Telegram alerts and questions, all in a web UI. Every
 The user dictates requests to Jezebel ("take a note for Claude"); they land in
 `~/Documents/sentinel_home/claude-notes.md` (outside the repo, also sent to Telegram). When the user
 says "check notes", read that file, work through the To do items with them, and move finished ones
-under `## Done` with the date. Typing is hard for the user right now (shoulder surgery): keep
+to `~/Documents/sentinel_home/claude-notes-done.md` with the date (Jezebel appends new notes at the end
+of claude-notes.md, so a Done section there would swallow them). Typing is hard for the user right now (shoulder surgery): keep
 questions few and answerable in a word.
 
 ## Roadmap — agreed with the user 2026-10-27 (build in this order, one per session)
