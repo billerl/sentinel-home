@@ -56,7 +56,9 @@ sentinel-home/                         # repository root
     ├── notifications/
     │   └── telegram_notifier.py       # HTTPS Bot API, commands, clips
     ├── audio/
-    │   └── alert_system.py            # Piper TTS + `aplay`, pyttsx3 fallback (skipped when volume is 0)
+    │   ├── alert_system.py            # Piper TTS + `aplay` (or the Remote Desktop session via `paplay`),
+    │   │                              #   pyttsx3 fallback (skipped when volume is 0), chimes
+    │   └── voice.py                   # "Hey Jarvis": arecord -> band-pass -> openWakeWord -> faster-whisper
     └── settings/
         └── manager.py                 # `settings.json` load/save (locked, atomic, owner-only)
 ```

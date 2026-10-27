@@ -112,6 +112,21 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     ANTHROPIC_API_KEY removed from env. Context = last 48 h of events (150 lines max), cars home, cameras,
     weather, command list (~9k chars; ~5 s with Sonnet). Every miss is logged as `telegram_not_understood`
     so common phrasings can be taught to the rule-based parser later.
+  - Voice assistant (2026-10-27, `sentinel/audio/voice.py`, settings `voice_enabled`, `voice_follow_up`,
+    `voice_wake_threshold` 0.5, `voice_gain` 4, `voice_wake_model`, `audio_output`): one `arecord` on
+    plughw:0,0 (front "Headphone Mic"; mixer set by Sentinel at start since it isn't persisted) -> 150-4000 Hz
+    band-pass -> openWakeWord hey_jarvis (gain 4; ~0.35 core) -> after the wake word, recording until 1 s of
+    quiet (thresholds follow the room's noise) -> normalised -> faster-whisper base.en int8 (~2.3 s per
+    question; segments with no_speech_prob > 0.6 and stock inventions like "Thank you" dropped). Recording
+    starts at the wake word, so one-breath "Hey Jarvis, who's home?" works. `Engine.answer_voice`: time,
+    weather, enable/disable (asks first), household and event questions locally (`to_speech` strips emoji,
+    bullets, links, long lists), else Claude with `VOICE_SYSTEM_PROMPT`; Claude's COMMAND needs a spoken
+    "yes". Follow-ups without the wake word for 5 s, at most 5 turns. Alerts stay silent during a
+    conversation (`AudioAlertSystem.busy`/play lock). openWakeWord's `reset()` keeps its audio buffer, so
+    2 s of silence is pushed through after each conversation or it re-wakes on the old "Hey Jarvis".
+    `audio_output: remote` plays via `paplay` to /run/user/<uid>/pulse/native (the xrdp session), falling
+    back to aplay. main.py ends with `os._exit(0)` after `engine.stop()`: CTranslate2/onnxruntime crashed in
+    interpreter teardown and the core dump delayed a restart by a minute.
   - Presence flip-flops fixed (2026-10-25): a parked car partly hidden (box IoU 0.2–0.5, doors open) or
     covered by a person no longer counts as missing; an unknown parked car is named only after
     IDENTIFY_AGREE (2) confident checks in a row (it's re-checked every scan, so one lucky match used to

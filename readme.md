@@ -39,7 +39,10 @@ viewer with a live camera grid, a DVR-style motion timeline, and a zone editor.
 - **Resilience:** each camera runs in its own thread and reconnects on its own with backoff.
   On shutdown (SIGTERM), clips in progress are finalized.
 - **Audio alerts (optional):** Piper neural TTS or pyttsx3. This is skipped entirely when the
-  volume is 0.
+  volume is 0. Sounds can play on the PC's speakers or in the open Remote Desktop session.
+- **Voice assistant (optional, "Hey Jarvis"):** wake word (openWakeWord) and speech recognition
+  (faster-whisper `base.en`) run on the PC's CPU; answers are spoken with Piper. Follow-up
+  questions without the wake word; settings change only after a spoken "yes".
 - **Structured logging:** JSON lines in `sentinel_events.log`, with passwords redacted, rotated
   at 10 MB.
 
@@ -63,6 +66,8 @@ mkdir -p models/detector && curl -L -o models/detector/yolox_tiny.onnx \
 # optional: delivery-van / vehicle-type recognition (CLIP ViT-B/32, MIT)
 mkdir -p models/classifier && curl -L -o models/classifier/clip_vit_b32_vision.onnx \
   https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model.onnx
+# optional: voice assistant speech recognition (faster-whisper base.en, MIT)
+venv/bin/python -c "from huggingface_hub import snapshot_download as d; d('Systran/faster-whisper-base.en', local_dir='models/whisper/base.en')"
 venv/bin/python -m sentinel.web.set_password     # web viewer login
 venv/bin/python main.py
 ```

@@ -67,7 +67,13 @@ timeline, natural-language Telegram alerts and questions, all in a web UI. Every
 One feature per session: build → tests → deploy → ask to push → update this list, then the user
 runs `/clear`. Everything stays free and local except the existing opt-in Claude fallback.
 
-1. **Voice assistant ("Hey Jarvis")** — next up. Mic facts, measured 2026-10-27:
+1. **Voice assistant ("Hey Jarvis")** — DONE 2026-10-27 (see handoff_summary.md). Tested live by the
+   user over Remote Desktop: wake 0.93–1.0, every phrase transcribed right. Restore point before it:
+   git tag `pre-voice-assistant` + `../checkpoints/pre-voice-assistant/` (RESTORE.md). Open: the PC has no
+   speaker yet (`audio_output` is "remote" = plays in the RDP session; switch back once speakers are in);
+   the user dislikes "Jarvis" and wants a custom wake word, maybe "Jezebel" — needs an openWakeWord model
+   trained (free Colab notebook ~1 h, or overnight on this CPU), dropped in via `voice_wake_model`.
+   Original mic notes:
    - Mic is in the front jack ALSA calls **"Headphone Mic"** (card 0, `plughw:0,0`). Needs
      `Input Source` = 'Headphone Mic' and `Headphone Mic Boost` = 3 (max; Capture already 63/63).
      Set with amixer but NOT persisted (`alsactl store` needs sudo; the user runs sudo/pkexec
@@ -96,5 +102,5 @@ runs `/clear`. Everything stays free and local except the existing opt-in Claude
    voice, combine with car presence. Each person installs it on their own phone and must agree;
    check Cloudflare Access doesn't block the phone app's posts.
 
-Other open items: the user should send "Enable messages" on Telegram (motion alerts off since
-2026-10-24) and name the grey sunroof sedan (probably Abigail's Fusion) on the Vehicles page.
+Other open items: name the grey sunroof sedan (probably Abigail's Fusion) on the Vehicles page.
+(Motion alerts were turned back on by voice 2026-10-27.)
