@@ -332,6 +332,8 @@ class CameraPipeline:
                 if t.group != "vehicle" or t.vehicle_moved(w))
         classifier = getattr(self._detections, "vehicle_classifier", None)
         presence = getattr(self._detections, "presence", None)
+        if presence is not None:
+            self._watch_spots(presence, detections, ts)
         for track in ready:
             if track.not_a_subject:
                 continue  # a bin or a fan, not a person
@@ -424,25 +426,46 @@ class CameraPipeline:
         bx, by, bw2, bh2 = best.box
         return big, (bx + rx0, by + ry0, bw2, bh2)
 
+    # A parked car has left only once its spot looks empty this long, in this many frames in a row:
+    # at night the detector misses the parked truck for a frame now and then, and the tracker hopped
+    # onto the next car: "Luke's Truck is leaving" while it sat there (2026-10-27 19:32).
+    LEAVE_EMPTY_SECONDS = 2.0
+    LEAVE_EMPTY_FRAMES = 3
+
+    @staticmethod
+    def _spot_occupied(spot, detections) -> bool:
+        """A car on the spot now, or someone standing in front of it."""
+        from sentinel.engine.household import _covers, _iou
+
+        return any(d.group == "vehicle" and _iou(d.box, spot.box) > 0.3 or
+                   d.group == "person" and _covers(d.box, spot.box) for d in detections)
+
+    def _watch_spots(self, presence, detections, ts: float) -> None:
+        for spot in presence.spots(self.host):
+            if self._spot_occupied(spot, detections):
+                spot.empty_since, spot.empty_frames = 0.0, 0
+            else:
+                spot.empty_since = spot.empty_since or ts
+                spot.empty_frames += 1
+
     def _parked_car_stays(self, presence, track, detections) -> bool:
         """Parking spots (from the once-a-minute driveway check) decide whether a parked car moved.
         Its box changing (doors opening, people loading it, the tracker hopping onto the next car)
         doesn't count; only its spot going empty does. True = say nothing (yet)."""
-        from sentinel.engine.household import _covers, _iou
+        from sentinel.engine.household import _iou
 
         spots = [p for p in presence.spots(self.host) if p.first_seen < track.first_seen - 5]
         if not spots:
             return False
-
-        def occupied(spot) -> bool:  # a car on it now, or someone standing in front of it
-            return any(d.group == "vehicle" and _iou(d.box, spot.box) > 0.3 or
-                       d.group == "person" and _covers(d.box, spot.box) for d in detections)
-
-        if any(occupied(p) for p in spots if _iou(p.box, track.box) >= 0.3):
+        if any(self._spot_occupied(p, detections) for p in spots if _iou(p.box, track.box) >= 0.3):
             track.reported = False  # still on a parked car's spot: look again on the next detection
             return True
         home = max(spots, key=lambda p: _iou(p.box, track.boxes[0][1]))
-        if _iou(home.box, track.boxes[0][1]) >= 0.3:  # it was the car parked there, and the spot is empty now
+        if _iou(home.box, track.boxes[0][1]) >= 0.3:  # it was the car parked there
+            if (home.empty_frames < self.LEAVE_EMPTY_FRAMES
+                    or track.last_seen - home.empty_since < self.LEAVE_EMPTY_SECONDS):
+                track.reported = False  # its spot only just looked empty: make sure
+                return True
             track.left_spot = True
             household = getattr(self._detections, "household", None)
             if home.vehicle_id is not None and household is not None:

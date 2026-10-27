@@ -121,9 +121,19 @@ class TestParkedAndDoors(TestPipeline):
         for i, b in enumerate(jiggle):  # people around it, doors opening: the box jumps about
             self.p._handle_detections([Detection("car", 0.8, b)], GREY, 2000.0 + i)
         self.assertEqual(self.events, [])
-        for i, x in enumerate((420, 470)):  # drives out of the spot
-            self.p._handle_detections([Detection("car", 0.8, (x, 150, 200, 120))], GREY, 2010.0 + i)
+        for i, x in enumerate((420, 440, 470, 500, 530, 560)):  # drives out of the spot (~0.5 s per frame)
+            self.p._handle_detections([Detection("car", 0.8, (x, 150, 200, 120))], GREY, 2010.0 + i * 0.5)
         self.assertEqual(self.events, ["🛻 Luke's Truck is leaving the Garage."])  # named by its spot
+
+    def test_a_missed_frame_and_a_hop_to_the_next_car_is_not_leaving(self):
+        truck, other = (900, 230, 370, 475), (560, 250, 340, 470)  # the car beside it isn't a known spot
+        self.park((truck, 4))
+        big = np.zeros((720, 1280, 3), np.uint8)
+        # At night the detector sees one or the other; the truck's track jumps onto the other car.
+        frames = [[truck], [truck], [other], [truck], [other], [truck], [truck]]
+        for i, boxes in enumerate(frames):
+            self.p._handle_detections([Detection("car", 0.6, b) for b in boxes], big, 2000.0 + i * 0.5)
+        self.assertEqual([e for e in self.events if "Truck" in e], [])
 
     def test_headlights_on_a_parked_car_the_last_scan_missed(self):
         from sentinel.engine.household import Parked

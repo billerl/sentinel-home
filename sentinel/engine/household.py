@@ -446,6 +446,10 @@ class Parked:
     candidate: Optional[int] = None  # who it looked like at the last confident check ...
     candidate_hits: int = 0  # ... and how many confident checks in a row agreed
     day_sure: bool = False  # a daylight photo of this parking clearly matched its car (night photos may be filed)
+    # Motion detection's view of the spot between scans (camera thread): since when, and in how many
+    # frames in a row, nothing has been seen on it.
+    empty_since: float = 0.0
+    empty_frames: int = 0
 
 
 class PresenceTracker:
