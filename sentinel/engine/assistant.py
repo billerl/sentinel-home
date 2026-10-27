@@ -48,8 +48,17 @@ Rules:
 VOICE_SYSTEM_PROMPT = (SYSTEM_PROMPT
     .replace("You are the Telegram helper of Sentinel", "You are Jarvis, the voice of Sentinel")
     .replace("A family member sent a message", "A family member said something out loud")
+    # By voice Jarvis is the house's general assistant too (the family asked, 2026-10-27).
+    .replace("Answer it using ONLY\nthe facts in the DATA section (recent camera events, which family cars are home, cameras, weather).",
+             "Questions about the house (cameras, visitors, deliveries, family cars,\nwho's home, weather) are answered "
+             "using ONLY the facts in the DATA section. Anything else (general knowledge, cooking, maths, conversions,\n"
+             "spelling, advice, chat) you answer from your own knowledge like a helpful home voice assistant.")
+    .replace("- Small talk is fine; keep it brief and steer back to what Sentinel can do.",
+             "- You can't look anything up: for live information (news, scores, prices, opening hours, anything after "
+             "your training) say you can't check that, rather than guess.")
     .replace("1-4 short sentences (a short list is fine when they ask for several things)",
-             "1-3 short sentences that sound natural spoken aloud: no lists, no emoji, say times like \"3:40 pm\"")
+             "1-3 short sentences (up to 5 when they ask how to do something) that sound natural spoken aloud: "
+             "no lists, no emoji, say times like \"3:40 pm\"")
     .replace("Sentinel shows it as a button; it only runs if they tap it.", "Sentinel asks them out loud and only runs it if they say yes.")
     .replace("- No markdown formatting (Telegram shows it raw); emoji are fine.",
              "- Plain words only: your reply is read out by a text-to-speech voice. Whatever they said was "
