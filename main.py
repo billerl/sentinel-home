@@ -6,6 +6,7 @@ Runs the cameras, recordings, Telegram bot and web viewer. The web viewer
 (see settings.json "web") is the user interface.
 """
 
+import os
 import signal
 import sys
 
@@ -25,7 +26,11 @@ def main() -> int:
 
     engine.start()
     engine.wait()
-    return 0
+    # Clips are finished and settings saved. Skip Python's final cleanup: the speech libraries
+    # (CTranslate2 / onnxruntime threads) can crash there, and the crash dump held up the restart.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
 
 
 if __name__ == "__main__":

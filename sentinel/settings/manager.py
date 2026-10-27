@@ -123,6 +123,7 @@ class SettingsManager:
             "assistant_model": "sonnet",
             # "Hey Jarvis" voice assistant (sentinel/audio/voice.py) and where sounds play
             "voice_enabled": False,
+            "voice_follow_up": True,  # after an answer, listen ~5 s for another question without the wake word
             "voice_wake_threshold": 0.5,
             "voice_gain": 4.0,
             "audio_output": "speakers",  # or "remote": the Remote Desktop session, when one is open

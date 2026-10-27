@@ -100,16 +100,16 @@ class FakeSpeaker:
 
 
 class TestConversation(unittest.TestCase):
-    def run_talk(self, heard, reply):
+    def run_talk(self, heard, reply, **settings):
         speaker = FakeSpeaker()
-        va = VoiceAssistant({}, lambda text, say: reply, speaker)
+        va = VoiceAssistant(settings, lambda text, say: reply, speaker)
         with mock.patch.object(va, "_hear", side_effect=heard):
             va._conversation()
         return speaker.said, va
 
     def test_answers_and_returns_to_listening(self):
-        said, va = self.run_talk(["who's home"], VoiceReply("Steph is home."))
-        self.assertEqual(said, ["<listen>", "Steph is home."])
+        said, va = self.run_talk(["who's home", None], VoiceReply("Steph is home."))
+        self.assertEqual(said, ["<listen>", "Steph is home.", "<listen>", "<cancel>"])
         self.assertEqual(va._mode, "wake")
         self.assertTrue(va._wake_reset)
 
@@ -120,23 +120,41 @@ class TestConversation(unittest.TestCase):
     def test_change_needs_a_spoken_yes(self):
         done = []
         reply = VoiceReply("Should I turn on alerts?", lambda: done.append(1) or "Done.")
-        said, _ = self.run_talk(["enable alerts", "yes please"], reply)
+        said, _ = self.run_talk(["enable alerts", "yes please", None], reply)
         self.assertEqual(done, [1])
-        self.assertEqual(said[-1], "Done.")
+        self.assertEqual(said[-3], "Done.")
 
     def test_anything_but_yes_does_nothing(self):
         done = []
         for answer in ("no", None, "what?"):
             reply = VoiceReply("Should I?", lambda: done.append(1) or "Done.")
-            said, _ = self.run_talk(["enable alerts", answer], reply)
-            self.assertEqual(said[-1], "Okay, I won't.")
+            said, _ = self.run_talk(["enable alerts", answer, None], reply)
+            self.assertEqual(said[-3], "Okay, I won't.")
         self.assertEqual(done, [])
+
+    def test_follow_up_question_needs_no_wake_word(self):
+        asked = []
+        speaker = FakeSpeaker()
+        va = VoiceAssistant({}, lambda text, say: asked.append(text) or VoiceReply("ok"), speaker)
+        with mock.patch.object(va, "_hear", side_effect=["who's home", "and the weather", None]):
+            va._conversation()
+        self.assertEqual(asked, ["who's home", "and the weather"])
+        self.assertEqual(speaker.said[-1], "<cancel>")
+
+    def test_follow_ups_are_capped(self):
+        with mock.patch.object(v, "MAX_TURNS", 3):
+            said, _ = self.run_talk(["blah"] * 10, VoiceReply("ok"))
+        self.assertEqual(said.count("ok"), 3)
+
+    def test_follow_up_can_be_turned_off(self):
+        said, _ = self.run_talk(["who's home"], VoiceReply("Steph is home."), voice_follow_up=False)
+        self.assertEqual(said, ["<listen>", "Steph is home."])
 
     def test_alerts_stay_quiet_during_a_conversation(self):
         speaker = FakeSpeaker()
         seen = []
         va = VoiceAssistant({}, lambda text, say: seen.append(speaker.busy) or VoiceReply("ok"), speaker)
-        with mock.patch.object(va, "_hear", return_value="hi"):
+        with mock.patch.object(va, "_hear", side_effect=["hi", None]):
             va._conversation()
         self.assertEqual(seen, [True])
         self.assertFalse(speaker.busy)

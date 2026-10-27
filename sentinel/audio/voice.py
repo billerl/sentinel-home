@@ -35,6 +35,8 @@ STARTUP_SKIP_SECONDS = 1.0  # opening the mic gives a loud thump
 WAIT_FOR_SPEECH = 5.0  # after the chime
 MAX_COMMAND = 10.0
 END_SILENCE = 1.0
+FOLLOW_UP_WAIT = 5.0  # after an answer, a follow-up question needs no wake word...
+MAX_TURNS = 5  # ...but a TV can't keep it talking forever
 NO_SPEECH_MAX = 0.6  # Whisper's own "this was noise" score; above it the words are usually invented
 # Whisper's favourite inventions on silence and noise.
 HALLUCINATIONS = {"you", "thank you", "thanks", "thank you very much", "thanks for watching", "bye", "okay", "so",
@@ -329,27 +331,35 @@ class VoiceAssistant:
         if text:
             self.speaker.speak(text)
 
+    def _respond(self, text: str) -> None:
+        reply = self.answer(text, self._say)
+        self._say(reply.text)
+        if reply.confirm is None:
+            return
+        answer = self._hear(wait=4.0) or ""
+        if is_yes(answer):
+            self._say(reply.confirm())
+        else:
+            self._say("Okay, I won't.")
+
     def _conversation(self) -> None:
         self.speaker.busy = True
         try:
             self.speaker.tone("listen")
             self._ignore_until = time.time() + 0.15  # the chime's echo
             text = self._hear(fresh=False)
-            if text is None:
-                self.speaker.tone("cancel")
-                return
-            if not text:
-                self._say("Sorry, I didn't catch that.")
-                return
-            reply = self.answer(text, self._say)
-            self._say(reply.text)
-            if reply.confirm is None:
-                return
-            answer = self._hear(wait=4.0) or ""
-            if is_yes(answer):
-                self._say(reply.confirm())
-            else:
-                self._say("Okay, I won't.")
+            for turn in range(MAX_TURNS):
+                if not text:  # silence, or noise Whisper made nothing of
+                    if text == "" and turn == 0:
+                        self._say("Sorry, I didn't catch that.")
+                    else:
+                        self.speaker.tone("cancel")
+                    return
+                self._respond(text)
+                if turn == MAX_TURNS - 1 or not self.settings.get("voice_follow_up", True):
+                    return
+                self.speaker.tone("listen")
+                text = self._hear(wait=FOLLOW_UP_WAIT)
         except Exception as e:
             self.last_error = str(e)
             app_logger.log("error", "voice_failed", error_message=str(e), component="voice", action="conversation")

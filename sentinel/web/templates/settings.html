@@ -268,6 +268,7 @@
         <p class="hint" style="margin-top:0">“Remote Desktop session” plays alerts and voice answers on the computer you're connected from. When nobody is connected it uses this PC's speakers instead.</p>
         <div class="row"><label><input type="checkbox" data-key="voice_enabled"> Voice assistant: answer “Hey Jarvis” through the microphone</label></div>
         <p class="hint" style="margin-top:0">Listens only for “Hey Jarvis”; nothing is recorded or saved, and speech is understood on this PC. Needs the volume above 0. Questions Sentinel can't answer itself go to Claude if “ask Claude” is on under <a href="#telegram">Telegram</a>.</p>
+        <div class="row"><label><input type="checkbox" data-key="voice_follow_up"> After an answer, listen for another question without “Hey Jarvis” (about 5 seconds)</label></div>
         <div class="save-row"><button class="primary" onclick="saveSection('audio')">Save</button><span class="msg" id="msg-audio"></span></div>
       </div>
     </section>
@@ -324,7 +325,7 @@
           <li><b>Zones: on / off</b> (top of the live page) — shows or hides the zone outlines on the live view. Detection still uses the zones either way. It applies to everyone watching.</li>
           <li><b>Data saver: on / off</b> (top of the live page) — for phone hotspots and mobile data. The grid uses small pictures refreshed every ~5 seconds (about 0.1 GB an hour instead of 0.4–1.3 GB), and full screen shows one sharp picture a second instead of live video. It's remembered per device, so turning it on on your phone doesn't affect your computer.</li>
           <li><b>Asking Claude</b> — if “ask Claude” is on under <a href="#telegram">Telegram</a>, any message Sentinel doesn't understand (“was it busy out back this afternoon?”, “did Abi leave before or after Steph got home?”) is answered by Claude from the last 2 days of events. You'll see “🤔 Let me think…” first; answers take about 10 seconds. It uses your Claude subscription, up to the daily limit you set.</li>
-          <li><b>Talking to Sentinel (“Hey Jarvis”)</b> — if the voice assistant is on under <a href="#audio">Audio</a>, say “Hey Jarvis”, wait for the rising chime, then ask: “who's home?”, “when did Abi get home?”, “did anyone come by today?”, “what's the weather?”, “what time is it?”. It answers out loud. Anything else goes to Claude (“Let me think…”) if that's on. To change a setting (“enable messages”) it asks first and only does it if you say “yes”. A falling chime means it didn't hear a question; just try again. Speak toward the microphone; from across the room, speak up a little.</li>
+          <li><b>Talking to Sentinel (“Hey Jarvis”)</b> — if the voice assistant is on under <a href="#audio">Audio</a>, say “Hey Jarvis”, wait for the rising chime, then ask: “who's home?”, “when did Abi get home?”, “did anyone come by today?”, “what's the weather?”, “what time is it?”. It answers out loud. Anything else goes to Claude (“Let me think…”) if that's on. To change a setting (“enable messages”) it asks first and only does it if you say “yes”. After each answer it chimes again and listens for about 5 seconds, so you can ask another question without “Hey Jarvis”. A falling chime means it has stopped listening; say “Hey Jarvis” to start again. Speak toward the microphone; from across the room, speak up a little.</li>
           <li><b>Weather</b> — with 3 cameras the grid has a spare space, which shows the weather (set your town or ZIP under <a href="#weather">Weather</a>). On a phone it's under the cameras. When it's windy it warns you to expect motion clips from trees.</li>
           <li><b>⟳ Reload</b> (top of the live page) — reloads the page, for TVs and browsers without F5. Open pages also reload themselves after Sentinel is updated.</li>
           <li><b>Signing in a TV (QR code)</b> — on a big screen the sign-in page shows a QR code. Scan it with your phone's camera (the phone must already be signed in), check the 4-letter code matches, and tap <b>Yes</b>. The TV stays signed in, even after Sentinel restarts. If the phone says the screen is on a <i>different internet connection</i>, only approve if you're standing in front of it.</li>
@@ -414,7 +415,7 @@
       recording: ["recording_retention_enabled", "recording_retention_days", "recording_min_free_percent",
                   "night_bug_start_hour", "night_bug_end_hour", "auto_reconnect_enabled",
                   "reconnect_interval_seconds", "feed_fps", "web.max_fps", "web.show_zones"],
-      audio: ["volume", "speech_speed", "voice_id", "audio_output", "voice_enabled"],
+      audio: ["volume", "speech_speed", "voice_id", "audio_output", "voice_enabled", "voice_follow_up"],
       access: ["remote_web_url", "remote_rdp_user"],
       weather: ["weather_location", "weather_units"],
       detection: ["object_detection_enabled", "household_ask_enabled", "household_ask_per_day", "vehicle_types_enabled", "alert_mode", "detector_model", "inference_device", "object_alert_cooldown"]
