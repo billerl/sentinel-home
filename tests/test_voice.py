@@ -135,6 +135,16 @@ class TestConversation(unittest.TestCase):
             self.assertEqual(said[-3], "Okay, I won't.")
         self.assertEqual(done, [])
 
+    def test_dictation_after_go_ahead(self):
+        saved = []
+        speaker = FakeSpeaker()
+        va = VoiceAssistant({}, lambda t, s: VoiceReply("Go ahead.", dictate=lambda n: saved.append(n) or "Got it."), speaker)
+        with mock.patch.object(va, "_hear", side_effect=["take a note for claude", "make the music bar bigger", None]) as hear:
+            va._conversation()
+        self.assertEqual(saved, ["make the music bar bigger"])
+        self.assertEqual(hear.call_args_list[1].kwargs["silence"], v.DICTATE_SILENCE)
+        self.assertIn("Got it.", speaker.said)
+
     def test_follow_up_question_needs_no_wake_word(self):
         asked = []
         speaker = FakeSpeaker()
@@ -308,6 +318,19 @@ class TestEngineVoiceAnswers(unittest.TestCase):
 
     def ask(self, text):
         return self.engine.answer_voice(text, self.said.append)
+
+    def test_notes_for_claude(self):
+        self.engine.NOTES_FILE = os.path.join(self.dir, "notes", "claude-notes.md")
+        reply = self.ask("Take a note for Claude.")
+        self.assertEqual(reply.text, "Go ahead.")
+        self.assertEqual(reply.dictate("Make the music bar bigger."), "Got it, I've saved that for Claude.")
+        self.assertIn("I've saved", self.ask("Note for Claude: add a snow alert.").text)
+        self.assertIn("I've saved", self.ask("tell cloud that the garage camera is blurry").text)
+        notes = open(self.engine.NOTES_FILE).read()
+        self.assertIn("Make the music bar bigger.", notes)
+        self.assertIn("add a snow alert", notes)
+        self.assertIn("the garage camera is blurry", notes)
+        self.assertIn("didn't save", reply.dictate(""))
 
     def test_time(self):
         self.assertTrue(self.ask("What time is it?").text.startswith("It's "))

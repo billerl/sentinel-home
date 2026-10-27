@@ -727,6 +727,28 @@ class Engine:
             self.voice.stop()
             self.voice = None
 
+    NOTES_FILE = os.path.join(os.path.expanduser("~"), "Documents", "sentinel_home", "claude-notes.md")
+    _NOTE = re.compile(r"^(?:please )?(?:(?:take|make|leave|write|save|add)(?: down)? (?:a |another )?note"
+                       r"(?: for (?:claude|cloud|clod|claud))?|note for (?:claude|cloud|clod|claud)|"
+                       r"tell (?:claude|cloud) (?:that )?)[:,.]?\s*(.*)$", re.IGNORECASE)
+
+    def save_claude_note(self, text: str) -> str:
+        """A spoken request for Claude (the coding assistant), kept until the next session reads it."""
+        text = (text or "").strip()
+        if not text:
+            return "I didn't catch anything, so I didn't save a note."
+        os.makedirs(os.path.dirname(self.NOTES_FILE), exist_ok=True)
+        new = not os.path.exists(self.NOTES_FILE)
+        with open(self.NOTES_FILE, "a", encoding="utf-8") as f:
+            if new:
+                f.write("# Notes for Claude (said to Jezebel)\n\nClaude: read these when asked to \"check notes\"; "
+                        "move finished ones under ## Done.\n\n## To do\n")
+            f.write(f"- {time.strftime('%Y-%m-%d %H:%M')} — {text}\n")
+        app_logger.log("info", "claude_note_saved", length=len(text), component="voice", action="note")
+        for chat_id in self.telegram.chat_ids:
+            self.telegram.reply_to_chat(chat_id, f"📝 Note for Claude (as Jezebel heard it):\n{text}")
+        return "Got it, I've saved that for Claude."
+
     def _voice_toggle(self, changes: Dict[str, bool]):
         from sentinel.audio.voice import VoiceReply
 
@@ -748,6 +770,12 @@ class Engine:
         plain = re.sub(r"\s+", " ", re.sub(r"[^\w\s'?:-]", " ", text)).strip()
         low = plain.lower().rstrip("?")
         app_logger.log("info", "voice_request", text=text[:200], component="voice", action="answer")
+        note = self._NOTE.match(plain)
+        if note:
+            said = note.group(1).strip(" .")
+            if said:
+                return VoiceReply(self.save_claude_note(said))
+            return VoiceReply("Go ahead.", dictate=self.save_claude_note)
         music = parse_music_command(low)
         if music and self.spotify.connected():
             return VoiceReply(self.spotify.command(*music))

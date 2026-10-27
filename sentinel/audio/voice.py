@@ -35,6 +35,9 @@ STARTUP_SKIP_SECONDS = 1.0  # opening the mic gives a loud thump
 WAIT_FOR_SPEECH = 5.0  # after the chime
 MAX_COMMAND = 10.0
 END_SILENCE = 1.0
+# Dictation ("take a note for Claude"): longer, with room to pause and think.
+DICTATE_WAIT, DICTATE_SILENCE, DICTATE_MAX = 8.0, 2.5, 90.0
+DICTATE_PROMPT = "A note for Claude about changes to the Sentinel home security program, Jezebel, Spotify, cameras."
 FOLLOW_UP_WAIT = 5.0  # after an answer, a follow-up question needs no wake word...
 MAX_TURNS = 5  # ...but a TV can't keep it talking forever
 NO_SPEECH_MAX = 0.6  # Whisper's own "this was noise" score; above it the words are usually invented
@@ -52,6 +55,7 @@ PROMPT = ("Sentinel. Who's home? Is Steph home? When did Abi get home? Did Linco
 class VoiceReply:
     text: str
     confirm: Optional[Callable[[], str]] = None  # run only after a spoken "yes"; returns what to say
+    dictate: Optional[Callable[[str], str]] = None  # take a long message next ("note for Claude"); returns what to say
 
 
 class BandPass:
@@ -327,13 +331,14 @@ class VoiceAssistant:
                            main_score=round(getattr(self, "_trial_main", 0.0), 2), component="voice", action="trial")
             self._trial_peak, self._trial_main = 0.0, 0.0
 
-    def _hear(self, wait: float = WAIT_FOR_SPEECH, fresh: bool = True) -> Optional[str]:
+    def _hear(self, wait: float = WAIT_FOR_SPEECH, fresh: bool = True, silence: float = END_SILENCE,
+              max_len: float = MAX_COMMAND, prompt: str = PROMPT) -> Optional[str]:
         """Record until the speaker stops, then transcribe. None = nothing said."""
         if fresh:
             while not self._queue.empty():
                 self._queue.get_nowait()
             self._mode = "listen"
-        end = SpeechEnd(self._noise, wait=wait)
+        end = SpeechEnd(self._noise, wait=wait, max_len=max_len, silence=silence)
         chunks: List[np.ndarray] = []
         try:
             while not self._stop.is_set():
@@ -350,7 +355,7 @@ class VoiceAssistant:
             return None
         audio = normalise(np.concatenate(chunks))
         started = time.time()
-        segments, _ = self._load_whisper().transcribe(audio, beam_size=1, language="en", initial_prompt=PROMPT,
+        segments, _ = self._load_whisper().transcribe(audio, beam_size=1, language="en", initial_prompt=prompt,
                                                       vad_filter=False, condition_on_previous_text=False)
         segments = list(segments)
         text = clean_transcript(segments)
@@ -369,6 +374,11 @@ class VoiceAssistant:
         app_logger.log("info", "voice_replied", text=(reply.text or "")[:300], confirm=reply.confirm is not None,
                        component="voice", action="respond")
         self._say(reply.text)
+        if reply.dictate is not None:
+            self.speaker.tone("listen")
+            self._say(reply.dictate(self._hear(wait=DICTATE_WAIT, silence=DICTATE_SILENCE, max_len=DICTATE_MAX,
+                                               prompt=DICTATE_PROMPT) or ""))
+            return
         if reply.confirm is None:
             return
         answer = self._hear(wait=4.0) or ""
