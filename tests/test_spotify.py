@@ -27,6 +27,7 @@ class TestParse(unittest.TestCase):
             "volume up": ("volume", "+"), "turn it down a bit": ("volume", "-"), "louder": ("volume", "+"),
             "volume 40": ("volume", "40"), "set the volume to fifty percent": ("volume", "50"),
             "What's playing?": ("now", ""), "what song is this": ("now", ""),
+            "Place on Tom Petty.": ("play", "tom petty"), "Place some jazz": ("play", "some jazz"),
         }
         for text, want in cases.items():
             self.assertEqual(parse_music_command(text), want, text)

@@ -45,7 +45,7 @@ HALLUCINATIONS = {"you", "thank you", "thanks", "thank you very much", "thanks f
 # (2026-10-27); with it, quiet "who's home" variants went from 7/24 to 15/24 right in a synthetic test.
 PROMPT = ("Sentinel. Who's home? Is Steph home? When did Abi get home? Did Lincoln, Luke or Karleigh leave? "
           "Did anyone come by today? Any deliveries? What's the weather? Front door, back yard, garage, driveway. "
-          "Enable messages.")
+          "Enable messages. Play some Tom Petty. Pause. Skip. Volume up. What's playing?")
 
 
 @dataclass
@@ -336,6 +336,8 @@ class VoiceAssistant:
 
     def _respond(self, text: str) -> None:
         reply = self.answer(text, self._say)
+        app_logger.log("info", "voice_replied", text=(reply.text or "")[:300], confirm=reply.confirm is not None,
+                       component="voice", action="respond")
         self._say(reply.text)
         if reply.confirm is None:
             return

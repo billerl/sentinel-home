@@ -63,6 +63,9 @@ def parse_music_command(text: str) -> Optional[Tuple[str, str]]:
     t = _words(text)
     t = re.sub(r"^(please |can you |could you |would you )", "", t)
     t = re.sub(r" please$", "", t)
+    # Whisper's usual mishearings of "play" from across the room ("Place on Tom Petty", 2026-10-27)
+    # ("on" there is the misheard "play"'s tail, not "on the TV": "Place on Tom Petty" = play Tom Petty)
+    t = re.sub(r"^(place|plays|played|playing|blade|plate) (on (?!(the )?(tv|television)\b))?", "play ", t)
     if re.fullmatch(r"(pause|stop)( the| this)?( music| song| spotify| playing| it)?|(be )?quiet|shut up|"
                     r"mute( the music)?|turn (off|the music off) the music|turn the music off", t):
         return ("pause", "")
