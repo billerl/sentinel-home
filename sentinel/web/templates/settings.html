@@ -263,6 +263,9 @@
         <div class="row"><label style="flex:1">Volume <input type="range" min="0" max="1" step="0.05" data-key="volume" oninput="this.nextElementSibling.textContent=Math.round(this.value*100)+'%'"><span></span></label></div>
         <div class="row"><label style="flex:1">Speed <input type="range" min="80" max="350" step="5" data-key="speech_speed" oninput="this.nextElementSibling.textContent=this.value"><span></span></label></div>
         <div class="row"><div class="field" style="flex: 0 1 280px"><span>Voice</span><select data-key="voice_id" id="voice-select"></select></div></div>
+        <div class="row"><div class="field" style="flex: 0 1 320px"><span>Play sounds on</span>
+          <select data-key="audio_output"><option value="speakers">This PC's speakers</option><option value="remote">Remote Desktop session (for testing from another computer)</option></select></div></div>
+        <p class="hint" style="margin-top:0">“Remote Desktop session” plays alerts and voice answers on the computer you're connected from. When nobody is connected it uses this PC's speakers instead.</p>
         <div class="row"><label><input type="checkbox" data-key="voice_enabled"> Voice assistant: answer “Hey Jarvis” through the microphone</label></div>
         <p class="hint" style="margin-top:0">Listens only for “Hey Jarvis”; nothing is recorded or saved, and speech is understood on this PC. Needs the volume above 0. Questions Sentinel can't answer itself go to Claude if “ask Claude” is on under <a href="#telegram">Telegram</a>.</p>
         <div class="save-row"><button class="primary" onclick="saveSection('audio')">Save</button><span class="msg" id="msg-audio"></span></div>
@@ -411,7 +414,7 @@
       recording: ["recording_retention_enabled", "recording_retention_days", "recording_min_free_percent",
                   "night_bug_start_hour", "night_bug_end_hour", "auto_reconnect_enabled",
                   "reconnect_interval_seconds", "feed_fps", "web.max_fps", "web.show_zones"],
-      audio: ["volume", "speech_speed", "voice_id", "voice_enabled"],
+      audio: ["volume", "speech_speed", "voice_id", "audio_output", "voice_enabled"],
       access: ["remote_web_url", "remote_rdp_user"],
       weather: ["weather_location", "weather_units"],
       detection: ["object_detection_enabled", "household_ask_enabled", "household_ask_per_day", "vehicle_types_enabled", "alert_mode", "detector_model", "inference_device", "object_alert_cooldown"]

@@ -1166,7 +1166,7 @@ class Engine:
                 "night_bug_start_hour": int(self.settings.get("night_bug_start_hour", 20)),
                 "night_bug_end_hour": int(self.settings.get("night_bug_end_hour", 6)),
             })
-        if {"volume", "speech_speed", "voice_id"} & cleaned.keys():
+        if {"volume", "speech_speed", "voice_id", "audio_output"} & cleaned.keys():
             if self.audio is None:
                 self.audio = self._init_audio()
             else:

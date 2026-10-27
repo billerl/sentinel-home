@@ -44,6 +44,7 @@ class AudioAlertSystem:
         self._volume: float = settings.get("volume", DEFAULT_VOLUME)
         self._play_lock = threading.Lock()  # one sound at a time: alerts never talk over the voice assistant
         self.busy = False  # set by the voice assistant during a conversation: alerts stay quiet
+        self._output: str = settings.get("audio_output", "speakers")
 
         # Try Piper first (neural, natural-sounding)
         self._try_init_piper(settings)
@@ -210,8 +211,23 @@ class AudioAlertSystem:
             w.writeframes(pcm.tobytes())
         self._play(buf.getvalue())
 
+    @staticmethod
+    def _remote_desktop_sound() -> Optional[str]:
+        """The signed-in desktop's sound server (Remote Desktop sends it to the viewer's PC), if any."""
+        path = f"/run/user/{os.getuid()}/pulse/native"
+        return path if os.path.exists(path) else None
+
     def _play(self, wav_payload: bytes) -> None:
         with self._play_lock:
+            server = self._remote_desktop_sound() if self._output == "remote" else None
+            if server:
+                try:
+                    done = subprocess.run(["paplay"], input=wav_payload, env={"PULSE_SERVER": f"unix:{server}"},
+                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+                    if done.returncode == 0:
+                        return
+                except (OSError, subprocess.TimeoutExpired):
+                    pass  # nobody connected: fall back to the PC's own speakers
             proc = subprocess.Popen(
                 ["aplay", "-q", "-"],
                 stdin=subprocess.PIPE,
@@ -280,6 +296,9 @@ class AudioAlertSystem:
                     self.tts_engine.setProperty("volume", self._volume)
                 except Exception:
                     pass
+
+        if "audio_output" in settings:
+            self._output = settings["audio_output"]
 
         if "voice_id" in settings:
             new_id = settings["voice_id"]

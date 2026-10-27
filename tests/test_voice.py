@@ -142,6 +142,34 @@ class TestConversation(unittest.TestCase):
         self.assertFalse(speaker.busy)
 
 
+class TestSoundOutput(unittest.TestCase):
+    def make(self, output):
+        from sentinel.audio.alert_system import AudioAlertSystem
+
+        audio = AudioAlertSystem.__new__(AudioAlertSystem)
+        audio._play_lock, audio._output = __import__("threading").Lock(), output
+        return audio
+
+    def test_remote_desktop_session_when_connected(self):
+        audio = self.make("remote")
+        with mock.patch.object(audio, "_remote_desktop_sound", return_value="/run/user/1000/pulse/native"), \
+                mock.patch("subprocess.run", return_value=types.SimpleNamespace(returncode=0)) as run, \
+                mock.patch("subprocess.Popen") as popen:
+            audio._play(b"wav")
+        self.assertEqual(run.call_args.args[0], ["paplay"])
+        self.assertEqual(run.call_args.kwargs["env"], {"PULSE_SERVER": "unix:/run/user/1000/pulse/native"})
+        popen.assert_not_called()
+
+    def test_falls_back_to_the_pc_speakers(self):
+        for output, server, rc in (("remote", "/x", 1), ("remote", None, 0), ("speakers", "/x", 0)):
+            audio = self.make(output)
+            with mock.patch.object(audio, "_remote_desktop_sound", return_value=server), \
+                    mock.patch("subprocess.run", return_value=types.SimpleNamespace(returncode=rc)), \
+                    mock.patch("subprocess.Popen") as popen:
+                audio._play(b"wav")
+            self.assertEqual(popen.call_args.args[0][0], "aplay", (output, server, rc))
+
+
 class TestEngineVoiceAnswers(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="sentinel-voice-")

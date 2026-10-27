@@ -134,6 +134,7 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "weather_location": _place,
     "assistant_enabled": _bool,
     "voice_enabled": _bool,
+    "audio_output": lambda v: _choice(v or "speakers", ("speakers", "remote")),
     "voice_wake_threshold": _num(0.1, 0.95),
     "voice_gain": _num(1, 20),
     "assistant_daily_limit": _num(0, 200, int),

@@ -121,6 +121,11 @@ class SettingsManager:
             "assistant_enabled": False,
             "assistant_daily_limit": 30,
             "assistant_model": "sonnet",
+            # "Hey Jarvis" voice assistant (sentinel/audio/voice.py) and where sounds play
+            "voice_enabled": False,
+            "voice_wake_threshold": 0.5,
+            "voice_gain": 4.0,
+            "audio_output": "speakers",  # or "remote": the Remote Desktop session, when one is open
             # Shown in the Help page and the Telegram "access" reply
             "remote_web_url": "",
             "remote_rdp_user": "",
