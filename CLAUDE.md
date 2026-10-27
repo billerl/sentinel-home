@@ -62,3 +62,39 @@ timeline, natural-language Telegram alerts and questions, all in a web UI. Every
 - User-facing text (web Help page in `settings.html`, Telegram replies) is plain English for a
   non-developer; update the Help section and `_commands_help_text` when adding user features.
 - Keep `handoff_summary.md` and `project-structure.md` current when adding modules or behaviour.
+
+## Roadmap — agreed with the user 2026-10-27 (build in this order, one per session)
+One feature per session: build → tests → deploy → ask to push → update this list, then the user
+runs `/clear`. Everything stays free and local except the existing opt-in Claude fallback.
+
+1. **Voice assistant ("Hey Jarvis")** — next up. Mic facts, measured 2026-10-27:
+   - Mic is in the front jack ALSA calls **"Headphone Mic"** (card 0, `plughw:0,0`). Needs
+     `Input Source` = 'Headphone Mic' and `Headphone Mic Boost` = 3 (max; Capture already 63/63).
+     Set with amixer but NOT persisted (`alsactl store` needs sudo; the user runs sudo/pkexec
+     themselves) — have Sentinel set these mixer values itself at startup.
+   - Signal is weak and rumbly: from 20 ft voice peaks ~18% of full scale, only ~1% of energy is
+     in the voice band. Band-pass 150–4000 Hz + normalise before recognition lifted
+     faster-whisper's speech confidence from 57% to 82% (no_speech 0.43 → 0.18). Do that filter.
+   - whisper invents "You" / "Thank you very much" on noise → drop segments with high
+     no_speech_prob and require the wake word first. Recording starts with a loud thump (skip ~1 s).
+   - Tested pieces (scratchpad venv, not yet in the project): faster-whisper `base.en` int8 on CPU
+     (~3 s per question); openwakeword 0.4.0 (`wakeword_model_paths` + bundled hey_jarvis model).
+     faster-whisper's `av` dep was broken here → feed it numpy arrays, not files.
+   - Spoken replies: reuse Piper (already in `sentinel/audio/alert_system.py`, voices in `models/`).
+   - Answers: route through the same path as Telegram text (`route_text`-style local answers first,
+     opt-in Claude fallback second). Never run commands from Claude without confirmation — by voice,
+     confirm with "yes".
+   - Shell sessions older than 2026-10-25 aren't in the `audio` group: use `sg audio -c "..."`.
+     The service already has it.
+2. **Spotify (user has Premium)** — "play some jazz", pause, skip, volume. Needs from the user: a
+   free app at developer.spotify.com, its **Client ID**, redirect `http://127.0.0.1:8888/callback`
+   (PKCE, no client secret). PC needs a playback device: librespot (free, open source, makes the
+   PC a Spotify Connect speaker) or the Spotify app.
+3. **"Where is Abigail?" (Life360-like)** — Life360 has no official API; use **OwnTracks** (free
+   phone app, HTTP mode posting to a Sentinel endpoint through the Cloudflare tunnel, per-person
+   login). Named places (home/school/work), arrive/leave Telegram alerts, answers by Telegram and
+   voice, combine with car presence. Each person installs it on their own phone and must agree;
+   check Cloudflare Access doesn't block the phone app's posts.
+
+Other open items: the user should send "Enable messages" on Telegram (motion alerts off since
+2026-10-24) and name the grey sunroof sedan (probably Abigail's Fusion) on the Vehicles page.
