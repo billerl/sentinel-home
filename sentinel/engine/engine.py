@@ -21,6 +21,7 @@ from sentinel.constants import CAPTURE_DIR, VIDEO_DIR
 from sentinel.engine import admin
 from sentinel.engine.camera import CLIP_REQUEST_REASON, CameraPipeline, camera_host
 from sentinel.engine.assistant import Assistant, build_context
+from sentinel.engine.spotify import SpotifyService, parse_music_command
 from sentinel.engine.weather import WeatherService
 from sentinel.logging_utils import app_logger
 from sentinel.notifications import TelegramNotifier
@@ -112,6 +113,7 @@ class Engine:
         self.telegram = TelegramNotifier(self.settings)
         self.weather = WeatherService(self.settings)
         self.assistant = Assistant(self.settings)
+        self.spotify = SpotifyService(self.settings, lambda: self.settings_manager.save_settings(force=True))
         self._command_offers: Dict[int, Tuple[str, str, float]] = {}  # "Do it" buttons under Claude's replies
         self._offer_ids = itertools.count(1)
         self.audio = self._init_audio()
@@ -746,8 +748,13 @@ class Engine:
         plain = re.sub(r"\s+", " ", re.sub(r"[^\w\s'?:-]", " ", text)).strip()
         low = plain.lower().rstrip("?")
         app_logger.log("info", "voice_request", text=text[:200], component="voice", action="answer")
+        music = parse_music_command(low)
+        if music and self.spotify.connected():
+            return VoiceReply(self.spotify.command(*music))
         if re.fullmatch(r"(never ?mind|cancel|stop|nothing|no|forget it|no thanks)", low):
             return VoiceReply("Okay.")
+        if music and music[0] == "play":
+            return VoiceReply("Spotify isn't connected yet. Connect it on the Settings page, under Spotify.")
         if re.search(r"\bwhat time is it\b|\bwhat'?s the time\b|\bwhat is the time\b", low):
             return VoiceReply(f"It's {_fmt_clock(time.time())}.")
         if re.search(r"\b(weather|temperature|how (hot|cold|warm)|rain\w*|snow\w*)\b", low) \

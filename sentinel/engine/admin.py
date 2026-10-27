@@ -66,6 +66,13 @@ def available_voices(models_dir: str = "models") -> List[str]:
     )
 
 
+def _spotify_client_id(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text and not re.fullmatch(r"[0-9a-f]{32}", text):
+        raise ValueError("a Spotify Client ID is 32 letters and numbers (0-9, a-f)")
+    return text
+
+
 def _choice(value: Any, options: tuple) -> str:
     if value not in options:
         raise ValueError("choose one of: " + ", ".join(options))
@@ -134,6 +141,8 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "weather_location": _place,
     "assistant_enabled": _bool,
     "voice_enabled": _bool,
+    "spotify_client_id": _spotify_client_id,
+    "spotify_device": lambda v: str(v or "").strip()[:80],
     "voice_follow_up": _bool,
     "audio_output": lambda v: _choice(v or "speakers", ("speakers", "remote")),
     "voice_wake_threshold": _num(0.1, 0.95),

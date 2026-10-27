@@ -123,6 +123,10 @@ class SettingsManager:
             "assistant_model": "sonnet",
             # "Hey Jarvis" voice assistant (sentinel/audio/voice.py) and where sounds play
             "voice_enabled": False,
+            # Spotify (sentinel/engine/spotify.py): public Client ID; the refresh token is stored here too
+            "spotify_client_id": "",
+            "spotify_device": "",  # preferred speaker when none is playing
+            "spotify_refresh_token": "",
             "voice_follow_up": True,  # after an answer, listen ~5 s for another question without the wake word
             "voice_wake_threshold": 0.5,
             "voice_gain": 4.0,

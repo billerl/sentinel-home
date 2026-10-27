@@ -92,6 +92,7 @@
       <a href="#telegram">Telegram</a>
       <a href="#recording">Recording</a>
       <a href="#audio">Audio</a>
+      <a href="#spotify">Spotify</a>
       <a href="#weather">Weather</a>
       <a href="#access">Remote access</a>
       <a href="#security">Password</a>
@@ -273,6 +274,39 @@
       </div>
     </section>
 
+    <!-- ======================= SPOTIFY ======================= -->
+    <section id="spotify">
+      <h2>Spotify</h2>
+      <div class="card">
+        <p class="hint" style="margin-top:0">Lets “Hey Jarvis, play some jazz” (and pause, skip, volume) work, and shows what's playing at the bottom of the live page. The music plays on your own Spotify devices (the TV's Spotify app, phones, computers); Sentinel just tells Spotify what to do. Needs Spotify Premium.</p>
+        <div class="row">
+          <div class="field" style="flex: 0 1 360px"><span>Client ID (from developer.spotify.com)</span><input type="text" data-key="spotify_client_id" placeholder="32 letters and numbers" autocomplete="off" spellcheck="false"></div>
+        </div>
+        <div class="save-row"><button class="primary" onclick="saveSection('spotify')">Save</button><span class="msg" id="msg-spotify"></span></div>
+        <h3>Connection: <span id="sp-state">…</span></h3>
+        <div id="sp-connect" hidden>
+          <ol class="hint" style="margin-top:0">
+            <li>Press <b>Connect Spotify</b> and sign in to Spotify in the tab that opens, then press <b>Agree</b>.</li>
+            <li>On this PC (through Remote Desktop) it finishes by itself. On any other device the last page says it can't be reached — that's expected: copy the whole address from the address bar, paste it below and press <b>Finish</b>.</li>
+          </ol>
+          <div class="save-row"><button class="primary" onclick="spotifyConnect()">Connect Spotify</button><span class="msg" id="msg-sp-connect"></span></div>
+          <div class="row">
+            <div class="field" style="flex: 1 1 360px"><span>Address of the last page (only if it didn't finish by itself)</span><input type="text" id="sp-paste" placeholder="http://127.0.0.1:8888/callback?code=…" autocomplete="off" spellcheck="false"></div>
+          </div>
+          <div class="save-row"><button onclick="spotifyFinish()">Finish</button><span class="msg" id="msg-sp-finish"></span></div>
+        </div>
+        <div id="sp-connected" hidden>
+          <div class="row"><div class="field" style="flex: 0 1 320px"><span>Play on this speaker when nothing is playing</span><select data-key="spotify_device" id="sp-device"><option value="">Whichever was used last</option></select></div></div>
+          <p class="hint" style="margin-top:0">Only speakers with Spotify open (or used recently) appear here. You can also say “Hey Jarvis, play jazz on the TV”.</p>
+          <div class="save-row">
+            <button class="primary" onclick="saveSection('spotify')">Save</button>
+            <button onclick="spotifyDisconnect()">Disconnect</button>
+            <span class="msg" id="msg-sp-device"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ======================= WEATHER ======================= -->
     <section id="weather">
       <h2>Weather</h2>
@@ -326,6 +360,7 @@
           <li><b>Data saver: on / off</b> (top of the live page) — for phone hotspots and mobile data. The grid uses small pictures refreshed every ~5 seconds (about 0.1 GB an hour instead of 0.4–1.3 GB), and full screen shows one sharp picture a second instead of live video. It's remembered per device, so turning it on on your phone doesn't affect your computer.</li>
           <li><b>Asking Claude</b> — if “ask Claude” is on under <a href="#telegram">Telegram</a>, any message Sentinel doesn't understand (“was it busy out back this afternoon?”, “did Abi leave before or after Steph got home?”) is answered by Claude from the last 2 days of events. You'll see “🤔 Let me think…” first; answers take about 10 seconds. It uses your Claude subscription, up to the daily limit you set.</li>
           <li><b>Talking to Sentinel (“Hey Jarvis”)</b> — if the voice assistant is on under <a href="#audio">Audio</a>, say “Hey Jarvis”, wait for the rising chime, then ask: “who's home?”, “when did Abi get home?”, “did anyone come by today?”, “what's the weather?”, “what time is it?”. It answers out loud. Anything else goes to Claude (“Let me think…”) if that's on. To change a setting (“enable messages”) it asks first and only does it if you say “yes”. After each answer it chimes again and listens for about 5 seconds, so you can ask another question without “Hey Jarvis”. A falling chime means it has stopped listening; say “Hey Jarvis” to start again. Speak toward the microphone; from across the room, speak up a little.</li>
+          <li><b>Music (Spotify)</b> — once Spotify is connected under <a href="#spotify">Spotify</a>: “Hey Jarvis, play some jazz”, “play Tom Petty”, “play Free Fallin'”, “pause”, “skip”, “go back”, “volume up / down”, “volume 40”, “what's playing?”, “play on the TV”. The music plays on whichever Spotify device is playing (or the one picked under Spotify); if none is, open Spotify on the TV or your phone first. The bar at the bottom of the live page shows the song and has ⏮ ⏯ ⏭ and volume buttons.</li>
           <li><b>Weather</b> — with 3 cameras the grid has a spare space, which shows the weather (set your town or ZIP under <a href="#weather">Weather</a>). On a phone it's under the cameras. When it's windy it warns you to expect motion clips from trees.</li>
           <li><b>⟳ Reload</b> (top of the live page) — reloads the page, for TVs and browsers without F5. Open pages also reload themselves after Sentinel is updated.</li>
           <li><b>Signing in a TV (QR code)</b> — on a big screen the sign-in page shows a QR code. Scan it with your phone's camera (the phone must already be signed in), check the 4-letter code matches, and tap <b>Yes</b>. The TV stays signed in, even after Sentinel restarts. If the phone says the screen is on a <i>different internet connection</i>, only approve if you're standing in front of it.</li>
@@ -417,6 +452,7 @@
                   "reconnect_interval_seconds", "feed_fps", "web.max_fps", "web.show_zones"],
       audio: ["volume", "speech_speed", "voice_id", "audio_output", "voice_enabled", "voice_follow_up"],
       access: ["remote_web_url", "remote_rdp_user"],
+      spotify: ["spotify_client_id", "spotify_device"],
       weather: ["weather_location", "weather_units"],
       detection: ["object_detection_enabled", "household_ask_enabled", "household_ask_per_day", "vehicle_types_enabled", "alert_mode", "detector_model", "inference_device", "object_alert_cooldown"]
     };
@@ -501,6 +537,44 @@
       catch (e) { say("msg-telegram", e.message, false); }
     }
 
+    // ---------------- spotify ----------------
+    async function loadSpotify() {
+      var now = await api("/api/spotify").catch(function() { return {}; });
+      $("sp-connect").hidden = !!now.connected;
+      $("sp-connected").hidden = !now.connected;
+      $("sp-state").textContent = now.connected ? "connected ✓" : now.configured ? "not connected yet" : "enter the Client ID first";
+      if (!now.connected) return;
+      var d = await api("/api/spotify/devices").catch(function() { return { devices: [] }; });
+      var sel = $("sp-device"), want = settings && settings.values.spotify_device || "";
+      sel.innerHTML = '<option value="">Whichever was used last</option>';
+      var names = d.devices.map(function(x) { return x.name; });
+      if (want && names.indexOf(want) < 0) names.push(want);
+      names.forEach(function(n) { var o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o); });
+      sel.value = want;
+    }
+
+    async function spotifyConnect() {
+      try {
+        var r = await api("/api/spotify/login", {});
+        window.open(r.url, "_blank");
+        say("msg-sp-connect", "Sign in in the new tab…", true);
+        var tries = 0, timer = setInterval(async function() {  // finished on the PC by itself?
+          var now = await api("/api/spotify").catch(function() { return {}; });
+          if (now.connected || ++tries > 200) { clearInterval(timer); if (now.connected) { say("msg-sp-connect", "Connected!", true); loadSpotify(); } }
+        }, 3000);
+      } catch (e) { say("msg-sp-connect", e.message, false); }
+    }
+
+    async function spotifyFinish() {
+      try { await api("/api/spotify/finish", { url: $("sp-paste").value }); $("sp-paste").value = ""; say("msg-sp-finish", "Connected!", true); loadSpotify(); }
+      catch (e) { say("msg-sp-finish", e.message, false); }
+    }
+
+    async function spotifyDisconnect() {
+      try { await api("/api/spotify/disconnect", {}); say("msg-sp-device", "Disconnected", true); loadSpotify(); }
+      catch (e) { say("msg-sp-device", e.message, false); }
+    }
+
     async function changePassword() {
       if ($("pw-new").value !== $("pw-new2").value) { say("msg-pw", "New passwords don't match", false); return; }
       try {
@@ -513,6 +587,7 @@
     async function loadSettings() {
       settings = await api("/api/settings");
       fillForm();
+      loadSpotify();
     }
 
     // ---------------- cameras ----------------
