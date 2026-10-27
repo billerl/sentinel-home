@@ -209,6 +209,15 @@ class TestPresence(unittest.TestCase):
         self.assertEqual(self.changes[-1], ("left", "Luke's Sierra", 1240.0))  # last time it was seen
         self.assertIsNone(self.tracker.where_is(self.sierra))
 
+    def test_a_missed_scan_keeps_the_spot(self):
+        self.scan([])
+        for _ in range(3):
+            self.scan([self.BOX])
+        self.scan([])  # the night detector missed it once
+        self.assertEqual([p.box for p in self.tracker.spots(self.cam.host)], [self.BOX])
+        self.scan([]); self.scan([])
+        self.assertEqual(self.tracker.spots(self.cam.host), [])  # three misses: it left
+
     def test_cars_already_parked_at_start_did_not_arrive(self):
         self.scan([self.BOX]); self.scan([self.BOX])
         self.assertEqual(self.changes, [])

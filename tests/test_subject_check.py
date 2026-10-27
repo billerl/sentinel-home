@@ -125,6 +125,18 @@ class TestParkedAndDoors(TestPipeline):
             self.p._handle_detections([Detection("car", 0.8, (x, 150, 200, 120))], GREY, 2010.0 + i)
         self.assertEqual(self.events, ["🛻 Luke's Truck is leaving the Garage."])  # named by its spot
 
+    def test_headlights_on_a_parked_car_the_last_scan_missed(self):
+        from sentinel.engine.household import Parked
+        spot = (912, 233, 366, 476)
+        self.park((spot, 4))
+        self.p._detections.presence.spots = lambda key: [Parked(spot, 0, 0, seen=5, missed=1, confirmed=True, vehicle_id=4)]
+        merged = (528, 220, 746, 490)  # at night the detector sometimes boxes both parked cars as one "truck"
+        frames = [[spot], [spot], [merged], [merged, spot], [merged]]
+        big = np.zeros((720, 1280, 3), np.uint8)
+        for i, boxes in enumerate(frames):
+            self.p._handle_detections([Detection("car", 0.6, b) for b in boxes], big, 2000.0 + i)
+        self.assertEqual(self.events, [])
+
     def test_tracker_hopping_to_the_next_parked_car_is_not_driving(self):
         a, b = (100, 150, 200, 120), (280, 150, 200, 120)
         self.park((a, None), (b, None))

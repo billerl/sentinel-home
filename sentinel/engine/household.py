@@ -610,9 +610,11 @@ class PresenceTracker:
             return self._home_except(None)
 
     def spots(self, camera_key: str) -> List[Parked]:
-        """Spots where the last check saw a parked car (named or not, confirmed or not)."""
+        """Spots with a parked car (named or not, confirmed or not). Includes cars the last check or two
+        missed: at night a parked truck scores 0.3-0.6, so scans at 0.45 often miss it, and that let
+        passing headlights make it "drive past" (2026-10-27 19:17). Gone only after LEAVE_SCANS misses."""
         with self._lock:
-            return [p for p in self.parked.get(camera_key, []) if not p.missed]
+            return list(self.parked.get(camera_key, []))
 
     def _parked_elsewhere(self, p: "Parked") -> bool:
         """Is p's car also in another (announced) parking spot right now?"""
