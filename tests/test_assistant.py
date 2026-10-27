@@ -18,6 +18,19 @@ def _ok(result="It was quiet out back."):
                                  stderr="")
 
 
+class TestVoiceName(unittest.TestCase):
+    def test_voice_prompt_uses_the_wake_word_name(self):
+        with mock.patch.object(am, "find_claude", return_value="/usr/bin/claude"):
+            calls = []
+            a = Assistant({"assistant_enabled": True, "voice_name": "Jezebel"},
+                          run=lambda cmd, **kw: calls.append(cmd) or _ok())
+            a.ask("hi", "DATA", voice=True)
+            system = calls[0][calls[0].index("--system-prompt") + 1]
+            self.assertIn("You are Jezebel,", system)
+            a.ask("hi", "DATA")
+            self.assertNotIn("Jezebel", calls[1][calls[1].index("--system-prompt") + 1])
+
+
 class TestAssistant(unittest.TestCase):
     def setUp(self):
         self.calls = []

@@ -107,7 +107,8 @@ def normalise(audio: np.ndarray, peak: float = 0.9) -> np.ndarray:
 def clean_transcript(segments) -> str:
     """Whisper segments -> the words actually said (noise segments and stock inventions dropped)."""
     words = " ".join(s.text.strip() for s in segments if s.no_speech_prob <= NO_SPEECH_MAX).strip()
-    words = re.sub(r"^\W*(hey|hi|okay|ok)?,?\s*(jarvis|travis|service)\b[\s,.!]*", "", words, flags=re.IGNORECASE)
+    words = re.sub(r"^\W*(hey|hi|okay|ok)?,?\s*(jarvis|travis|service|jezebel|jezabel|jessabelle|jess a bell)\b[\s,.!]*",
+                   "", words, flags=re.IGNORECASE)
     if re.sub(r"[^a-z ]", "", words.lower()).strip() in HALLUCINATIONS:
         return ""
     return words.strip()
@@ -167,7 +168,8 @@ class VoiceAssistant:
         self._noise = 0.003
         self._wake = None
         self._wake_name = WAKE_MODEL
-        # Trial wake word (setting voice_trial_model): listens alongside, only logs its scores.
+        # Second wake word (setting voice_trial_model): logs its scores, and also wakes the assistant
+        # when voice_trial_wakes is on (at voice_trial_threshold) - "Jezebel" next to "Hey Jarvis".
         self._trial_name = ""
         self._trial_peak = 0.0
         self._whisper = None
@@ -297,15 +299,21 @@ class VoiceAssistant:
         pcm = (np.clip(audio * self._gain(), -1, 1) * 32767).astype(np.int16)
         scores = self._wake.predict(pcm)
         score = float(scores.get(self._wake_name, 0.0))
+        word = self._wake_name
         if self._trial_name:
-            self._track_trial(float(scores.get(self._trial_name, 0.0)), score)
+            trial = float(scores.get(self._trial_name, 0.0))
+            self._track_trial(trial, score)
+            if self.settings.get("voice_trial_wakes") and trial >= float(self.settings.get("voice_trial_threshold", 0.45)) \
+                    and trial > score:
+                score, word = 1.0, self._trial_name
         if score >= self._threshold():
             while not self._queue.empty():
                 self._queue.get_nowait()
             self._ignore_until = time.time() + 5.0  # until the chime has played
             self._mode = "listen"  # keep recording: people say "Hey Jarvis, who's home?" in one breath
-            app_logger.log("info", "voice_wake", score=round(score, 2), noise=round(self._noise, 4),
+            app_logger.log("info", "voice_wake", score=round(score, 2), word=word, noise=round(self._noise, 4),
                            component="voice", action="wake")
+            self._trial_peak, self._trial_main = 0.0, 0.0  # this utterance woke it; don't log it as a near-miss
             threading.Thread(target=self._conversation, name="voice-talk", daemon=True).start()
 
     def _track_trial(self, score: float, main_score: float) -> None:

@@ -14,6 +14,7 @@ project instructions or memory are loaded. Calls are capped per day.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -149,7 +150,9 @@ class Assistant:
         model = str(self.settings.get("assistant_model") or "sonnet")
         started = time.time()
         try:
-            r = self._run(build_command(claude, prompt, model, VOICE_SYSTEM_PROMPT if voice else SYSTEM_PROMPT),
+            name = re.sub(r"[^A-Za-z' -]", "", str(self.settings.get("voice_name") or "Jarvis"))[:20] or "Jarvis"
+            system = VOICE_SYSTEM_PROMPT.replace("You are Jarvis,", f"You are {name},") if voice else SYSTEM_PROMPT
+            r = self._run(build_command(claude, prompt, model, system),
                           capture_output=True, text=True,
                           timeout=TIMEOUT_SECONDS, env=_env(), cwd=self._work_dir())
             out = r.stdout or ""

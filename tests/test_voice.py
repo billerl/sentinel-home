@@ -57,6 +57,9 @@ class TestTranscript(unittest.TestCase):
     def test_drops_noise_segments_and_wake_word(self):
         self.assertEqual(clean_transcript([seg(" Hey Jarvis, who's home?"), seg(" Thank you.", 0.8)]), "who's home?")
 
+    def test_new_wake_word_is_dropped_too(self):
+        self.assertEqual(clean_transcript([seg(" Jezebel, what's the weather?")]), "what's the weather?")
+
     def test_whisper_inventions_are_nothing(self):
         for text in (" You", " Thank you very much.", " Thanks for watching!"):
             self.assertEqual(clean_transcript([seg(text)]), "", text)
@@ -200,6 +203,26 @@ class TestTrialWakeWord(unittest.TestCase):
         self.assertEqual(trial[0].kwargs["score"], 0.7)
         self.assertTrue(trial[0].kwargs["would_wake"])
         self.assertEqual(va._mode, "wake")  # the trial word never starts a conversation
+
+
+class TestSecondWakeWord(unittest.TestCase):
+    def run_chunk(self, settings, jarvis, jezebel):
+        va = VoiceAssistant(settings, lambda t, s: VoiceReply("x"), FakeSpeaker())
+        va._wake_name, va._trial_name, va._wake_reset = "hey_jarvis_v0.1", "jezebel", False
+        va._wake = mock.Mock(predict=mock.Mock(return_value={"hey_jarvis_v0.1": jarvis, "jezebel": jezebel}))
+        with mock.patch.object(v.threading, "Thread") as thread, mock.patch.object(v.app_logger, "log") as log:
+            va._on_chunk(np.zeros(v.CHUNK, np.float32))
+        woke = [c for c in log.call_args_list if c.args[1] == "voice_wake"]
+        return thread.called, woke[0].kwargs["word"] if woke else None
+
+    def test_either_word_wakes_when_on(self):
+        on = {"voice_trial_wakes": True, "voice_trial_threshold": 0.45}
+        self.assertEqual(self.run_chunk(on, 0.0, 0.5), (True, "jezebel"))
+        self.assertEqual(self.run_chunk(on, 0.9, 0.0), (True, "hey_jarvis_v0.1"))
+        self.assertEqual(self.run_chunk(on, 0.0, 0.4), (False, None))
+
+    def test_log_only_when_off(self):
+        self.assertEqual(self.run_chunk({}, 0.0, 0.9), (False, None))
 
 
 class TestKokoro(unittest.TestCase):
