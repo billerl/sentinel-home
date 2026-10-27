@@ -8,3 +8,4 @@ openvino>=2024.0  # object detection (CPU); model in models/detector/
 segno>=1.6  # QR code for signing in a TV from a phone (pure Python, BSD)
 faster-whisper>=1.2  # voice assistant: speech to text (CPU)
 openwakeword>=0.4  # voice assistant: "Hey Jarvis" wake word
+kokoro-onnx>=0.6  # most natural spoken replies ("Heart" voice); model in models/kokoro/

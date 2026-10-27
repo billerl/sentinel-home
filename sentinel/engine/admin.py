@@ -61,9 +61,13 @@ def _place(value: Any) -> str:
 
 
 def available_voices(models_dir: str = "models") -> List[str]:
-    return sorted(
-        os.path.splitext(os.path.basename(p))[0] for p in glob.glob(os.path.join(models_dir, "*.onnx"))
-    )
+    piper = sorted(os.path.splitext(os.path.basename(p))[0] for p in glob.glob(os.path.join(models_dir, "*.onnx")))
+    kokoro = []
+    if os.path.exists(os.path.join(models_dir, "kokoro", "kokoro-v1.0.onnx")):
+        from sentinel.audio.alert_system import KOKORO_VOICES
+
+        kokoro = [f"kokoro:{name}" for name, _label in KOKORO_VOICES]
+    return kokoro + piper
 
 
 def _spotify_client_id(value: Any) -> str:

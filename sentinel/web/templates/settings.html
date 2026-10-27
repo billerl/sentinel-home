@@ -498,12 +498,22 @@
       sel.innerHTML = "";
       var opt0 = document.createElement("option"); opt0.value = ""; opt0.textContent = "System default"; sel.appendChild(opt0);
       settings.voices.forEach(function(name) {
-        var o = document.createElement("option"); o.value = name; o.textContent = name; sel.appendChild(o);
+        var o = document.createElement("option"); o.value = name; o.textContent = voiceLabel(name); sel.appendChild(o);
       });
       if (v.voice_id && settings.voices.indexOf(v.voice_id) < 0) {
         var cur = document.createElement("option"); cur.value = v.voice_id; cur.textContent = v.voice_id + " (current)"; sel.appendChild(cur);
       }
       sel.value = v.voice_id || "";
+    }
+
+    var KOKORO_LABELS = { af_heart: "Heart (US woman, most natural)", af_bella: "Bella (US woman)", am_michael: "Michael (US man)",
+                          bf_emma: "Emma (British woman)", bm_george: "George (British man)", bm_fable: "Fable (British man)" };
+    function voiceLabel(name) {
+      if (name.indexOf("kokoro:") === 0) return "Kokoro – " + (KOKORO_LABELS[name.slice(7)] || name.slice(7));
+      var m = /^([a-z]{2})_([A-Z]{2})-(.+)-(low|medium|high)$/.exec(name);  // en_GB-aru-medium -> Aru (British, Piper)
+      if (!m) return name;
+      var who = m[3].charAt(0).toUpperCase() + m[3].slice(1);
+      return "Piper – " + who + " (" + ({ GB: "British", US: "US" }[m[2]] || m[2]) + ", faster)";
     }
 
     function readField(key) {

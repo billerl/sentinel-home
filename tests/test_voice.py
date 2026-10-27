@@ -188,6 +188,73 @@ class TestSoundOutput(unittest.TestCase):
             self.assertEqual(popen.call_args.args[0][0], "aplay", (output, server, rc))
 
 
+class TestKokoro(unittest.TestCase):
+    def test_sentences(self):
+        from sentinel.audio.alert_system import split_sentences
+
+        self.assertEqual(split_sentences("Steph is home. Abi left at 7:30 am! Anything else?"),
+                         ["Steph is home.", "Abi left at 7:30 am!", "Anything else?"])
+        self.assertEqual(split_sentences(""), [])
+
+    def make(self):
+        import threading
+        from sentinel.audio.alert_system import AudioAlertSystem
+
+        audio = AudioAlertSystem.__new__(AudioAlertSystem)
+        audio._play_lock, audio._output, audio._volume, audio._speech_rate = threading.Lock(), "speakers", 0.5, 220
+        audio.piper_voice, audio.tts_engine = None, None
+        audio.kokoro_voice = "af_heart"
+        made = []
+
+        class FakeKokoro:
+            def create(self, text, voice, speed, lang):
+                made.append((text, voice, round(speed, 2), lang))
+                return np.full(2400, 0.5, np.float32), 24000
+
+        audio.kokoro = FakeKokoro()
+        return audio, made
+
+    def test_streams_every_sentence_into_one_player(self):
+        audio, made = self.make()
+        written = []
+        player = mock.MagicMock()
+        player.stdin.write.side_effect = written.append
+        with mock.patch.object(audio, "_open_raw_player", return_value=player) as opened:
+            self.assertTrue(audio.speak("One. Two. Three."))
+        opened.assert_called_once_with(24000)
+        self.assertEqual([m[0] for m in made], ["One.", "Two.", "Three."])
+        self.assertEqual(made[0][1:], ("af_heart", 1.0, "en-us"))
+        self.assertEqual(len(written), 3)
+        self.assertEqual(np.frombuffer(written[0], np.int16)[0], int(0.5 * 0.5 * 32767))  # volume applied
+
+    def test_falls_back_to_piper_when_kokoro_fails(self):
+        audio, _ = self.make()
+        audio.kokoro.create = mock.Mock(side_effect=RuntimeError("boom"))
+        audio.piper_voice = object()
+        with mock.patch.object(audio, "_speak_piper", return_value=True) as piper:
+            self.assertTrue(audio.speak("Hello."))
+        piper.assert_called_once_with("Hello.")
+
+    def test_british_voices_use_british_english(self):
+        audio, made = self.make()
+        audio.kokoro_voice = "bf_emma"
+        with mock.patch.object(audio, "_open_raw_player", return_value=mock.MagicMock()):
+            audio.speak("Garage.")
+        self.assertEqual(made[0][3], "en-gb")
+
+    def test_kokoro_voices_listed_only_when_installed(self):
+        from sentinel.engine import admin
+
+        d = tempfile.mkdtemp()
+        try:
+            self.assertFalse(any(v.startswith("kokoro:") for v in admin.available_voices(d)))
+            os.makedirs(os.path.join(d, "kokoro"))
+            open(os.path.join(d, "kokoro", "kokoro-v1.0.onnx"), "w").close()
+            self.assertIn("kokoro:af_heart", admin.available_voices(d))
+        finally:
+            shutil.rmtree(d)
+
+
 class TestEngineVoiceAnswers(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="sentinel-voice-")

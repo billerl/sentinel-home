@@ -59,3 +59,4 @@ models/.ov_cache/
 # Speech recognition model (see readme: voice assistant)
 models/whisper/
 models/wakeword/
+models/kokoro/

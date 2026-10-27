@@ -1,10 +1,13 @@
 """
 Audio alert system for Sentinel Home.
-Supports Piper TTS (high-quality neural) with pyttsx3 as fallback.
+Supports Kokoro (most natural; voice ids "kokoro:<name>"), Piper TTS (fast neural)
+and pyttsx3 as the last fallback.
 """
 
 import io
 import os
+import queue
+import re
 import time
 import wave
 import threading
@@ -21,6 +24,25 @@ from sentinel.constants import (
     DEFAULT_VOLUME,
     MOTION_TIMEOUT,
 )
+
+
+KOKORO_DIR = os.path.join("models", "kokoro")
+# A few of Kokoro's voices: (id, label). The family picked Heart after a side-by-side listen (2026-10-27).
+KOKORO_VOICES = (("af_heart", "Heart (US woman, most natural)"), ("af_bella", "Bella (US woman)"),
+                 ("am_michael", "Michael (US man)"), ("bf_emma", "Emma (British woman)"),
+                 ("bm_george", "George (British man)"), ("bm_fable", "Fable (British man)"))
+KOKORO_RATE = 24000
+
+
+def kokoro_available() -> bool:
+    return os.path.exists(os.path.join(KOKORO_DIR, "kokoro-v1.0.onnx")) and \
+        os.path.exists(os.path.join(KOKORO_DIR, "voices-v1.0.bin"))
+
+
+def split_sentences(text: str) -> List[str]:
+    """Kokoro is ~2x faster than real time here: speak sentence 1 while sentence 2 is made."""
+    parts = re.split(r"(?<=[.!?])\s+", (text or "").strip())
+    return [p for p in parts if p]
 
 
 @dataclass
@@ -44,10 +66,15 @@ class AudioAlertSystem:
         self._volume: float = settings.get("volume", DEFAULT_VOLUME)
         self._play_lock = threading.Lock()  # one sound at a time: alerts never talk over the voice assistant
         self.busy = False  # set by the voice assistant during a conversation: alerts stay quiet
+        self.kokoro = None
+        self.kokoro_voice = ""
         self._output: str = settings.get("audio_output", "speakers")
 
-        # Try Piper first (neural, natural-sounding)
+        # Try Piper first (neural, natural-sounding); Kokoro on top when one of its voices is chosen
         self._try_init_piper(settings)
+        self._add_kokoro_voices()
+        if str(settings.get("voice_id") or "").startswith("kokoro:"):
+            self._load_kokoro(settings["voice_id"])
 
         # Fall back to pyttsx3 if no Piper models found
         if not self.piper_voice:
@@ -88,6 +115,93 @@ class AudioAlertSystem:
         except Exception as e:
             print(f"Error loading Piper model '{selected_id}': {e}")
             self.piper_voice = None
+
+    # ------------------------------------------------------------------
+    # Kokoro (most natural; ~1.7 s to the first word for a two-sentence answer on this PC)
+    # ------------------------------------------------------------------
+
+    def _add_kokoro_voices(self) -> None:
+        if not kokoro_available():
+            return
+        for name, label in KOKORO_VOICES:
+            self.voices.append(VoiceInfo(id=f"kokoro:{name}", name=f"Kokoro – {label}"))
+            self.voice_ids.append(f"kokoro:{name}")
+
+    def _load_kokoro(self, voice_id: str) -> None:
+        try:
+            if self.kokoro is None:
+                import onnxruntime as ort
+                from kokoro_onnx import Kokoro
+
+                options = ort.SessionOptions()
+                options.intra_op_num_threads = 3  # leave cores for the cameras
+                session = ort.InferenceSession(os.path.join(KOKORO_DIR, "kokoro-v1.0.onnx"), options,
+                                               providers=["CPUExecutionProvider"])
+                self.kokoro = Kokoro.from_session(session, os.path.join(KOKORO_DIR, "voices-v1.0.bin"))
+            self.kokoro_voice = voice_id.split(":", 1)[1]
+            print(f"Kokoro TTS initialised with voice: {self.kokoro_voice}")
+        except Exception as e:  # missing package or files: keep using Piper
+            print(f"Kokoro unavailable ({e}); using Piper")
+            self.kokoro, self.kokoro_voice = None, ""
+
+    def _kokoro_speed(self) -> float:
+        # 220 is this household's setting and sounded right at Kokoro's normal pace
+        return max(0.6, min(1.6, float(self._speech_rate) / 220.0))
+
+    def _speak_kokoro(self, text: str) -> bool:
+        """Make each sentence while the previous one plays, into one player (no gaps)."""
+        chunks: "queue.Queue" = queue.Queue()
+        lang = "en-gb" if self.kokoro_voice.startswith("b") else "en-us"
+
+        def make() -> None:
+            try:
+                for sentence in split_sentences(text):
+                    audio, _rate = self.kokoro.create(sentence, voice=self.kokoro_voice, speed=self._kokoro_speed(),
+                                                      lang=lang)
+                    level = max(0.0, min(1.0, float(self._volume)))
+                    chunks.put((np.clip(audio * level, -1, 1) * 32767).astype(np.int16).tobytes())
+            except Exception as e:
+                print(f"Kokoro error: {e}")
+                chunks.put(e)
+            chunks.put(None)
+
+        threading.Thread(target=make, name="kokoro", daemon=True).start()
+        first = chunks.get()
+        if first is None or isinstance(first, Exception):
+            return False
+        with self._play_lock:
+            proc = self._open_raw_player(KOKORO_RATE)
+            try:
+                item = first
+                while item is not None and not isinstance(item, Exception):
+                    proc.stdin.write(item)
+                    proc.stdin.flush()
+                    item = chunks.get()
+            except (BrokenPipeError, OSError):
+                pass
+            finally:
+                try:
+                    proc.stdin.close()
+                    proc.wait(timeout=120)
+                except Exception:
+                    proc.kill()
+        return True
+
+    def _open_raw_player(self, rate: int):
+        server = self._remote_desktop_sound() if self._output == "remote" else None
+        if server:
+            return subprocess.Popen(["paplay", "--raw", "--format=s16le", f"--rate={rate}", "--channels=1"],
+                                    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                    env={"PULSE_SERVER": f"unix:{server}"})
+        return subprocess.Popen(["aplay", "-q", "-t", "raw", "-f", "S16_LE", "-r", str(rate), "-c", "1", "-"],
+                                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _speak(self, text: str) -> bool:
+        if self.kokoro is not None and self._speak_kokoro(text):
+            return True
+        if self.piper_voice:
+            return self._speak_piper(text)
+        return False
 
     def _load_piper_model(self, voice_id: str) -> None:
         """Load a Piper .onnx model by voice_id."""
@@ -162,9 +276,9 @@ class AudioAlertSystem:
 
         self.last_alert_time = current_time
 
-        if self.piper_voice:
+        if self.piper_voice or self.kokoro is not None:
             self._tts_thread = threading.Thread(
-                target=self._speak_piper,
+                target=self._speak,
                 args=(message,),
                 daemon=True,
             )
@@ -183,8 +297,8 @@ class AudioAlertSystem:
 
     def speak(self, text: str) -> bool:
         """Say something now and return when it's finished (voice assistant replies)."""
-        if self.piper_voice:
-            return self._speak_piper(text)
+        if self.piper_voice or self.kokoro is not None:
+            return self._speak(text)
         if self.tts_engine:
             try:
                 with self._play_lock:
@@ -302,7 +416,10 @@ class AudioAlertSystem:
 
         if "voice_id" in settings:
             new_id = settings["voice_id"]
-            if self.piper_voice is not None and new_id in self.voice_ids:
+            if str(new_id).startswith("kokoro:") and new_id in self.voice_ids:
+                self._load_kokoro(new_id)
+            elif self.piper_voice is not None and new_id in self.voice_ids:
+                self.kokoro, self.kokoro_voice = None, ""  # back to Piper (frees Kokoro's memory)
                 try:
                     self._load_piper_model(new_id)
                     print(f"Switched Piper voice to: {new_id}")
