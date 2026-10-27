@@ -326,6 +326,8 @@ class TestEngineVoiceAnswers(unittest.TestCase):
         self.assertEqual(reply.dictate("Make the music bar bigger."), "Got it, I've saved that for Claude.")
         self.assertIn("I've saved", self.ask("Note for Claude: add a snow alert.").text)
         self.assertIn("I've saved", self.ask("tell cloud that the garage camera is blurry").text)
+        self.assertEqual(self.ask("Take a note for Pause.").text, "Go ahead.")  # misheard "Claude" (2026-10-27)
+        self.assertEqual(self.ask("take a note for cloud").text, "Go ahead.")
         notes = open(self.engine.NOTES_FILE).read()
         self.assertIn("Make the music bar bigger.", notes)
         self.assertIn("add a snow alert", notes)

@@ -728,8 +728,10 @@ class Engine:
             self.voice = None
 
     NOTES_FILE = os.path.join(os.path.expanduser("~"), "Documents", "sentinel_home", "claude-notes.md")
+    # "for <one word>": Whisper hears "Claude" as "Pause", "cloud", "Klaus"... (2026-10-27), so any single
+    # word after "take a note for" counts as Claude rather than as the note.
     _NOTE = re.compile(r"^(?:please )?(?:(?:take|make|leave|write|save|add)(?: down)? (?:a |another )?note"
-                       r"(?: for (?:claude|cloud|clod|claud))?|note for (?:claude|cloud|clod|claud)|"
+                       r"(?: for [\w']+)?|note for (?:claude|cloud|clod|claud|klaus|claws|clause)|"
                        r"tell (?:claude|cloud) (?:that )?)[:,.]?\s*(.*)$", re.IGNORECASE)
 
     def save_claude_note(self, text: str) -> str:
