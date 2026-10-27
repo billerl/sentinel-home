@@ -11,7 +11,7 @@ import itertools
 import re
 import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote, urlparse
 
 import cv2
@@ -115,6 +115,7 @@ class Engine:
         self._command_offers: Dict[int, Tuple[str, str, float]] = {}  # "Do it" buttons under Claude's replies
         self._offer_ids = itertools.count(1)
         self.audio = self._init_audio()
+        self.voice = None  # "Hey Jarvis" listener (sentinel.audio.voice), when enabled
         self.frame_broker = None
         self.web_server = None
         self.cameras: Dict[str, CameraPipeline] = {}
@@ -286,6 +287,7 @@ class Engine:
             target=self._command_loop, name="telegram-commands", daemon=True
         )
         self._command_thread.start()
+        self._start_voice()
         app_logger.log(
             "info", "engine_started", cameras=list(self.cameras), component="engine", action="start"
         )
@@ -301,6 +303,7 @@ class Engine:
             self.detection_worker.stop()
         if self.presence is not None:
             self.presence.stop()
+        self._stop_voice()
         self.telegram.cleanup()
         self.recording_store.stop()
         if self.audio is not None:
@@ -446,9 +449,7 @@ class Engine:
 
     def answer_question(self, chat_id: str, text: str) -> None:
         """Reply to 'did anyone come by?'-style questions from the event history."""
-        from sentinel.engine.questions import _fmt_clock, answer_question, parse_question
-
-        from sentinel.engine.questions import household_question
+        from sentinel.engine.questions import _fmt_clock, household_question
 
         hq = household_question(text, self.household.vehicles())
         if hq is not None:
@@ -456,6 +457,23 @@ class Engine:
             app_logger.log("info", "question_answered", kind="household_" + hq.kind, component="engine",
                            action="answer_question")
             return
+        reply, photos = self.event_question_reply(text)
+        self.telegram.reply_to_chat(chat_id, reply)
+        for event in photos:
+            path = self.recording_store.event_snapshot_path(event)
+            if not path:
+                continue
+            try:
+                with open(path, "rb") as handle:
+                    jpeg = handle.read()
+            except OSError:
+                continue
+            self.telegram.send_photo(chat_id, jpeg, f"{_fmt_clock(event['ts'])} — {event['description']}")
+
+    def event_question_reply(self, text: str) -> Tuple[str, List[Dict[str, Any]]]:
+        """Answer text for an event question, and the events whose snapshots go with it."""
+        from sentinel.engine.questions import answer_question, parse_question
+
         names = {p.display_name: key for key, p in self.cameras.items()}
         q = parse_question(text, names.keys())
         keys = [names[n] for n in q.cameras] or None
@@ -472,19 +490,9 @@ class Engine:
         if self.detection_worker is None:
             reply = ("Note: object recognition is off, so I only know about sightings from before it was "
                      "turned off.\n\n" + reply)
-        self.telegram.reply_to_chat(chat_id, reply)
-        for event in photos:
-            path = store.event_snapshot_path(event)
-            if not path:
-                continue
-            try:
-                with open(path, "rb") as handle:
-                    jpeg = handle.read()
-            except OSError:
-                continue
-            self.telegram.send_photo(chat_id, jpeg, f"{_fmt_clock(event['ts'])} — {event['description']}")
         app_logger.log("info", "question_answered", period=q.period, groups=groups, cameras=q.cameras,
                        matches=len(events), component="engine", action="answer_question")
+        return reply, photos
 
     # ------------------------------------------------------ household vehicles (web)
     VEHICLE_KINDS = ("car", "sedan", "suv", "pickup", "van", "minivan", "motorcycle")
@@ -693,6 +701,90 @@ class Engine:
                     else self.telegram._commands_help_text())
         self.telegram.reply_to_chat(chat_id, f"(Claude couldn't help: {self.assistant.last_error}.)\n\n{fallback}")
 
+    # ------------------------------------------------------ voice ("Hey Jarvis")
+    VOICE_FEATURES = {"recording": "recording", "messages": "Telegram motion alerts", "clips": "clip uploads",
+                      "night_bug": "the night bug filter", "reconnect": "auto reconnect"}
+
+    def _start_voice(self) -> None:
+        if not self.settings.get("voice_enabled") or self.voice is not None:
+            return
+        if self.audio is None:
+            app_logger.log("warning", "voice_unavailable", error_message="the speaker volume is 0",
+                           component="voice", action="start")
+            return
+        try:
+            from sentinel.audio.voice import VoiceAssistant
+        except ImportError as e:  # faster-whisper / openwakeword not installed
+            app_logger.log("warning", "voice_unavailable", error_message=str(e), component="voice", action="start")
+            return
+        self.voice = VoiceAssistant(self.settings, self.answer_voice, self.audio)
+        self.voice.start()
+
+    def _stop_voice(self) -> None:
+        if self.voice is not None:
+            self.voice.stop()
+            self.voice = None
+
+    def _voice_toggle(self, changes: Dict[str, bool]):
+        from sentinel.audio.voice import VoiceReply
+
+        what = " and ".join(f"turn {'on' if on else 'off'} {self.VOICE_FEATURES.get(key, key)}"
+                            for key, on in changes.items())
+
+        def run() -> str:
+            applied = self.apply_feature_changes(changes, source="voice")
+            return "Done. " + ". ".join(applied) + "." if applied else "Nothing needed changing."
+
+        return VoiceReply(f"Should I {what}? Say yes or no.", run)
+
+    def answer_voice(self, text: str, say: Callable[[str], None]):
+        """What to say back to a spoken request: Sentinel's own answers first, then Claude (opt-in)."""
+        from sentinel.audio.voice import VoiceReply, to_speech
+        from sentinel.engine.assistant import split_command
+        from sentinel.engine.questions import _fmt_clock, household_question, is_question
+
+        plain = re.sub(r"\s+", " ", re.sub(r"[^\w\s'?:-]", " ", text)).strip()
+        low = plain.lower().rstrip("?")
+        app_logger.log("info", "voice_request", text=text[:200], component="voice", action="answer")
+        if re.fullmatch(r"(never ?mind|cancel|stop|nothing|no|forget it|no thanks)", low):
+            return VoiceReply("Okay.")
+        if re.search(r"\bwhat time is it\b|\bwhat'?s the time\b|\bwhat is the time\b", low):
+            return VoiceReply(f"It's {_fmt_clock(time.time())}.")
+        if re.search(r"\b(weather|temperature|how (hot|cold|warm)|rain\w*|snow\w*)\b", low) \
+                and self.settings.get("weather_location"):
+            w = self.weather.current()
+            if w.get("temp") is not None:
+                return VoiceReply(f"It's {w['temp']} degrees and {w.get('words', '').lower()} in {w.get('place')}. "
+                                  f"High of {w.get('high')}, low of {w.get('low')}, "
+                                  f"and a {w.get('rain_today')} percent chance of rain today.")
+        changes, _err = self.telegram._parse_feature_toggle_command(low)
+        if changes:
+            return self._voice_toggle(changes)
+        hq = household_question(low, self.household.vehicles())
+        if hq is not None:
+            return VoiceReply(to_speech(self.answer_household_question(hq)))
+        if is_question(low):
+            return VoiceReply(to_speech(self.event_question_reply(low)[0]))
+        if not self.assistant.enabled():
+            return VoiceReply("Sorry, I can't answer that one. Try asking who's home, or did anyone come by today.")
+        reply = None
+        if self.assistant.remaining_today() > 0:
+            say("Let me think.")
+            try:
+                reply = self.assistant.ask(text, self.assistant_context(), voice=True)
+            except Exception as e:
+                self.assistant.last_error = str(e)
+        else:
+            self.assistant.last_error = "today's limit of Claude questions is used up"
+        if not reply:
+            return VoiceReply(f"Sorry, I couldn't get an answer: {self.assistant.last_error}.")
+        text_part, command = split_command(reply)
+        spoken = to_speech(text_part or reply, max_lines=6, max_chars=600)
+        changes = self.telegram._parse_feature_toggle_command(command)[0] if command else None
+        if changes:
+            return VoiceReply(spoken + " Should I do that? Say yes or no.", self._voice_toggle(changes).confirm)
+        return VoiceReply(spoken)
+
     def answer_household_question(self, hq) -> str:
         from sentinel.engine.questions import VehicleStatus, answer_household
 
@@ -814,6 +906,12 @@ class Engine:
         return "\n".join(lines)
 
     def apply_feature_toggles(self, chat_id: str, changes: Dict[str, bool]) -> None:
+        applied = self.apply_feature_changes(changes, source="telegram")
+        self.telegram.reply_to_chat(
+            chat_id, "Applied:\n" + "\n".join(applied) if applied else "No changes applied."
+        )
+
+    def apply_feature_changes(self, changes: Dict[str, bool], source: str) -> List[str]:
         applied: List[str] = []
         for key, val in changes.items():
             if key == "recording":
@@ -838,10 +936,8 @@ class Engine:
                     for pipeline in self.cameras.values():
                         pipeline.start()  # no-op if its thread is still running
         self.settings_manager.save_settings(force=True)
-        app_logger.log("info", "remote_feature_toggle", changes=changes, component="engine", action="telegram")
-        self.telegram.reply_to_chat(
-            chat_id, "Applied:\n" + "\n".join(applied) if applied else "No changes applied."
-        )
+        app_logger.log("info", "remote_feature_toggle", changes=changes, component="engine", action=source)
+        return applied
 
     def _set_all_profiles(self, changes: Dict[str, Any]) -> None:
         with self._lock:
@@ -1075,6 +1171,9 @@ class Engine:
                 self.audio = self._init_audio()
             else:
                 self.audio.update_settings(self.settings)
+        if {"voice_enabled", "volume"} & cleaned.keys() and self._started:
+            self._stop_voice()
+            self._start_voice()
 
     def send_telegram_test(self) -> Tuple[bool, str]:
         if not self.telegram.enabled:

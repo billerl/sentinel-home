@@ -55,3 +55,7 @@ models/.ov_cache/
 # Signed-in web sessions (token hashes only)
 .web_sessions.json
 .web_sessions.json.tmp
+
+# Speech recognition model (see readme: voice assistant)
+models/whisper/
+models/wakeword/

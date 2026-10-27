@@ -13,6 +13,7 @@ import audioop
 from dataclasses import dataclass
 from typing import Dict, Any, List, Optional
 
+import numpy as np
 import pyttsx3
 
 from sentinel.constants import (
@@ -41,6 +42,8 @@ class AudioAlertSystem:
         self._tts_thread: Optional[threading.Thread] = None
         self._speech_rate: int = settings.get("speech_speed", DEFAULT_SPEECH_SPEED)
         self._volume: float = settings.get("volume", DEFAULT_VOLUME)
+        self._play_lock = threading.Lock()  # one sound at a time: alerts never talk over the voice assistant
+        self.busy = False  # set by the voice assistant during a conversation: alerts stay quiet
 
         # Try Piper first (neural, natural-sounding)
         self._try_init_piper(settings)
@@ -153,7 +156,7 @@ class AudioAlertSystem:
         if (current_time - self.last_alert_time) <= MOTION_TIMEOUT:
             return False
         # Don't stack TTS calls
-        if self._tts_thread and self._tts_thread.is_alive():
+        if self.busy or self._tts_thread and self._tts_thread.is_alive() or self._play_lock.locked():
             return False
 
         self.last_alert_time = current_time
@@ -177,8 +180,48 @@ class AudioAlertSystem:
 
         return False
 
-    def _speak_piper(self, text: str) -> None:
-        """Synthesise speech with Piper and play it via aplay (background thread)."""
+    def speak(self, text: str) -> bool:
+        """Say something now and return when it's finished (voice assistant replies)."""
+        if self.piper_voice:
+            return self._speak_piper(text)
+        if self.tts_engine:
+            try:
+                with self._play_lock:
+                    self.tts_engine.say(text)
+                    self.tts_engine.runAndWait()
+                return True
+            except Exception as e:
+                print(f"Error speaking: {e}")
+        return False
+
+    def tone(self, kind: str = "listen") -> None:
+        """A short chime: rising = "I'm listening", falling = "never mind"."""
+        notes = (660, 880) if kind == "listen" else (660, 440)
+        rate = 22050
+        t = np.arange(int(rate * 0.12)) / rate
+        fade = np.minimum(1.0, np.minimum(t, t[::-1]) / 0.01)
+        wave_ = np.concatenate([np.sin(2 * np.pi * f * t) * fade for f in notes]) * 0.5
+        pcm = (wave_ * max(0.0, min(1.0, float(self._volume))) * 32767).astype(np.int16)
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(rate)
+            w.writeframes(pcm.tobytes())
+        self._play(buf.getvalue())
+
+    def _play(self, wav_payload: bytes) -> None:
+        with self._play_lock:
+            proc = subprocess.Popen(
+                ["aplay", "-q", "-"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            proc.communicate(wav_payload, timeout=120)
+
+    def _speak_piper(self, text: str) -> bool:
+        """Synthesise speech with Piper and play it via aplay."""
         try:
             from piper.config import SynthesisConfig
             length_scale = 150.0 / max(self._speech_rate, 1)
@@ -191,16 +234,11 @@ class AudioAlertSystem:
                     text, wav_file, syn_config=syn_config, set_wav_format=True
                 )
 
-            wav_payload = self._apply_volume_to_wav(wav_buffer.getvalue(), self._volume)
-            proc = subprocess.Popen(
-                ["aplay", "-q", "-"],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            proc.communicate(wav_payload)
+            self._play(self._apply_volume_to_wav(wav_buffer.getvalue(), self._volume))
+            return True
         except Exception as e:
             print(f"Piper TTS playback error: {e}")
+            return False
 
     def _apply_volume_to_wav(self, wav_bytes: bytes, volume: float) -> bytes:
         """Scale WAV PCM amplitude to honor volume slider for Piper output."""

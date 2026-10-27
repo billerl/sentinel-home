@@ -44,6 +44,18 @@ Rules:
 - No markdown formatting (Telegram shows it raw); emoji are fine."""
 
 
+# Same rules, but the answer is spoken aloud by the PC's speakers ("Hey Jarvis").
+VOICE_SYSTEM_PROMPT = (SYSTEM_PROMPT
+    .replace("You are the Telegram helper of Sentinel", "You are Jarvis, the voice of Sentinel")
+    .replace("A family member sent a message", "A family member said something out loud")
+    .replace("1-4 short sentences (a short list is fine when they ask for several things)",
+             "1-3 short sentences that sound natural spoken aloud: no lists, no emoji, say times like \"3:40 pm\"")
+    .replace("Sentinel shows it as a button; it only runs if they tap it.", "Sentinel asks them out loud and only runs it if they say yes.")
+    .replace("- No markdown formatting (Telegram shows it raw); emoji are fine.",
+             "- Plain words only: your reply is read out by a text-to-speech voice. Whatever they said was "
+             "transcribed by speech recognition, so allow for misheard words (e.g. \"Abby\" = Abi)."))
+
+
 def find_claude(configured: str = "") -> Optional[str]:
     for path in (configured, shutil.which("claude") or "", os.path.expanduser("~/.local/bin/claude")):
         if path and os.path.isfile(path) and os.access(path, os.X_OK):
@@ -59,8 +71,8 @@ def _env() -> Dict[str, str]:
     return env
 
 
-def build_command(claude: str, prompt: str, model: str) -> List[str]:
-    return [claude, "-p", prompt, "--model", model, "--tools", "", "--system-prompt", SYSTEM_PROMPT,
+def build_command(claude: str, prompt: str, model: str, system_prompt: str = SYSTEM_PROMPT) -> List[str]:
+    return [claude, "-p", prompt, "--model", model, "--tools", "", "--system-prompt", system_prompt,
             "--max-turns", "1", "--output-format", "json", "--no-session-persistence",
             "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "user"]
 
@@ -114,7 +126,7 @@ class Assistant:
         os.makedirs(WORK_DIR, exist_ok=True)
         return WORK_DIR
 
-    def ask(self, text: str, context: str) -> Optional[str]:
+    def ask(self, text: str, context: str, voice: bool = False) -> Optional[str]:
         if not self.enabled():
             return None
         claude = find_claude(str(self.settings.get("assistant_claude_path") or ""))
@@ -124,11 +136,12 @@ class Assistant:
         if not self._take_slot():
             self.last_error = f"today's limit of {self._limit()} Claude questions is used up"
             return None
-        prompt = f"{context}\n\nMESSAGE FROM THE FAMILY:\n{text.strip()[:1000]}"
+        prompt = f"{context}\n\n{'SAID OUT LOUD' if voice else 'MESSAGE'} FROM THE FAMILY:\n{text.strip()[:1000]}"
         model = str(self.settings.get("assistant_model") or "sonnet")
         started = time.time()
         try:
-            r = self._run(build_command(claude, prompt, model), capture_output=True, text=True,
+            r = self._run(build_command(claude, prompt, model, VOICE_SYSTEM_PROMPT if voice else SYSTEM_PROMPT),
+                          capture_output=True, text=True,
                           timeout=TIMEOUT_SECONDS, env=_env(), cwd=self._work_dir())
             out = r.stdout or ""
             data = json.loads(out[out.find("{"):out.rfind("}") + 1]) if "{" in out else {}
@@ -147,7 +160,7 @@ class Assistant:
                                f"Claude didn't answer ({detail[:120] or 'exit ' + str(r.returncode)})")
         usage = data.get("usage") or {}
         app_logger.log("info" if ok else "warning", "assistant_answered" if ok else "assistant_failed",
-                       seconds=round(time.time() - started, 1), model=model,
+                       seconds=round(time.time() - started, 1), model=model, voice=voice,
                        input_tokens=sum(int(usage.get(k) or 0) for k in
                                         ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")),
                        output_tokens=usage.get("output_tokens"), error_message=None if ok else self.last_error,
