@@ -188,6 +188,20 @@ class TestSoundOutput(unittest.TestCase):
             self.assertEqual(popen.call_args.args[0][0], "aplay", (output, server, rc))
 
 
+class TestTrialWakeWord(unittest.TestCase):
+    def test_logs_one_peak_per_utterance_and_never_wakes(self):
+        va = VoiceAssistant({}, lambda t, s: VoiceReply("x"), FakeSpeaker())
+        va._trial_name = "jezebel"
+        with mock.patch.object(v.app_logger, "log") as log:
+            for score in (0.0, 0.2, 0.7, 0.4, 0.02, 0.0, 0.03):
+                va._track_trial(score, 0.01)
+        trial = [c for c in log.call_args_list if c.args[1] == "voice_trial_score"]
+        self.assertEqual(len(trial), 1)
+        self.assertEqual(trial[0].kwargs["score"], 0.7)
+        self.assertTrue(trial[0].kwargs["would_wake"])
+        self.assertEqual(va._mode, "wake")  # the trial word never starts a conversation
+
+
 class TestKokoro(unittest.TestCase):
     def test_sentences(self):
         from sentinel.audio.alert_system import split_sentences

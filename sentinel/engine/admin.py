@@ -145,6 +145,7 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "weather_location": _place,
     "assistant_enabled": _bool,
     "voice_enabled": _bool,
+    "voice_trial_model": lambda v: str(v or "").strip()[:200],
     "spotify_client_id": _spotify_client_id,
     "spotify_device": lambda v: str(v or "").strip()[:80],
     "voice_follow_up": _bool,

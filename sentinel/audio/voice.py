@@ -167,6 +167,9 @@ class VoiceAssistant:
         self._noise = 0.003
         self._wake = None
         self._wake_name = WAKE_MODEL
+        # Trial wake word (setting voice_trial_model): listens alongside, only logs its scores.
+        self._trial_name = ""
+        self._trial_peak = 0.0
         self._whisper = None
         self._whisper_lock = threading.Lock()
         self.last_error = ""
@@ -204,7 +207,12 @@ class VoiceAssistant:
 
         path = self._wake_path()
         self._wake_name = os.path.splitext(os.path.basename(path))[0]
-        self._wake = Model(wakeword_model_paths=[path])
+        paths = [path]
+        trial = str(self.settings.get("voice_trial_model") or "")
+        if trial and os.path.isfile(trial) and os.path.abspath(trial) != os.path.abspath(path):
+            self._trial_name = os.path.splitext(os.path.basename(trial))[0]
+            paths.append(trial)  # same Model: shares the audio features, so it costs little extra
+        self._wake = Model(wakeword_model_paths=paths)
         self._load_whisper()
 
     def _load_whisper(self):
@@ -287,7 +295,10 @@ class VoiceAssistant:
             self._wake.reset()
             self._wake_reset = False
         pcm = (np.clip(audio * self._gain(), -1, 1) * 32767).astype(np.int16)
-        score = float(self._wake.predict(pcm).get(self._wake_name, 0.0))
+        scores = self._wake.predict(pcm)
+        score = float(scores.get(self._wake_name, 0.0))
+        if self._trial_name:
+            self._track_trial(float(scores.get(self._trial_name, 0.0)), score)
         if score >= self._threshold():
             while not self._queue.empty():
                 self._queue.get_nowait()
@@ -296,6 +307,17 @@ class VoiceAssistant:
             app_logger.log("info", "voice_wake", score=round(score, 2), noise=round(self._noise, 4),
                            component="voice", action="wake")
             threading.Thread(target=self._conversation, name="voice-talk", daemon=True).start()
+
+    def _track_trial(self, score: float, main_score: float) -> None:
+        """Log the trial word's peak score once per utterance (anything that looked a bit like it)."""
+        if score >= 0.1:
+            self._trial_peak = max(self._trial_peak, score)
+            self._trial_main = max(getattr(self, "_trial_main", 0.0), main_score)
+        elif self._trial_peak and score < 0.05:
+            app_logger.log("info", "voice_trial_score", word=self._trial_name, score=round(self._trial_peak, 2),
+                           would_wake=self._trial_peak >= self._threshold(), noise=round(self._noise, 4),
+                           main_score=round(getattr(self, "_trial_main", 0.0), 2), component="voice", action="trial")
+            self._trial_peak, self._trial_main = 0.0, 0.0
 
     def _hear(self, wait: float = WAIT_FOR_SPEECH, fresh: bool = True) -> Optional[str]:
         """Record until the speaker stops, then transcribe. None = nothing said."""

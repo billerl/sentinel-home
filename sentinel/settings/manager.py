@@ -127,6 +127,7 @@ class SettingsManager:
             "spotify_client_id": "",
             "spotify_device": "",  # preferred speaker when none is playing
             "spotify_refresh_token": "",
+            "voice_trial_model": "",  # a second wake word that only logs its scores (trying "Jezebel")
             "voice_follow_up": True,  # after an answer, listen ~5 s for another question without the wake word
             "voice_wake_threshold": 0.5,
             "voice_gain": 4.0,
