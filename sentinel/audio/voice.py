@@ -41,8 +41,11 @@ NO_SPEECH_MAX = 0.6  # Whisper's own "this was noise" score; above it the words 
 # Whisper's favourite inventions on silence and noise.
 HALLUCINATIONS = {"you", "thank you", "thanks", "thank you very much", "thanks for watching", "bye", "okay", "so",
                   "thank you for watching", "the end", "hmm", "uh", "um"}
-PROMPT = ("Sentinel. Is Steph home? When did Abi get home? Did Lincoln, Luke or Karleigh leave? "
-          "Did anyone come by today? Any deliveries? Front door, back yard, garage, driveway. Enable messages.")
+# Words Whisper should expect. "Who's home?" must be here or the family names pull it to "Luke home"
+# (2026-10-27); with it, quiet "who's home" variants went from 7/24 to 15/24 right in a synthetic test.
+PROMPT = ("Sentinel. Who's home? Is Steph home? When did Abi get home? Did Lincoln, Luke or Karleigh leave? "
+          "Did anyone come by today? Any deliveries? What's the weather? Front door, back yard, garage, driveway. "
+          "Enable messages.")
 
 
 @dataclass
