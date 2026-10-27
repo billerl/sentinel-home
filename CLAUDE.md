@@ -92,10 +92,12 @@ runs `/clear`. Everything stays free and local except the existing opt-in Claude
      confirm with "yes".
    - Shell sessions older than 2026-10-25 aren't in the `audio` group: use `sg audio -c "..."`.
      The service already has it.
-2. **Spotify (user has Premium)** — "play some jazz", pause, skip, volume. Needs from the user: a
-   free app at developer.spotify.com, its **Client ID**, redirect `http://127.0.0.1:8888/callback`
-   (PKCE, no client secret). PC needs a playback device: librespot (free, open source, makes the
-   PC a Spotify Connect speaker) or the Spotify app.
+2. **Spotify** — DONE 2026-10-27 (handoff_summary.md). Tested live: "Play some Tom Petty" played on
+   Luke's Echo Dot in ~2 s. Not done: the PC itself as a speaker (librespot) once speakers are plugged
+   in; Bluetooth needs a USB adapter (the PC has none).
+   Also 2026-10-27: CPU unlocked (was 800 MHz; see handoff), Kokoro "Heart" voice, Jarvis answers
+   general questions. Jezebel wake word being trialled (`voice_trial_model`, log-only
+   `voice_trial_score` events); training workspace ~/Documents/sentinel_home/wakeword-training.
 3. **"Where is Abigail?" (Life360-like)** — Life360 has no official API; use **OwnTracks** (free
    phone app, HTTP mode posting to a Sentinel endpoint through the Cloudflare tunnel, per-person
    login). Named places (home/school/work), arrive/leave Telegram alerts, answers by Telegram and

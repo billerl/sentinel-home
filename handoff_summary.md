@@ -127,6 +127,22 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     `audio_output: remote` plays via `paplay` to /run/user/<uid>/pulse/native (the xrdp session), falling
     back to aplay. main.py ends with `os._exit(0)` after `engine.stop()`: CTranslate2/onnxruntime crashed in
     interpreter teardown and the core dump delayed a restart by a minute.
+  - Spotify (2026-10-27, `sentinel/engine/spotify.py`, settings `spotify_client_id`, `spotify_device`,
+    `spotify_refresh_token` [never sent to the browser]): Web API only, music plays on the family's own
+    Connect devices (Fire TV app, phones, "Luke's Echo Dot"). PKCE; one-shot listener on 127.0.0.1:8888 or
+    paste-the-address. `parse_music_command` handles play/pause/skip/previous/volume/now/move incl. Whisper's
+    "Place on Tom Petty". Search: exact artist -> artist, exact album, matching track, "some <genre>" ->
+    first non-Spotify-owned playlist (Spotify's editorial playlists are blocked for new apps since Nov 2024).
+    Dev-mode app: the account's email must be listed under User Management. Never run a second
+    SpotifyService on the live settings (a refresh can rotate the token and log the engine out; the dev
+    harness blanks it). Live page: now-playing bar (/api/spotify, polled 5 s; ticker on phones).
+  - Voices: Kokoro (`models/kokoro/`, kokoro-onnx, 3 threads) with voice ids `kokoro:<name>`; household uses
+    `kokoro:af_heart`. Sentences are synthesised while the previous one plays, into one raw aplay/paplay
+    stream (~1.3 s to the first word). Piper stays loaded as the fallback. By voice, Claude may answer
+    general questions (VOICE_SYSTEM_PROMPT); house facts still only from DATA. Claude limit 100/day.
+  - CPU: the Dell BIOS locked the i5-9500T at 800 MHz (unrecognised adapter). Root service
+    `sentinel-cpu-unlock` (source ~/Documents/sentinel_home/cpu-unlock/, not in this repo) re-enables turbo
+    via MSRs and caps RAPL at 30/40 W. Timings in older notes were measured at 800 MHz.
   - Presence flip-flops fixed (2026-10-25): a parked car partly hidden (box IoU 0.2–0.5, doors open) or
     covered by a person no longer counts as missing; an unknown parked car is named only after
     IDENTIFY_AGREE (2) confident checks in a row (it's re-checked every scan, so one lucky match used to

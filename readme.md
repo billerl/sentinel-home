@@ -41,8 +41,12 @@ viewer with a live camera grid, a DVR-style motion timeline, and a zone editor.
 - **Audio alerts (optional):** Piper neural TTS or pyttsx3. This is skipped entirely when the
   volume is 0. Sounds can play on the PC's speakers or in the open Remote Desktop session.
 - **Voice assistant (optional, "Hey Jarvis"):** wake word (openWakeWord) and speech recognition
-  (faster-whisper `base.en`) run on the PC's CPU; answers are spoken with Piper. Follow-up
-  questions without the wake word; settings change only after a spoken "yes".
+  (faster-whisper `base.en`) run on the PC's CPU; answers are spoken with Kokoro ("Heart" voice,
+  streamed sentence by sentence) or Piper. Follow-up questions without the wake word; settings
+  change only after a spoken "yes". With the opt-in Claude fallback it also answers general questions.
+- **Spotify (optional, Premium):** "play some jazz", pause, skip, volume, "what's playing?" by voice,
+  on the household's own Spotify devices (TV app, phones, Echo); a now-playing bar on the live page.
+  PKCE sign-in with your own free developer app's Client ID (redirect `http://127.0.0.1:8888/callback`).
 - **Structured logging:** JSON lines in `sentinel_events.log`, with passwords redacted, rotated
   at 10 MB.
 
@@ -66,6 +70,9 @@ mkdir -p models/detector && curl -L -o models/detector/yolox_tiny.onnx \
 # optional: delivery-van / vehicle-type recognition (CLIP ViT-B/32, MIT)
 mkdir -p models/classifier && curl -L -o models/classifier/clip_vit_b32_vision.onnx \
   https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model.onnx
+# optional: natural voice (Kokoro, Apache-2.0)
+mkdir -p models/kokoro && for f in kokoro-v1.0.onnx voices-v1.0.bin; do curl -L -o models/kokoro/$f \
+  https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/$f; done
 # optional: voice assistant speech recognition (faster-whisper base.en, MIT)
 venv/bin/python -c "from huggingface_hub import snapshot_download as d; d('Systran/faster-whisper-base.en', local_dir='models/whisper/base.en')"
 venv/bin/python -m sentinel.web.set_password     # web viewer login

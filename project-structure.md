@@ -30,6 +30,7 @@ sentinel-home/                         # repository root
     │   ├── objects.py                 # Detection worker, tracking, plain-English descriptions
     │   ├── household.py               # Family cars: photo references, recognition, who's home
     │   ├── weather.py                 # Weather tile data (Open-Meteo, server-side, cached 10 min)
+    │   ├── spotify.py                 # Spotify Web API: PKCE sign-in, play/pause/skip/volume, now playing, voice phrases
     │   ├── assistant.py               # Opt-in: Telegram messages Sentinel doesn't understand -> `claude -p`
     │   ├── questions.py               # Telegram questions ("did anyone come by?", "is Steph home?")
     │   ├── queries.py                 # "videos <when>" parsing
@@ -59,6 +60,7 @@ sentinel-home/                         # repository root
     │   ├── alert_system.py            # Piper TTS + `aplay` (or the Remote Desktop session via `paplay`),
     │   │                              #   pyttsx3 fallback (skipped when volume is 0), chimes
     │   └── voice.py                   # "Hey Jarvis": arecord -> band-pass -> openWakeWord -> faster-whisper
+    │                                  #   (+ an optional trial wake word that only logs scores)
     └── settings/
         └── manager.py                 # `settings.json` load/save (locked, atomic, owner-only)
 ```
