@@ -12,7 +12,8 @@ from unittest import mock
 import numpy as np
 
 from sentinel.audio import voice as v
-from sentinel.audio.voice import SpeechEnd, VoiceAssistant, VoiceReply, clean_transcript, is_yes, to_speech
+from sentinel.audio.voice import (SpeechEnd, VoiceAssistant, VoiceReply, clean_transcript, is_cancel, is_yes,
+                                  to_speech)
 from sentinel.engine import Engine
 from sentinel.settings.manager import SettingsManager
 
@@ -153,6 +154,36 @@ class TestConversation(unittest.TestCase):
             va._conversation()
         self.assertEqual(asked, ["who's home", "and the weather"])
         self.assertEqual(speaker.said[-1], "<cancel>")
+
+    def test_cancel_stops_without_answering(self):
+        asked = []
+        for heard in ("Cancel.", "so I told him the game was at, oh, Jezebel, cancel", "Never mind.", "nothing"):
+            speaker = FakeSpeaker()
+            va = VoiceAssistant({}, lambda text, say: asked.append(text) or VoiceReply("ok"), speaker)
+            with mock.patch.object(va, "_hear", side_effect=[heard, "who's home", None]):
+                va._conversation()
+            self.assertEqual(speaker.said, ["<listen>", "<cancel>"], heard)
+            self.assertEqual(va._mode, "wake")
+        self.assertEqual(asked, [])
+        said, _ = self.run_talk(["who's home", "never mind", "ignored"], VoiceReply("Steph is home."))
+        self.assertEqual(said, ["<listen>", "Steph is home.", "<listen>", "<cancel>"])  # a follow-up can cancel too
+
+    def test_what_is_and_isnt_cancel(self):
+        for text in ("Cancel", "forget it.", "Jezebel, never mind", "I'm not talking to you", "That's all.",
+                     "no thank you", "go to sleep"):
+            self.assertTrue(is_cancel(text), text)
+        for text in ("", None, "stop", "be quiet", "pause the music", "who's home", "how do I cancel the alarm?",
+                     "nothing on the front door?", "cancelled flights"):
+            self.assertFalse(is_cancel(text), text)
+
+    def test_cancel_drops_a_note(self):
+        saved = []
+        speaker = FakeSpeaker()
+        va = VoiceAssistant({}, lambda t, s: VoiceReply("Go ahead.", dictate=lambda n: saved.append(n) or "Got it."), speaker)
+        with mock.patch.object(va, "_hear", side_effect=["take a note for claude", "uh, never mind", None]):
+            va._conversation()
+        self.assertEqual(saved, [])
+        self.assertIn("Okay, cancelled.", speaker.said)
 
     def test_follow_ups_are_capped(self):
         with mock.patch.object(v, "MAX_TURNS", 3):

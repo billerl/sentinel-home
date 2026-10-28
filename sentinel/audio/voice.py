@@ -48,7 +48,8 @@ HALLUCINATIONS = {"you", "thank you", "thanks", "thank you very much", "thanks f
 # (2026-10-27); with it, quiet "who's home" variants went from 7/24 to 15/24 right in a synthetic test.
 PROMPT = ("Sentinel. Who's home? Is Steph home? When did Abi get home? Did Lincoln, Luke or Karleigh leave? "
           "Did anyone come by today? Any deliveries? What's the weather? Front door, back yard, garage, driveway. "
-          "Enable messages. Play some Tom Petty. Pause. Skip. Volume up. What's playing? Take a note for Claude.")
+          "Enable messages. Play some Tom Petty. Pause. Skip. Volume up. What's playing? Take a note for Claude. "
+          "Never mind. Cancel.")
 
 
 @dataclass
@@ -116,6 +117,17 @@ def clean_transcript(segments) -> str:
     if re.sub(r"[^a-z ]", "", words.lower()).strip() in HALLUCINATIONS:
         return ""
     return words.strip()
+
+
+# "Cancel" ends a conversation: at the end of anything (she woke by accident mid-chat, then heard
+# "...Jezebel, cancel"), or as the whole reply. Not "stop"/"be quiet": those stop the music.
+_CANCEL_AT_END = r"cancel|never ?mind|forget (it|that)|stop listening|go (back )?to sleep|(i'?m |i was )?not talking to you"
+_CANCEL_ALONE = r"nothing|that'?s all|no thanks?( you)?|not you|ignore (that|me)"
+
+
+def is_cancel(text: str) -> bool:
+    low = re.sub(r"\s+", " ", re.sub(r"[^a-z' ]", " ", (text or "").lower())).strip()
+    return bool(re.search(rf"(^|\s)({_CANCEL_AT_END})$", low) or re.fullmatch(_CANCEL_ALONE, low))
 
 
 def is_yes(text: str) -> bool:
@@ -376,8 +388,8 @@ class VoiceAssistant:
         self._say(reply.text)
         if reply.dictate is not None:
             self.speaker.tone("listen")
-            self._say(reply.dictate(self._hear(wait=DICTATE_WAIT, silence=DICTATE_SILENCE, max_len=DICTATE_MAX,
-                                               prompt=DICTATE_PROMPT) or ""))
+            said = self._hear(wait=DICTATE_WAIT, silence=DICTATE_SILENCE, max_len=DICTATE_MAX, prompt=DICTATE_PROMPT)
+            self._say("Okay, cancelled." if is_cancel(said) else reply.dictate(said or ""))
             return
         if reply.confirm is None:
             return
@@ -394,6 +406,10 @@ class VoiceAssistant:
             self._ignore_until = time.time() + 0.15  # the chime's echo
             text = self._hear(fresh=False)
             for turn in range(MAX_TURNS):
+                if text and is_cancel(text):
+                    app_logger.log("info", "voice_cancelled", component="voice", action="conversation")
+                    self.speaker.tone("cancel")
+                    return
                 if not text:  # silence, or noise Whisper made nothing of
                     if text == "" and turn == 0:
                         self._say("Sorry, I didn't catch that.")
