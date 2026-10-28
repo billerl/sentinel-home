@@ -77,10 +77,23 @@
       <p class="muted">Install it, then come back to this page.</p>
     </div>
 
+    <div class="card wait" id="inapp" hidden>
+      <b>Open this page in Safari first.</b> It's open inside another app (like the Google app), which can't
+      hand the setup over to OwnTracks. Tap <b>⋯</b> or the share button and choose <b>Open in Safari</b>
+      (or copy this page's address into Safari).
+    </div>
+
     <div class="card">
       <h2><span class="step">2</span>Connect it to Sentinel</h2>
+      <div class="ios">
+        <p class="muted label">iPhone — do this first</p>
+        <p>iPhones block setup links until you allow them: open OwnTracks, tap <b>ⓘ</b> (top left of the map) →
+          <b>Settings</b> → <b>Remote Control</b>, and switch on <b>Allow external configuration</b>.
+          Then come back here.</p>
+      </div>
       <p>Tap the button. OwnTracks opens and asks to import a configuration — tap <b>Import</b> (or OK).</p>
       <a class="btn" href="{{ v.link }}">Set up OwnTracks</a>
+      <p class="muted ios">If OwnTracks says “URI or file configuration not allowed”, the switch above is still off.</p>
       <details class="android">
         <summary>Button didn't open the app?</summary>
         <p>Download the setup file, then open it with OwnTracks (or in OwnTracks: menu → <i>Configuration management</i> →
@@ -141,6 +154,9 @@
     var android = /Android/.test(ua);
     if (ios) document.body.classList.add("platform-ios");
     else if (android) document.body.classList.add("platform-android");
+    // In-app browsers (Google app, Facebook, Instagram...) often can't open owntracks:// links.
+    if (ios && /\bGSA\/|FBAN|FBAV|Instagram|Snapchat|LinkedInApp|\bLine\//.test(ua))
+      document.getElementById("inapp").hidden = false;
   })();
   var code = {{ code|tojson }};
   var sharing = {{ v.sharing|tojson }};
