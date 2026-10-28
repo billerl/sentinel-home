@@ -18,7 +18,7 @@ import bcrypt
 from sentinel.engine.household import Vehicle
 from sentinel.engine.location import (
     CarLine, LocationQuestion, LocationStore, PersonView, answer_location, change_message, distance_m,
-    location_question, owntracks_config, owntracks_link, parse_coordinates,
+    location_question, owntracks_config, owntracks_link, parse_coordinates, resolve_map_link,
 )
 
 HOME = (41.1145, -83.1780)
@@ -128,11 +128,34 @@ class TestHelpers(unittest.TestCase):
             "https://www.google.com/maps/@41.15,-83.17,15z": (41.15, -83.17),
             "https://maps.apple.com/?ll=41.2,-83.1&q=Pin": (41.2, -83.1),
             "https://www.openstreetmap.org/?mlat=41.3&mlon=-83.2#map=17/41.3/-83.2": (41.3, -83.2),
+            "https://www.google.com/maps/search/41.108764,+-83.112597?entry=tts": (41.108764, -83.112597),
+            "https://maps.apple.com/place?coordinate=41.4,-83.3&name=Pin": (41.4, -83.3),
+            '41°06\'31.8"N 83°06\'45.4"W': (41.108833, -83.112611),
         }
         for text, want in cases.items():
             self.assertEqual(parse_coordinates(text), want, text)
         for text in ("", "the salon", "https://maps.app.goo.gl/abc123", "95, 10", "0, 0"):
             self.assertIsNone(parse_coordinates(text), text)
+
+    def test_short_share_links_are_followed_by_their_redirects_only(self):
+        import urllib.error
+        hops = {
+            "https://maps.app.goo.gl/abc123": "https://maps.google.com/?q=x&ftid=1",
+            "https://maps.google.com/?q=x&ftid=1": "https://www.google.com/maps/search/41.108764,+-83.112597?g_ep=1",
+        }
+        seen = []
+
+        def fake_open(req, timeout=None):
+            seen.append(req.full_url)
+            raise urllib.error.HTTPError(req.full_url, 302, "Found", {"Location": hops[req.full_url]}, None)
+
+        with patch("urllib.request.build_opener") as build:
+            build.return_value.open.side_effect = fake_open
+            self.assertEqual(resolve_map_link("Dropped pin https://maps.app.goo.gl/abc123"), (41.108764, -83.112597))
+            self.assertEqual(seen, list(hops))  # the google.com page itself is never fetched
+            seen.clear()
+            self.assertIsNone(resolve_map_link("https://example.com/maps/abc"))  # only map share hosts
+            self.assertEqual(seen, [])
 
     def test_distance(self):
         self.assertAlmostEqual(distance_m(*HOME, *SALON), 4730, delta=30)
@@ -361,6 +384,8 @@ class TestEndpoints(unittest.TestCase):
         self.assertTrue(ok)
         salon = next(p for p in self.engine.locations.places() if p.name == "the salon")
         self.assertEqual(salon.radius, 50)  # clamped
+        ok, msg = self.engine.place_save({"name": "school", "where": "41°08'00\"N 83°10'40\"W"})
+        self.assertEqual((ok, msg), (True, "Saved — about 1.3 miles north of home"))
         self.assertFalse(self.engine.place_save({"name": "home", "where": "41, -83"})[0])  # Home exists
         view = self.engine.people_view("http://localhost")
         self.assertEqual([p["name"] for p in view["people"]], ["Abigail", "Stephanie"])

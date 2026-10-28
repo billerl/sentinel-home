@@ -1071,7 +1071,7 @@ class Engine:
         else:
             self.locations.save_place(name, pin[0], pin[1])
             self.telegram.reply_to_chat(chat_id, f"📍 Saved “{name}”. I'll say when anyone arrives or leaves "
-                                                 "(change its size or alerts on the People page).")
+                                                 "(change its size or alerts on the Family page).")
         app_logger.log("info", "location_place_saved", source="telegram", component="engine", action="location")
         return True
 
@@ -1177,7 +1177,8 @@ class Engine:
         return True, "Done."
 
     def place_save(self, body: Dict[str, Any]) -> Tuple[bool, str]:
-        from sentinel.engine.location import DEFAULT_RADIUS_M, parse_coordinates
+        from sentinel.engine.location import (DEFAULT_RADIUS_M, _miles, bearing_word, distance_m,
+                                              parse_coordinates, place_phrase, resolve_map_link)
 
         name = self._clean_name(body.get("name"), 40)
         if not name:
@@ -1197,10 +1198,11 @@ class Engine:
                 return False, "That person's phone hasn't sent a location yet."
             coords = (fix["lat"], fix["lon"])
         elif body.get("where"):
-            coords = parse_coordinates(str(body["where"]))
+            coords = parse_coordinates(str(body["where"])) or resolve_map_link(str(body["where"]))
             if coords is None:
-                return False, ("I couldn't find coordinates in that. In Google Maps, press and hold the spot, "
-                               "then copy the numbers that appear (like 41.1145, -83.1780).")
+                return False, ("I couldn't find the spot in that. In Google Maps, press and hold the spot, "
+                               "then copy the numbers that appear (like 41.1145, -83.1780) — or tap Share on "
+                               "that dropped pin and paste its link. (A shared business link has no spot in it.)")
         elif existing is not None:
             coords = (existing.lat, existing.lon)
         if coords is None:
@@ -1210,9 +1212,18 @@ class Engine:
         except (TypeError, ValueError):
             return False, "Size must be a number of metres."
         alerts = body.get("alerts", existing.alerts if existing else True)
-        new_id = self.locations.save_place(name, coords[0], coords[1], radius, alerts is True, place_id)
+        self.locations.save_place(name, coords[0], coords[1], radius, alerts is True, place_id)
         app_logger.log("info", "location_place_saved", source="web", component="engine", action="location")
-        return True, str(new_id)
+        # Say where it landed, so a place that ended up in the wrong spot is obvious at once.
+        others = [p for p in self.locations.places() if p.name != name]
+        ref = next((p for p in others if p.name == "Home"), others[0] if others else None)
+        if ref is None:
+            return True, "Saved"
+        d = distance_m(ref.lat, ref.lon, coords[0], coords[1])
+        if d < 100:
+            return True, f"Saved — right at {place_phrase(ref)}"
+        return True, (f"Saved — about {_miles(d)} {bearing_word(ref.lat, ref.lon, coords[0], coords[1])} "
+                      f"of {place_phrase(ref)}")
 
     def place_delete(self, place_id: int) -> Tuple[bool, str]:
         if self.locations.place(place_id) is None:

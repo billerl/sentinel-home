@@ -19,7 +19,9 @@ import secrets
 import sqlite3
 import threading
 import time
+import urllib.error
 import urllib.parse
+import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -59,12 +61,14 @@ def bearing_word(lat1: float, lon1: float, lat2: float, lon2: float) -> str:
 
 def parse_coordinates(text: str) -> Optional[Tuple[float, float]]:
     """'41.11, -83.17' or a Google/Apple/OpenStreetMap link -> (lat, lon)."""
-    t = urllib.parse.unquote(str(text or ""))
+    t = urllib.parse.unquote_plus(str(text or ""))
+    n = r"(-?\d+(?:\.\d+)?)"
     patterns = (
-        r"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)",  # Google place links (the pin, not the view)
-        r"@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)",  # Google map view
-        r"[?&](?:q|ll|query|destination|center|daddr)=(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)",
-        r"[?&]mlat=(-?\d+(?:\.\d+)?)&mlon=(-?\d+(?:\.\d+)?)",  # openstreetmap.org
+        rf"!3d{n}!4d{n}",  # Google place links (the pin, not the view)
+        rf"@{n},{n}",  # Google map view
+        rf"/maps/(?:search|place|dir)/{n},\s*{n}",  # Google dropped-pin share links, once followed
+        rf"[?&](?:q|ll|sll|query|destination|center|daddr|coordinate)={n},\s*{n}",
+        rf"[?&]mlat={n}&mlon={n}",  # openstreetmap.org
         r"^\s*\(?(-?\d{1,2}(?:\.\d+)?)\s*[, ]\s*(-?\d{1,3}(?:\.\d+)?)\)?\s*$",  # plain numbers
     )
     for p in patterns:
@@ -73,6 +77,61 @@ def parse_coordinates(text: str) -> Optional[Tuple[float, float]]:
             lat, lon = float(m.group(1)), float(m.group(2))
             if -90 <= lat <= 90 and -180 <= lon <= 180 and (lat, lon) != (0.0, 0.0):
                 return lat, lon
+    return _parse_dms(t)
+
+
+def _parse_dms(text: str) -> Optional[Tuple[float, float]]:
+    """41°06'31.8"N 83°06'45.4"W (what Google Maps shows for a dropped pin)."""
+    part = r"(\d{1,3})\s*°\s*(?:(\d{1,2}(?:\.\d+)?)\s*['′]\s*)?(?:(\d{1,2}(?:\.\d+)?)\s*[\"″]\s*)?([NSEW])"
+    found = re.findall(part, text, re.IGNORECASE)
+    if len(found) != 2:
+        return None
+    vals = {}
+    for deg, mins, secs, hemi in found:
+        v = float(deg) + float(mins or 0) / 60 + float(secs or 0) / 3600
+        hemi = hemi.upper()
+        vals["lat" if hemi in "NS" else "lon"] = -v if hemi in "SW" else v
+    if set(vals) != {"lat", "lon"} or abs(vals["lat"]) > 90 or abs(vals["lon"]) > 180:
+        return None
+    return round(vals["lat"], 6), round(vals["lon"], 6)
+
+
+# Share buttons give short links with no numbers in them; following Google's redirect reveals them.
+_SHORT_LINK_HOSTS = ("maps.app.goo.gl", "goo.gl", "g.co", "maps.google.com", "maps.apple.com")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):  # we read each Location header ourselves
+        return None
+
+
+def resolve_map_link(text: str, timeout: float = 6.0) -> Optional[Tuple[float, float]]:
+    """Follow a short map share link's redirects (headers only) until coordinates appear in the address.
+
+    Never reads the page itself: Google centres an unknown place on the requester, i.e. on home."""
+    m = re.search(r"https?://\S+", str(text or ""))
+    if not m:
+        return None
+    url = m.group(0).rstrip(").,")
+    opener = urllib.request.build_opener(_NoRedirect)
+    for _ in range(5):
+        host = (urllib.parse.urlsplit(url).hostname or "").lower()
+        if not any(host == h or host.endswith("." + h) for h in _SHORT_LINK_HOSTS):
+            return None
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        try:
+            with opener.open(req, timeout=timeout):
+                return None  # no redirect: nothing more to learn
+        except urllib.error.HTTPError as e:
+            nxt = e.headers.get("Location") if 300 <= e.code < 400 else None
+        except (urllib.error.URLError, OSError, ValueError):
+            return None
+        if not nxt:
+            return None
+        url = urllib.parse.urljoin(url, nxt)
+        coords = parse_coordinates(url)
+        if coords:
+            return coords
     return None
 
 
@@ -638,7 +697,7 @@ def answer_location(q: LocationQuestion, views: Dict[int, PersonView], places: L
             lines.append(_no_phone(v, now))
             continue
         if q.kind == "at" and asked is None:
-            lines.append(f"I don't have a place called home yet — add it on the People page. {name} is "
+            lines.append(f"I don't have a place called home yet — add it on the Family page. {name} is "
                          f"{whereabouts(v, places, now)}.")
             continue
         if q.kind == "where":
@@ -650,7 +709,7 @@ def answer_location(q: LocationQuestion, views: Dict[int, PersonView], places: L
                 text = f"No — {name} is {whereabouts(v, places, now)}.{_freshness(v, now)}"
         else:
             if asked is None:
-                lines.append("I don't have a place called home yet — add it on the People page.")
+                lines.append("I don't have a place called home yet — add it on the Family page.")
                 continue
             arr = _last_visit(v, "arrived", asked.id)
             dep = _last_visit(v, "left", asked.id)

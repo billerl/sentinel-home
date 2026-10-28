@@ -31,6 +31,7 @@
     .dot.out { background: #fb3; box-shadow: 0 0 6px #fb3; }
     .dot.off { background: #444; }
     .row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; margin-top: 10px; }
+    [hidden] { display: none !important; }
     .field { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; flex: 1 1 160px; min-width: 0; }
     .field span { color: #9cc; }
     input[type=text], input[type=number], select {
@@ -303,6 +304,7 @@
     }
 
     // ---------------- places ----------------
+    var placeNotes = {};  // place id -> "Saved — about 2 miles north of home" (survives the redraw)
     function renderPlaces() {
       var root = $("places");
       root.innerHTML = "";
@@ -327,6 +329,7 @@
         var cb = el("input"); cb.type = "checkbox"; cb.checked = pl.alerts;
         lab.appendChild(cb); lab.appendChild(document.createTextNode("Arrive/leave messages"));
         var msg = el("span", "msg");
+        if (placeNotes[pl.id]) say(msg, placeNotes[pl.id], true);
         var save = function() {
           api("/api/places", { id: pl.id, name: pl.name, radius: Number(r.value), alerts: cb.checked })
             .then(function() { say(msg, "Saved", true); }).catch(function(e) { say(msg, e.message, false); });
@@ -337,24 +340,42 @@
         data.people.filter(function(p) { return p.sharing; }).forEach(function(p) {
           var o = el("option", null, "where " + p.name + " is now"); o.value = String(p.id); move.appendChild(o);
         });
-        move.onchange = function() {
-          if (!move.value) return;
-          api("/api/places", { id: pl.id, name: pl.name, from_person: Number(move.value) }).then(load)
+        var ot = el("option", null, "coordinates or a map link…"); ot.value = "typed"; move.appendChild(ot);
+        var whereRow = el("div", "row moving"); whereRow.hidden = true;
+        var whereBox = el("div", "field"); whereBox.appendChild(el("span", null, "Coordinates or a map link"));
+        var where = el("input"); where.type = "text"; where.placeholder = "41.1145, -83.1780";
+        whereBox.appendChild(where);
+        var moveBtn = el("button", "primary", "Move " + pl.name);
+        whereRow.appendChild(whereBox); whereRow.appendChild(moveBtn);
+        var moveTo = function(extra) {
+          var body = { id: pl.id, name: pl.name };
+          Object.keys(extra).forEach(function(k) { body[k] = extra[k]; });
+          say(msg, "Saving…");
+          api("/api/places", body).then(function(d) { placeNotes[pl.id] = d.message; return load(); })
             .catch(function(e) { say(msg, e.message, false); });
+        };
+        moveBtn.onclick = function() { moveTo({ where: where.value }); };
+        move.onchange = function() {
+          whereRow.hidden = move.value !== "typed";
+          if (move.value === "typed") { where.focus(); return; }
+          if (move.value) moveTo({ from_person: Number(move.value) });
         };
         var del = el("button", "danger", "Delete");
         armed(del, "Tap again to delete " + pl.name, function() {
           api("/api/places/" + pl.id + "/delete", {}).then(load).catch(function(e) { say(msg, e.message, false); });
         });
         row.appendChild(size); row.appendChild(lab);
-        if (move.options.length > 1) row.appendChild(move);
+        row.appendChild(move);
         row.appendChild(del); row.appendChild(msg);
         card.appendChild(row);
+        card.appendChild(whereRow);
         root.appendChild(card);
       });
 
       var from = $("pl-from"), keep = from.value;
       from.innerHTML = "";
+      // No silent default: picking your own phone by accident puts the new place at home.
+      var pick = el("option", null, "Choose…"); pick.value = ""; from.appendChild(pick);
       data.people.filter(function(p) { return p.sharing; }).forEach(function(p) {
         var o = el("option", null, "Where " + p.name + "'s phone is now"); o.value = String(p.id); from.appendChild(o);
       });
@@ -366,12 +387,14 @@
 
     async function addPlace() {
       var body = { name: $("pl-name").value, radius: Number($("pl-radius").value) };
+      if (!$("pl-from").value) { say($("pl-msg"), "Choose where it is.", false); return; }
       if ($("pl-from").value === "typed") body.where = $("pl-where").value;
       else body.from_person = Number($("pl-from").value);
       try {
-        await api("/api/places", body);
+        say($("pl-msg"), "Saving…");
+        var d = await api("/api/places", body);
         $("pl-name").value = ""; $("pl-where").value = "";
-        say($("pl-msg"), "Added", true);
+        say($("pl-msg"), d.message.replace(/^Saved/, "Added " + body.name.trim()), true);
         await load();
       } catch (e) { say($("pl-msg"), e.message, false); }
     }
@@ -390,7 +413,7 @@
       renderPlaces();
     }
     load();
-    setInterval(function() { if (!document.querySelector(".invite, .edit, input:focus")) load(); }, 60000);
+    setInterval(function() { if (!document.querySelector(".invite, .edit, .moving:not([hidden]), input:focus")) load(); }, 60000);
   </script>
 </body>
 </html>
