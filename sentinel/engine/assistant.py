@@ -136,7 +136,7 @@ class Assistant:
         os.makedirs(WORK_DIR, exist_ok=True)
         return WORK_DIR
 
-    def ask(self, text: str, context: str, voice: bool = False) -> Optional[str]:
+    def ask(self, text: str, context: str, voice: bool = False, name: str = "") -> Optional[str]:
         if not self.enabled():
             return None
         claude = find_claude(str(self.settings.get("assistant_claude_path") or ""))
@@ -150,7 +150,7 @@ class Assistant:
         model = str(self.settings.get("assistant_model") or "sonnet")
         started = time.time()
         try:
-            name = re.sub(r"[^A-Za-z' -]", "", str(self.settings.get("voice_name") or "Jarvis"))[:20] or "Jarvis"
+            name = re.sub(r"[^A-Za-z' -]", "", str(name or self.settings.get("voice_name") or "Jarvis"))[:20] or "Jarvis"
             system = VOICE_SYSTEM_PROMPT.replace("You are Jarvis,", f"You are {name},") if voice else SYSTEM_PROMPT
             r = self._run(build_command(claude, prompt, model, system),
                           capture_output=True, text=True,

@@ -96,8 +96,8 @@ class FakeSpeaker:
     def __init__(self):
         self.said, self.busy = [], False
 
-    def speak(self, text):
-        self.said.append(text)
+    def speak(self, text, voice=""):
+        self.said.append(f"{text} [{voice}]" if voice else text)
 
     def tone(self, kind):
         self.said.append(f"<{kind}>")
@@ -184,6 +184,26 @@ class TestConversation(unittest.TestCase):
             va._conversation()
         self.assertEqual(saved, [])
         self.assertIn("Okay, cancelled.", speaker.said)
+
+    def test_hey_jarvis_answers_as_jarvis_in_his_own_voice(self):
+        speaker = FakeSpeaker()
+        settings = {"voice_name": "Jezebel", "voice_jarvis_id": "kokoro:bm_george"}
+        va = VoiceAssistant(settings, lambda text, say: say("Let me think.") or VoiceReply("Steph is home."), speaker)
+        va._persona("hey_jarvis_v0.1")
+        self.assertEqual(va.speaking_as, "Jarvis")
+        with mock.patch.object(va, "_hear", side_effect=["who's home", None]):
+            va._conversation()
+        self.assertIn("Steph is home. [kokoro:bm_george]", speaker.said)
+        self.assertIn("Let me think. [kokoro:bm_george]", speaker.said)
+        speaker.said.clear()
+        va._persona("jezebel")  # the next conversation, woken the other way
+        self.assertEqual(va.speaking_as, "Jezebel")
+        with mock.patch.object(va, "_hear", side_effect=["who's home", None]):
+            va._conversation()
+        self.assertIn("Steph is home.", speaker.said)
+        settings["voice_jarvis_id"] = ""  # "same as above": one voice for both
+        va._persona("hey_jarvis_v0.1")
+        self.assertEqual((va.speaking_as, va._reply_voice), ("Jezebel", ""))
 
     def test_follow_ups_are_capped(self):
         with mock.patch.object(v, "MAX_TURNS", 3):

@@ -923,7 +923,8 @@ class Engine:
         if self.assistant.remaining_today() > 0:
             say("Let me think.")
             try:
-                reply = self.assistant.ask(text, self.assistant_context(), voice=True)
+                reply = self.assistant.ask(text, self.assistant_context(), voice=True,
+                                           name=getattr(self.voice, "speaking_as", ""))
             except Exception as e:
                 self.assistant.last_error = str(e)
         else:

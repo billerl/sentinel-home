@@ -131,6 +131,7 @@ class SettingsManager:
             "voice_trial_wakes": False,  # ...and wakes the assistant too when on
             "voice_trial_threshold": 0.45,
             "voice_name": "Jarvis",  # what the assistant calls itself (matches the wake word)
+            "voice_jarvis_id": "kokoro:bm_george",  # woken with "Hey Jarvis": this voice, named Jarvis ("" = main voice)
             "voice_follow_up": True,  # after an answer, listen ~5 s for another question without the wake word
             "voice_wake_threshold": 0.5,
             "voice_gain": 4.0,

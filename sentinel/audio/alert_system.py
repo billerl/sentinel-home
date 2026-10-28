@@ -148,15 +148,16 @@ class AudioAlertSystem:
         # 220 is this household's setting and sounded right at Kokoro's normal pace
         return max(0.6, min(1.6, float(self._speech_rate) / 220.0))
 
-    def _speak_kokoro(self, text: str) -> bool:
+    def _speak_kokoro(self, text: str, voice: str = "") -> bool:
         """Make each sentence while the previous one plays, into one player (no gaps)."""
         chunks: "queue.Queue" = queue.Queue()
-        lang = "en-gb" if self.kokoro_voice.startswith("b") else "en-us"
+        name = voice.split(":", 1)[1] if voice.startswith("kokoro:") else self.kokoro_voice
+        lang = "en-gb" if name.startswith("b") else "en-us"
 
         def make() -> None:
             try:
                 for sentence in split_sentences(text):
-                    audio, _rate = self.kokoro.create(sentence, voice=self.kokoro_voice, speed=self._kokoro_speed(),
+                    audio, _rate = self.kokoro.create(sentence, voice=name, speed=self._kokoro_speed(),
                                                       lang=lang)
                     level = max(0.0, min(1.0, float(self._volume)))
                     chunks.put((np.clip(audio * level, -1, 1) * 32767).astype(np.int16).tobytes())
@@ -196,8 +197,8 @@ class AudioAlertSystem:
         return subprocess.Popen(["aplay", "-q", "-t", "raw", "-f", "S16_LE", "-r", str(rate), "-c", "1", "-"],
                                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    def _speak(self, text: str) -> bool:
-        if self.kokoro is not None and self._speak_kokoro(text):
+    def _speak(self, text: str, voice: str = "") -> bool:
+        if self.kokoro is not None and self._speak_kokoro(text, voice):
             return True
         if self.piper_voice:
             return self._speak_piper(text)
@@ -295,10 +296,12 @@ class AudioAlertSystem:
 
         return False
 
-    def speak(self, text: str) -> bool:
-        """Say something now and return when it's finished (voice assistant replies)."""
+    def speak(self, text: str, voice: str = "") -> bool:
+        """Say something now and return when it's finished (voice assistant replies).
+
+        ``voice`` ("kokoro:bm_george") overrides the main voice for this sentence; Kokoro only."""
         if self.piper_voice or self.kokoro is not None:
-            return self._speak(text)
+            return self._speak(text, voice)
         if self.tts_engine:
             try:
                 with self._play_lock:

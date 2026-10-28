@@ -191,6 +191,10 @@ class VoiceAssistant:
         self._whisper = None
         self._whisper_lock = threading.Lock()
         self.last_error = ""
+        # Who is talking this conversation: "Hey Jarvis" gets Jarvis (a man's voice, voice_jarvis_id),
+        # the other wake word the main voice and voice_name. Read by the engine for Claude's prompt.
+        self.speaking_as = ""
+        self._reply_voice = ""
 
     # ------------------------------------------------------------ lifecycle
     def start(self) -> None:
@@ -330,6 +334,7 @@ class VoiceAssistant:
             app_logger.log("info", "voice_wake", score=round(score, 2), word=word, noise=round(self._noise, 4),
                            component="voice", action="wake")
             self._trial_peak, self._trial_main = 0.0, 0.0  # this utterance woke it; don't log it as a near-miss
+            self._persona(word)
             threading.Thread(target=self._conversation, name="voice-talk", daemon=True).start()
 
     def _track_trial(self, score: float, main_score: float) -> None:
@@ -377,8 +382,17 @@ class VoiceAssistant:
         return text
 
     # ------------------------------------------------------------ talking
+    def _persona(self, word: str) -> None:
+        jarvis = str(self.settings.get("voice_jarvis_id") or "")
+        if word.startswith("hey_jarvis") and jarvis:
+            self.speaking_as, self._reply_voice = "Jarvis", jarvis
+        else:
+            self.speaking_as, self._reply_voice = str(self.settings.get("voice_name") or ""), ""
+
     def _say(self, text: str) -> None:
-        if text:
+        if text and self._reply_voice:
+            self.speaker.speak(text, voice=self._reply_voice)
+        elif text:
             self.speaker.speak(text)
 
     def _respond(self, text: str) -> None:

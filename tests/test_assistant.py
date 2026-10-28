@@ -29,6 +29,8 @@ class TestVoiceName(unittest.TestCase):
             self.assertIn("You are Jezebel,", system)
             a.ask("hi", "DATA")
             self.assertNotIn("Jezebel", calls[1][calls[1].index("--system-prompt") + 1])
+            a.ask("hi", "DATA", voice=True, name="Jarvis")  # woken with "Hey Jarvis"
+            self.assertIn("You are Jarvis,", calls[2][calls[2].index("--system-prompt") + 1])
 
 
 class TestAssistant(unittest.TestCase):

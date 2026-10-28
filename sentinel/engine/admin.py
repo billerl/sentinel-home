@@ -111,6 +111,13 @@ def _voice(value: Any) -> str:
     return text
 
 
+def _jarvis_voice(value: Any) -> str:
+    text = str(value or "")
+    if text and (not text.startswith("kokoro:") or text not in available_voices()):
+        raise ValueError("unknown voice")  # per-conversation voices are Kokoro's (one model holds them all)
+    return text
+
+
 # Settings editable from the web page (dotted keys live under nested dicts).
 SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "telegram_enabled": _bool,
@@ -129,6 +136,7 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "volume": _num(0, 1),
     "speech_speed": _num(80, 350, int),
     "voice_id": _voice,
+    "voice_jarvis_id": _jarvis_voice,
     "object_detection_enabled": _bool,
     "vehicle_types_enabled": _bool,
     "inference_device": lambda v: _choice(v, ("auto", "GPU", "CPU")),
