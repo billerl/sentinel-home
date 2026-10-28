@@ -58,7 +58,7 @@
         (for 30 days) — not a trail of everywhere you've been. It stays on the family's computer at home.</li>
       <li><b>Stopping:</b> any time — in the OwnTracks app switch to <i>Quiet</i> mode, or just delete the app.</li>
     </ul>
-    <button onclick="agree()">I agree — set it up</button>
+    <button onclick="agree(true)">I agree — set it up</button>
     <button class="alt" onclick="decline()">No thanks</button>
   </div>
 
@@ -68,19 +68,20 @@
   </div>
 
   <div id="steps" hidden>
+    <div class="card wait" id="inapp" hidden>
+      <b>This page is open inside another app</b> (like the Google app), which can't hand the setup over to
+      OwnTracks. Tap the button to carry on in <span class="ios">Safari</span><span class="android">Chrome</span>.
+      <a class="btn" id="inapp-open" href="#">Open in <span class="ios">Safari</span><span class="android">Chrome</span></a>
+      <p class="muted">Nothing happens? Tap <b>⋯</b> or the share button and choose <i>Open in browser</i>.</p>
+    </div>
+
     <div class="card">
       <h2><span class="step">1</span>Get the free OwnTracks app</h2>
       <p>OwnTracks is a free, open-source app that sends your location only to the address you give it — here, your
         family's Sentinel. No account, no ads.</p>
       <a class="btn ios" href="https://apps.apple.com/us/app/owntracks/id692424691" target="_blank" rel="noopener">Get it on the App Store</a>
-      <a class="btn android" href="https://play.google.com/store/apps/details?id=org.owntracks.android" target="_blank" rel="noopener">Get it on Google Play</a>
+      <a class="btn android" id="play" href="https://play.google.com/store/apps/details?id=org.owntracks.android" target="_blank" rel="noopener">Get it on Google Play</a>
       <p class="muted">Install it, then come back to this page.</p>
-    </div>
-
-    <div class="card wait" id="inapp" hidden>
-      <b>Open this page in Safari first.</b> It's open inside another app (like the Google app), which can't
-      hand the setup over to OwnTracks. Tap <b>⋯</b> or the share button and choose <b>Open in Safari</b>
-      (or copy this page's address into Safari).
     </div>
 
     <div class="card">
@@ -152,22 +153,38 @@
 </main>
 {% if not expired %}
 <script>
+  var inApp = false, browserUrl = "";
   (function() {
     var ua = navigator.userAgent || "";
     var ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
     var android = /Android/.test(ua);
     if (ios) document.body.classList.add("platform-ios");
     else if (android) document.body.classList.add("platform-android");
-    // In-app browsers (Google app, Facebook, Instagram...) often can't open owntracks:// links.
-    if (ios && /\bGSA\/|FBAN|FBAV|Instagram|Snapchat|LinkedInApp|\bLine\//.test(ua))
+    // In-app browsers (Google app, Facebook, Instagram...) often can't open owntracks:// links, so offer
+    // the real browser: iOS 17+ opens x-safari-https:// links in Safari; Android intents can name Chrome.
+    var here = location.origin + location.pathname + "?agreed=1";
+    inApp = (ios || android) && /\bGSA\/|FBAN|FBAV|Instagram|Snapchat|LinkedInApp|\bLine\/|; wv\)/.test(ua);
+    if (inApp) {
+      browserUrl = ios ? "x-safari-" + here
+        : "intent://" + location.host + location.pathname + "?agreed=1#Intent;scheme=https;package=com.android.chrome;"
+          + "S.browser_fallback_url=" + encodeURIComponent(here) + ";end";
       document.getElementById("inapp").hidden = false;
+      document.getElementById("inapp-open").href = browserUrl;
+    }
+    if (android) {  // straight into the Play Store app rather than its web page
+      var play = document.getElementById("play");
+      play.href = "intent://details?id=org.owntracks.android#Intent;scheme=market;package=com.android.vending;"
+        + "S.browser_fallback_url=" + encodeURIComponent(play.href) + ";end";
+      play.removeAttribute("target");
+    }
   })();
   var code = {{ code|tojson }};
   var sharing = {{ v.sharing|tojson }};
   function show(id, on) { document.getElementById(id).hidden = !on; }
-  function agree() {
+  function agree(tapped) {
     show("ask", false); show("steps", true); window.scrollTo(0, 0);
     try { localStorage.setItem("sentinel.join." + code, "1"); } catch (e) {}
+    if (tapped && inApp) location.href = browserUrl;  // carry on in the real browser (a tap is needed for this)
     poll();
   }
   function decline() { show("ask", false); show("declined", true); }
@@ -185,8 +202,10 @@
     } catch (e) {}
     setTimeout(poll, 5000);
   }
-  // Coming back from the app store or OwnTracks: skip straight to the steps.
-  try { if (localStorage.getItem("sentinel.join." + code)) agree(); } catch (e) {}
+  // Coming back from the app store or OwnTracks, or reopened in the browser after agreeing: skip to the steps.
+  var agreed = /[?&]agreed=1\b/.test(location.search);
+  try { agreed = agreed || !!localStorage.getItem("sentinel.join." + code); } catch (e) {}
+  if (agreed) agree(false);
 </script>
 {% endif %}
 </body>
