@@ -104,6 +104,9 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     3 min, bound to the requesting IP, 3 per IP. Sessions persist as SHA-256 token hashes in
     `.web_sessions.json` (0600), so restarts don't sign anyone out. The grid reloads itself when
     `X-Sentinel-Boot` changes (after an update) and has a Reload button (Fire TV has no F5).
+  - "Keep me signed in" (and QR-paired TVs) = a remembered session: lasts `session_max_days` (365) with no
+    idle limit and no IP binding — phones on mobile data change IP constantly. Unticked logins keep the
+    60-min idle limit and IP binding.
   - Claude fallback (`sentinel/engine/assistant.py`, settings `assistant_enabled`/`assistant_daily_limit`/
     `assistant_model`): messages none of the built-in parsers understood are queued (`consume_free_text`) and
     answered by the official `claude -p` (user's own Max login on this PC; allowed for personal use of the

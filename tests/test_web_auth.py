@@ -101,6 +101,16 @@ class TestWebAuth(unittest.TestCase):
             self.assertIsNotNone(auth.validate_session(tok, "10.0.0.1"))
             self.assertIsNone(auth.validate_session(tok, "10.0.0.2"))
 
+    def test_keep_me_signed_in_survives_idle_and_new_address(self) -> None:
+        auth = WebAuthManager({"username": "u", "password_hash": _hash("p"), "bind_session_to_ip": True,
+                               "session_idle_minutes": 60, "session_max_days": 365})
+        with patch("sentinel.web.auth.time.monotonic", return_value=0.0):
+            tok = auth.create_session("u", "10.0.0.1", remember=True)
+        with patch("sentinel.web.auth.time.monotonic", return_value=3 * 86400.0):  # 3 days idle, new IP
+            self.assertIsNotNone(auth.validate_session(tok, "10.9.9.9"))
+        with patch("sentinel.web.auth.time.monotonic", return_value=366 * 86400.0):
+            self.assertIsNone(auth.validate_session(tok, "10.9.9.9"))  # the year still ends
+
     def test_revoke_returns_record(self) -> None:
         auth = WebAuthManager(
             {

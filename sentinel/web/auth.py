@@ -39,6 +39,9 @@ class SessionRecord:
     client_ip: str
     created: float
     last_seen: float
+    # "Keep me signed in": lasts until session_max_days, with no idle limit and no IP binding
+    # (a phone on mobile data changes address all the time, which signed it out within minutes).
+    remember: bool = False
 
 
 @dataclass
@@ -192,7 +195,8 @@ class WebAuthManager:
             wall, mono = time.time(), time.monotonic()
             for key, r in saved.items():
                 self._sessions[key] = SessionRecord(r["username"], r["client_ip"],
-                                                    mono - (wall - r["created"]), mono - (wall - r["last_seen"]))
+                                                    mono - (wall - r["created"]), mono - (wall - r["last_seen"]),
+                                                    r.get("remember") is True)
         except (OSError, ValueError, KeyError, TypeError, AttributeError):
             self._sessions.clear()  # unreadable: everyone signs in again
 
@@ -201,7 +205,8 @@ class WebAuthManager:
             return
         wall, mono = time.time(), time.monotonic()
         data = {key: {"username": r.username, "client_ip": r.client_ip,
-                      "created": wall - (mono - r.created), "last_seen": wall - (mono - r.last_seen)}
+                      "created": wall - (mono - r.created), "last_seen": wall - (mono - r.last_seen),
+                      "remember": r.remember}
                 for key, r in list(self._sessions.items())}
         with self._store_lock:
             tmp = self._store_path + ".tmp"
@@ -214,7 +219,7 @@ class WebAuthManager:
             except OSError:
                 pass
 
-    def create_session(self, username: str, client_ip: str) -> str:
+    def create_session(self, username: str, client_ip: str, remember: bool = False) -> str:
         token = secrets.token_urlsafe(32)
         t = time.monotonic()
         self._sessions[self._key(token)] = SessionRecord(
@@ -222,6 +227,7 @@ class WebAuthManager:
             client_ip=client_ip,
             created=t,
             last_seen=t,
+            remember=remember,
         )
         self._save_sessions()
         return token
@@ -241,8 +247,9 @@ class WebAuthManager:
         if not rec:
             return None
         now = time.monotonic()
-        if (now - rec.created > self._max_life_sec or now - rec.last_seen > self._idle_sec
-                or (self._bind_session_to_ip and rec.client_ip != client_ip)):
+        if (now - rec.created > self._max_life_sec
+                or (not rec.remember and (now - rec.last_seen > self._idle_sec
+                                          or (self._bind_session_to_ip and rec.client_ip != client_ip)))):
             self._sessions.pop(key, None)
             self._save_sessions()
             return None
@@ -293,4 +300,4 @@ class WebAuthManager:
         if not pairing.approved_by:
             return "waiting", None
         self._pairings.pop(code, None)  # one use
-        return "approved", self.create_session(pairing.approved_by, client_ip)
+        return "approved", self.create_session(pairing.approved_by, client_ip, remember=True)  # a TV stays signed in

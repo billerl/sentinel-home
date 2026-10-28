@@ -295,7 +295,8 @@ class WebServer:
 
             if auth.verify_password(username, password):
                 auth.record_success(ip)
-                token = auth.create_session(username, ip)
+                remember = request.form.get("remember") == "1"
+                token = auth.create_session(username, ip, remember)
                 app_logger.log(
                     "info",
                     "web_login_success",
@@ -307,7 +308,7 @@ class WebServer:
                 )
                 nxt = request.args.get("next") or url_for("index")
                 resp = redirect(nxt)
-                _set_session_cookie(resp, token, request.form.get("remember") == "1")
+                _set_session_cookie(resp, token, remember)
                 return resp
 
             now_locked, ra = auth.record_failure(ip)
