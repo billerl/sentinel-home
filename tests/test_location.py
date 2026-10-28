@@ -80,6 +80,16 @@ class TestGeofence(unittest.TestCase):
             self.assertEqual(self.store.record(self.abi, payload), [])
         self.assertIsNone(self.store.fix(self.abi.id))
 
+    def test_adding_or_moving_a_place_rechecks_everyone_at_once(self):
+        gym = (41.20, -83.30)
+        self.kinds(fix(*gym, self.t))  # phone connected before the place existed
+        self.assertIsNone(self.store.fix(self.abi.id)["place_id"])
+        gym_id = self.store.save_place("the gym", *gym)
+        self.assertEqual(self.store.fix(self.abi.id)["place_id"], gym_id)
+        self.store.save_place("the gym", *SALON, place_id=gym_id)  # moved away from her
+        self.assertIsNone(self.store.fix(self.abi.id)["place_id"])
+        self.assertEqual(self.store.visits(self.abi.id), [])  # no made-up arrivals/departures
+
     def test_deleting_a_place_clears_who_is_there(self):
         self.kinds(fix(*HOME, self.t))
         self.store.delete_place(self.home.id)

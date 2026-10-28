@@ -146,6 +146,7 @@ class LocationStore:
             if "invite" not in columns:  # setup link sent to the person's own phone (no Sentinel login needed)
                 conn.execute("ALTER TABLE people ADD COLUMN invite TEXT NOT NULL DEFAULT ''")
                 conn.execute("ALTER TABLE people ADD COLUMN invite_expires REAL NOT NULL DEFAULT 0")
+        self.reassess()
         try:
             os.chmod(self.db_path, 0o600)  # holds the phones' passwords and the family's whereabouts
         except OSError:
@@ -258,10 +259,32 @@ class LocationStore:
             if place_id is None:
                 cur = conn.execute("INSERT INTO places (name, lat, lon, radius, alerts) VALUES (?, ?, ?, ?, ?)",
                                    (name, lat, lon, radius, int(alerts)))
-                return int(cur.lastrowid)
+                place_id = int(cur.lastrowid)
+                conn.commit()
+                self.reassess()
+                return place_id
             conn.execute("UPDATE places SET name = ?, lat = ?, lon = ?, radius = ?, alerts = ? WHERE id = ?",
                          (name, lat, lon, radius, int(alerts), place_id))
-            return place_id
+        self.reassess()
+        return place_id
+
+    def reassess(self) -> None:
+        """Places changed: check everyone's last position again now, not at the phone's next report
+        (a phone sitting still at home may not report for hours). Quietly: no arrive/leave records,
+        and a new place's start time is unknown."""
+        with self._lock, self._connect() as conn:
+            places = self.places()
+            for row in conn.execute("SELECT * FROM fixes").fetchall():
+                current = next((p for p in places if p.id == row["place_id"]), None)
+                acc = 100.0 if row["acc"] is None else row["acc"]
+                if current is not None and self._has_left(current, row["lat"], row["lon"], acc, None):
+                    current = None
+                if current is None:
+                    current = self._place_at(places, row["lat"], row["lon"], acc, None)
+                new_id = current.id if current else None
+                if new_id != row["place_id"]:
+                    conn.execute("UPDATE fixes SET place_id = ?, place_since = NULL WHERE person_id = ?",
+                                 (new_id, row["person_id"]))
 
     def delete_place(self, place_id: int) -> None:
         with self._lock, self._connect() as conn:
