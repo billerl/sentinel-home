@@ -29,6 +29,7 @@ sentinel-home/                         # repository root
     │   │                              #   recording, clip requests, reconnect with backoff)
     │   ├── objects.py                 # Detection worker, tracking, plain-English descriptions
     │   ├── household.py               # Family cars: photo references, recognition, who's home
+    │   ├── location.py                # Family phones (OwnTracks): people, places, arrive/leave, "where is X?"
     │   ├── weather.py                 # Weather tile data (Open-Meteo, server-side, cached 10 min)
     │   ├── spotify.py                 # Spotify Web API: PKCE sign-in, play/pause/skip/volume, now playing, voice phrases
     │   ├── assistant.py               # Opt-in: Telegram messages Sentinel doesn't understand -> `claude -p`
@@ -53,7 +54,8 @@ sentinel-home/                         # repository root
     │   ├── set_password.py            # CLI: `python -m sentinel.web.set_password`
     │   ├── static/                    # Icons + web app manifest
     │   └── templates/                 # login (+ QR), pair (phone approves a TV), grid (live + weather +
-    │                                  #   timeline + player), zones, settings, vehicles
+    │                                  #   family lights + timeline + player), zones, settings, vehicles,
+    │                                  #   people (Family page), join (setup link opened on a family phone)
     ├── notifications/
     │   └── telegram_notifier.py       # HTTPS Bot API, commands, clips
     ├── audio/

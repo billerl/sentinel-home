@@ -136,6 +136,23 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     Dev-mode app: the account's email must be listed under User Management. Never run a second
     SpotifyService on the live settings (a refresh can rotate the token and log the engine out; the dev
     harness blanks it). Live page: now-playing bar (/api/spotify, polled 5 s; ticker on phones).
+  - Family locations (2026-10-27, `sentinel/engine/location.py`, `recorded_videos/location.db` [mode 600]):
+    OwnTracks HTTP mode posts to public `POST /owntracks` (HTTP Basic: per-person username + random token;
+    20 failures/10 min per IP -> 429; no Cloudflare Access in front, checked). Tables: people (with a 7-day
+    `invite` code for `/join/<code>`, the public setup page: consent, App Store/Play links, `owntracks:///config?
+    inline=` link + .otrc download + manual values, permission steps, polls `/join/<code>/status`), places
+    (name as said after "at"; "Home" special; radius 50-2000 m), fixes (one row per person: latest position,
+    current place, place_since NULL = there when tracking began), visits (arrived/left, pruned at 30 days).
+    No position trail is stored. Geofence: arrive inside radius with acc <= max(250, 2r); leave beyond
+    radius + clamp(acc, 100..300) with acc <= 500; phone transition events (waypoints in the setup config)
+    trusted by place name; late out-of-order fixes ignored. Rule from the user: the phone is the person,
+    the car is separate ("Abigail is at the salon. Abigail's Fusion is at home."); person<->car link = the
+    vehicle's `owner` matching the person's name/aliases. Questions (`location_question`) are checked before
+    car questions in Telegram and voice; anything naming a car word stays a car question. Alerts: settings
+    `location_alerts_enabled` + per-place checkbox, 15 min cooldown per person+place, respects Pause.
+    Telegram: a 📍 pin then a name adds/moves a place (`text_interceptor`); "where" answers send map pins
+    for people between places. Live page: `/api/family` -> lights row in the weather tile (tile gets class
+    `fam` to tighten spacing; measured to fit at 1280x800, 1920x1080 and phone width).
   - Voices: Kokoro (`models/kokoro/`, kokoro-onnx, 3 threads) with voice ids `kokoro:<name>`; household uses
     `kokoro:af_heart`. Sentences are synthesised while the previous one plays, into one raw aplay/paplay
     stream (~1.3 s to the first word). Piper stays loaded as the fallback. By voice, Claude may answer

@@ -106,11 +106,13 @@ runs `/clear`. Everything stays free and local except the existing opt-in Claude
    Also 2026-10-27: CPU unlocked (was 800 MHz; see handoff), Kokoro "Heart" voice, Jarvis answers
    general questions. Jezebel wake word being trialled (`voice_trial_model`, log-only
    `voice_trial_score` events); training workspace ~/Documents/sentinel_home/wakeword-training.
-3. **"Where is Abigail?" (Life360-like)** — Life360 has no official API; use **OwnTracks** (free
-   phone app, HTTP mode posting to a Sentinel endpoint through the Cloudflare tunnel, per-person
-   login). Named places (home/school/work), arrive/leave Telegram alerts, answers by Telegram and
-   voice, combine with car presence. Each person installs it on their own phone and must agree;
-   check Cloudflare Access doesn't block the phone app's posts.
+3. **"Where is Abigail?" (Life360-like)** — BUILT 2026-10-27 (handoff_summary.md "Family locations").
+   Restore point: git tag `pre-location` + `../checkpoints/pre-location/`. Not yet tested with a real
+   phone: first person to set up = the user. Open: make Home, then send setup links (Family page).
+   The user's rule: a person's phone is where they are; their car is reported separately.
+   Ideas not built: OwnTracks "friends" (show family to each other in the app), syncing new places to
+   phones via the HTTP response (`setWaypoints`), location in the Claude fallback's context (left out:
+   family whereabouts would leave the house).
 
 Other open items: name the grey sunroof sedan (probably Abigail's Fusion) on the Vehicles page.
 (Motion alerts were turned back on by voice 2026-10-27.)

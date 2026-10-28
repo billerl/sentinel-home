@@ -48,6 +48,11 @@ viewer with a live camera grid, a DVR-style motion timeline, and a zone editor.
 - **Spotify (optional, Premium):** "play some jazz", pause, skip, volume, "what's playing?" by voice,
   on the household's own Spotify devices (TV app, phones, Echo); a now-playing bar on the live page.
   PKCE sign-in with your own free developer app's Client ID (redirect `http://127.0.0.1:8888/callback`).
+- **Family locations (optional, OwnTracks):** family members who agree install the free OwnTracks app
+  (a setup link from the Family page walks them through it, no Sentinel login needed). Ask "Where is
+  Abigail?", "Who's home?", "Is Mom at work?" by Telegram or voice; arrive/leave messages for named places;
+  a light per person on the live page (tap = map). The phone says where the person is; their car is
+  reported separately. Only the latest position and 30 days of arrivals/departures are kept.
 - **Structured logging:** JSON lines in `sentinel_events.log`, with passwords redacted, rotated
   at 10 MB.
 

@@ -390,6 +390,155 @@ class WebServer:
                 return jsonify({"configured": False})
             return jsonify(engine.weather.current())
 
+        # ---- Family locations: OwnTracks posts, setup links, People page (sentinel/engine/location.py) ----
+        location_failures: Dict[str, List[float]] = {}
+
+        def _location_blocked(ip: str) -> bool:
+            """Too many wrong phone logins / setup links from one address: refuse for a while."""
+            now = time.time()
+            recent = [t for t in location_failures.get(ip, []) if now - t < 600]
+            location_failures[ip] = recent
+            return len(recent) >= 20
+
+        def _location_failed(ip: str, what: str) -> None:
+            location_failures.setdefault(ip, []).append(time.time())
+            app_logger.log("warning", "location_auth_failed", what=what, ip=ip, component="web_server",
+                           action="location")
+
+        def _base_url() -> str:
+            proto = (request.headers.get("X-Forwarded-Proto") or request.scheme).split(",")[0].strip()
+            return f"{proto}://{request.host}"
+
+        @app.route("/owntracks", methods=["POST"])
+        def owntracks():
+            # The phone app, not a browser: HTTP Basic login with the person's own username and key.
+            ip = _client_ip(request.remote_addr or "", request.headers)
+            if engine is None:
+                return jsonify([]), 503
+            if _location_blocked(ip):
+                return jsonify([]), 429
+            creds = request.authorization
+            payload = request.get_json(silent=True, force=True)
+            name = engine.owntracks_post(creds.username if creds else "", creds.password if creds else "", payload)
+            if name is None:
+                _location_failed(ip, "phone login")
+                return Response("[]", status=401, mimetype="application/json",
+                                headers={"WWW-Authenticate": 'Basic realm="Sentinel"'})
+            return jsonify([])
+
+        def _join_or_404(code: str):
+            ip = _client_ip(request.remote_addr or "", request.headers)
+            if engine is None or _location_blocked(ip):
+                return None
+            view = engine.join_view(code, _base_url())
+            if view is None:
+                _location_failed(ip, "setup link")
+            return view
+
+        @app.route("/join/<code>")
+        def join_page(code: str):
+            view = _join_or_404(code)
+            if view is None:
+                return render_template("join.html", expired=True), 404
+            resp = Response(render_template("join.html", expired=False, v=view, code=code))
+            resp.headers["Cache-Control"] = "no-store"
+            resp.headers["Referrer-Policy"] = "no-referrer"
+            return resp
+
+        @app.route("/join/<code>/status")
+        def join_status(code: str):
+            view = _join_or_404(code)
+            if view is None:
+                return jsonify({"expired": True}), 404
+            return jsonify({"sharing": view["sharing"]})
+
+        @app.route("/join/<code>/sentinel.otrc")
+        def join_config_file(code: str):
+            view = _join_or_404(code)
+            if view is None:
+                return "This setup link has expired.", 404
+            import json as _json
+
+            return Response(_json.dumps(view["config"], indent=2), mimetype="application/octet-stream",
+                            headers={"Content-Disposition": "attachment; filename=sentinel.otrc",
+                                     "Cache-Control": "no-store"})
+
+        @app.route("/people")
+        def people_page():
+            redir = _require_session()
+            if redir:
+                return redir
+            return render_template("people.html")
+
+        @app.route("/api/family")
+        def api_family():
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            return jsonify({"people": engine.family_lights() if engine is not None else []})
+
+        @app.route("/api/people")
+        def api_people():
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            if engine is None:
+                return jsonify({"error": "configuration unavailable"}), 503
+            return jsonify(engine.people_view(_base_url()))
+
+        @app.route("/api/people", methods=["POST"])
+        def api_people_save():
+            err = _config_guard()
+            if err:
+                return err
+            body = request.get_json(silent=True)
+            if not isinstance(body, dict):
+                return jsonify({"error": "expected a JSON object"}), 400
+            return _result(*engine.people_save(body))
+
+        @app.route("/api/people/<int:person_id>/<action>", methods=["POST"])
+        def api_people_action(person_id: int, action: str):
+            err = _config_guard()
+            if err:
+                return err
+            return _result(*engine.people_action(person_id, action, _base_url()))
+
+        @app.route("/api/people/<int:person_id>/qr")
+        def api_people_qr(person_id: int):
+            # QR of the person's setup link, for scanning with their phone's camera in person.
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            invite = engine.locations.invite(person_id) if engine is not None else None
+            if not invite:
+                return jsonify({"error": "no setup link yet"}), 404
+            url = engine._join_url(_base_url(), invite[0])
+            return jsonify({"qr": segno.make(url, error="m").svg_inline(scale=5, dark="#000", light="#fff", border=2)})
+
+        @app.route("/api/places", methods=["POST"])
+        def api_places_save():
+            err = _config_guard()
+            if err:
+                return err
+            body = request.get_json(silent=True)
+            if not isinstance(body, dict):
+                return jsonify({"error": "expected a JSON object"}), 400
+            return _result(*engine.place_save(body))
+
+        @app.route("/api/places/<int:place_id>/delete", methods=["POST"])
+        def api_places_delete(place_id: int):
+            err = _config_guard()
+            if err:
+                return err
+            return _result(*engine.place_delete(place_id))
+
+        @app.route("/api/location/alerts", methods=["POST"])
+        def api_location_alerts():
+            err = _config_guard()
+            if err:
+                return err
+            return _result(*engine.location_alerts((request.get_json(silent=True) or {}).get("on")))
+
         # ---- Spotify: now-playing strip, controls, sign-in (sentinel/engine/spotify.py) ----
         @app.route("/api/spotify")
         def api_spotify():

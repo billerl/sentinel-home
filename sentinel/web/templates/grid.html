@@ -90,6 +90,20 @@
     .wx-windy { color: #ffd166; }
     .wx-msg { font-size: 6cqh; color: #9fd3ee; text-align: center; }
     .wx-msg a { color: #00ffff; }
+    /* Family row (OwnTracks phones): a light per person, tap = their spot on a map. */
+    .wx-family { display: flex; flex-wrap: wrap; gap: 1cqh 3cqw; font-size: 5cqh; border-top: 1px solid rgba(255,255,255,0.1);
+                 padding-top: 2cqh; }
+    .wx-family a, .wx-family span.p { color: #e6f7ff; text-decoration: none; display: inline-flex; align-items: center; gap: 0.4em; }
+    .wx-family a:hover { text-decoration: underline; }
+    .wx-family .dot { width: 0.75em; height: 0.75em; border-radius: 50%; display: inline-block; }
+    .wx-family .dot.home { background: #3f3; box-shadow: 0 0 0.4em #3f3; }
+    .wx-family .dot.out { background: #fb3; box-shadow: 0 0 0.4em #fb3; }
+    .wx-family .dot.off { background: #555; }
+    /* With the family row, tighten the weather so everything still fits the tile. */
+    .tile.weather.fam { gap: 1.6cqh; padding-top: 7.5cqh; padding-bottom: 2cqh; }
+    .tile.weather.fam .wx-icon { font-size: 12cqh; }
+    .tile.weather.fam .wx-temp { font-size: 17cqh; }
+    .tile.weather.fam .wx-hours div { padding: 1cqh 0; gap: 0.3cqh; }
 
     #focus-overlay {
       display: none;
@@ -322,6 +336,7 @@
     <button class="header-btn" id="saver-toggle" type="button" onclick="toggleDataSaver()" title="Smaller, less frequent pictures for phone hotspots and mobile data (remembered on this device)">Data saver: off</button>
     <button class="header-btn" id="zones-toggle" type="button" onclick="toggleZones()" title="Show or hide the zone outlines on the live view (detection is unaffected)" hidden>Zones: on</button>
     <button class="header-btn" type="button" onclick="location.reload()" title="Reload the page (for TVs and browsers without F5)">⟳ Reload</button>
+    <a class="header-btn" href="{{ url_for('people_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Family</a>
     <a class="header-btn" href="{{ url_for('zones_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Zones</a>
     <a class="header-btn" href="{{ url_for('settings_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Settings</a>
     <form method="post" action="{{ url_for('logout') }}" style="margin: 0;">
@@ -503,9 +518,27 @@
 
     function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
 
+    var family = [];  // last /api/family answer: [{name, state: home|out|off, label, lat, lon}]
+    function familyHtml() {
+      if (!family.length) return "";
+      return '<div class="wx-family">' + family.map(function(p) {
+        var inner = '<span class="dot ' + esc(p.state) + '"></span>' + esc(p.name);
+        var title = esc(p.name + " — " + p.label);
+        if (p.lat == null) return '<span class="p" title="' + title + '">' + inner + '</span>';
+        return '<a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p.lat + "," + p.lon) +
+          '" target="_blank" rel="noopener" title="' + title + '">' + inner + '</a>';
+      }).join("") + '</div>';
+    }
+
     function renderWeather() {
       var w = weather;
       if (!w) { weatherTile.innerHTML = ""; return; }
+      renderWeatherOnly(w);
+      weatherTile.classList.toggle("fam", family.length > 0);
+      weatherTile.insertAdjacentHTML("beforeend", familyHtml());
+    }
+
+    function renderWeatherOnly(w) {
       if (!w.configured) {
         weatherTile.innerHTML = '<h2>Weather</h2><div class="wx-msg">Show the weather here: enter your town or ZIP code in ' +
           '<a href="/settings#weather">Settings → Weather</a>.</div>';
@@ -547,6 +580,15 @@
       setTimeout(loadWeather, next);
     }
     loadWeather();
+
+    async function loadFamily() {
+      try {
+        var r = await fetch("/api/family");
+        if (r.ok) { family = (await r.json()).people || []; renderWeather(); }
+      } catch (e) {}
+      setTimeout(loadFamily, 60 * 1000);
+    }
+    loadFamily();
 
     function applyCameras(cams) {
       var root = document.getElementById("grid");

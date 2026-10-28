@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <meta name="theme-color" content="#001525">
+  <title>Sentinel — Family</title>
+  <style>
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; }
+    a { color: #00ffff; }
+    header { position: sticky; top: 0; z-index: 10; background: #1a1a1a; border-bottom: 1px solid #033; }
+    .bar { display: flex; align-items: center; gap: 12px; padding: 0 1rem; height: 44px; }
+    .bar a { text-decoration: none; font-size: 0.85rem; }
+    h1 { font-size: 0.95rem; margin: 0; flex: 1; color: #00ffff; }
+    main { max-width: 900px; margin: 0 auto; padding: 12px 16px 60px; }
+    section { margin: 18px 0 28px; }
+    h2 { font-size: 1rem; color: #00ffff; margin: 0 0 10px; border-bottom: 1px solid #033; padding-bottom: 6px; }
+    .intro { font-size: 0.85rem; line-height: 1.6; color: #9cc; margin: 4px 0 0; }
+    .card { background: #0b0b0b; border: 1px solid #033; border-radius: 6px; padding: 12px 14px; margin-bottom: 12px; }
+    .head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+    .head .name { font-weight: 600; color: #fff; font-size: 1rem; flex: 1; min-width: 8rem; display: flex; align-items: center; gap: 8px; }
+    .meta { font-size: 0.8rem; color: #6aa; margin-top: 4px; line-height: 1.5; }
+    .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex: none; }
+    .dot.home { background: #3f3; box-shadow: 0 0 6px #3f3; }
+    .dot.out { background: #fb3; box-shadow: 0 0 6px #fb3; }
+    .dot.off { background: #444; }
+    .row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; margin-top: 10px; }
+    .field { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; flex: 1 1 160px; min-width: 0; }
+    .field span { color: #9cc; }
+    input[type=text], input[type=number], select {
+      background: #111; color: #e6ffff; border: 1px solid #066; border-radius: 4px;
+      padding: 7px 8px; font: inherit; font-size: 0.9rem; width: 100%; color-scheme: dark;
+    }
+    button {
+      background: rgba(0,255,255,0.15); color: #00ffff; border: 1px solid #00ffff;
+      padding: 7px 12px; border-radius: 4px; cursor: pointer; font: inherit; font-size: 0.85rem;
+    }
+    button.primary { background: #00ffff; color: #000; font-weight: 600; }
+    button.danger { border-color: #ff5555; color: #ff6b6b; background: rgba(255,85,85,0.1); }
+    button:disabled { opacity: 0.4; cursor: default; }
+    label.check { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; cursor: pointer; }
+    .msg { font-size: 0.8rem; min-height: 1.2em; }
+    .msg.ok { color: #6f6; } .msg.err { color: #ff6b6b; }
+    .hint { color: #6aa; font-size: 0.78rem; line-height: 1.5; margin: 6px 0 0; }
+    .empty { color: #6aa; font-size: 0.85rem; padding: 6px 0; }
+    .warn { color: #ffd479; font-size: 0.85rem; line-height: 1.5; }
+    .invite { margin-top: 10px; padding: 10px; border: 1px dashed #0a5555; border-radius: 6px; }
+    .invite code { display: block; word-break: break-all; background: #111; padding: 6px 8px; border-radius: 4px;
+                   font-size: 0.8rem; color: #e6ffff; margin: 6px 0; }
+    .qr { background: #fff; display: inline-block; padding: 4px; border-radius: 4px; margin-top: 8px; }
+    .qr svg { display: block; width: 180px; height: 180px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <a href="{{ url_for('index') }}">← Live</a>
+      <h1>Family &amp; places</h1>
+      <a href="{{ url_for('vehicles_page') }}">Vehicles</a>
+      <a href="{{ url_for('settings_page') }}">Settings</a>
+    </div>
+  </header>
+
+  <main>
+    <p class="intro">Family members who agree install the free <b>OwnTracks</b> app, and their phone tells Sentinel
+      where they are. Then you can ask Telegram or Jezebel <i>“Where is Abigail?”</i>, <i>“Who's home?”</i> or
+      <i>“Is Mom at work?”</i>, see a light for each person on the Live page, and get a message when someone arrives
+      at or leaves a place. The phone says where the <i>person</i> is; their car is reported separately, since
+      people swap cars. Sentinel keeps only each person's latest position and their arrivals/departures (30 days).</p>
+    <p class="warn" id="no-url" hidden>⚠️ Set the web address under Settings → Remote access first, so phones away from
+      home can reach Sentinel.</p>
+
+    <section>
+      <h2>People</h2>
+      <div id="people"><div class="empty">Loading…</div></div>
+      <div id="suggest" class="row"></div>
+      <details class="card" id="add-box">
+        <summary style="cursor:pointer;color:#9ff">+ Add a person</summary>
+        <div class="row">
+          <div class="field"><span>Name</span><input type="text" id="new-name" placeholder="Abigail" maxlength="30"></div>
+          <div class="field"><span>Other names they go by (optional, commas)</span><input type="text" id="new-aliases" placeholder="Abi" maxlength="120"></div>
+        </div>
+        <div class="row"><button class="primary" onclick="addPerson()">Add person</button><span class="msg" id="add-msg"></span></div>
+      </details>
+    </section>
+
+    <section>
+      <h2>Places</h2>
+      <div id="places"><div class="empty">Loading…</div></div>
+      <details class="card" id="place-box">
+        <summary style="cursor:pointer;color:#9ff">+ Add a place</summary>
+        <div class="row">
+          <div class="field"><span>Name — the way you'd say it after “at”</span><input type="text" id="pl-name" placeholder="the salon" maxlength="40"></div>
+          <div class="field" style="flex: 0 1 130px"><span>Size (metres across ÷ 2)</span><input type="number" id="pl-radius" value="150" min="50" max="2000" step="10"></div>
+        </div>
+        <div class="row">
+          <div class="field"><span>Where is it?</span><select id="pl-from"></select></div>
+          <div class="field" id="pl-where-box"><span>Coordinates or a Google Maps link</span><input type="text" id="pl-where" placeholder="41.1145, -83.1780"></div>
+        </div>
+        <div class="row"><button class="primary" onclick="addPlace()">Add place</button><span class="msg" id="pl-msg"></span></div>
+        <p class="hint">Easiest: stand there with your phone and pick yourself above, or send Sentinel's Telegram chat a
+          📍 location pin (attach → Location) and reply with the name. Start with <b>Home</b>. 150 m suits a house;
+          use 300–500 m for a school or a big store.</p>
+      </details>
+    </section>
+
+    <section>
+      <h2>Messages</h2>
+      <label class="check"><input type="checkbox" id="alerts" onchange="setAlerts()"> Send a Telegram message when someone
+        arrives at or leaves a place</label>
+      <span class="msg" id="alerts-msg"></span>
+      <p class="hint">Turn messages off for one place (say, work) with its own checkbox above.</p>
+    </section>
+  </main>
+
+  <script>
+    var data = null;
+    function $(id) { return document.getElementById(id); }
+    function el(tag, cls, text) {
+      var e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text != null) e.textContent = text;
+      return e;
+    }
+    async function api(url, body) {
+      var opts = body === undefined ? {} : {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+        body: JSON.stringify(body)
+      };
+      var r = await fetch(url, opts);
+      if (r.status === 401) { location.href = "/login"; throw new Error("signed out"); }
+      var d = await r.json().catch(function() { return {}; });
+      if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
+      return d;
+    }
+    function say(node, text, ok) { node.textContent = text; node.className = "msg" + (ok === undefined ? "" : ok ? " ok" : " err"); }
+    function ago(ts) {
+      var m = Math.round((Date.now() / 1000 - ts) / 60);
+      if (m < 2) return "just now";
+      if (m < 60) return m + " min ago";
+      if (m < 48 * 60) return Math.round(m / 60) + " h ago";
+      return new Date(ts * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    }
+    function mapUrl(lat, lon) { return "https://www.google.com/maps/search/?api=1&query=" + lat + "," + lon; }
+    function armed(btn, label, action) {
+      btn.onclick = function() {
+        if (btn.dataset.armed) { action(); return; }
+        btn.dataset.armed = "1"; btn.textContent = label;
+      };
+    }
+
+    // ---------------- people ----------------
+    function renderPeople() {
+      var root = $("people");
+      root.innerHTML = "";
+      if (!data.people.length) {
+        root.appendChild(el("div", "empty", "Nobody yet — add the first person below (tap a name to add it in one go)."));
+      }
+      data.people.forEach(function(p) {
+        var card = el("div", "card");
+        var head = el("div", "head");
+        var name = el("span", "name");
+        name.appendChild(el("span", "dot " + (!p.sharing ? "off" : p.home ? "home" : "out")));
+        name.appendChild(document.createTextNode(p.name));
+        head.appendChild(name);
+        if (p.sharing && p.lat != null) {
+          var a = el("a", null, "Open map"); a.href = mapUrl(p.lat, p.lon); a.target = "_blank"; a.rel = "noopener";
+          head.appendChild(a);
+        }
+        card.appendChild(head);
+        var bits = [];
+        if (p.sharing) {
+          bits.push(p.where.charAt(0).toUpperCase() + p.where.slice(1));
+          bits.push("updated " + ago(p.ts));
+          if (p.batt != null) bits.push("🔋 " + p.batt + "%");
+        } else {
+          bits.push("Not sharing yet — send them a setup link");
+        }
+        if (p.aliases.length) bits.push("also: " + p.aliases.join(", "));
+        if (p.cars.length) bits.push("car: " + p.cars.join(", "));
+        card.appendChild(el("div", "meta", bits.join(" · ")));
+
+        var row = el("div", "row");
+        var msg = el("span", "msg");
+        var link = el("button", p.sharing ? null : "primary", p.invite ? "Show setup link" : "Make setup link");
+        link.onclick = async function() {
+          try {
+            if (!p.invite) { await api("/api/people/" + p.id + "/invite", {}); await load(); openInvite(p.id); }
+            else showInvite(card, p);
+          } catch (e) { say(msg, e.message, false); }
+        };
+        var edit = el("button", null, "Edit");
+        edit.onclick = function() { editPerson(card, p); };
+        var forget = el("button", null, "Forget location");
+        armed(forget, "Tap again: forget " + p.name + "'s location history", function() {
+          api("/api/people/" + p.id + "/forget", {}).then(load).catch(function(e) { say(msg, e.message, false); });
+        });
+        var pw = el("button", null, "New phone password");
+        pw.title = "The phone stops sharing until it's set up again (e.g. lost phone)";
+        armed(pw, "Tap again: disconnect " + p.name + "'s phone", function() {
+          api("/api/people/" + p.id + "/new-password", {}).then(load).catch(function(e) { say(msg, e.message, false); });
+        });
+        var del = el("button", "danger", "Delete");
+        armed(del, "Tap again to delete " + p.name, function() {
+          api("/api/people/" + p.id + "/delete", {}).then(load).catch(function(e) { say(msg, e.message, false); });
+        });
+        [link, edit, forget, pw, del, msg].forEach(function(b) { row.appendChild(b); });
+        card.appendChild(row);
+        card.dataset.person = p.id;
+        root.appendChild(card);
+      });
+
+      var sug = $("suggest");
+      sug.innerHTML = "";
+      if (data.suggestions.length) {
+        sug.appendChild(el("span", "hint", "From your cars:"));
+        data.suggestions.forEach(function(s) {
+          var b = el("button", null, "+ " + s.name);
+          b.onclick = async function() {
+            b.disabled = true;
+            try { await api("/api/people", { name: s.name, aliases: s.aliases }); await load(); }
+            catch (e) { b.disabled = false; b.textContent = e.message; }
+          };
+          sug.appendChild(b);
+        });
+      }
+    }
+
+    function openInvite(id) {
+      var p = data.people.find(function(x) { return x.id === id; });
+      var card = document.querySelector('[data-person="' + id + '"]');
+      if (p && card) showInvite(card, p);
+    }
+
+    async function showInvite(card, p) {
+      var old = card.querySelector(".invite");
+      if (old) { old.remove(); return; }
+      var box = el("div", "invite");
+      box.appendChild(el("div", "meta", "Send this to " + p.name + " (text, WhatsApp, email…) or let them scan the code. " +
+        "It opens a page on their phone that asks if they agree, then walks them through installing OwnTracks. " +
+        "Works until " + new Date(p.invite.expires * 1000).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) + "."));
+      box.appendChild(el("code", null, p.invite.url));
+      var row = el("div", "row");
+      var msg = el("span", "msg");
+      if (navigator.share) {
+        var share = el("button", "primary", "Share…");
+        share.onclick = function() {
+          navigator.share({ title: "Sentinel", text: "Set up location sharing for the family's Sentinel:", url: p.invite.url }).catch(function() {});
+        };
+        row.appendChild(share);
+      }
+      var copy = el("button", null, "Copy link");
+      copy.onclick = function() {
+        (navigator.clipboard ? navigator.clipboard.writeText(p.invite.url) : Promise.reject())
+          .then(function() { say(msg, "Copied", true); })
+          .catch(function() { say(msg, "Press and hold the link to copy it", false); });
+      };
+      var fresh = el("button", null, "New link");
+      fresh.onclick = async function() {
+        try { await api("/api/people/" + p.id + "/invite", {}); await load(); openInvite(p.id); }
+        catch (e) { say(msg, e.message, false); }
+      };
+      row.appendChild(copy); row.appendChild(fresh); row.appendChild(msg);
+      box.appendChild(row);
+      var qr = el("div", "qr");
+      box.appendChild(qr);
+      card.appendChild(box);
+      try { qr.innerHTML = (await api("/api/people/" + p.id + "/qr")).qr; } catch (e) { qr.remove(); }
+    }
+
+    function editPerson(card, p) {
+      if (card.querySelector(".edit")) return;
+      var box = el("div", "edit");
+      box.innerHTML =
+        '<div class="row"><div class="field"><span>Name</span><input type="text" maxlength="30" data-f="name"></div>' +
+        '<div class="field"><span>Other names (commas)</span><input type="text" maxlength="120" data-f="aliases"></div></div>' +
+        '<div class="row"><button class="primary">Save</button><button>Cancel</button><span class="msg"></span></div>';
+      card.appendChild(box);
+      var f = function(n) { return box.querySelector('[data-f="' + n + '"]'); };
+      f("name").value = p.name; f("aliases").value = p.aliases.join(", ");
+      var buttons = box.querySelectorAll("button");
+      buttons[1].onclick = function() { box.remove(); };
+      buttons[0].onclick = async function() {
+        try { await api("/api/people", { id: p.id, name: f("name").value, aliases: f("aliases").value }); await load(); }
+        catch (e) { say(box.querySelector(".msg"), e.message, false); }
+      };
+    }
+
+    async function addPerson() {
+      try {
+        await api("/api/people", { name: $("new-name").value, aliases: $("new-aliases").value });
+        $("new-name").value = ""; $("new-aliases").value = "";
+        say($("add-msg"), "Added — now make a setup link for them", true);
+        await load();
+      } catch (e) { say($("add-msg"), e.message, false); }
+    }
+
+    // ---------------- places ----------------
+    function renderPlaces() {
+      var root = $("places");
+      root.innerHTML = "";
+      if (!data.places.length) {
+        root.appendChild(el("div", "empty", "No places yet. Add Home first."));
+        $("place-box").open = true;
+        if (!$("pl-name").value) $("pl-name").value = "Home";
+      }
+      data.places.forEach(function(pl) {
+        var card = el("div", "card");
+        var head = el("div", "head");
+        head.appendChild(el("span", "name", (pl.home ? "🏠 " : "📍 ") + pl.name));
+        var a = el("a", null, "Open map"); a.href = mapUrl(pl.lat, pl.lon); a.target = "_blank"; a.rel = "noopener";
+        head.appendChild(a);
+        card.appendChild(head);
+        var row = el("div", "row");
+        var size = el("div", "field"); size.style.flex = "0 1 130px";
+        size.appendChild(el("span", null, "Size (m)"));
+        var r = el("input"); r.type = "number"; r.min = 50; r.max = 2000; r.step = 10; r.value = Math.round(pl.radius);
+        size.appendChild(r);
+        var lab = el("label", "check");
+        var cb = el("input"); cb.type = "checkbox"; cb.checked = pl.alerts;
+        lab.appendChild(cb); lab.appendChild(document.createTextNode("Arrive/leave messages"));
+        var msg = el("span", "msg");
+        var save = function() {
+          api("/api/places", { id: pl.id, name: pl.name, radius: Number(r.value), alerts: cb.checked })
+            .then(function() { say(msg, "Saved", true); }).catch(function(e) { say(msg, e.message, false); });
+        };
+        r.onchange = save; cb.onchange = save;
+        var move = el("select");
+        var o0 = el("option", null, "Move it to…"); o0.value = ""; move.appendChild(o0);
+        data.people.filter(function(p) { return p.sharing; }).forEach(function(p) {
+          var o = el("option", null, "where " + p.name + " is now"); o.value = String(p.id); move.appendChild(o);
+        });
+        move.onchange = function() {
+          if (!move.value) return;
+          api("/api/places", { id: pl.id, name: pl.name, from_person: Number(move.value) }).then(load)
+            .catch(function(e) { say(msg, e.message, false); });
+        };
+        var del = el("button", "danger", "Delete");
+        armed(del, "Tap again to delete " + pl.name, function() {
+          api("/api/places/" + pl.id + "/delete", {}).then(load).catch(function(e) { say(msg, e.message, false); });
+        });
+        row.appendChild(size); row.appendChild(lab);
+        if (move.options.length > 1) row.appendChild(move);
+        row.appendChild(del); row.appendChild(msg);
+        card.appendChild(row);
+        root.appendChild(card);
+      });
+
+      var from = $("pl-from"), keep = from.value;
+      from.innerHTML = "";
+      data.people.filter(function(p) { return p.sharing; }).forEach(function(p) {
+        var o = el("option", null, "Where " + p.name + "'s phone is now"); o.value = String(p.id); from.appendChild(o);
+      });
+      var typed = el("option", null, "Coordinates or a map link…"); typed.value = "typed"; from.appendChild(typed);
+      if (keep && Array.prototype.some.call(from.options, function(o) { return o.value === keep; })) from.value = keep;
+      from.onchange = function() { $("pl-where-box").hidden = from.value !== "typed"; };
+      from.onchange();
+    }
+
+    async function addPlace() {
+      var body = { name: $("pl-name").value, radius: Number($("pl-radius").value) };
+      if ($("pl-from").value === "typed") body.where = $("pl-where").value;
+      else body.from_person = Number($("pl-from").value);
+      try {
+        await api("/api/places", body);
+        $("pl-name").value = ""; $("pl-where").value = "";
+        say($("pl-msg"), "Added", true);
+        await load();
+      } catch (e) { say($("pl-msg"), e.message, false); }
+    }
+
+    async function setAlerts() {
+      try { await api("/api/location/alerts", { on: $("alerts").checked }); say($("alerts-msg"), "Saved", true); }
+      catch (e) { say($("alerts-msg"), e.message, false); }
+    }
+
+    async function load() {
+      try { data = await api("/api/people"); }
+      catch (e) { $("people").innerHTML = ""; $("people").appendChild(el("div", "empty", "Couldn't load: " + e.message)); return; }
+      $("no-url").hidden = !!data.public_url;
+      $("alerts").checked = data.alerts_enabled;
+      renderPeople();
+      renderPlaces();
+    }
+    load();
+    setInterval(function() { if (!document.querySelector(".invite, .edit, input:focus")) load(); }, 60000);
+  </script>
+</body>
+</html>

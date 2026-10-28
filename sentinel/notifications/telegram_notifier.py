@@ -47,6 +47,10 @@ class TelegramNotifier:
         # instead of getting the help text.
         self.assistant_available: Optional[Callable[[], bool]] = None
         self._pending_free_text: List[Tuple[str, str]] = []
+        # Set by the engine: a 📍 pin someone sent (chat_id, lat, lon, venue title) and a check that
+        # may claim the next typed message (the pin's name); returns True when it handled the text.
+        self.location_handler: Optional[Callable[[str, float, float, str], None]] = None
+        self.text_interceptor: Optional[Callable[[str, str], bool]] = None
         self.update_settings(settings)
 
     @staticmethod
@@ -61,6 +65,8 @@ class TelegramNotifier:
             "- Access — how to reach Sentinel remotely (web link, Tailscale, Remote Desktop)\n"
             "- Videos <when> — send recorded clips, e.g. Videos last 2 hours, Videos 2pm-4pm people\n"
             "- Ask in plain words — Did anyone come by? Any deliveries today? What happened last night?\n"
+            "- Family (phones with OwnTracks) — Where is Abigail? Who's home? Is Mom at work? When did Link get to school?\n"
+            "- Send a 📍 location pin, then a name, to add a place (home, school, the salon)\n"
             "- Help — this message\n\n"
             "Clip:\n"
             "- Clip — record ~10s per connected camera and upload\n\n"
@@ -528,10 +534,22 @@ class TelegramNotifier:
                 app_logger.log("warning", "telegram_message_ignored", chat_id=chat_id, chat_type=chat.get("type"),
                                reason="chat not in Telegram chat IDs", component="telegram", action="listen")
                 continue
+            pin = message.get("location")
+            if isinstance(pin, dict) and self.location_handler is not None:
+                try:
+                    lat, lon = float(pin["latitude"]), float(pin["longitude"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                title = str((message.get("venue") or {}).get("title") or "")[:40]
+                app_logger.log("info", "telegram_location_received", chat_id=chat_id, component="telegram",
+                               action="listen")
+                self.location_handler(chat_id, lat, lon, title)
+                continue
             if not text:
                 app_logger.log("info", "telegram_message_ignored", chat_id=chat_id,
                                reason="no text (photo, voice or sticker)", component="telegram", action="listen")
-                self._send_message_to_chat(chat_id, "I can only read typed messages. Send Help for what I can do.")
+                self._send_message_to_chat(chat_id, "I can only read typed messages (and 📍 location pins, to name a "
+                                                    "place). Send Help for what I can do.")
                 continue
             app_logger.log("info", "telegram_message_received", chat_id=chat_id, length=len(text),
                            component="telegram", action="listen")
@@ -551,6 +569,8 @@ class TelegramNotifier:
 
     def route_text(self, chat_id: str, text: str, from_button: bool = False) -> None:
         """Handle one typed message (or a command from a "Do it" button)."""
+        if not from_button and self.text_interceptor is not None and self.text_interceptor(chat_id, text):
+            return
         if re.match(r"^resume$", text, flags=re.IGNORECASE):
             self.paused_until_by_chat.pop(chat_id, None)
             self._send_message_to_chat(chat_id, "Sentinel notifications resumed.")
@@ -619,6 +639,12 @@ class TelegramNotifier:
             chat_id,
             f"Sentinel notifications paused for {minutes} minutes.",
         )
+
+    def send_location(self, chat_id: str, lat: float, lon: float) -> bool:
+        """A map pin (Telegram shows a small map; tapping it opens the phone's maps app)."""
+        if not self.is_configured():
+            return False
+        return self._post_json(self._api_url("sendLocation"), {"chat_id": chat_id, "latitude": lat, "longitude": lon})
 
     def send_text_with_buttons(self, chat_id: str, text: str, buttons: List[List[Tuple[str, str]]]) -> bool:
         """A text message with inline buttons (rows of (label, callback data))."""

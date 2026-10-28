@@ -110,6 +110,11 @@ class Engine:
         from sentinel.engine.household import HouseholdStore
 
         self.household = HouseholdStore(VIDEO_DIR)
+        from sentinel.engine.location import LocationStore
+
+        self.locations = LocationStore(VIDEO_DIR)  # family phones (OwnTracks) and named places
+        self._place_pins: Dict[str, Tuple[float, float, float]] = {}  # chat -> pin waiting for a name (lat, lon, until)
+        self._location_alerted: Dict[Tuple[int, int], float] = {}  # (person, place) -> last alert
         self.presence = None  # PresenceTracker, when object detection + CLIP are available
         self.telegram = TelegramNotifier(self.settings)
         self.weather = WeatherService(self.settings)
@@ -283,9 +288,12 @@ class Engine:
         def _household_filter(text: str) -> bool:
             from sentinel.engine.questions import household_question
 
-            return household_question(text, self.household.vehicles()) is not None
+            return (household_question(text, self.household.vehicles()) is not None
+                    or self.location_question(text) is not None)
 
         self.telegram.question_filter = _household_filter
+        self.telegram.location_handler = self._on_telegram_pin
+        self.telegram.text_interceptor = self._name_pinned_place
         self.telegram.assistant_available = self.assistant.enabled
         if self.assistant.enabled():
             threading.Thread(target=self._check_assistant, name="assistant-check", daemon=True).start()
@@ -524,6 +532,15 @@ class Engine:
         """Reply to 'did anyone come by?'-style questions from the event history."""
         from sentinel.engine.questions import _fmt_clock, household_question
 
+        lq = self.location_question(text)
+        if lq is not None:
+            reply, pins = self.answer_location_question(lq)
+            self.telegram.reply_to_chat(chat_id, reply)
+            for _name, lat, lon in pins[:3]:
+                self.telegram.send_location(chat_id, lat, lon)
+            app_logger.log("info", "question_answered", kind="location_" + lq.kind, component="engine",
+                           action="answer_question")
+            return
         hq = household_question(text, self.household.vehicles())
         if hq is not None:
             self.telegram.reply_to_chat(chat_id, self.answer_household_question(hq))
@@ -892,6 +909,9 @@ class Engine:
         changes, _err = self.telegram._parse_feature_toggle_command(low)
         if changes:
             return self._voice_toggle(changes)
+        lq = self.location_question(low)
+        if lq is not None:
+            return VoiceReply(to_speech(self.answer_location_question(lq)[0]))
         hq = household_question(low, self.household.vehicles())
         if hq is not None:
             return VoiceReply(to_speech(self.answer_household_question(hq)))
@@ -918,10 +938,17 @@ class Engine:
         return VoiceReply(spoken)
 
     def answer_household_question(self, hq) -> str:
-        from sentinel.engine.questions import VehicleStatus, answer_household
+        from sentinel.engine.questions import answer_household
 
         if self.presence is None:
             return "Keeping track of the family's cars needs object recognition, which is off right now."
+        statuses, unknown = self.vehicle_statuses()
+        return answer_household(hq, statuses, unknown, page_url=str(self.settings.get("remote_web_url") or ""))
+
+    def vehicle_statuses(self):
+        """({vehicle id: VehicleStatus}, names of cameras with unrecognised parked cars); needs presence."""
+        from sentinel.engine.questions import VehicleStatus
+
         store = self.recording_store
         statuses = {}
         for v in self.household.vehicles():
@@ -934,7 +961,285 @@ class Engine:
             statuses[v.id] = VehicleStatus(v.name, spot is not None, camera, since, arr_ts, dep_ts)
         unknown = [self.cameras[key].display_name for key, cars in self.presence.present().items()
                    for p in cars if p.vehicle_id is None and key in self.cameras]
-        return answer_household(hq, statuses, unknown, page_url=str(self.settings.get("remote_web_url") or ""))
+        return statuses, unknown
+
+    # ------------------------------------------------------ family locations (OwnTracks)
+    def location_question(self, text: str):
+        from sentinel.engine.location import location_question
+
+        return location_question(text, self.locations.people(), self.locations.places(), self.household.vehicles())
+
+    def _cars_of(self, person, statuses) -> list:
+        """The person's own cars (by the Vehicles page's "whose is it?"), as CarLines."""
+        from sentinel.engine.location import CarLine
+
+        words = set(person.words())
+        return [CarLine(s.name, s.here, s.last_arrival, s.last_departure)
+                for v in self.household.vehicles() if v.owner and v.owner.lower() in words
+                for s in [statuses.get(v.id)] if s is not None]
+
+    def person_views(self) -> Dict[int, Any]:
+        from sentinel.engine.location import PersonView
+
+        statuses = self.vehicle_statuses()[0] if self.presence is not None else {}
+        places = {p.id: p for p in self.locations.places()}
+        views = {}
+        for person in self.locations.people():
+            fix = self.locations.fix(person.id)
+            views[person.id] = PersonView(person, fix, places.get((fix or {}).get("place_id")),
+                                          self.locations.visits(person.id), self._cars_of(person, statuses))
+        return views
+
+    def answer_location_question(self, q) -> Tuple[str, List[Tuple[str, float, float]]]:
+        """Reply and map pins; "who's home?" also lists the cars (people swap cars)."""
+        from sentinel.engine.location import answer_location
+        from sentinel.engine.questions import HouseholdQuestion
+
+        text, pins = answer_location(q, self.person_views(), self.locations.places())
+        if q.kind == "list" and self.presence is not None and self.household.vehicles():
+            text += "\n\nCars:\n" + self.answer_household_question(HouseholdQuestion("list"))
+        return text, pins
+
+    def owntracks_post(self, username: str, password: str, payload: Any) -> Optional[str]:
+        """A position from a family phone. Returns the person's name, or None if the login is wrong."""
+        from sentinel.engine.location import change_message
+
+        person = self.locations.authenticate(username, password)
+        if person is None:
+            return None
+        changes = self.locations.record(person, payload) if isinstance(payload, dict) else []
+        if changes:
+            statuses = self.vehicle_statuses()[0] if self.presence is not None else {}
+            for change in changes:
+                app_logger.log("info", "location_" + change.kind, person=person.name,
+                               place=change.place.name if change.place else None, component="engine",
+                               action="location")
+                if change.kind != "started" and not (self.settings.get("location_alerts_enabled", True)
+                                                     and change.place.alerts):
+                    continue
+                if change.kind != "started":
+                    key = (person.id, change.place.id)
+                    if time.time() - self._location_alerted.get(key, 0) < 15 * 60:
+                        continue  # GPS wobbling at the edge of a place: one message is enough
+                    self._location_alerted[key] = time.time()
+                text = change_message(change, self._cars_of(person, statuses))
+                if text:
+                    self._send_location_alert(text)
+        return person.name
+
+    def _send_location_alert(self, text: str) -> None:
+        now = time.time()
+        for chat_id in self.telegram.chat_ids:
+            if not self.telegram._is_paused(chat_id, now):
+                threading.Thread(target=self.telegram.reply_to_chat, args=(chat_id, text),
+                                 name="location-alert", daemon=True).start()
+
+    # Telegram: send a 📍 pin, then reply with a name, to add a place without typing coordinates.
+    def _on_telegram_pin(self, chat_id: str, lat: float, lon: float, title: str = "") -> None:
+        self._place_pins[chat_id] = (lat, lon, time.time() + 600)
+        has_home = any(p.is_home for p in self.locations.places())
+        example = "the salon, school, work, Grandma's" if has_home else "home, the salon, school, work"
+        hint = f' (“{title}”?)' if title else ""
+        self.telegram.reply_to_chat(chat_id, f"📍 Got the pin{hint}. What should I call this place? Reply with a name "
+                                             f"the way you'd say it after “at” — e.g. {example}. Or reply cancel.")
+
+    def _name_pinned_place(self, chat_id: str, text: str) -> bool:
+        """The reply naming a pinned place; anything that looks like another request passes through."""
+        pin = self._place_pins.get(chat_id)
+        if pin is None:
+            return False
+        if time.time() > pin[2]:
+            self._place_pins.pop(chat_id, None)
+            return False
+        name = re.sub(r"\s+", " ", text).strip().strip(".!\"'“”")
+        if re.fullmatch(r"(?i)(cancel|no|never ?mind|stop)", name):
+            self._place_pins.pop(chat_id, None)
+            self.telegram.reply_to_chat(chat_id, "Okay, not saved.")
+            return True
+        from sentinel.engine.questions import is_question
+
+        if not name or len(name) > 40 or name.endswith("?") or is_question(name) or self.telegram.is_command(name):
+            return False
+        name = re.sub(r"^(?i:at|call it|it'?s|its)\s+", "", name)
+        if name.lower() == "home":
+            name = "Home"
+        self._place_pins.pop(chat_id, None)
+        existing = next((p for p in self.locations.places() if p.name.lower() == name.lower()), None)
+        if existing is not None:
+            self.locations.save_place(existing.name, pin[0], pin[1], existing.radius, existing.alerts, existing.id)
+            self.telegram.reply_to_chat(chat_id, f"📍 Moved “{existing.name}” to the new pin.")
+        else:
+            self.locations.save_place(name, pin[0], pin[1])
+            self.telegram.reply_to_chat(chat_id, f"📍 Saved “{name}”. I'll say when anyone arrives or leaves "
+                                                 "(change its size or alerts on the People page).")
+        app_logger.log("info", "location_place_saved", source="telegram", component="engine", action="location")
+        return True
+
+    # ---- web: People page, join links, Live page lights
+    def _owntracks_endpoint(self, base_url: str) -> str:
+        return (str(self.settings.get("remote_web_url") or "").strip() or base_url).rstrip("/") + "/owntracks"
+
+    def _join_url(self, base_url: str, code: str) -> str:
+        return (str(self.settings.get("remote_web_url") or "").strip() or base_url).rstrip("/") + "/join/" + code
+
+    def family_lights(self) -> List[Dict[str, Any]]:
+        """Live page: one light per person (home / out / not sharing) with a map position."""
+        from sentinel.engine.location import whereabouts
+
+        places = self.locations.places()
+        now = time.time()
+        out = []
+        for v in self.person_views().values():
+            if not v.fix:
+                out.append({"name": v.person.name, "state": "off", "label": "not sharing location"})
+                continue
+            home = v.place is not None and v.place.is_home
+            out.append({"name": v.person.name, "state": "home" if home else "out",
+                        "label": whereabouts(v, places, now), "lat": round(v.fix["lat"], 6),
+                        "lon": round(v.fix["lon"], 6), "ts": v.fix["ts"]})
+        return out
+
+    def people_view(self, base_url: str) -> Dict[str, Any]:
+        from sentinel.engine.location import car_name_words, whereabouts
+
+        places = self.locations.places()
+        now = time.time()
+        people = []
+        names = set()
+        for v in self.person_views().values():
+            p = v.person
+            names.update(p.words())
+            invite = self.locations.invite(p.id)
+            fix = v.fix or {}
+            people.append({
+                "id": p.id, "name": p.name, "aliases": p.aliases, "sharing": bool(v.fix),
+                "where": whereabouts(v, places, now) if v.fix else None,
+                "home": bool(v.place and v.place.is_home), "ts": fix.get("ts"), "batt": fix.get("batt"),
+                "lat": fix.get("lat"), "lon": fix.get("lon"), "cars": [c.name for c in v.cars],
+                "invite": {"url": self._join_url(base_url, invite[0]), "expires": invite[1]} if invite else None,
+            })
+        vehicles = self.household.vehicles()
+        car_words = set(car_name_words(vehicles))
+        suggestions = []
+        for veh in vehicles:
+            owner = veh.owner.strip()
+            if not owner or owner.lower() in names or owner.lower() == veh.name.lower() or owner.lower() in car_words:
+                continue
+            aliases = [a for a in veh.aliases if a.lower() not in (owner.lower(),) and a.lower() not in car_words]
+            suggestions.append({"name": owner, "aliases": aliases})
+            names.add(owner.lower())
+        return {
+            "people": people, "suggestions": suggestions,
+            "places": [{"id": p.id, "name": p.name, "lat": p.lat, "lon": p.lon, "radius": p.radius,
+                        "alerts": p.alerts, "home": p.is_home} for p in places],
+            "alerts_enabled": bool(self.settings.get("location_alerts_enabled", True)),
+            "public_url": str(self.settings.get("remote_web_url") or ""),
+            "telegram": self.telegram.is_configured(),
+        }
+
+    @staticmethod
+    def _clean_name(value: Any, limit: int = 30) -> str:
+        return re.sub(r"\s+", " ", value if isinstance(value, str) else "").strip()[:limit]
+
+    def people_save(self, body: Dict[str, Any]) -> Tuple[bool, str]:
+        name = self._clean_name(body.get("name"))
+        if not name:
+            return False, "Enter the person's name."
+        aliases = body.get("aliases") or []
+        if isinstance(aliases, str):
+            aliases = aliases.split(",")
+        aliases = [self._clean_name(a) for a in aliases if isinstance(a, str)][:10]
+        person_id = body.get("id")
+        if person_id is not None and (not isinstance(person_id, int) or self.locations.person(person_id) is None):
+            return False, "That person no longer exists."
+        others = [p for p in self.locations.people() if p.id != person_id]
+        if any(name.lower() in o.words() for o in others):
+            return False, f"There's already someone called {name}."
+        new_id = self.locations.save_person(name, aliases, person_id)
+        app_logger.log("info", "location_person_saved", new=person_id is None, component="engine", action="location")
+        return True, str(new_id)
+
+    def people_action(self, person_id: int, action: str, base_url: str = "") -> Tuple[bool, str]:
+        person = self.locations.person(person_id)
+        if person is None:
+            return False, "That person no longer exists."
+        if action == "delete":
+            self.locations.delete_person(person_id)
+        elif action == "forget":
+            self.locations.forget(person_id)
+        elif action == "new-password":
+            self.locations.new_token(person_id)
+        elif action == "invite":
+            return True, self._join_url(base_url, self.locations.new_invite(person_id))
+        else:
+            return False, "Unknown action."
+        app_logger.log("info", "location_person_" + action.replace("-", "_"), component="engine", action="location")
+        return True, "Done."
+
+    def place_save(self, body: Dict[str, Any]) -> Tuple[bool, str]:
+        from sentinel.engine.location import DEFAULT_RADIUS_M, parse_coordinates
+
+        name = self._clean_name(body.get("name"), 40)
+        if not name:
+            return False, "Give the place a name."
+        if name.lower() == "home":
+            name = "Home"
+        place_id = body.get("id")
+        existing = self.locations.place(place_id) if isinstance(place_id, int) else None
+        if place_id is not None and existing is None:
+            return False, "That place no longer exists."
+        if any(p.name.lower() == name.lower() and p.id != place_id for p in self.locations.places()):
+            return False, f"There's already a place called {name}."
+        coords = None
+        if isinstance(body.get("from_person"), int):
+            fix = self.locations.fix(body["from_person"])
+            if not fix:
+                return False, "That person's phone hasn't sent a location yet."
+            coords = (fix["lat"], fix["lon"])
+        elif body.get("where"):
+            coords = parse_coordinates(str(body["where"]))
+            if coords is None:
+                return False, ("I couldn't find coordinates in that. In Google Maps, press and hold the spot, "
+                               "then copy the numbers that appear (like 41.1145, -83.1780).")
+        elif existing is not None:
+            coords = (existing.lat, existing.lon)
+        if coords is None:
+            return False, "Choose where the place is."
+        try:
+            radius = float(body.get("radius") or (existing.radius if existing else DEFAULT_RADIUS_M))
+        except (TypeError, ValueError):
+            return False, "Size must be a number of metres."
+        alerts = body.get("alerts", existing.alerts if existing else True)
+        new_id = self.locations.save_place(name, coords[0], coords[1], radius, alerts is True, place_id)
+        app_logger.log("info", "location_place_saved", source="web", component="engine", action="location")
+        return True, str(new_id)
+
+    def place_delete(self, place_id: int) -> Tuple[bool, str]:
+        if self.locations.place(place_id) is None:
+            return False, "That place no longer exists."
+        self.locations.delete_place(place_id)
+        return True, "Deleted."
+
+    def location_alerts(self, on: Any) -> Tuple[bool, str]:
+        if not isinstance(on, bool):
+            return False, "expected true or false"
+        self.settings["location_alerts_enabled"] = on
+        self.settings_manager.save_settings(force=True)
+        return True, "Arrive/leave messages " + ("on." if on else "off.")
+
+    def join_view(self, code: str, base_url: str) -> Optional[Dict[str, Any]]:
+        """The setup page a person opens on their own phone (no Sentinel login: the link is the key)."""
+        from sentinel.engine.location import owntracks_config, owntracks_link
+
+        person = self.locations.by_invite(code)
+        if person is None:
+            return None
+        endpoint = self._owntracks_endpoint(base_url)
+        config = owntracks_config(person, endpoint, self.locations.places())
+        return {"name": person.name, "link": owntracks_link(config), "endpoint": endpoint,
+                "username": person.username, "password": person.token, "config": config,
+                "sharing": self.locations.fix(person.id) is not None,
+                "names": [p.name for p in self.locations.people()]}
 
     def backfill_events_from_log(self) -> int:
         """One-off: import sightings logged before the events table existed (no photos)."""

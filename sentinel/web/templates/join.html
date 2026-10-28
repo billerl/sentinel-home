@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <meta name="theme-color" content="#001525">
+  <title>Sentinel — Share your location</title>
+  <style>
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; line-height: 1.55; }
+    main { max-width: 560px; margin: 0 auto; padding: 18px 16px 60px; }
+    h1 { font-size: 1.25rem; color: #00ffff; margin: 6px 0 12px; display: flex; align-items: center; gap: 10px; }
+    h1 img { width: 36px; height: 36px; border-radius: 8px; }
+    h2 { font-size: 1rem; color: #00ffff; margin: 0 0 8px; }
+    p, li { font-size: 0.95rem; }
+    ul, ol { padding-left: 1.3rem; margin: 6px 0; }
+    li { margin: 4px 0; }
+    .card { background: #0b0b0b; border: 1px solid #033; border-radius: 8px; padding: 14px 16px; margin: 14px 0; }
+    .step { display: inline-flex; width: 26px; height: 26px; border-radius: 50%; background: #00ffff; color: #000;
+            font-weight: 700; align-items: center; justify-content: center; margin-right: 8px; font-size: 0.9rem; }
+    a.btn, button { display: block; width: 100%; text-align: center; background: #00ffff; color: #000; font-weight: 600;
+            text-decoration: none; border: 0; border-radius: 8px; padding: 13px; font: inherit; font-size: 1rem;
+            margin: 10px 0 4px; cursor: pointer; }
+    a.btn.alt, button.alt { background: rgba(0,255,255,0.12); color: #00ffff; border: 1px solid #00ffff; }
+    .muted { color: #7aa; font-size: 0.85rem; }
+    .ok { color: #6f6; font-weight: 600; }
+    .wait { color: #ffd479; }
+    code { background: #111; border: 1px solid #044; border-radius: 4px; padding: 2px 6px; word-break: break-all;
+           color: #e6ffff; font-size: 0.88rem; }
+    details summary { cursor: pointer; color: #9ff; }
+    [hidden] { display: none !important; }
+    .platform-ios .label, .platform-android .label { display: none; }
+    .platform-ios .android, .platform-android .ios { display: none; }
+  </style>
+</head>
+<body>
+<main>
+  <h1><img src="/static/icon-192.png" alt="">Sentinel</h1>
+{% if expired %}
+  <div class="card">
+    <h2>This setup link has expired</h2>
+    <p>Ask whoever sent it for a new one (it's on Sentinel's People page).</p>
+  </div>
+{% else %}
+  <div class="card" id="ask">
+    <h2>Hi {{ v.name }} — share your location with the family?</h2>
+    <p>Sentinel is your family's home security system. If you agree, your phone tells it where you are from time to time,
+      so the family can ask <i>“Where is {{ v.name }}?”</i> and see on the Live page whether you're home.</p>
+    <ul>
+      <li><b>What's shared:</b> your phone's location and battery level.</li>
+      <li><b>Who can see it:</b> people who sign in to Sentinel and the family's Sentinel Telegram chat
+        (it posts when someone arrives at or leaves a saved place, like home or school).</li>
+      <li><b>What's kept:</b> only your latest location, and the times you arrived at or left saved places
+        (for 30 days) — not a trail of everywhere you've been. It stays on the family's computer at home.</li>
+      <li><b>Stopping:</b> any time — in the OwnTracks app switch to <i>Quiet</i> mode, or just delete the app.</li>
+    </ul>
+    <button onclick="agree()">I agree — set it up</button>
+    <button class="alt" onclick="decline()">No thanks</button>
+  </div>
+
+  <div class="card" id="declined" hidden>
+    <h2>No problem</h2>
+    <p>Nothing has been shared. You can close this page.</p>
+  </div>
+
+  <div id="steps" hidden>
+    <div class="card">
+      <h2><span class="step">1</span>Get the free OwnTracks app</h2>
+      <p>OwnTracks is a free, open-source app that sends your location only to the address you give it — here, your
+        family's Sentinel. No account, no ads.</p>
+      <a class="btn ios" href="https://apps.apple.com/us/app/owntracks/id692424691" target="_blank" rel="noopener">Get it on the App Store</a>
+      <a class="btn android" href="https://play.google.com/store/apps/details?id=org.owntracks.android" target="_blank" rel="noopener">Get it on Google Play</a>
+      <p class="muted">Install it, then come back to this page.</p>
+    </div>
+
+    <div class="card">
+      <h2><span class="step">2</span>Connect it to Sentinel</h2>
+      <p>Tap the button. OwnTracks opens and asks to import a configuration — tap <b>Import</b> (or OK).</p>
+      <a class="btn" href="{{ v.link }}">Set up OwnTracks</a>
+      <details class="android">
+        <summary>Button didn't open the app?</summary>
+        <p>Download the setup file, then open it with OwnTracks (or in OwnTracks: menu → <i>Configuration management</i> →
+          <i>Import</i>).</p>
+        <a class="btn alt" href="/join/{{ code }}/sentinel.otrc">Download setup file</a>
+      </details>
+      <details>
+        <summary>Set it up by hand instead</summary>
+        <p>In OwnTracks settings, under <i>Connection</i>:</p>
+        <ul>
+          <li>Mode: <b>HTTP</b></li>
+          <li>URL / Host: <code>{{ v.endpoint }}</code></li>
+          <li>Authentication on — Username: <code>{{ v.username }}</code></li>
+          <li>Password: <code>{{ v.password }}</code></li>
+          <li>Device ID: <code>phone</code></li>
+        </ul>
+      </details>
+    </div>
+
+    <div class="card">
+      <h2><span class="step">3</span>Allow location “all the time”</h2>
+      <p>OwnTracks can only say when you get home if it may check your location in the background.</p>
+      <div class="ios">
+        <p class="muted label">iPhone</p>
+        <ol>
+          <li>When OwnTracks asks for your location, tap <b>Allow While Using App</b>. Later iOS asks again — tap
+            <b>Change to Always Allow</b>.</li>
+          <li>Or do it now: <i>Settings → OwnTracks → Location</i> → <b>Always</b>, and switch on <b>Precise Location</b>.</li>
+          <li>Allow <b>Motion &amp; Fitness</b> if asked, and keep <i>Settings → OwnTracks → Background App Refresh</i> on.</li>
+          <li>In OwnTracks, tap the mode arrow (top left) and make sure it says <b>Significant</b> (easy on the battery).</li>
+        </ol>
+      </div>
+      <div class="android">
+        <p class="muted label">Android</p>
+        <ol>
+          <li>When asked for location, choose <b>Precise</b>, then <b>Allow all the time</b>. If you only see
+            “While using the app”, pick it, then go to <i>Settings → Apps → OwnTracks → Permissions → Location</i>
+            → <b>Allow all the time</b>.</li>
+          <li>Allow <b>notifications</b> (OwnTracks shows a small one so Android keeps it running).</li>
+          <li><i>Settings → Apps → OwnTracks → Battery</i> → <b>Unrestricted</b> (or “Don't optimise”), so it isn't put to sleep.</li>
+          <li>In OwnTracks, the mode should be <b>Significant</b> (easy on the battery).</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span class="step">4</span>Check it worked</h2>
+      <p id="status" class="wait">Waiting for your phone's first location… In OwnTracks, tap the ⬆ (send) button to send it now.</p>
+    </div>
+  </div>
+{% endif %}
+</main>
+{% if not expired %}
+<script>
+  (function() {
+    var ua = navigator.userAgent || "";
+    var ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    var android = /Android/.test(ua);
+    if (ios) document.body.classList.add("platform-ios");
+    else if (android) document.body.classList.add("platform-android");
+  })();
+  var code = {{ code|tojson }};
+  var sharing = {{ v.sharing|tojson }};
+  function show(id, on) { document.getElementById(id).hidden = !on; }
+  function agree() {
+    show("ask", false); show("steps", true); window.scrollTo(0, 0);
+    try { localStorage.setItem("sentinel.join." + code, "1"); } catch (e) {}
+    poll();
+  }
+  function decline() { show("ask", false); show("declined", true); }
+  function done() {
+    var s = document.getElementById("status");
+    s.className = "ok";
+    s.textContent = "✅ Connected — Sentinel can see your phone. You're all set; you can close this page.";
+  }
+  async function poll() {
+    if (sharing) { done(); return; }
+    try {
+      var r = await fetch("/join/" + encodeURIComponent(code) + "/status", { cache: "no-store" });
+      var d = await r.json();
+      if (d.sharing) { sharing = true; done(); return; }
+    } catch (e) {}
+    setTimeout(poll, 5000);
+  }
+  // Coming back from the app store or OwnTracks: skip straight to the steps.
+  try { if (localStorage.getItem("sentinel.join." + code)) agree(); } catch (e) {}
+</script>
+{% endif %}
+</body>
+</html>
