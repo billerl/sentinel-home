@@ -35,6 +35,9 @@ LOGIN_SECONDS = 15 * 60
 RESTART_DELAYS = (5, 15, 60, 300)  # after it stops by itself, growing while it keeps failing
 
 
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")  # spotifyd colours its log lines
+
+
 def speaker_name(settings: Dict[str, Any]) -> str:
     name = re.sub(r"[^\w' -]", "", str(settings.get("spotify_speaker_name") or "")).strip()
     return name[:40] or "Sentinel"
@@ -107,7 +110,8 @@ class SpotifyPlayer:
 
     def _spawn(self, args: List[str]) -> subprocess.Popen:
         self._write_config()
-        return self._popen([os.path.abspath(BIN), "--config-path", os.path.abspath(CONFIG)] + args,
+        # (after the subcommand: `authenticate` has its own --config-path)
+        return self._popen([os.path.abspath(BIN)] + args + ["--config-path", os.path.abspath(CONFIG)],
                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                            env=alsa_env())
 
@@ -126,7 +130,7 @@ class SpotifyPlayer:
                 app_logger.log("info", "spotify_speaker_started", name=speaker_name(self.settings),
                                component="spotify", action="speaker")
                 for line in self._proc.stdout:
-                    self._output.append(line.rstrip()[:300])
+                    self._output.append(_ANSI.sub("", line).rstrip()[:300])
                 code = self._proc.wait()
             except OSError as e:
                 code = -1
@@ -162,7 +166,7 @@ class SpotifyPlayer:
 
         def read() -> None:
             for line in proc.stdout:
-                self._output.append(line.rstrip()[:300])
+                self._output.append(_ANSI.sub("", line).rstrip()[:300])
                 m = re.search(r"https://accounts\.spotify\.com/authorize\S+", line)
                 if m and not found:
                     found.append(m.group(0))

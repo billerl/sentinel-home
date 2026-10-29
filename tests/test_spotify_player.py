@@ -70,7 +70,7 @@ class TestSpotifyPlayer(unittest.TestCase):
             self.assertIn(line, conf)
         self.assertEqual(oct(os.stat(spotify_player.CACHE_DIR).st_mode & 0o777), "0o700")
         args = self.spawned[0].args
-        self.assertEqual(args[1:], ["--config-path", os.path.abspath(spotify_player.CONFIG), "--no-daemon"])
+        self.assertEqual(args[1:], ["--no-daemon", "--config-path", os.path.abspath(spotify_player.CONFIG)])
 
     def test_sign_in_relays_the_pasted_address(self):
         url = "https://accounts.spotify.com/authorize?client_id=x&redirect_uri=http%3A%2F%2F127.0.0.1%3A8898%2Flogin"
@@ -78,7 +78,7 @@ class TestSpotifyPlayer(unittest.TestCase):
         login.wait = lambda timeout=None: login.code if login.done else time.sleep(5)  # waits for the redirect
         p = self.player([login])
         self.assertEqual(p.begin_login(), url)
-        self.assertEqual(self.spawned[0].args[3:], ["authenticate", "--oauth-port", "8898"])
+        self.assertEqual(self.spawned[0].args[1:4], ["authenticate", "--oauth-port", "8898"])
         self.assertEqual(p.finish_login("http://127.0.0.1:8898/login?state=s"), (False, "couldn't find the code in that address"))
 
         def deliver(addr, timeout):
