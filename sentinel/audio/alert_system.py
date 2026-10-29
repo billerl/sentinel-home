@@ -32,6 +32,9 @@ KOKORO_VOICES = (("af_heart", "Heart (US woman, most natural)"), ("af_bella", "B
                  ("am_michael", "Michael (US man)"), ("bf_emma", "Emma (British woman)"),
                  ("bm_george", "George (British man)"), ("bm_fable", "Fable (British man)"))
 KOKORO_RATE = 24000
+# The PC's own sound card (front line-out jack). Named directly: the service has no desktop sound server,
+# so ALSA's "default" (PipeWire) fails there with "Host is down".
+SPEAKER_DEVICE = "plughw:0,0"
 
 
 def kokoro_available() -> bool:
@@ -194,7 +197,7 @@ class AudioAlertSystem:
             return subprocess.Popen(["paplay", "--raw", "--format=s16le", f"--rate={rate}", "--channels=1"],
                                     stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                     env={"PULSE_SERVER": f"unix:{server}"})
-        return subprocess.Popen(["aplay", "-q", "-t", "raw", "-f", "S16_LE", "-r", str(rate), "-c", "1", "-"],
+        return subprocess.Popen(["aplay", "-q", "-D", SPEAKER_DEVICE, "-t", "raw", "-f", "S16_LE", "-r", str(rate), "-c", "1", "-"],
                                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def _speak(self, text: str, voice: str = "") -> bool:
@@ -346,7 +349,7 @@ class AudioAlertSystem:
                 except (OSError, subprocess.TimeoutExpired):
                     pass  # nobody connected: fall back to the PC's own speakers
             proc = subprocess.Popen(
-                ["aplay", "-q", "-"],
+                ["aplay", "-q", "-D", SPEAKER_DEVICE, "-"],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,

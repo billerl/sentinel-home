@@ -77,8 +77,9 @@ runs `/clear`. Everything stays free and local except the existing opt-in Claude
 
 1. **Voice assistant ("Hey Jarvis")** — DONE 2026-10-27 (see handoff_summary.md). Tested live by the
    user over Remote Desktop: wake 0.93–1.0, every phrase transcribed right. Restore point before it:
-   git tag `pre-voice-assistant` + `../checkpoints/pre-voice-assistant/` (RESTORE.md). Open: the PC has no
-   speaker yet (`audio_output` is "remote" = plays in the RDP session; switch back once speakers are in);
+   git tag `pre-voice-assistant` + `../checkpoints/pre-voice-assistant/` (RESTORE.md). Speaker: plugged into the front
+   line-out jack 2026-10-28, `audio_output` = "speakers" (plays on `plughw:0,0`: the service has no desktop
+   sound server, ALSA "default" fails there; "remote" = the RDP session, for testing);
    the user dislikes "Jarvis" and wants a custom wake word, maybe "Jezebel" — needs an openWakeWord model
    trained (free Colab notebook ~1 h, or overnight on this CPU), dropped in via `voice_wake_model`.
    Original mic notes:

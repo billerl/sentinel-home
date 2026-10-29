@@ -128,7 +128,8 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     conversation (`AudioAlertSystem.busy`/play lock). openWakeWord's `reset()` keeps its audio buffer, so
     2 s of silence is pushed through after each conversation or it re-wakes on the old "Hey Jarvis".
     `audio_output: remote` plays via `paplay` to /run/user/<uid>/pulse/native (the xrdp session), falling
-    back to aplay. main.py ends with `os._exit(0)` after `engine.stop()`: CTranslate2/onnxruntime crashed in
+    back to aplay; "speakers" = `aplay -D plughw:0,0` (front line-out jack; the service has no PipeWire, so
+    ALSA "default" fails with "Host is down"). main.py ends with `os._exit(0)` after `engine.stop()`: CTranslate2/onnxruntime crashed in
     interpreter teardown and the core dump delayed a restart by a minute.
   - Spotify (2026-10-27, `sentinel/engine/spotify.py`, settings `spotify_client_id`, `spotify_device`,
     `spotify_refresh_token` [never sent to the browser]): Web API only, music plays on the family's own
