@@ -6,7 +6,7 @@ the voice assistant can talk over it, and is turned down while it does (AudioAle
 
 spotifyd isn't packaged for Ubuntu: the release binary goes in bin/spotifyd (not in git; see readme).
 Sign-in is Spotify's own, through `spotifyd authenticate`, which saves reusable credentials in
-.spotifyd/credentials.json (owner-only, not in git); discovery on the network is off, so the
+.spotifyd/oauth/credentials.json (owner-only, not in git); discovery on the network is off, so the
 firewall needs no changes. The sign-in redirect is http://127.0.0.1:8898/login: on the PC spotifyd's
 own listener catches it; from another device the person pastes the address and Sentinel forwards it.
 """
@@ -29,7 +29,7 @@ from sentinel.logging_utils import app_logger
 BIN = os.path.join("bin", "spotifyd")
 CACHE_DIR = ".spotifyd"
 CONFIG = os.path.join(CACHE_DIR, "spotifyd.conf")
-CREDENTIALS = os.path.join(CACHE_DIR, "credentials.json")
+CREDENTIALS = os.path.join(CACHE_DIR, "oauth", "credentials.json")  # where `spotifyd authenticate` saves it
 OAUTH_PORT = 8898  # Sentinel's own Spotify sign-in uses 8888
 LOGIN_SECONDS = 15 * 60
 RESTART_DELAYS = (5, 15, 60, 300)  # after it stops by itself, growing while it keeps failing

@@ -143,7 +143,7 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     An unknown speaker name by voice ("play Spotify on the kitchen") offers the list (VoiceReply.confirm).
   - The PC as a Spotify speaker (2026-10-28, `sentinel/audio/spotify_player.py`, setting
     `spotify_speaker_name` [default "Sentinel"]): supervises `bin/spotifyd` (v0.4.2 release binary, not in
-    git) with `.spotifyd/spotifyd.conf` (generated each start) and `.spotifyd/credentials.json` (from
+    git) with `.spotifyd/spotifyd.conf` (generated each start) and `.spotifyd/oauth/credentials.json` (from
     `spotifyd authenticate`, port 8898; pasted redirects are forwarded to its listener). Discovery is off
     (ufw is on; no firewall change needed). Runs only once signed in; restarts with back-off. Audio:
     `alsa-sentinel.conf` via `ALSA_CONFIG_PATH=/usr/share/alsa/alsa.conf:<it>` (only Sentinel and its

@@ -83,6 +83,7 @@ class TestSpotifyPlayer(unittest.TestCase):
 
         def deliver(addr, timeout):
             self.assertEqual(addr, "http://127.0.0.1:8898/login?code=abc&state=s")
+            os.makedirs(os.path.dirname(spotify_player.CREDENTIALS))
             with open(spotify_player.CREDENTIALS, "w") as f:
                 f.write("{}")
             login.done = True
@@ -97,7 +98,7 @@ class TestSpotifyPlayer(unittest.TestCase):
         p.start()
         time.sleep(0.2)
         self.assertEqual(self.spawned, [])  # not signed in: nothing runs
-        os.makedirs(spotify_player.CACHE_DIR)
+        os.makedirs(os.path.dirname(spotify_player.CREDENTIALS))
         with open(spotify_player.CREDENTIALS, "w") as f:
             f.write("{}")
         with mock.patch.object(spotify_player, "RESTART_DELAYS", (0.05,)):
@@ -112,7 +113,7 @@ class TestSpotifyPlayer(unittest.TestCase):
         self.assertEqual(p.last_error, "")  # the second run ended cleanly
 
     def test_sign_out_removes_the_credentials(self):
-        os.makedirs(spotify_player.CACHE_DIR)
+        os.makedirs(os.path.dirname(spotify_player.CREDENTIALS))
         with open(spotify_player.CREDENTIALS, "w") as f:
             f.write("{}")
         p = self.player([])
