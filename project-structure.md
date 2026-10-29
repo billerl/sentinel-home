@@ -61,6 +61,8 @@ sentinel-home/                         # repository root
     ├── audio/
     │   ├── alert_system.py            # Piper TTS + `aplay` (or the Remote Desktop session via `paplay`),
     │   │                              #   pyttsx3 fallback (skipped when volume is 0), chimes
+    │   ├── alsa-sentinel.conf         # dmix: the line-out shared by voice/alerts and the Spotify speaker
+    │   ├── spotify_player.py          # this PC as a Spotify speaker: runs bin/spotifyd, its sign-in relay
     │   └── voice.py                   # "Hey Jarvis": arecord -> band-pass -> openWakeWord -> faster-whisper
     │                                  #   (+ an optional trial wake word that only logs scores)
     └── settings/

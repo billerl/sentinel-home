@@ -48,6 +48,8 @@ viewer with a live camera grid, a DVR-style motion timeline, and a zone editor.
 - **Spotify (optional, Premium):** "play some jazz", pause, skip, volume, "what's playing?" by voice,
   on the household's own Spotify devices (TV app, phones, Echo); a now-playing bar on the live page.
   PKCE sign-in with your own free developer app's Client ID (redirect `http://127.0.0.1:8888/callback`).
+  Optionally the PC itself is a Spotify speaker ("play Spotify on Sentinel", "play Spotify here"),
+  through spotifyd on its line-out jack; the music turns down while the voice assistant talks.
 - **Family locations (optional, OwnTracks):** family members who agree install the free OwnTracks app
   (a setup link from the Family page walks them through it, no Sentinel login needed). Ask "Where is
   Abigail?", "Who's home?", "Is Mom at work?" by Telegram or voice; arrive/leave messages for named places;
@@ -81,6 +83,9 @@ mkdir -p models/kokoro && for f in kokoro-v1.0.onnx voices-v1.0.bin; do curl -L 
   https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/$f; done
 # optional: voice assistant speech recognition (faster-whisper base.en, MIT)
 venv/bin/python -c "from huggingface_hub import snapshot_download as d; d('Systran/faster-whisper-base.en', local_dir='models/whisper/base.en')"
+# optional: this PC as a Spotify speaker (spotifyd, GPL-3.0; sign in under Settings -> Spotify)
+mkdir -p bin && curl -L https://github.com/Spotifyd/spotifyd/releases/download/v0.4.2/spotifyd-linux-x86_64-slim.tar.gz \
+  | tar xz -C bin   # check it against the release's .sha512 file
 venv/bin/python -m sentinel.web.set_password     # web viewer login
 venv/bin/python main.py
 ```

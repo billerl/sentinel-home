@@ -33,8 +33,46 @@ KOKORO_VOICES = (("af_heart", "Heart (US woman, most natural)"), ("af_bella", "B
                  ("bm_george", "George (British man)"), ("bm_fable", "Fable (British man)"))
 KOKORO_RATE = 24000
 # The PC's own sound card (front line-out jack). Named directly: the service has no desktop sound server,
-# so ALSA's "default" (PipeWire) fails there with "Host is down".
-SPEAKER_DEVICE = "plughw:0,0"
+# so ALSA's "default" (PipeWire) fails there with "Host is down". alsa-sentinel.conf shares the jack with
+# the Spotify speaker (spotify_player.py); without it, the bare card plays one sound at a time.
+ALSA_CONF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alsa-sentinel.conf")
+SYSTEM_ALSA_CONF = "/usr/share/alsa/alsa.conf"
+MUSIC_CONTROL = "Sentinel Music"  # the Spotify speaker's own volume, created by alsa-sentinel.conf
+MUSIC_DUCKED = "60%"  # softvol's scale is in dB: 60% is about -20 dB, music well under the voice
+
+
+def shared_speaker() -> bool:
+    return os.path.exists(ALSA_CONF) and os.path.exists(SYSTEM_ALSA_CONF)
+
+
+def alsa_env() -> Dict[str, str]:
+    """Environment for ALSA programs (aplay, spotifyd) that use the shared speaker devices."""
+    env = dict(os.environ)
+    if shared_speaker():
+        env["ALSA_CONFIG_PATH"] = f"{SYSTEM_ALSA_CONF}:{ALSA_CONF}"
+    return env
+
+
+def speaker_device() -> str:
+    return "sentinel_speaker" if shared_speaker() else "plughw:0,0"
+
+
+def pc_volume() -> Optional[int]:
+    """The sound card's Master volume in percent (everything on the line-out: voice, alerts, music)."""
+    try:
+        out = subprocess.run(["amixer", "-c", "0", "sget", "Master"], capture_output=True, text=True, timeout=3).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = re.search(r"\[(\d+)%\]", out)
+    return int(m.group(1)) if m else None
+
+
+def set_pc_volume(percent: int) -> bool:
+    try:
+        return subprocess.run(["amixer", "-q", "-c", "0", "sset", "Master", f"{max(0, min(100, int(percent)))}%"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def kokoro_available() -> bool:
@@ -68,7 +106,7 @@ class AudioAlertSystem:
         self._speech_rate: int = settings.get("speech_speed", DEFAULT_SPEECH_SPEED)
         self._volume: float = settings.get("volume", DEFAULT_VOLUME)
         self._play_lock = threading.Lock()  # one sound at a time: alerts never talk over the voice assistant
-        self.busy = False  # set by the voice assistant during a conversation: alerts stay quiet
+        self._busy = False
         self.kokoro = None
         self.kokoro_voice = ""
         self._output: str = settings.get("audio_output", "speakers")
@@ -197,8 +235,8 @@ class AudioAlertSystem:
             return subprocess.Popen(["paplay", "--raw", "--format=s16le", f"--rate={rate}", "--channels=1"],
                                     stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                     env={"PULSE_SERVER": f"unix:{server}"})
-        return subprocess.Popen(["aplay", "-q", "-D", SPEAKER_DEVICE, "-t", "raw", "-f", "S16_LE", "-r", str(rate), "-c", "1", "-"],
-                                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return subprocess.Popen(["aplay", "-q", "-D", speaker_device(), "-t", "raw", "-f", "S16_LE", "-r", str(rate), "-c", "1", "-"],
+                                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=alsa_env())
 
     def _speak(self, text: str, voice: str = "") -> bool:
         if self.kokoro is not None and self._speak_kokoro(text, voice):
@@ -299,6 +337,26 @@ class AudioAlertSystem:
 
         return False
 
+    @property
+    def busy(self) -> bool:
+        """Set by the voice assistant during a conversation: alerts stay quiet and music is turned down."""
+        return getattr(self, "_busy", False)
+
+    @busy.setter
+    def busy(self, value: bool) -> None:
+        if value != self.busy:
+            self.duck_music(value)
+        self._busy = value
+
+    @staticmethod
+    def duck_music(on: bool) -> None:
+        """Turn the PC's Spotify speaker down (or back up) so the voice assistant can hear and be heard."""
+        try:
+            subprocess.run(["amixer", "-q", "-c", "0", "sset", MUSIC_CONTROL, MUSIC_DUCKED if on else "100%"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
+        except (OSError, subprocess.TimeoutExpired):
+            pass  # no amixer, or the control doesn't exist yet (the Spotify speaker hasn't played)
+
     def speak(self, text: str, voice: str = "") -> bool:
         """Say something now and return when it's finished (voice assistant replies).
 
@@ -349,10 +407,11 @@ class AudioAlertSystem:
                 except (OSError, subprocess.TimeoutExpired):
                     pass  # nobody connected: fall back to the PC's own speakers
             proc = subprocess.Popen(
-                ["aplay", "-q", "-D", SPEAKER_DEVICE, "-"],
+                ["aplay", "-q", "-D", speaker_device(), "-"],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                env=alsa_env(),
             )
             proc.communicate(wav_payload, timeout=120)
 

@@ -22,7 +22,7 @@ from sentinel.constants import CAPTURE_DIR, VIDEO_DIR
 from sentinel.engine import admin
 from sentinel.engine.camera import CLIP_REQUEST_REASON, CameraPipeline, camera_host
 from sentinel.engine.assistant import Assistant, build_context
-from sentinel.engine.spotify import SpotifyService, parse_music_command
+from sentinel.engine.spotify import NO_SUCH_SPEAKER, SpotifyService, parse_music_command
 from sentinel.engine.weather import WeatherService
 from sentinel.logging_utils import app_logger
 from sentinel.notifications import TelegramNotifier
@@ -78,6 +78,43 @@ def _display_name(value: Any) -> Optional[str]:
     return text[:60] if text else None
 
 
+# "Turn the PC down" (the whole PC: voice, alerts and music) vs "speak quieter" (just the voice).
+_PC = r"(?:the |this |your )?(?:p ?c|computer|speakers?|system)(?:'s)?"
+_STEP = r"(?: a (?:bit|little|lot))?"
+
+
+def parse_volume_command(text: str) -> Optional[Tuple[str, str]]:
+    """("pc", "+" / "-" / "40") or ("voice", ...), or None. Music volume is Spotify's (parse_music_command)."""
+    from sentinel.engine.spotify import _NUMBERS
+
+    t = re.sub(r"^(please |can you |could you |would you )|( please)$", "", (text or "").lower().strip(" .?!"))
+    t = re.sub(r"\s+", " ", t)
+
+    def level(word: str) -> Optional[str]:
+        if word.isdigit():
+            return str(min(100, int(word)))
+        return str(_NUMBERS[word]) if word in _NUMBERS else None
+
+    m = re.fullmatch(rf"(?:turn |set |put )?{_PC} volume (?:to |at )?(\d{{1,3}}|[a-z ]+?)(?: percent)?", t)
+    if m and level(m.group(1)):
+        return ("pc", level(m.group(1)))
+    m = (re.fullmatch(rf"turn {_PC}(?: volume)? (up|down){_STEP}", t)
+         or re.fullmatch(rf"turn (up|down) {_PC}(?: volume)?{_STEP}", t)
+         or re.fullmatch(rf"{_PC} volume (up|down){_STEP}", t)
+         or re.fullmatch(rf"make {_PC} (louder|quieter|softer){_STEP}", t))
+    if m:
+        return ("pc", "+" if m.group(1) in ("up", "louder") else "-")
+    m = re.fullmatch(r"(?:set )?your (?:voice |speaking )?volume (?:to |at )?(\d{1,3}|[a-z ]+?)(?: percent)?", t)
+    if m and level(m.group(1)):
+        return ("voice", level(m.group(1)))
+    m = (re.fullmatch(rf"(?:speak|talk){_STEP} (up|louder|quieter|softer|more quietly|more softly|down)", t)
+         or re.fullmatch(rf"turn (?:your voice|yourself) (up|down){_STEP}", t)
+         or re.fullmatch(rf"(?:you'?re|you are) too (loud|quiet|soft)", t))
+    if m:
+        return ("voice", "+" if m.group(1) in ("up", "louder", "quiet", "soft") else "-")
+    return None
+
+
 EDITABLE_PROFILE_FIELDS = {
     "display": _display_name,
     "enabled": bool,
@@ -120,6 +157,9 @@ class Engine:
         self.weather = WeatherService(self.settings)
         self.assistant = Assistant(self.settings)
         self.spotify = SpotifyService(self.settings, lambda: self.settings_manager.save_settings(force=True))
+        from sentinel.audio.spotify_player import SpotifyPlayer  # (sentinel.audio loads the speech engines)
+
+        self.spotify_player = SpotifyPlayer(self.settings)  # this PC as a Spotify speaker (spotifyd)
         self._command_offers: Dict[int, Tuple[str, str, float]] = {}  # "Do it" buttons under Claude's replies
         self._offer_ids = itertools.count(1)
         self.audio = self._init_audio()
@@ -302,6 +342,11 @@ class Engine:
         )
         self._command_thread.start()
         self._start_voice()
+        if self.settings.get("pc_volume") is not None:  # ALSA forgets it at reboot without `alsactl store` (sudo)
+            from sentinel.audio.alert_system import set_pc_volume
+
+            set_pc_volume(int(self.settings["pc_volume"]))
+        self.spotify_player.start()
         app_logger.log(
             "info", "engine_started", cameras=list(self.cameras), component="engine", action="start"
         )
@@ -318,6 +363,7 @@ class Engine:
         if self.presence is not None:
             self.presence.stop()
         self._stop_voice()
+        self.spotify_player.stop()
         self.telegram.cleanup()
         self.recording_store.stop()
         if self.audio is not None:
@@ -863,6 +909,27 @@ class Engine:
             self.telegram.reply_to_chat(chat_id, f"📝 Note for Claude (as Jezebel heard it):\n{text}")
         return "Got it, I've saved that for Claude."
 
+    def change_volume(self, what: str, value: str) -> str:
+        """By voice: the PC's Master volume (kept in pc_volume, set again at start) or the voice's own."""
+        from sentinel.audio.alert_system import pc_volume, set_pc_volume
+
+        if what == "pc":
+            now = pc_volume()
+            if now is None:
+                return "I can't reach this PC's volume."
+            new = max(0, min(100, now + (10 if value == "+" else -10))) if value in "+-" else int(value)
+            if not set_pc_volume(new):
+                return "I couldn't change this PC's volume."
+            self.settings_manager.set("pc_volume", new)
+            return f"PC volume {new} percent."
+        now = float(self.settings.get("volume", 0.5) or 0.5)
+        new = now + (0.1 if value == "+" else -0.1) if value in "+-" else int(value) / 100
+        new = round(max(0.1, min(1.0, new)), 2)  # never 0: that turns the voice off altogether
+        self.settings_manager.set("volume", new)
+        if self.audio is not None:
+            self.audio.update_settings({"volume": new})
+        return f"Okay, my voice is at {round(new * 100)} percent."
+
     def _voice_toggle(self, changes: Dict[str, bool]):
         from sentinel.audio.voice import VoiceReply
 
@@ -890,9 +957,15 @@ class Engine:
             if said:
                 return VoiceReply(self.save_claude_note(said))
             return VoiceReply("Go ahead.", dictate=self.save_claude_note)
+        volume = parse_volume_command(low)
+        if volume:
+            return VoiceReply(self.change_volume(*volume))
         music = parse_music_command(low)
         if music and self.spotify.connected():
-            return VoiceReply(self.spotify.command(*music))
+            said = self.spotify.command(*music)
+            if said.startswith(NO_SUCH_SPEAKER):
+                return VoiceReply(said + " Do you want to hear the list of speakers?", confirm=self.spotify.speaker_list)
+            return VoiceReply(said)
         if re.fullmatch(r"(never ?mind|cancel|stop|nothing|no|forget it|no thanks)", low):
             return VoiceReply("Okay.")
         if music and music[0] == "play":
@@ -1620,6 +1693,8 @@ class Engine:
                 self.audio = self._init_audio()
             else:
                 self.audio.update_settings(self.settings)
+        if "spotify_speaker_name" in cleaned:
+            self.spotify_player.settings_changed()
         if {"voice_enabled", "volume"} & cleaned.keys() and self._started:
             self._stop_voice()
             self._start_voice()

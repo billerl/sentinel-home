@@ -249,7 +249,8 @@ class TestSoundOutput(unittest.TestCase):
                     mock.patch("subprocess.run", return_value=types.SimpleNamespace(returncode=rc)), \
                     mock.patch("subprocess.Popen") as popen:
                 audio._play(b"wav")
-            self.assertEqual(popen.call_args.args[0][:4], ["aplay", "-q", "-D", "plughw:0,0"], (output, server, rc))
+            self.assertEqual(popen.call_args.args[0][:4], ["aplay", "-q", "-D", "sentinel_speaker"], (output, server, rc))
+            self.assertIn("alsa-sentinel.conf", popen.call_args.kwargs["env"]["ALSA_CONFIG_PATH"])
 
 
 class TestTrialWakeWord(unittest.TestCase):

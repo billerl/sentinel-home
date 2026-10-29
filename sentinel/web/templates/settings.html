@@ -306,6 +306,22 @@
             <span class="msg" id="msg-sp-device"></span>
           </div>
         </div>
+        <h3>This PC as a speaker: <span id="spk-state">…</span></h3>
+        <p class="hint" style="margin-top:0">Plays Spotify on the speaker plugged into this PC. It shows up in Spotify like any other speaker, under the name below, so you can say “Hey Jezebel, play Tom Petty on Sentinel” (or “on this speaker”, “play Spotify here”) or pick it in the Spotify app. The music turns down while Jezebel or Jarvis is talking.</p>
+        <div class="row"><div class="field" style="flex: 0 1 320px"><span>Speaker name in Spotify</span><input type="text" data-key="spotify_speaker_name" maxlength="40" placeholder="Sentinel" autocomplete="off"></div></div>
+        <div class="save-row"><button class="primary" onclick="saveSection('spotify')">Save</button><span class="msg" id="msg-spk-name"></span></div>
+        <div id="spk-connect" hidden>
+          <ol class="hint" style="margin-top:0">
+            <li>Press <b>Connect this PC</b> and sign in to Spotify in the tab that opens (the same account), then press <b>Agree</b>.</li>
+            <li>On this PC (through Remote Desktop) it finishes by itself. On any other device the last page says it can't be reached — that's expected: copy the whole address from the address bar, paste it below and press <b>Finish</b>.</li>
+          </ol>
+          <div class="save-row"><button class="primary" onclick="speakerConnect()">Connect this PC</button><span class="msg" id="msg-spk-connect"></span></div>
+          <div class="row">
+            <div class="field" style="flex: 1 1 360px"><span>Address of the last page (only if it didn't finish by itself)</span><input type="text" id="spk-paste" placeholder="http://127.0.0.1:8898/login?code=…" autocomplete="off" spellcheck="false"></div>
+          </div>
+          <div class="save-row"><button onclick="speakerFinish()">Finish</button><span class="msg" id="msg-spk-finish"></span></div>
+        </div>
+        <div class="save-row" id="spk-signed-in" hidden><button onclick="speakerSignOut()">Disconnect this PC</button><span class="msg" id="msg-spk-out"></span></div>
       </div>
     </section>
 
@@ -363,7 +379,8 @@
           <li><b>Asking Claude</b> — if “ask Claude” is on under <a href="#telegram">Telegram</a>, any message Sentinel doesn't understand (“was it busy out back this afternoon?”, “did Abi leave before or after Steph got home?”) is answered by Claude from the last 2 days of events. You'll see “🤔 Let me think…” first; answers take about 10 seconds. It uses your Claude subscription, up to the daily limit you set.</li>
           <li><b>Talking to Sentinel (“Jezebel”, or “Hey Jarvis” if that's the wake word in use)</b> — if the voice assistant is on under <a href="#audio">Audio</a>, say “Hey Jarvis”, wait for the rising chime, then ask: “who's home?”, “when did Abi get home?”, “did anyone come by today?”, “what's the weather?”, “what time is it?”. It answers out loud. Anything else goes to Claude (“Let me think…”) if that's on. To change a setting (“enable messages”) it asks first and only does it if you say “yes”. After each answer it chimes again and listens for about 5 seconds, so you can ask another question without “Hey Jarvis”. A falling chime means it has stopped listening; say “Hey Jarvis” to start again. Wake it with “Hey Jarvis” and Jarvis answers in a man's voice (chosen under Audio); with “Jezebel”, Jezebel answers in the main voice. If it starts listening by mistake, say “cancel” or “never mind” (even at the end of whatever it overheard) and it stops without answering. Speak toward the microphone; from across the room, speak up a little.</li>
           <li><b>Notes for Claude</b> — say “Jezebel, take a note for Claude”, wait for “Go ahead”, then say what you'd like changed or fixed (pauses are fine; up to about 90 seconds). She saves it and sends you a copy on Telegram. Next time you work with Claude, say “check notes”. You can also say it in one go: “Jezebel, note for Claude: make the music bar bigger.”</li>
-          <li><b>Music (Spotify)</b> — once Spotify is connected under <a href="#spotify">Spotify</a>: “Hey Jarvis, play some jazz”, “play Tom Petty”, “play Free Fallin'”, “pause”, “skip”, “go back”, “volume up / down”, “volume 40”, “what's playing?”, “play on the TV”. The music plays on whichever Spotify device is playing (or the one picked under Spotify); if none is, open Spotify on the TV or your phone first. The bar at the bottom of the live page shows the song and has ⏮ ⏯ ⏭ and volume buttons.</li>
+          <li><b>Music (Spotify)</b> — once Spotify is connected under <a href="#spotify">Spotify</a>: “Hey Jarvis, play some jazz”, “play Tom Petty”, “play Free Fallin'”, “pause”, “skip”, “go back”, “volume up / down”, “volume 40”, “what's playing?”, “play on the TV”, “play Spotify on Sentinel” (any speaker's name; if Jezebel doesn't know the name she offers to read out the list — say “yes”). “Play Spotify here” or “on this speaker” means the speaker plugged into this PC (see <b>This PC as a speaker</b> under <a href="#spotify">Spotify</a>).</li>
+          <li><b>Volume</b> — “turn the PC volume down / up” or “PC volume 40” changes everything this PC plays (voice, alerts and music). “Speak up”, “talk quieter” or “set your volume to 60” changes just the voice. “Volume up / down” on its own is the music's (Spotify) volume. The music plays on whichever Spotify device is playing (or the one picked under Spotify); if none is, open Spotify on the TV or your phone first. The bar at the bottom of the live page shows the song and has ⏮ ⏯ ⏭ and volume buttons.</li>
           <li><b>Weather</b> — with 3 cameras the grid has a spare space, which shows the weather (set your town or ZIP under <a href="#weather">Weather</a>). On a phone it's under the cameras. When it's windy it warns you to expect motion clips from trees.</li>
           <li><b>⟳ Reload</b> (top of the live page) — reloads the page, for TVs and browsers without F5. Open pages also reload themselves after Sentinel is updated.</li>
           <li><b>Signing in a TV (QR code)</b> — on a big screen the sign-in page shows a QR code. Scan it with your phone's camera (the phone must already be signed in), check the 4-letter code matches, and tap <b>Yes</b>. The TV stays signed in, even after Sentinel restarts. If the phone says the screen is on a <i>different internet connection</i>, only approve if you're standing in front of it.</li>
@@ -456,7 +473,7 @@
                   "reconnect_interval_seconds", "feed_fps", "web.max_fps", "web.show_zones"],
       audio: ["volume", "speech_speed", "voice_id", "voice_jarvis_id", "audio_output", "voice_enabled", "voice_follow_up"],
       access: ["remote_web_url", "remote_rdp_user"],
-      spotify: ["spotify_client_id", "spotify_device"],
+      spotify: ["spotify_client_id", "spotify_device", "spotify_speaker_name"],
       weather: ["weather_location", "weather_units"],
       detection: ["object_detection_enabled", "household_ask_enabled", "household_ask_per_day", "vehicle_types_enabled", "alert_mode", "detector_model", "inference_device", "object_alert_cooldown"]
     };
@@ -574,6 +591,37 @@
       sel.value = want;
     }
 
+    async function loadSpeaker() {
+      var st = await api("/api/spotify/speaker").catch(function() { return {}; });
+      $("spk-state").textContent = !st.installed ? "not installed (see the readme)" : !st.signed_in ? "not connected yet"
+        : st.running ? "on ✓ (“" + st.name + "”)" : "starting…" + (st.error ? " (" + st.error + ")" : "");
+      $("spk-connect").hidden = !st.installed || !!st.signed_in;
+      $("spk-signed-in").hidden = !st.signed_in;
+      return st;
+    }
+
+    async function speakerConnect() {
+      try {
+        var r = await api("/api/spotify/speaker/login", {});
+        window.open(r.url, "_blank");
+        say("msg-spk-connect", "Sign in in the new tab…", true);
+        var tries = 0, timer = setInterval(async function() {  // finished on the PC by itself?
+          var st = await loadSpeaker();
+          if (st.signed_in || ++tries > 200) { clearInterval(timer); if (st.signed_in) say("msg-spk-connect", "Connected!", true); }
+        }, 3000);
+      } catch (e) { say("msg-spk-connect", e.message, false); }
+    }
+
+    async function speakerFinish() {
+      try { await api("/api/spotify/speaker/finish", { url: $("spk-paste").value }); $("spk-paste").value = ""; say("msg-spk-finish", "Connected!", true); loadSpeaker(); }
+      catch (e) { say("msg-spk-finish", e.message, false); }
+    }
+
+    async function speakerSignOut() {
+      try { await api("/api/spotify/speaker/signout", {}); say("msg-spk-out", "Disconnected", true); loadSpeaker(); }
+      catch (e) { say("msg-spk-out", e.message, false); }
+    }
+
     async function spotifyConnect() {
       try {
         var r = await api("/api/spotify/login", {});
@@ -609,6 +657,7 @@
       settings = await api("/api/settings");
       fillForm();
       loadSpotify();
+      loadSpeaker();
     }
 
     // ---------------- cameras ----------------

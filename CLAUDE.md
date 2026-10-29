@@ -102,8 +102,7 @@ runs `/clear`. Everything stays free and local except the existing opt-in Claude
    - Shell sessions older than 2026-10-25 aren't in the `audio` group: use `sg audio -c "..."`.
      The service already has it.
 2. **Spotify** — DONE 2026-10-27 (handoff_summary.md). Tested live: "Play some Tom Petty" played on
-   Luke's Echo Dot in ~2 s. Not done: the PC itself as a speaker (librespot) once speakers are plugged
-   in; Bluetooth needs a USB adapter (the PC has none).
+   Luke's Echo Dot in ~2 s. The PC itself as a speaker: built 2026-10-28 (spotifyd, handoff_summary.md); Bluetooth needs a USB adapter (the PC has none).
    Also 2026-10-27: CPU unlocked (was 800 MHz; see handoff), Kokoro "Heart" voice, Jarvis answers
    general questions. Jezebel wake word being trialled (`voice_trial_model`, log-only
    `voice_trial_score` events); training workspace ~/Documents/sentinel_home/wakeword-training.

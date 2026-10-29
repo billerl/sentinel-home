@@ -126,6 +126,7 @@ class SettingsManager:
             # Spotify (sentinel/engine/spotify.py): public Client ID; the refresh token is stored here too
             "spotify_client_id": "",
             "spotify_device": "",  # preferred speaker when none is playing
+            "spotify_speaker_name": "Sentinel",  # this PC as a Spotify speaker (sentinel/audio/spotify_player.py)
             "spotify_refresh_token": "",
             "voice_trial_model": "",  # a second wake word: logs its scores (trying "Jezebel")...
             "voice_trial_wakes": False,  # ...and wakes the assistant too when on
@@ -135,6 +136,7 @@ class SettingsManager:
             "voice_follow_up": True,  # after an answer, listen ~5 s for another question without the wake word
             "voice_wake_threshold": 0.5,
             "voice_gain": 4.0,
+            "pc_volume": None,  # the sound card's Master %, set by voice ("turn the PC down"); None = leave it
             "audio_output": "speakers",  # or "remote": the Remote Desktop session, when one is open
             # Shown in the Help page and the Telegram "access" reply
             "remote_web_url": "",

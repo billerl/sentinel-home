@@ -140,6 +140,17 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     Dev-mode app: the account's email must be listed under User Management. Never run a second
     SpotifyService on the live settings (a refresh can rotate the token and log the engine out; the dev
     harness blanks it). Live page: now-playing bar (/api/spotify, polled 5 s; ticker on phones).
+    An unknown speaker name by voice ("play Spotify on the kitchen") offers the list (VoiceReply.confirm).
+  - The PC as a Spotify speaker (2026-10-28, `sentinel/audio/spotify_player.py`, setting
+    `spotify_speaker_name` [default "Sentinel"]): supervises `bin/spotifyd` (v0.4.2 release binary, not in
+    git) with `.spotifyd/spotifyd.conf` (generated each start) and `.spotifyd/credentials.json` (from
+    `spotifyd authenticate`, port 8898; pasted redirects are forwarded to its listener). Discovery is off
+    (ufw is on; no firewall change needed). Runs only once signed in; restarts with back-off. Audio:
+    `alsa-sentinel.conf` via `ALSA_CONFIG_PATH=/usr/share/alsa/alsa.conf:<it>` (only Sentinel and its
+    children): dmix on hw:PCH,0; `sentinel_speaker` (voice) and `sentinel_music` (softvol control
+    "Sentinel Music", ducked to 60% ≈ -20 dB while `AudioAlertSystem.busy`). "Here", "this speaker",
+    "the computer" = this speaker. Voice volume commands (`parse_volume_command`): "turn the PC down" =
+    Master (setting `pc_volume`, re-applied at start since ALSA forgets it), "speak up" = `volume`.
   - Family locations (2026-10-27, `sentinel/engine/location.py`, `recorded_videos/location.db` [mode 600]):
     OwnTracks HTTP mode posts to public `POST /owntracks` (HTTP Basic: per-person username + random token;
     20 failures/10 min per IP -> 429; no Cloudflare Access in front, checked). Tables: people (with a 7-day

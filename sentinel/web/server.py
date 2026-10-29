@@ -604,6 +604,42 @@ class WebServer:
             engine.spotify.disconnect()
             return _result(True, "disconnected")
 
+        # ---- this PC as a Spotify speaker (sentinel/audio/spotify_player.py) ----
+        @app.route("/api/spotify/speaker")
+        def api_spotify_speaker():
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            if engine is None:
+                return jsonify({"installed": False})
+            return jsonify(engine.spotify_player.status())
+
+        @app.route("/api/spotify/speaker/login", methods=["POST"])
+        def api_spotify_speaker_login():
+            err = _config_guard()
+            if err:
+                return err
+            try:
+                return jsonify({"ok": True, "url": engine.spotify_player.begin_login()})
+            except Exception as e:
+                return jsonify({"error": str(e)}), 400
+
+        @app.route("/api/spotify/speaker/finish", methods=["POST"])
+        def api_spotify_speaker_finish():
+            err = _config_guard()
+            if err:
+                return err
+            body = request.get_json(silent=True) or {}
+            return _result(*engine.spotify_player.finish_login(str(body.get("url") or "")[:3000]))
+
+        @app.route("/api/spotify/speaker/signout", methods=["POST"])
+        def api_spotify_speaker_signout():
+            err = _config_guard()
+            if err:
+                return err
+            engine.spotify_player.sign_out()
+            return _result(True, "signed out")
+
         @app.route("/snapshot.jpg")
         def snapshot():
             redir = _require_session()

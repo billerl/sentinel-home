@@ -30,6 +30,9 @@ TOKEN_URL = "https://accounts.spotify.com/api/token"
 API_URL = "https://api.spotify.com/v1"
 REDIRECT_URI = "http://127.0.0.1:8888/callback"
 SCOPES = "user-read-playback-state user-modify-playback-state user-read-currently-playing"
+NO_SUCH_SPEAKER = "I can't see a Spotify speaker called "  # the voice assistant offers the list after it
+# What people call the PC's own Spotify speaker (spotify_player.py) besides its name.
+_THIS_PC = re.compile(r"here|(this|the|that)? ?(speaker|computer|pc|desktop|office computer)")
 NOW_PLAYING_SECONDS = 3.0  # shared by every open page (Fire TV, phones)
 LOGIN_SECONDS = 15 * 60
 
@@ -88,9 +91,9 @@ def parse_music_command(text: str) -> Optional[Tuple[str, str]]:
     if re.fullmatch(r"(turn (it|the music|the volume) down|(music |volume )?down|quieter|softer|volume down|"
                     r"turn down( the)?( music| volume)?)( a (bit|little))?", t):
         return ("volume", "-")
-    m = re.fullmatch(r"(?:play|put on)(?: the)? (?:music |spotify )?on (?:the )?(.+)", t)
+    m = re.fullmatch(r"(?:play|put on)(?: the)? (?:music |spotify |it )?(?:on (?:the )?(.+)|(?:right |in )?(here))", t)
     if m:
-        return ("move", m.group(1))
+        return ("move", m.group(1) or m.group(2))
     m = re.fullmatch(r"(?:play|put on|listen to|i want to hear|let'?s hear)(?: me)? (.+?)"
                      r"(?: on spotify)?(?: on (?:the )?([a-z' ]+))?", t)
     if m and m.group(1) not in ("it", "that", "this"):
@@ -298,6 +301,18 @@ class SpotifyService:
     def devices(self) -> List[Dict[str, Any]]:
         return [d for d in self.api("GET", "/me/player/devices").get("devices") or [] if not d.get("is_restricted")]
 
+    def speaker_list(self) -> str:
+        """The speakers Spotify can see right now, as a sentence to say."""
+        try:
+            names = [str(d.get("name")) for d in self.devices() if d.get("name")]
+        except SpotifyError as e:
+            return "Spotify didn't answer: " + str(e)
+        if not names:
+            return "I can't see any Spotify speakers right now. Open Spotify on one first."
+        if len(names) == 1:
+            return f"The only Spotify speaker I can see is {names[0]}."
+        return f"The Spotify speakers I can see are {', '.join(names[:-1])} and {names[-1]}."
+
     # ------------------------------------------------------------ controls
     def _pick_device(self, wanted: str = "") -> Optional[Dict[str, Any]]:
         """By (part of) its name; else the active one; else the preferred one; else the first."""
@@ -305,6 +320,8 @@ class SpotifyService:
         if not devices:
             return None
         if wanted:
+            if _THIS_PC.fullmatch(_words(wanted)):
+                wanted = str(self.settings.get("spotify_speaker_name") or "Sentinel")
             w = _words(wanted).replace("tv", "").strip() or "tv"
             for d in devices:
                 name = _words(d.get("name"))
@@ -402,14 +419,14 @@ class SpotifyService:
         if action == "move":
             device = self._pick_device(arg)
             if device is None:
-                return f"I can't see a Spotify speaker called {arg}. Open Spotify on it first."
+                return f"{NO_SUCH_SPEAKER}{arg}."
             self.api("PUT", "/me/player", body={"device_ids": [device["id"]], "play": True})
             return f"Playing on {device['name']}."
         if action == "play":
             query, _, where = arg.partition(" @ ")
             device = self._pick_device(where)
             if device is None:
-                return (f"I can't see a Spotify speaker called {where}." if where else
+                return (f"{NO_SUCH_SPEAKER}{where}." if where else
                         "I can't find a Spotify speaker that's on. Open Spotify on the TV or your phone, then ask again.")
             what, described = self._search(query)
             if what is None:

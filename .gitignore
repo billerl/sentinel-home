@@ -60,3 +60,7 @@ models/.ov_cache/
 models/whisper/
 models/wakeword/
 models/kokoro/
+
+# spotifyd (this PC as a Spotify speaker): the downloaded binary, and its Spotify sign-in
+bin/
+.spotifyd/

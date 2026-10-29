@@ -28,6 +28,8 @@ class TestParse(unittest.TestCase):
             "volume 40": ("volume", "40"), "set the volume to fifty percent": ("volume", "50"),
             "What's playing?": ("now", ""), "what song is this": ("now", ""),
             "Place on Tom Petty.": ("play", "tom petty"), "Place some jazz": ("play", "some jazz"),
+            "Play Spotify on Sentinel.": ("move", "sentinel"), "play spotify here": ("move", "here"),
+            "play music in here": ("move", "here"), "play Tom Petty on this speaker": ("play", "tom petty @ this speaker"),
         }
         for text, want in cases.items():
             self.assertEqual(parse_music_command(text), want, text)
@@ -170,6 +172,23 @@ class TestService(unittest.TestCase):
         self.assertEqual(self.last_play()[0]["device_id"], ["tv1"])
         self.assertIn("can't see a Spotify speaker called kitchen", self.sp.command("play", "song @ kitchen"))
 
+    def test_this_speaker_means_the_pc(self):
+        self.connect()
+        self.http.devices.append({"id": "pc1", "name": "Sentinel", "type": "Speaker", "is_active": False})
+        for where in ("here", "this speaker", "the computer", "sentinel"):
+            self.assertEqual(self.sp.command("move", where), "Playing on Sentinel.", where)
+        self.settings["spotify_speaker_name"] = "Office"
+        self.http.devices[-1]["name"] = "Office"
+        self.assertEqual(self.sp.command("move", "the pc"), "Playing on Office.")
+
+    def test_speaker_list(self):
+        self.connect()
+        self.assertEqual(self.sp.speaker_list(), "The Spotify speakers I can see are Fire TV Living Room and Luke's iPhone.")
+        self.http.devices = self.http.devices[:1]
+        self.assertEqual(self.sp.speaker_list(), "The only Spotify speaker I can see is Fire TV Living Room.")
+        self.http.devices = []
+        self.assertIn("can't see any", self.sp.speaker_list())
+
     def test_no_devices_says_what_to_do(self):
         self.connect()
         self.http.devices = []
@@ -222,6 +241,38 @@ class TestEngineMusic(unittest.TestCase):
             reply = self.engine.answer_voice("Play some jazz.", lambda s: None)
         cmd.assert_called_once_with("play", "play some jazz".split(" ", 1)[1])
         self.assertEqual(reply.text, "Playing a jazz playlist.")
+
+    def test_unknown_speaker_offers_the_list(self):
+        sp = self.engine.spotify
+        with mock.patch.object(sp, "connected", return_value=True), \
+                mock.patch.object(sp, "command", return_value="I can't see a Spotify speaker called kitchen."), \
+                mock.patch.object(sp, "speaker_list", return_value="The only Spotify speaker I can see is Sentinel."):
+            reply = self.engine.answer_voice("Play Spotify on the kitchen.", lambda s: None)
+            self.assertEqual(reply.text, "I can't see a Spotify speaker called kitchen. Do you want to hear the list of speakers?")
+            self.assertEqual(reply.confirm(), "The only Spotify speaker I can see is Sentinel.")
+
+    def test_volume_words(self):
+        from sentinel.engine.engine import parse_volume_command
+
+        cases = {"turn the PC volume down": ("pc", "-"), "turn the computer up a bit": ("pc", "+"),
+                 "PC volume 40": ("pc", "40"), "set the p c volume to fifty percent": ("pc", "50"),
+                 "turn down the speakers": ("pc", "-"), "make the computer louder": ("pc", "+"),
+                 "speak up": ("voice", "+"), "talk quieter": ("voice", "-"), "you're too loud": ("voice", "-"),
+                 "set your volume to 30": ("voice", "30"),
+                 "turn it down": None, "volume 40": None, "turn the music down": None}
+        for text, want in cases.items():
+            self.assertEqual(parse_volume_command(text), want, text)
+
+    def test_pc_and_voice_volume_by_voice(self):
+        with mock.patch("sentinel.audio.alert_system.pc_volume", return_value=64), \
+                mock.patch("sentinel.audio.alert_system.set_pc_volume", return_value=True) as setter:
+            self.assertEqual(self.engine.answer_voice("Turn the PC volume down.", lambda s: None).text, "PC volume 54 percent.")
+            setter.assert_called_once_with(54)
+        self.assertEqual(self.engine.settings["pc_volume"], 54)
+        self.engine.settings["volume"] = 0.5
+        self.assertEqual(self.engine.answer_voice("Speak up.", lambda s: None).text, "Okay, my voice is at 60 percent.")
+        self.assertEqual(self.engine.answer_voice("Set your volume to 5", lambda s: None).text, "Okay, my voice is at 10 percent.")
+        self.assertEqual(self.engine.settings["volume"], 0.1)
 
     def test_stop_is_cancel_when_not_connected(self):
         self.assertEqual(self.engine.answer_voice("Stop.", lambda s: None).text, "Okay.")
