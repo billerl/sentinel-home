@@ -436,11 +436,21 @@ class WebServer:
                 _location_failed(ip, "setup link")
             return view
 
+        def _phone_kind() -> str:
+            agent = request.headers.get("User-Agent", "")
+            kind = "iPhone" if ("iPhone" in agent or "iPad" in agent) else "Android" if "Android" in agent else "other"
+            if "GSA/" in agent or "FBAN" in agent or "Instagram" in agent or "; wv)" in agent:
+                kind += " (inside another app)"  # e.g. opened from the Google app: OwnTracks links may not work
+            return kind
+
         @app.route("/join/<code>")
         def join_page(code: str):
             view = _join_or_404(code)
             if view is None:
                 return render_template("join.html", expired=True), 404
+            # How far a setup got (a phone that never reports could have stopped anywhere).
+            app_logger.log("info", "location_setup_opened", person=view["name"], phone=_phone_kind(),
+                           sharing=view["sharing"], component="web_server", action="location")
             resp = Response(render_template("join.html", expired=False, v=view, code=code))
             resp.headers["Cache-Control"] = "no-store"
             resp.headers["Referrer-Policy"] = "no-referrer"
@@ -458,6 +468,8 @@ class WebServer:
             view = _join_or_404(code)
             if view is None:
                 return "This setup link has expired.", 404
+            app_logger.log("info", "location_setup_file", person=view["name"], phone=_phone_kind(),
+                           component="web_server", action="location")
             import json as _json
 
             return Response(_json.dumps(view["config"], indent=2), mimetype="application/octet-stream",

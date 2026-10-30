@@ -370,6 +370,17 @@ class TestEndpoints(unittest.TestCase):
         cfg = json.loads(self.client.get(f"/join/{code}/sentinel.otrc").get_data(as_text=True))
         self.assertEqual(cfg["password"], self.abi.token)
 
+    def test_setup_visits_are_logged_with_the_phone_type(self):
+        from sentinel.logging_utils import app_logger
+        ok, url = self.engine.people_action(self.abi.id, "invite")
+        code = url.rsplit("/", 1)[1]
+        google_app = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 GSA/350.0 Mobile/15E148"
+        self.client.get("/join/" + code, headers={"User-Agent": google_app})
+        with open(app_logger.log_path) as f:
+            opened = [json.loads(line) for line in f if "location_setup_opened" in line]
+        self.assertEqual((opened[-1]["person"], opened[-1]["phone"]), ("Abigail", "iPhone (inside another app)"))
+        self.assertNotIn(self.abi.token, json.dumps(opened[-1]))
+
     def test_people_api_needs_sign_in(self):
         self.assertEqual(self.client.get("/api/people").status_code, 401)
         self.assertEqual(self.client.get("/api/family").status_code, 401)
