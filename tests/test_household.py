@@ -122,6 +122,13 @@ class TestLookAlikes(unittest.TestCase):
         self.assertIsNone(self.crop_colour(lamp, (10, 10, 100, 80)))  # lamp colours aren't paint colours
         self.assertIsNone(self.store.identify(unit(31), False, colour=self.crop_colour(self.red, (10, 10, 100, 80)))[0])  # a stranger stays a stranger
 
+    def test_paint_colour_vetoes_automatic_filing(self):
+        from sentinel.engine.household import colour_signature
+        blue = colour_signature(self.blue[:224, :224])
+        self.assertTrue(self.store.colour_agrees(self.edge, blue))
+        self.assertFalse(self.store.colour_agrees(self.fusion, blue))  # a blue car isn't the red one
+        self.assertTrue(self.store.colour_agrees(self.fusion, None))  # no colour (night): no veto
+
     def test_a_car_parked_elsewhere_is_ruled_out(self):
         look = unit(30, self.shape, 0.01)
         self.assertEqual(self.store.identify(look, False, exclude={self.edge})[0], self.fusion)
@@ -247,6 +254,26 @@ class TestPresence(unittest.TestCase):
         self.assertEqual(len(self.changes), 1)
         self.scan([], dusk)
         self.assertEqual(self.changes[-1][:2], ("left", "Luke's Sierra"))
+
+    def test_people_crossing_an_empty_spot_dont_keep_the_car(self):
+        day = self.textured(1)
+        self.scan([]); self.scan([self.BOX], day); self.scan([self.BOX], day)
+        gone = self.textured(2)
+        for _ in range(3):  # it left; someone keeps walking across where it stood
+            self.scan([], gone); self.det.people = [(150, 120, 60, 120)]
+        self.det.people = []
+        self.scan([], gone); self.scan([], gone)  # (the people used to reset the count every time)
+        self.assertEqual(self.changes[-1][:2], ("left", "Luke's Sierra"))
+
+    def test_daytime_look_is_kept_for_the_morning(self):
+        day, night = self.textured(1), self.textured(3, night=True)
+        self.scan([]); self.scan([self.BOX], day); self.scan([self.BOX], day)
+        self.scan([self.BOX], night)  # seen once in infrared too
+        for _ in range(10):
+            self.scan([], night)  # the rest of the night: missed, but the spot looks the same
+        for _ in range(5):
+            self.scan([], day)  # morning: compared with yesterday's daylight look
+        self.assertEqual(len(self.changes), 1)
 
     def test_night_scans_also_look_at_a_contrast_stretched_copy(self):
         det = self.det

@@ -64,6 +64,7 @@ IGNORE_SIMILARITY = 0.90
 # (each against photos from other days): 38 right / 2 wrong without colour, 69 / 6 with it.
 COLOUR_POOL = 0.03
 COLOUR_MARGIN = 0.08
+COLOUR_VETO = 0.05  # a daytime photo this much closer in paint colour to another car isn't filed automatically
 MAX_REFS_PER_LIGHT = 80  # per car, per day/night: plenty, and keeps matching fast
 MIN_DAYS = 2  # only cars seen on this many different days are suggested (skips visitors, deliveries)
 
@@ -72,7 +73,7 @@ ASK_AFTER_SCANS = 3  # parked and still unknown after ~3 minutes: worth asking w
 SCAN_INTERVAL = 60.0
 CONFIRM_SCANS = 2  # seen this many scans in a row = parked
 LEAVE_SCANS = 3  # missing this many scans in a row = left
-LEAVE_SCANS_UNSURE = 8  # ... when its spot can't be compared (last seen in the other light: dusk, headlights)
+LEAVE_SCANS_UNSURE = 8  # ... when its spot can't be compared (only seen in the other light: first dusk, headlights)
 SAME_LOOK = 0.6  # a missed car's spot looking this much like when it was last seen = still there
 MIN_BOX_FRACTION = 0.015  # ignore vehicles smaller than this share of the frame (far street)
 SIGHTING_EVERY = 3600.0  # keep a new photo of a parked car at most hourly (and on day/night change)
@@ -280,7 +281,8 @@ class HouseholdStore:
                 continue
             best_id, best = scores[0]
             runner = scores[1][1] if len(scores) > 1 else 0.0
-            if best >= AUTO_MATCH and best - runner >= AUTO_MARGIN:
+            if best >= AUTO_MATCH and best - runner >= AUTO_MARGIN and \
+                    (s["night"] or self.colour_agrees(best_id, self._colour_of(s["id"]))):
                 filed.setdefault((best_id, bool(s["night"])), []).append(s["id"])
         n = 0
         for (vid, night), ids in filed.items():
@@ -361,6 +363,22 @@ class HouseholdStore:
         if len(closeness) > 1 and closeness[0][0] - closeness[1][0] >= COLOUR_MARGIN:
             return closeness[0][1]
         return None
+
+    def colour_agrees(self, vehicle_id: int, colour: Optional[np.ndarray]) -> bool:
+        """Before filing a daytime photo under a car automatically: is its paint colour not clearly
+        another car's? 2026-10-28 the blue Edge, parked where the grey Fusion usually stands, was
+        filed under the Fusion ten times; each wrong photo made the next match easier."""
+        if colour is None:
+            return True
+        self._references()
+        closeness = {}
+        for vid, ids in self._day_ref_ids.items():
+            sigs = [c for c in (self._colour_of(i) for i in ids) if c is not None]
+            if sigs:
+                closeness[vid] = float(np.sort(np.array(sigs) @ colour)[::-1][:TOP_K].mean())
+        if vehicle_id not in closeness:
+            return True
+        return max(closeness.values()) - closeness[vehicle_id] < COLOUR_VETO
 
     def scores(self, embedding: np.ndarray, night: bool, exclude: Iterable[int] = ()) -> Dict[int, float]:
         """Per known vehicle (except ``exclude``): mean similarity of its TOP_K closest reference
@@ -463,8 +481,9 @@ class Parked:
     candidate: Optional[int] = None  # who it looked like at the last confident check ...
     candidate_hits: int = 0  # ... and how many confident checks in a row agreed
     day_sure: bool = False  # a daylight photo of this parking clearly matched its car (night photos may be filed)
-    look: Optional[np.ndarray] = None  # spot_look when the detector last saw it ...
-    look_night: Optional[bool] = None  # ... and in which light
+    # spot_look per light (False = day, True = infrared), from the last time the car was seen there:
+    # the daytime picture survives the night, so the morning has something to compare with.
+    looks: Dict[bool, np.ndarray] = field(default_factory=dict)
     # Motion detection's view of the spot between scans (camera thread): since when, and in how many
     # frames in a row, nothing has been seen on it.
     empty_since: float = 0.0
@@ -559,17 +578,19 @@ class PresenceTracker:
                 unmatched.remove(best)
                 p.box, p.last_seen, p.missed = best, now, 0
                 p.seen += 1
-                p.look, p.look_night = spot_look(frame, best), night
-            elif best is not None and _iou(best, p.box) > 0.2 or any(_covers(b, p.box) for b in people):
-                # Still there, just partly hidden (doors open, someone loading it, someone standing
-                # in front): don't let it "leave" and "arrive" again.
-                if best is not None and _iou(best, p.box) > 0.2:
-                    unmatched.remove(best)
+                self._remember_look(p, frame, night)
+            elif best is not None and _iou(best, p.box) > 0.2:
+                # Still there, just partly hidden (doors open, someone loading it): don't let it
+                # "leave" and "arrive" again.
+                unmatched.remove(best)
                 p.last_seen, p.missed = now, 0
             elif self._looks_unchanged(frame, p, night):
                 # The detector missed it, but the spot looks just the same: nothing drove off it.
                 p.last_seen, p.missed = now, 0
-                p.look = spot_look(frame, p.box)  # follow slow changes (dusk deepening, frost)
+                self._remember_look(p, frame, night)  # follow slow changes (shadows, dusk, frost)
+            elif any(_covers(b, p.box) for b in people):
+                pass  # someone in front of it: can't tell, so wait (people crossing an empty spot
+                # used to keep a car that had left "parked": the Edge, 2026-10-29 17:40)
             else:
                 p.missed += 1
         for box in unmatched:
@@ -577,7 +598,7 @@ class PresenceTracker:
         self.last_scan[key] = now
 
         for p in list(parked):
-            if p.missed >= (LEAVE_SCANS if p.look_night in (None, night) else LEAVE_SCANS_UNSURE):
+            if p.missed >= (LEAVE_SCANS if night in p.looks or not p.looks else LEAVE_SCANS_UNSURE):
                 parked.remove(p)
                 if p.confirmed and p.vehicle_id is not None and p.announced and not self._parked_elsewhere(p):
                     vehicle = self.store.vehicle(p.vehicle_id)
@@ -606,7 +627,8 @@ class PresenceTracker:
                     # File the photo under the car only when this photo itself clearly is that car (by day),
                     # or at night for a parking recognised clearly by day. Filing on the parking's identity
                     # alone let one wrong guess grow: a grey sedan's photos ended up under the blue Edge.
-                    sure = p.day_sure if night else self.store.confident(embedding, False) == p.vehicle_id
+                    sure = p.day_sure if night else (self.store.confident(embedding, False) == p.vehicle_id
+                                                     and self.store.colour_agrees(p.vehicle_id, crop_colour(frame, p.box)))
                     if p.vehicle_id is not None and p.confirmed and sure and \
                             self.store.ref_count(p.vehicle_id, night) < MAX_REFS_PER_LIGHT:
                         # A car we already know, parked in the same spot: its photo (including the
@@ -634,11 +656,18 @@ class PresenceTracker:
                     self.on_change("arrived", cam, vehicle, p.first_seen, jpeg.tobytes() if ok else None)
 
     @staticmethod
+    def _remember_look(p: "Parked", frame: np.ndarray, night: bool) -> None:
+        look = spot_look(frame, p.box)
+        if look is not None:
+            p.looks[night] = look
+
+    @staticmethod
     def _looks_unchanged(frame: np.ndarray, p: "Parked", night: bool) -> bool:
-        if p.look is None or p.look_night != night:
+        then = p.looks.get(night)
+        if then is None:
             return False  # nothing to compare in this light
         now = spot_look(frame, p.box)
-        return now is not None and float((now * p.look).mean()) >= SAME_LOOK
+        return now is not None and float((now * then).mean()) >= SAME_LOOK
 
     def _home_except(self, p: "Parked") -> set:
         """Family cars parked in other spots right now: p can't be one of them."""
