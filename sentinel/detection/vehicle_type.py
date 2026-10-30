@@ -97,6 +97,16 @@ def is_greyscale(frame: np.ndarray) -> bool:
     return float((small.max(2) - small.min(2)).mean()) < 8.0
 
 
+def is_daylight(frame: np.ndarray) -> bool:
+    """Colour and bright: real daylight. At night the cameras also go to colour when headlights or the
+    porch light come on, but those frames are dark (median brightness 30-49 vs 65+ by day) and their
+    colours are the lamps', not the paint's (2026-10-29: a dark Fusion under orange light "was" the Jeep)."""
+    if is_greyscale(frame):
+        return False
+    small = cv2.resize(frame, (64, 36), interpolation=cv2.INTER_AREA)
+    return float(np.median(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY))) >= 60.0
+
+
 class VehicleClassifier:
     """Thread-safe. ``available`` is False when OpenVINO, the model or the prompts are missing."""
 

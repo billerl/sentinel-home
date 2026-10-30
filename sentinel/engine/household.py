@@ -10,7 +10,8 @@ How it works:
 - ``identify`` compares a crop with those references (mean of the best three matches)
   and only answers when the best car is clearly ahead of the next one.
 - ``PresenceTracker`` looks at each camera every minute. A car seen at the same spot in
-  two scans is "parked"; one gone for three scans has "left". Parked cars keep their
+  two scans is "parked"; one gone for three scans has "left". A car the detector misses
+  (often, at night) but whose spot looks unchanged is still there. Parked cars keep their
   identity by position, so a car recognised in daylight stays named all night.
 - Cars it sees but can't name are kept as "sightings" and grouped by look, so the user
   can name a whole group at once on the Vehicles page.
@@ -27,7 +28,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 import cv2
 import numpy as np
 
-from sentinel.detection.vehicle_type import crop_for_clip, is_greyscale
+from sentinel.detection.vehicle_type import crop_for_clip, is_daylight, is_greyscale
 
 DB_NAME = "household.db"
 CROPS_DIRNAME = ".household"
@@ -71,6 +72,8 @@ ASK_AFTER_SCANS = 3  # parked and still unknown after ~3 minutes: worth asking w
 SCAN_INTERVAL = 60.0
 CONFIRM_SCANS = 2  # seen this many scans in a row = parked
 LEAVE_SCANS = 3  # missing this many scans in a row = left
+LEAVE_SCANS_UNSURE = 8  # ... when its spot can't be compared (last seen in the other light: dusk, headlights)
+SAME_LOOK = 0.6  # a missed car's spot looking this much like when it was last seen = still there
 MIN_BOX_FRACTION = 0.015  # ignore vehicles smaller than this share of the frame (far street)
 SIGHTING_EVERY = 3600.0  # keep a new photo of a parked car at most hourly (and on day/night change)
 MAX_UNLABELLED = 1500
@@ -109,10 +112,24 @@ def colour_signature(crop: np.ndarray) -> Optional[np.ndarray]:
 
 
 def crop_colour(frame: np.ndarray, box: Tuple[int, int, int, int]) -> Optional[np.ndarray]:
-    """Colour signature of a vehicle in a frame, cropped the way sightings are saved; None at night."""
-    if is_greyscale(frame):
+    """Colour signature of a vehicle in a frame, cropped the way sightings are saved; None unless
+    it's daylight (infrared, or lamp-lit at night)."""
+    if not is_daylight(frame):
         return None
     return colour_signature(crop_for_clip(frame, box, pad=0.08))
+
+
+def spot_look(frame: np.ndarray, box: Tuple[int, int, int, int]) -> Optional[np.ndarray]:
+    """A small brightness-normalised picture of a parking spot, to tell whether the car on it is
+    still there when the detector misses it (at night it often does). Same car minutes later:
+    0.66-0.95 alike; the spot after it left: 0.33 or less (SAME_LOOK sits between)."""
+    x, y, w, h = box
+    crop = frame[max(0, y): y + h, max(0, x): x + w]
+    if crop.size == 0:
+        return None
+    g = cv2.resize(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), (48, 36), interpolation=cv2.INTER_AREA).astype(np.float32)
+    std = float(g.std())
+    return (g - g.mean()) / std if std > 1.0 else None
 
 
 def sentence_case(name: str) -> str:
@@ -446,6 +463,8 @@ class Parked:
     candidate: Optional[int] = None  # who it looked like at the last confident check ...
     candidate_hits: int = 0  # ... and how many confident checks in a row agreed
     day_sure: bool = False  # a daylight photo of this parking clearly matched its car (night photos may be filed)
+    look: Optional[np.ndarray] = None  # spot_look when the detector last saw it ...
+    look_night: Optional[bool] = None  # ... and in which light
     # Motion detection's view of the spot between scans (camera thread): since when, and in how many
     # frames in a row, nothing has been seen on it.
     empty_since: float = 0.0
@@ -511,6 +530,12 @@ class PresenceTracker:
         h, w = frame.shape[:2]
         min_area = MIN_BOX_FRACTION * w * h
         found = self.detector.detect(frame, min_score=0.45)
+        if not is_daylight(frame):
+            # Parked cars in infrared or lamp light score far better on a contrast-stretched copy
+            # (2026-10-29 21:13: the Fusion and Edge right in front scored nothing; stretched 0.73).
+            grey = cv2.equalizeHist(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+            more = self.detector.detect(cv2.cvtColor(grey, cv2.COLOR_GRAY2BGR), min_score=0.45)
+            found = list(found) + [d for d in more if not any(_iou(d.box, f.box) > 0.5 for f in found)]
         return ([d.box for d in found if d.group == "vehicle" and d.label not in ("bicycle", "motorcycle")
                  and d.box[2] * d.box[3] >= min_area],
                 [d.box for d in found if d.group == "person"])
@@ -534,12 +559,17 @@ class PresenceTracker:
                 unmatched.remove(best)
                 p.box, p.last_seen, p.missed = best, now, 0
                 p.seen += 1
+                p.look, p.look_night = spot_look(frame, best), night
             elif best is not None and _iou(best, p.box) > 0.2 or any(_covers(b, p.box) for b in people):
                 # Still there, just partly hidden (doors open, someone loading it, someone standing
                 # in front): don't let it "leave" and "arrive" again.
                 if best is not None and _iou(best, p.box) > 0.2:
                     unmatched.remove(best)
                 p.last_seen, p.missed = now, 0
+            elif self._looks_unchanged(frame, p, night):
+                # The detector missed it, but the spot looks just the same: nothing drove off it.
+                p.last_seen, p.missed = now, 0
+                p.look = spot_look(frame, p.box)  # follow slow changes (dusk deepening, frost)
             else:
                 p.missed += 1
         for box in unmatched:
@@ -547,7 +577,7 @@ class PresenceTracker:
         self.last_scan[key] = now
 
         for p in list(parked):
-            if p.missed >= LEAVE_SCANS:
+            if p.missed >= (LEAVE_SCANS if p.look_night in (None, night) else LEAVE_SCANS_UNSURE):
                 parked.remove(p)
                 if p.confirmed and p.vehicle_id is not None and p.announced and not self._parked_elsewhere(p):
                     vehicle = self.store.vehicle(p.vehicle_id)
@@ -602,6 +632,13 @@ class PresenceTracker:
                 if vehicle is not None:
                     ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     self.on_change("arrived", cam, vehicle, p.first_seen, jpeg.tobytes() if ok else None)
+
+    @staticmethod
+    def _looks_unchanged(frame: np.ndarray, p: "Parked", night: bool) -> bool:
+        if p.look is None or p.look_night != night:
+            return False  # nothing to compare in this light
+        now = spot_look(frame, p.box)
+        return now is not None and float((now * p.look).mean()) >= SAME_LOOK
 
     def _home_except(self, p: "Parked") -> set:
         """Family cars parked in other spots right now: p can't be one of them."""

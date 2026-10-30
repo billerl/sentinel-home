@@ -118,6 +118,8 @@ class TestLookAlikes(unittest.TestCase):
         self.assertEqual(self.store.identify(look, False, colour=self.crop_colour(self.blue, (10, 10, 100, 80)))[0], self.edge)
         self.assertEqual(self.store.identify(look, False, colour=self.crop_colour(self.red, (10, 10, 100, 80)))[0], self.fusion)
         self.assertIsNone(self.crop_colour(NIGHT, (10, 10, 100, 80)))  # no colour in infrared
+        lamp = np.zeros((360, 640, 3), np.uint8); lamp[:] = (10, 40, 90)  # dark, orange porch light
+        self.assertIsNone(self.crop_colour(lamp, (10, 10, 100, 80)))  # lamp colours aren't paint colours
         self.assertIsNone(self.store.identify(unit(31), False, colour=self.crop_colour(self.red, (10, 10, 100, 80)))[0])  # a stranger stays a stranger
 
     def test_a_car_parked_elsewhere_is_ruled_out(self):
@@ -217,6 +219,42 @@ class TestPresence(unittest.TestCase):
         self.assertEqual([p.box for p in self.tracker.spots(self.cam.host)], [self.BOX])
         self.scan([]); self.scan([])
         self.assertEqual(self.tracker.spots(self.cam.host), [])  # three misses: it left
+
+    @staticmethod
+    def textured(seed, night=False):
+        rng = np.random.default_rng(seed)
+        frame = np.repeat(rng.integers(40, 80 if night else 140, (360, 640, 1), dtype=np.uint8), 3, axis=2)
+        return frame if night else frame + np.array([0, 60, 20], np.uint8)  # tinted: a colour picture
+
+    def test_missed_car_on_an_unchanged_spot_stays(self):
+        # Night 2026-10-29: the detector lost the parked Jeep, so it "left" at dusk and "came back"
+        # whenever headlights lit it up.
+        day = self.textured(1)
+        self.scan([]); self.scan([self.BOX], day); self.scan([self.BOX], day)
+        for _ in range(5):
+            self.scan([], day)
+        self.assertEqual(self.changes, [("arrived", "Luke's Sierra", 1060.0)])
+        gone = self.textured(2)  # the spot looks different now: it really left
+        self.scan([], gone); self.scan([], gone); self.scan([], gone)
+        self.assertEqual(self.changes[-1][:2], ("left", "Luke's Sierra"))
+
+    def test_after_the_light_changes_it_waits_longer(self):
+        day = self.textured(1)
+        self.scan([]); self.scan([self.BOX], day); self.scan([self.BOX], day)
+        dusk = self.textured(3, night=True)  # infrared: can't compare with the daytime look
+        for _ in range(7):
+            self.scan([], dusk)
+        self.assertEqual(len(self.changes), 1)
+        self.scan([], dusk)
+        self.assertEqual(self.changes[-1][:2], ("left", "Luke's Sierra"))
+
+    def test_night_scans_also_look_at_a_contrast_stretched_copy(self):
+        det = self.det
+        det.detect = lambda frame, min_score=0.45: (
+            [Detection("car", 0.9, self.BOX)] if frame.max() > 200 else [])  # only visible once stretched
+        dark = self.textured(4, night=True)
+        self.scan([], dark); self.scan([], dark); self.scan([], dark)
+        self.assertEqual([p.box for p in self.tracker.spots(self.cam.host)], [self.BOX])
 
     def test_cars_already_parked_at_start_did_not_arrive(self):
         self.scan([self.BOX]); self.scan([self.BOX])
