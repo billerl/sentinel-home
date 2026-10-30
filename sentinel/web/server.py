@@ -420,12 +420,12 @@ class WebServer:
                 return jsonify([]), 429
             creds = request.authorization
             payload = request.get_json(silent=True, force=True)
-            name = engine.owntracks_post(creds.username if creds else "", creds.password if creds else "", payload)
-            if name is None:
+            reply = engine.owntracks_post(creds.username if creds else "", creds.password if creds else "", payload)
+            if reply is None:
                 _location_failed(ip, "phone login")
                 return Response("[]", status=401, mimetype="application/json",
                                 headers={"WWW-Authenticate": 'Basic realm="Sentinel"'})
-            return jsonify([])
+            return jsonify(reply)
 
         def _join_or_404(code: str):
             ip = _client_ip(request.remote_addr or "", request.headers)

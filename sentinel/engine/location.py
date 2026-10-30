@@ -473,6 +473,7 @@ def owntracks_config(person: Person, endpoint: str, places: Iterable[Place], now
         "deviceId": "phone",
         "tid": initials(person.name),
         "monitoring": 1,  # "significant changes": easy on the battery
+        "cmd": True,  # lets Sentinel's reply ask for a fresh position when the one it has is old
         "waypoints": [{"_type": "waypoint", "desc": p.name, "lat": round(p.lat, 6), "lon": round(p.lon, 6),
                        "rad": int(p.radius), "tst": int(now) - i} for i, p in enumerate(places)],
     }

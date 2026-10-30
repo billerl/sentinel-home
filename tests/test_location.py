@@ -350,6 +350,14 @@ class TestEndpoints(unittest.TestCase):
         self.assertIn("👋 Abigail left home.", self.sent)
         self.assertIn("Abigail is about", self.engine.answer_location_question(self.engine.location_question("where is abigail"))[0])
 
+    def test_stale_position_asks_phone_for_a_fresh_one(self):
+        ask = [{"_type": "cmd", "action": "reportLocation"}]
+        self.assertEqual(self.post("abigail", self.abi.token, fix(*HOME, time.time() - 3600)).get_json(), ask)
+        # the phone's next check-in repeats the old reading: don't keep nagging it
+        self.assertEqual(self.post("abigail", self.abi.token, fix(*HOME, time.time() - 3600)).get_json(), [])
+        self.engine._location_asked.clear()
+        self.assertEqual(self.post("abigail", self.abi.token, fix(*HOME, time.time())).get_json(), [])
+
     def test_wrong_logins_get_blocked(self):
         for _ in range(20):
             self.post("abigail", "guess", {}, ip="198.51.100.99")

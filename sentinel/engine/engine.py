@@ -36,6 +36,7 @@ cv2.setNumThreads(1)
 
 # Camera profile fields the web editor may change, with their validators.
 _ENTRY_DIRECTIONS = ("outside_to_inside", "inside_to_outside", "both")
+LOCATION_STALE_S = 10 * 60  # a family phone's position older than this: ask the phone for a fresh one
 
 
 def _clean_points(points: Any) -> List[List[float]]:
@@ -152,6 +153,7 @@ class Engine:
         self.locations = LocationStore(VIDEO_DIR)  # family phones (OwnTracks) and named places
         self._place_pins: Dict[str, Tuple[float, float, float]] = {}  # chat -> pin waiting for a name (lat, lon, until)
         self._location_alerted: Dict[Tuple[int, int], float] = {}  # (person, place) -> last alert
+        self._location_asked: Dict[int, float] = {}  # person -> last time we asked their phone for a fresh fix
         self.presence = None  # PresenceTracker, when object detection + CLIP are available
         from sentinel.engine.camera_light import CameraLights
 
@@ -1081,14 +1083,31 @@ class Engine:
             text += "\n\nCars:\n" + self.answer_household_question(HouseholdQuestion("list"))
         return text, pins
 
-    def owntracks_post(self, username: str, password: str, payload: Any) -> Optional[str]:
-        """A position from a family phone. Returns the person's name, or None if the login is wrong."""
+    def owntracks_post(self, username: str, password: str, payload: Any) -> Optional[List[Dict[str, Any]]]:
+        """A message from a family phone. Returns what to send back to the phone, or None if the
+        login is wrong. A phone left alone mostly re-sends its last position (its 15-minute check-in
+        reuses an old reading), so when the one we have is stale we ask it for a fresh one."""
         from sentinel.engine.location import change_message
 
         person = self.locations.authenticate(username, password)
         if person is None:
             return None
         changes = self.locations.record(person, payload) if isinstance(payload, dict) else []
+        now = time.time()
+        fix = self.locations.fix(person.id)
+        reply: List[Dict[str, Any]] = []
+        if ((fix is None or now - fix["ts"] > LOCATION_STALE_S)
+                and now - self._location_asked.get(person.id, 0) > LOCATION_STALE_S):
+            self._location_asked[person.id] = now
+            reply = [{"_type": "cmd", "action": "reportLocation"}]
+        msg = payload if isinstance(payload, dict) else {}
+        try:
+            age = round(now - float(msg["tst"])) if "tst" in msg else None
+        except (TypeError, ValueError):
+            age = None
+        app_logger.log("info", "location_post", person=person.name, kind=msg.get("_type"), trigger=msg.get("t"),
+                       age_s=age, fix_age_s=round(now - fix["ts"]) if fix else None, asked=bool(reply),
+                       component="engine", action="location")
         if changes:
             statuses = self.vehicle_statuses()[0] if self.presence is not None else {}
             for change in changes:
@@ -1106,7 +1125,7 @@ class Engine:
                 text = change_message(change, self._cars_of(person, statuses))
                 if text:
                     self._send_location_alert(text)
-        return person.name
+        return reply
 
     def _send_location_alert(self, text: str) -> None:
         now = time.time()
