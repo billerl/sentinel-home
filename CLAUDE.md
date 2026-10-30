@@ -9,6 +9,9 @@ timeline, natural-language Telegram alerts and questions, all in a web UI. Every
 - Runs as systemd `sentinel.service`: `xvfb-run venv/bin/python main.py` from this folder.
   The venv is `./venv`. Settings live in `settings.json` (contains camera and Telegram
   credentials: never print, commit or paste them; logs are redacted by `logging_utils.redact`).
+  `camera_admin.json` (git-ignored, mode 600) holds the Garage camera's admin login, saved at the
+  user's request 2026-10-29 so Sentinel can switch its white light; same rules. Tests point
+  `camera_light.ADMIN_FILE` at a temp file (`_test_env`) so they never touch a real camera.
 - **Deploy** = send SIGTERM to the python process; systemd restarts it in ~10 s (no sudo):
   `kill -TERM $(pgrep -f "^$PWD/venv/bin/python main.py")`, then check `sentinel_events.log`
   for `engine_started`, `object_detector_ready` (`device: GPU`) and three `camera_connected`.

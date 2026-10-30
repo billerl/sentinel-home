@@ -153,6 +153,9 @@ class Engine:
         self._place_pins: Dict[str, Tuple[float, float, float]] = {}  # chat -> pin waiting for a name (lat, lon, until)
         self._location_alerted: Dict[Tuple[int, int], float] = {}  # (person, place) -> last alert
         self.presence = None  # PresenceTracker, when object detection + CLIP are available
+        from sentinel.engine.camera_light import CameraLights
+
+        self.camera_lights = CameraLights()  # white light for cars at night (cameras in camera_admin.json)
         self.telegram = TelegramNotifier(self.settings)
         self.weather = WeatherService(self.settings)
         self.assistant = Assistant(self.settings)
@@ -261,6 +264,7 @@ class Engine:
                 classifier = None
         self.detection_worker = DetectionWorker(detector, vehicle_classifier=classifier)
         self.detection_worker.household = self.household
+        self.detection_worker.lights = self.camera_lights
         if classifier is not None:
             from sentinel.detection.subject_check import SubjectChecker
 
@@ -286,6 +290,7 @@ class Engine:
                 on_unknown=self._ask_whose_car,
             )
             self.detection_worker.presence = self.presence
+            self.presence.lights = self.camera_lights
         app_logger.log("info", "object_detector_ready", model=os.path.basename(model), device=detector.device,
                        vehicle_types=classifier is not None,
                        classifier_device=classifier.device if classifier is not None else None,
@@ -324,6 +329,7 @@ class Engine:
                 pipeline.start()
         if self.presence is not None:
             self.presence.start()
+        self.camera_lights.start()
 
         def _household_filter(text: str) -> bool:
             from sentinel.engine.questions import household_question
@@ -362,6 +368,7 @@ class Engine:
             self.detection_worker.stop()
         if self.presence is not None:
             self.presence.stop()
+        self.camera_lights.stop()
         self._stop_voice()
         self.spotify_player.stop()
         self.telegram.cleanup()

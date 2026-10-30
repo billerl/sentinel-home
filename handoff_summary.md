@@ -75,7 +75,15 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   - Household vehicles (`sentinel/engine/household.py`, page `/vehicles`, DB `recorded_videos/household.db`,
     photos in `recorded_videos/.household/`): the user names groups of photos; those become per-car CLIP
     references (separately for day and infrared). `PresenceTracker` checks every camera once a minute:
-    parked = same spot in 2 scans, left = missing 3 scans; identity sticks to the parking spot, unknown
+    parked = same spot in 2 scans, left = missing 3 scans (8 when the spot can't be compared in this light).
+    At night the detector misses parked cars, so scans also run on an equalizeHist copy, and a missed car
+    whose spot still looks the same (`spot_look`, a day and an IR picture per spot, NCC >= 0.6) is still
+    there; people over an empty spot only pause the count. Paint colour (`crop_colour`) counts only in
+    daylight or under Sentinel's own white light, never lamp light; a daytime photo clearly closer in
+    colour to another car isn't auto-filed (`COLOUR_VETO`: ten Edge photos once snowballed under the
+    Fusion). White light for cars (`camera_light.py`): at night a moving car turns the camera's white light
+    on for 150 s via ISAPI with the admin login in git-ignored `camera_admin.json` (Sentinel's own camera
+    login can only watch); colour then picks between close shape matches (`LIT_POOL`). Identity sticks to the parking spot, unknown
     cars are retried each scan and their arrival is recorded (time = first seen) once named. Arrivals and
     departures go into the events table (grp `household`) and answer "when did X get home / leave",
     "is X home", "what cars are in the driveway". Infrared detection (`is_greyscale`) uses per-pixel

@@ -29,6 +29,7 @@ sentinel-home/                         # repository root
     │   │                              #   recording, clip requests, reconnect with backoff)
     │   ├── objects.py                 # Detection worker, tracking, plain-English descriptions
     │   ├── household.py               # Family cars: photo references, recognition, who's home
+    │   ├── camera_light.py            # Camera white light on for cars at night (admin login: camera_admin.json)
     │   ├── location.py                # Family phones (OwnTracks): people, places, arrive/leave, "where is X?"
     │   ├── weather.py                 # Weather tile data (Open-Meteo, server-side, cached 10 min)
     │   ├── spotify.py                 # Spotify Web API: PKCE sign-in, play/pause/skip/volume, now playing, voice phrases

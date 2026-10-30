@@ -64,6 +64,8 @@ IGNORE_SIMILARITY = 0.90
 # (each against photos from other days): 38 right / 2 wrong without colour, 69 / 6 with it.
 COLOUR_POOL = 0.03
 COLOUR_MARGIN = 0.08
+LIT_MATCH_MIN = 0.80  # under Sentinel's white light at night shapes match less well (no photos in that light) ...
+LIT_POOL = 0.06  # ... so colour picks among the cars this close to the best shape match
 COLOUR_VETO = 0.05  # a daytime photo this much closer in paint colour to another car isn't filed automatically
 MAX_REFS_PER_LIGHT = 80  # per car, per day/night: plenty, and keeps matching fast
 MIN_DAYS = 2  # only cars seen on this many different days are suggested (skips visitors, deliveries)
@@ -112,10 +114,11 @@ def colour_signature(crop: np.ndarray) -> Optional[np.ndarray]:
     return np.sqrt(hist / total).astype(np.float32) if total else None
 
 
-def crop_colour(frame: np.ndarray, box: Tuple[int, int, int, int]) -> Optional[np.ndarray]:
+def crop_colour(frame: np.ndarray, box: Tuple[int, int, int, int], lit: bool = False) -> Optional[np.ndarray]:
     """Colour signature of a vehicle in a frame, cropped the way sightings are saved; None unless
-    it's daylight (infrared, or lamp-lit at night)."""
-    if not is_daylight(frame):
+    it's daylight or ``lit`` (the camera's own white light, which Sentinel turned on: see
+    camera_light.py), not infrared or lamp light at night."""
+    if is_greyscale(frame) or not (lit or is_daylight(frame)):
         return None
     return colour_signature(crop_for_clip(frame, box, pad=0.08))
 
@@ -396,7 +399,7 @@ class HouseholdStore:
         return out
 
     def identify(self, embedding: np.ndarray, night: bool, exclude: Iterable[int] = (),
-                 colour: Optional[np.ndarray] = None) -> Tuple[Optional[int], float]:
+                 colour: Optional[np.ndarray] = None, lit: bool = False) -> Tuple[Optional[int], float]:
         """(vehicle id, similarity) when one known vehicle clearly matches, else (None, best).
         ``exclude``: cars that can't be this one (parked somewhere else right now). ``colour``
         (daytime crop_colour) settles near-ties between cars that are shaped alike."""
@@ -409,6 +412,11 @@ class HouseholdStore:
             return best_id, best
         if best >= MATCH_MIN and colour is not None and not night:
             pick = self._colour_pick(colour, [vid for vid, score in scores if score >= best - COLOUR_POOL])
+            if pick is not None:
+                return pick, dict(scores)[pick]
+        if lit and colour is not None and best >= LIT_MATCH_MIN:
+            # 2026-10-29 21:44, white light on: Edge shape 0.88 / Fusion 0.85, but paint 0.81 / 0.67.
+            pick = self._colour_pick(colour, [vid for vid, score in scores if score >= best - LIT_POOL])
             if pick is not None:
                 return pick, dict(scores)[pick]
         return None, best
@@ -512,6 +520,7 @@ class PresenceTracker:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
+        self.lights = None  # CameraLights: colours are real while its white light is on
         self._load()
 
     # ---------------------------------------------------------- lifecycle
@@ -567,6 +576,7 @@ class PresenceTracker:
     def _scan_locked(self, cam, frame: np.ndarray, boxes, now: float) -> None:
         key = cam.host
         night = is_greyscale(frame)
+        lit = self.lights is not None and self.lights.is_on(key)
         parked = self.parked.setdefault(key, [])
         baseline = key not in self._baseline  # first look after start: cars already here didn't "arrive"
         self._baseline.add(key)
@@ -615,7 +625,7 @@ class PresenceTracker:
                     # Unknown so far (e.g. arrived in the dark): try again every scan, and name it once
                     # two checks in a row agree (one lucky match would stick for the whole parking).
                     guess, _ = self.store.identify(embedding, night, exclude=self._home_except(p),
-                                                   colour=crop_colour(frame, p.box))
+                                                   colour=crop_colour(frame, p.box, lit), lit=lit)
                     if guess is not None:
                         p.candidate_hits = p.candidate_hits + 1 if guess == p.candidate else 1
                         p.candidate = guess
@@ -628,7 +638,7 @@ class PresenceTracker:
                     # or at night for a parking recognised clearly by day. Filing on the parking's identity
                     # alone let one wrong guess grow: a grey sedan's photos ended up under the blue Edge.
                     sure = p.day_sure if night else (self.store.confident(embedding, False) == p.vehicle_id
-                                                     and self.store.colour_agrees(p.vehicle_id, crop_colour(frame, p.box)))
+                                                     and self.store.colour_agrees(p.vehicle_id, crop_colour(frame, p.box, lit)))
                     if p.vehicle_id is not None and p.confirmed and sure and \
                             self.store.ref_count(p.vehicle_id, night) < MAX_REFS_PER_LIGHT:
                         # A car we already know, parked in the same spot: its photo (including the

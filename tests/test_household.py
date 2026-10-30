@@ -122,6 +122,14 @@ class TestLookAlikes(unittest.TestCase):
         self.assertIsNone(self.crop_colour(lamp, (10, 10, 100, 80)))  # lamp colours aren't paint colours
         self.assertIsNone(self.store.identify(unit(31), False, colour=self.crop_colour(self.red, (10, 10, 100, 80)))[0])  # a stranger stays a stranger
 
+    def test_under_our_white_light_colour_decides(self):
+        look = unit(30, self.shape, 0.024)  # shape matches less well under the lamp (~0.85)
+        best = max(self.store.scores(look, False).values())
+        self.assertTrue(0.80 <= best < 0.88, best)
+        blue = self.crop_colour(self.blue, (10, 10, 100, 80))
+        self.assertIsNone(self.store.identify(look, False, colour=blue)[0])
+        self.assertEqual(self.store.identify(look, False, colour=blue, lit=True)[0], self.edge)
+
     def test_paint_colour_vetoes_automatic_filing(self):
         from sentinel.engine.household import colour_signature
         blue = colour_signature(self.blue[:224, :224])

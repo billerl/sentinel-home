@@ -64,3 +64,7 @@ models/kokoro/
 # spotifyd (this PC as a Spotify speaker): the downloaded binary, and its Spotify sign-in
 bin/
 .spotifyd/
+# Camera admin logins (lets Sentinel switch camera lights); never commit
+camera_admin.json
+.camera_light_on.json
+.camera_light_on.json.tmp

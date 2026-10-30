@@ -320,6 +320,7 @@ class CameraPipeline:
 
         ready = self.tracker.update(detections, frame, ts, in_zone)
         confirmed = [t for t in self.tracker.tracks if t.hits >= 2 and t.best_score >= 0.5]
+        self._light_for_cars(confirmed, frame, in_zone)
         checker = getattr(self._detections, "subject_checker", None)
         for track in confirmed + [t for t in ready if t not in confirmed]:
             if track.group in ("person", "animal") and not track.subject_checked:
@@ -472,6 +473,20 @@ class CameraPipeline:
                 track.known_vehicle = household.vehicle(home.vehicle_id)  # named while it stood still
         return False
 
+    def _light_for_cars(self, confirmed, frame: np.ndarray, in_zone) -> None:
+        """A car moving here after dark: the camera's white light on, so its paint colour shows
+        (in infrared the blue Edge and the grey Fusion look alike)."""
+        lights = getattr(self._detections, "lights", None)
+        if lights is None or not lights.available(self.host):
+            return
+        from sentinel.detection.vehicle_type import is_daylight
+        from sentinel.engine.household import MIN_BOX_FRACTION
+
+        h, w = frame.shape[:2]
+        if any(t.group == "vehicle" and t.box[2] * t.box[3] >= MIN_BOX_FRACTION * w * h and in_zone(t.box)
+               and t.vehicle_moved(w) for t in confirmed) and not is_daylight(frame):
+            lights.request(self.host)
+
     def _check_subject(self, checker, track) -> None:
         """CLIP second opinion on a person/animal track: relabel it (a "person" that's really a
         cat) or mark it as an object (a bin) so it never alerts."""
@@ -511,8 +526,10 @@ class CameraPipeline:
 
                 presence = getattr(self._detections, "presence", None)
                 parked = presence.home_ids() if presence is not None else ()  # it isn't one of those
+                lights = getattr(self._detections, "lights", None)
+                lit = lights is not None and lights.is_on(self.host)
                 vehicle_id, _ = household.identify(embedding, is_greyscale(frame), exclude=parked,
-                                                   colour=crop_colour(frame, box))
+                                                   colour=crop_colour(frame, box, lit), lit=lit)
                 if vehicle_id is not None:
                     track.known_vehicle = household.vehicle(vehicle_id)
             if vt is not None and vt.delivery and track.known_vehicle is not None:
