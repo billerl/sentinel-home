@@ -115,6 +115,15 @@ class Track:
         limit = max(frame_width * VEHICLE_MIN_TRAVEL, widths[len(widths) // 2])
         return max(abs(dx), abs(dy)) < limit
 
+    def stayed_put(self, frame_width: int) -> bool:
+        """is_still for the whole path, not just where it started and ended: a delivery driver who
+        walks to the door and back ends where they began, but isn't scenery."""
+        widths = sorted(b[2] for _, b in self.boxes)
+        limit = max(frame_width * VEHICLE_MIN_TRAVEL, widths[len(widths) // 2])
+        x0, y0 = self.center(0)
+        return all(max(abs(x0 - (b[0] + b[2] / 2.0)), abs(y0 - (b[1] + b[3] / 2.0))) < limit
+                   for _, b in self.boxes)
+
 
 @dataclass
 class ObjectEvent:
@@ -418,10 +427,11 @@ class CameraObjectTracker:
                 ):
                     track.reported = True  # the small model sometimes calls a person a dog
                     continue
-                if track.is_still(frame_w):
-                    if any(self._matches_spot(track.box, spot[0]) for spot in self.static_spots):
-                        track.reported = True  # learned scenery; stay quiet
-                        continue
+                if track.stayed_put(frame_w) and any(self._matches_spot(track.box, spot[0])
+                                                     for spot in self.static_spots):
+                    # Learned scenery: stay quiet while it stays put, but keep watching. A person
+                    # who first stands there (the top of the front walk) and then walks still alerts.
+                    continue
             track.reported = True
             ready.append(track)
 
@@ -433,7 +443,7 @@ class CameraObjectTracker:
         for t in self.tracks:
             if now - t.last_seen < TRACK_TTL_SECONDS:
                 alive.append(t)
-            elif t.group != "vehicle" and t.hits >= MIN_HITS and t.is_still(frame_w):
+            elif t.group != "vehicle" and t.hits >= MIN_HITS and t.stayed_put(frame_w):
                 self._remember_static(t.box, now)
         self.tracks = alive
         self.static_spots = [s for s in self.static_spots if now - s[2] < STATIC_MEMORY_SECONDS]

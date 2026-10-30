@@ -76,6 +76,22 @@ class TestTrackerLearning(unittest.TestCase):
         walk = _feed(t, [(200 + 40 * i, 100, 40, 120) for i in range(3)], label="person", start=4000.0)
         self.assertEqual(len(walk), 1)
 
+    def test_standing_in_learned_spot_then_walking_alerts(self):
+        # Front Door, 2026-10-29: a delivery driver paused at the top of the walk, inside a spot
+        # learned from earlier visitors, was retired as scenery and never reported.
+        t = CameraObjectTracker("cam")
+        t.static_spots = [[(280, 80, 120, 200), 5, 1000.0]]
+        boxes = [(300, 100, 40, 120)] * 3 + [(300, 100 + 60 * i, 40, 120) for i in range(1, 4)]
+        ready = _feed(t, boxes, label="person")
+        self.assertEqual(len(ready), 1)
+
+    def test_round_trip_is_not_learned_as_scenery(self):
+        t = CameraObjectTracker("cam")
+        path = [(300, 100 + 80 * i, 40, 120) for i in range(4)] + [(300, 100 + 80 * i, 40, 120) for i in (2, 1, 0)]
+        _feed(t, path, label="person")
+        t.update([], GREY, 2000.0, _always)
+        self.assertEqual(t.static_spots, [])
+
     def test_jittering_box_is_not_walking(self):
         t = CameraObjectTracker("cam")
         jitter = [(300, 100, 40, 120), (322, 96, 30, 110), (305, 104, 45, 125)]  # ~20 px wobble
