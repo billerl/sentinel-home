@@ -358,6 +358,23 @@ class TestEndpoints(unittest.TestCase):
         self.engine._location_asked.clear()
         self.assertEqual(self.post("abigail", self.abi.token, fix(*HOME, time.time())).get_json(), [])
 
+    def test_car_seen_driving_off_is_not_still_here(self):
+        # 2026-10-30 13:54: "Abigail's Fusion is leaving", then her phone left home a minute later, before
+        # the driveway check's three missed scans had marked the car gone -> "(Fusion is still here.)"
+        from types import SimpleNamespace
+        from sentinel.engine.household import Parked
+        from sentinel.engine.questions import VehicleStatus
+
+        vid = self.engine.household.save_vehicle("Abigail's Fusion", owner="Abigail")
+        spot = Parked(box=(0, 0, 10, 10), first_seen=0, last_seen=0, vehicle_id=vid, confirmed=True)
+        self.engine.presence = SimpleNamespace(where_is=lambda v: ("garage", spot) if v == vid else None)
+        statuses = {vid: VehicleStatus("Abigail's Fusion", True, "Garage", None, None, None)}
+        self.assertTrue(self.engine._cars_of(self.abi, statuses)[0].here)
+        spot.leaving_at, spot.empty_since = time.time(), time.time()  # camera: it pulled out, spot empty
+        self.assertFalse(self.engine._cars_of(self.abi, statuses)[0].here)
+        spot.empty_since = 0.0  # it came straight back (or it was a false "leaving")
+        self.assertTrue(self.engine._cars_of(self.abi, statuses)[0].here)
+
     def test_wrong_logins_get_blocked(self):
         for _ in range(20):
             self.post("abigail", "guess", {}, ip="198.51.100.99")

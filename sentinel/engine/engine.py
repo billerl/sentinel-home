@@ -1057,9 +1057,16 @@ class Engine:
         from sentinel.engine.location import CarLine
 
         words = set(person.words())
-        return [CarLine(s.name, s.here, s.last_arrival, s.last_departure)
+        return [CarLine(s.name, s.here and not self._driving_off(v.id), s.last_arrival, s.last_departure)
                 for v in self.household.vehicles() if v.owner and v.owner.lower() in words
                 for s in [statuses.get(v.id)] if s is not None]
+
+    def _driving_off(self, vehicle_id: int) -> bool:
+        """The camera saw this car leave its spot and the spot is still empty. The driveway check only
+        records "left" after three missed scans (~3 min), so a phone leaving home in between would
+        otherwise hear the car is "still here" right after "Abigail's Fusion is leaving"."""
+        spot = self.presence.where_is(vehicle_id) if self.presence is not None else None
+        return spot is not None and spot[1].leaving_at > 0 and spot[1].empty_since > 0
 
     def person_views(self) -> Dict[int, Any]:
         from sentinel.engine.location import PersonView

@@ -496,6 +496,7 @@ class Parked:
     # frames in a row, nothing has been seen on it.
     empty_since: float = 0.0
     empty_frames: int = 0
+    leaving_at: float = 0.0  # when motion detection saw this car drive off its spot ("X is leaving")
 
 
 class PresenceTracker:

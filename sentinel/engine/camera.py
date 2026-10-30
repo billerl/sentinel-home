@@ -468,6 +468,7 @@ class CameraPipeline:
                 track.reported = False  # its spot only just looked empty: make sure
                 return True
             track.left_spot = True
+            home.leaving_at = track.last_seen
             household = getattr(self._detections, "household", None)
             if home.vehicle_id is not None and household is not None:
                 track.known_vehicle = household.vehicle(home.vehicle_id)  # named while it stood still
