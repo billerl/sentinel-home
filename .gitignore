@@ -1,0 +1,73 @@
+# Python virtual environment
+.venv/
+venv/
+ENV/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Captured images and videos
+captured_images/
+recorded_videos/
+
+# Settings file (contains user preferences)
+settings.json
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local environment files
+.env
+.env.local
+
+# Operator-only infra notes (never commit)
+cloudflare-tunnel-notes.local.md
+# Rotated logs
+*.log.*
+
+# Portable git toolchain (local only)
+.tools/
+
+# Downloaded detection models (see installation-guide.md)
+models/detector/
+models/classifier/
+models/.ov_cache/
+
+# Signed-in web sessions (token hashes only)
+.web_sessions.json
+.web_sessions.json.tmp
+
+# Speech recognition model (see readme: voice assistant)
+models/whisper/
+models/wakeword/
+models/kokoro/
+
+# spotifyd (this PC as a Spotify speaker): the downloaded binary, and its Spotify sign-in
+bin/
+.spotifyd/
+# Camera admin logins (lets Sentinel switch camera lights); never commit
+camera_admin.json
+.camera_light_on.json
+.camera_light_on.json.tmp
+
+# Notes for one install (machine, family, roadmap); never commit
+CLAUDE.local.md

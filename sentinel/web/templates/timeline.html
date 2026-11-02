@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <meta name="theme-color" content="#001525">
+  <title>Sentinel — Timeline</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='leaflet/leaflet.css') }}">
+  <style>
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; }
+    a { color: #00ffff; }
+    [hidden] { display: none !important; }
+    header { position: sticky; top: 0; z-index: 1000; background: #1a1a1a; border-bottom: 1px solid #033; }
+    .bar { display: flex; align-items: center; gap: 12px; padding: 0 1rem; height: 44px; max-width: 1100px; margin: 0 auto; }
+    .bar a { text-decoration: none; font-size: 0.85rem; }
+    h1 { font-size: 0.95rem; margin: 0; flex: 1; color: #00ffff; }
+    main { max-width: 1100px; margin: 0 auto; padding: 12px 16px 60px; }
+    .people { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 16px; }
+    .chip { display: inline-flex; align-items: center; gap: 8px; background: #0b0b0b; color: #cfe; border: 1px solid #066;
+            border-radius: 999px; padding: 6px 14px 6px 6px; font: inherit; font-size: 0.9rem; cursor: pointer; }
+    .chip .ini { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 0.72rem; font-weight: 700; color: #000; }
+    .chip .you { color: #6aa; font-size: 0.75rem; }
+    .chip[aria-pressed="true"] { border-color: #00ffff; background: rgba(0,255,255,0.15); color: #fff; }
+    button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid #00ffff; outline-offset: 2px; }
+    .grid { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 20px; align-items: start; }
+    @media (max-width: 760px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+    .card { background: #0b0b0b; border: 1px solid #033; border-radius: 6px; padding: 12px 14px; min-width: 0; }
+    h2 { font-size: 1rem; color: #00ffff; margin: 0; }
+    .month { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+    .nav { background: rgba(0,255,255,0.15); color: #00ffff; border: 1px solid #00ffff; border-radius: 4px; width: 32px; height: 28px; cursor: pointer; font: inherit; }
+    .nav:disabled { opacity: 0.3; cursor: default; }
+    .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; text-align: center; }
+    .cal .dow { font-size: 0.68rem; color: #6aa; text-transform: uppercase; letter-spacing: 0.06em; padding-bottom: 4px; }
+    .day { position: relative; aspect-ratio: 1; max-width: 100%; border: 1px solid transparent; border-radius: 4px; background: none; color: #cfe;
+           font: inherit; font-size: 0.85rem; font-variant-numeric: tabular-nums; cursor: pointer; padding: 0; }
+    .day.has { background: #071616; }
+    .day.has::after { content: ""; position: absolute; left: 50%; bottom: 4px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: #00ffff; }
+    .day:disabled { color: #2b4646; cursor: default; background: none; }
+    .day.today { border-color: #066; }
+    .day[aria-pressed="true"] { background: #00ffff; color: #000; font-weight: 700; }
+    .day[aria-pressed="true"]::after { background: #000; }
+    .legend { font-size: 0.75rem; color: #6aa; margin: 10px 0 0; line-height: 1.5; }
+    .mine { margin-top: 12px; padding-top: 10px; border-top: 1px solid #033; font-size: 0.8rem; color: #9cc; }
+    .mine summary { cursor: pointer; color: #9cc; margin-bottom: 6px; }
+    .mine .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+    .mine input { background: #111; color: #e6ffff; border: 1px solid #066; border-radius: 4px; padding: 5px 6px; font: inherit; color-scheme: dark; }
+    .danger { background: rgba(255,85,85,0.1); color: #ff6b6b; border: 1px solid #ff5555; border-radius: 4px; font: inherit; font-size: 0.78rem; padding: 5px 10px; cursor: pointer; }
+    .msg { font-size: 0.8rem; min-height: 1.2em; } .msg.ok { color: #6f6; } .msg.err { color: #ff6b6b; }
+    .dayhead { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin-bottom: 10px; }
+    .dayhead h2 { font-size: 1.05rem; color: #fff; }
+    .stats { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.8rem; color: #9cc; font-variant-numeric: tabular-nums; }
+    .stats b { color: #fff; font-weight: 600; }
+    #map { height: 340px; border: 1px solid #033; border-radius: 6px; background: #0a1414; }
+    @media (max-width: 760px) { #map { height: 280px; } }
+    /* OpenStreetMap's light tiles, darkened to sit in Sentinel's black page. */
+    #map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9); }
+    #map .leaflet-control-attribution { background: rgba(0,0,0,0.6); color: #6aa; }
+    #map .leaflet-control-attribution a { color: #9cc; }
+    .pin { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font: 700 12px system-ui, sans-serif;
+           color: #000; border: 2px solid #000; box-shadow: 0 0 0 1px rgba(255,255,255,0.3); }
+    .pin.home { background: #3f3; } .pin.named { background: #00ffff; } .pin.other { background: #fb3; }
+    .pin.active { border-color: #fff; transform: scale(1.25); }
+    .stops { list-style: none; margin: 14px 0 0; padding: 0; }
+    .stop { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; padding: 10px 8px; border-radius: 6px; cursor: pointer; }
+    .stop:hover, .stop.active { background: #071616; }
+    .num { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 0.78rem; font-weight: 700; color: #000; }
+    .num.home { background: #3f3; } .num.named { background: #00ffff; } .num.other { background: #fb3; }
+    .place { color: #fff; font-weight: 600; font-size: 0.95rem; min-width: 0; overflow-wrap: anywhere; }
+    .addr { color: #6aa; font-size: 0.78rem; font-weight: 400; display: block; margin-top: 2px; }
+    .when { text-align: right; font-size: 0.85rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .when small { display: block; color: #6aa; font-size: 0.75rem; }
+    .namebtn { background: rgba(0,255,255,0.15); color: #00ffff; border: 1px solid #00ffff; border-radius: 4px; font: inherit; font-size: 0.75rem; padding: 3px 8px; cursor: pointer; }
+    .naming { grid-column: 2 / 4; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .naming input { background: #111; color: #e6ffff; border: 1px solid #066; border-radius: 4px; padding: 5px 8px; font: inherit; font-size: 0.85rem; min-width: 0; flex: 1 1 140px; }
+    .drive { display: flex; align-items: center; gap: 10px; padding: 0 8px 0 20px; color: #6aa; font-size: 0.76rem; font-variant-numeric: tabular-nums; }
+    .drive::before { content: ""; width: 2px; height: 22px; background: #066; margin-right: 8px; }
+    .empty { color: #6aa; font-size: 0.88rem; line-height: 1.6; padding: 14px 4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <a href="{{ url_for('index') }}">← Live</a>
+      <h1>Timeline</h1>
+      <a href="{{ url_for('people_page') }}">Family</a>
+    </div>
+  </header>
+  <main>
+    <div class="people" id="people" role="group" aria-label="Whose timeline"></div>
+    <div class="grid">
+      <div class="card">
+        <div class="month"><button class="nav" id="prev" aria-label="Previous month">‹</button><h2 id="monthname"></h2><button class="nav" id="next" aria-label="Next month">›</button></div>
+        <div class="cal" id="cal"></div>
+        <p class="legend" id="legend">Days with a dot have history.</p>
+        <details class="mine" id="mine" hidden>
+          <summary>Delete my history</summary>
+          Your history is kept until you delete it. Only you can delete it, signed in as yourself.
+          <div class="row">
+            <label for="before">Delete before</label><input type="date" id="before">
+            <button class="danger" id="del-before">Delete</button>
+          </div>
+          <div class="row"><button class="danger" id="del-all">Delete all my history</button><span class="msg" id="del-msg"></span></div>
+        </details>
+      </div>
+      <div class="card">
+        <div class="dayhead"><h2 id="dayname"></h2><div class="stats" id="stats"></div></div>
+        <div id="map"></div>
+        <ol class="stops" id="stops"></ol>
+      </div>
+    </div>
+  </main>
+
+  <script src="{{ url_for('static', filename='leaflet/leaflet.js') }}"></script>
+  <script>
+    var COLORS = ["#ff9fd0", "#7fb8ff", "#c7a6ff", "#8fe39a", "#ffd479", "#ff9f80"];
+    var MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    var DOWS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+    var me = null, people = [], person = null, month = null, day = null, view = null, active = -1, refreshTimer = null;
+    var map = null, layer = null, markers = [];
+
+    function $(id) { return document.getElementById(id); }
+    function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function(c) { return "&#" + c.charCodeAt(0) + ";"; }); }
+    async function api(url, body) {
+      var opts = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+                                             body: JSON.stringify(body) };
+      var r = await fetch(url, opts);
+      if (r.status === 401) { location.href = "/login?next=/timeline"; throw new Error("signed out"); }
+      var d = await r.json().catch(function() { return {}; });
+      if (!r.ok) throw new Error(d.error || ("error " + r.status));
+      return d;
+    }
+    function iso(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+    function parse(s) { var p = s.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
+    function today() { var n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); }
+    function clock(ts) {
+      var d = new Date(ts * 1000), h = d.getHours();
+      return (h % 12 || 12) + ":" + String(d.getMinutes()).padStart(2, "0") + (h < 12 ? "am" : "pm");
+    }
+    function dur(s) {
+      var m = Math.max(1, Math.round(s / 60));
+      if (m < 60) return m + " min";
+      return Math.floor(m / 60) + " h" + (m % 60 ? " " + (m % 60) + " min" : "");
+    }
+    function who() { return people.find(function(p) { return p.id === person; }); }
+    function days() { var p = who(); return new Set(p ? p.days : []); }
+
+    function renderPeople() {
+      $("people").innerHTML = people.map(function(p, i) {
+        return '<button class="chip" aria-pressed="' + (p.id === person) + '" data-id="' + p.id + '"><span class="ini" style="background:' +
+          COLORS[i % COLORS.length] + '">' + esc(p.name.charAt(0)) + '</span>' + esc(p.name) + (p.id === me ? ' <span class="you">(you)</span>' : "") + '</button>';
+      }).join("");
+      $("mine").hidden = person === null || person !== me;
+    }
+    function renderCal() {
+      var have = days(), first = Array.from(have).sort()[0];
+      var firstMonth = first ? parse(first) : today();
+      firstMonth = new Date(firstMonth.getFullYear(), firstMonth.getMonth(), 1);
+      var thisMonth = new Date(today().getFullYear(), today().getMonth(), 1);
+      $("monthname").textContent = MONTHS[month.getMonth()] + " " + month.getFullYear();
+      $("prev").disabled = month <= firstMonth;
+      $("next").disabled = month >= thisMonth;
+      var html = "SMTWTFS".split("").map(function(c) { return '<div class="dow">' + c + '</div>'; }).join("");
+      var start = new Date(month.getFullYear(), month.getMonth(), 1), n = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+      for (var i = 0; i < start.getDay(); i++) html += "<div></div>";
+      for (var d = 1; d <= n; d++) {
+        var date = new Date(month.getFullYear(), month.getMonth(), d), key = iso(date), ok = have.has(key);
+        html += '<button class="day' + (ok ? " has" : "") + (key === iso(today()) ? " today" : "") + '" data-d="' + key + '"' + (ok ? "" : " disabled") +
+          ' aria-pressed="' + (key === day) + '" aria-label="' + MONTHS[date.getMonth()] + " " + d + (ok ? "" : ", no history") + '">' + d + '</button>';
+      }
+      $("cal").innerHTML = html;
+      var p = who();
+      $("legend").textContent = !p ? "" : have.size ? "Days with a dot have history." :
+        p.name + "'s phone hasn't sent anything since the Timeline started. Positions appear here as the phone reports them.";
+    }
+
+    function ensureMap() {
+      if (map) return;
+      map = L.map("map", { zoomControl: true, attributionControl: true });
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19, referrerPolicy: "strict-origin-when-cross-origin",
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'
+      }).addTo(map);
+      layer = L.layerGroup().addTo(map);
+      map.setView([41.114, -88.178], 12);
+    }
+    function kind(s) { return s.home ? "home" : s.name ? "named" : "other"; }
+    function drawMap() {
+      ensureMap();
+      layer.clearLayers(); markers = [];
+      var bounds = [];
+      if (view.path.length > 1) {
+        L.polyline(view.path, { color: "#00ffff", weight: 3, opacity: 0.8 }).addTo(layer);
+        view.path.forEach(function(p) { bounds.push(p); });
+      }
+      var n = 0;
+      view.items.forEach(function(it, i) {
+        if (it.type !== "stop") return;
+        n++;
+        var icon = L.divIcon({ className: "", html: '<div class="pin ' + kind(it) + (i === active ? " active" : "") + '">' + n + '</div>', iconSize: [24, 24], iconAnchor: [12, 12] });
+        var m = L.marker([it.lat, it.lon], { icon: icon, title: it.name || it.where, keyboard: false }).addTo(layer);
+        m.on("click", function() { select(i, true); });
+        markers[i] = m;
+        bounds.push([it.lat, it.lon]);
+      });
+      map.invalidateSize();  // the card may have changed size since the map was made (phone rotation, first load)
+      if (bounds.length) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 16, animate: false });
+    }
+    function select(i, scroll) {
+      active = active === i && !scroll ? -1 : i;
+      document.querySelectorAll(".stop").forEach(function(li) { li.classList.toggle("active", +li.dataset.i === active); });
+      markers.forEach(function(m, j) { if (m) { var el = m.getElement(); if (el && el.firstChild) el.firstChild.classList.toggle("active", j === active); } });
+      if (active >= 0 && markers[active]) map.panTo(markers[active].getLatLng());
+      if (scroll) { var li = document.querySelector('.stop[data-i="' + i + '"]'); if (li) li.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
+    }
+
+    function renderDay() {
+      var p = who(), d = parse(day), isToday = day === iso(today());
+      $("dayname").textContent = p.name + " · " + (isToday ? "Today" : DOWS[d.getDay()]) + ", " + MONTHS[d.getMonth()].slice(0, 3) + " " + d.getDate();
+      if (!view) { $("stats").innerHTML = ""; $("stops").innerHTML = '<li class="empty">Loading…</li>'; return; }
+      $("stats").innerHTML = '<span><b>' + view.stops + '</b> ' + (view.stops === 1 ? "stop" : "stops") + '</span><span><b>' + view.miles + '</b> miles</span>' +
+        (view.away_s ? '<span>away from home <b>' + dur(view.away_s) + '</b></span>' : "");
+      var html = "", n = 0;
+      view.items.forEach(function(it, i) {
+        if (it.type === "drive") {
+          html += '<li class="drive">Driving · ' + dur(it.end - it.start) + ' · ' + it.miles + ' mi</li>';
+          return;
+        }
+        n++;
+        var when, sub;
+        if (it.before_day && (it.ongoing || it.after_day)) { when = "all day"; sub = it.ongoing && isToday ? "still there" : ""; }
+        else if (it.before_day) { when = "until " + clock(it.end); sub = "from the night before"; }
+        else if (it.ongoing) { when = clock(it.start) + (isToday ? " – now" : ""); sub = dur(Date.now() / 1000 - it.start) + (isToday ? " so far" : ""); }
+        else if (it.after_day) { when = "from " + clock(it.start); sub = "into the next day"; }
+        else { when = clock(it.start) + " – " + clock(it.end); sub = dur(it.end - it.start); }
+        html += '<li class="stop' + (i === active ? " active" : "") + '" data-i="' + i + '"><span class="num ' + kind(it) + '">' + n + '</span>' +
+          '<span class="place">' + esc(it.name || "Unnamed stop") + (it.where ? '<span class="addr">' + esc(it.where) + '</span>' : "") + '</span>' +
+          '<span class="when">' + when + '<small>' + sub + '</small></span>' +
+          (it.name ? "" : '<span class="naming" data-i="' + i + '"><button class="namebtn" data-i="' + i + '">📍 Name this place</button></span>') + '</li>';
+      });
+      if (!n) html = '<li class="empty">' + (view.points ? "No stops long enough to count (5+ minutes) on this day." :
+                                             "Nothing from " + esc(p.name) + "'s phone on this day.") + '</li>';
+      $("stops").innerHTML = html;
+      drawMap();
+    }
+
+    async function loadDay() {
+      clearTimeout(refreshTimer);
+      view = null; active = -1; renderDay();
+      var want = person + "/" + day;
+      try {
+        var v = await api("/api/timeline/" + person + "/" + day);
+        if (want !== person + "/" + day) return;  // the person or day changed while loading
+        view = v; renderDay();
+      } catch (e) { $("stops").innerHTML = '<li class="empty">Couldn\'t load this day (' + esc(e.message) + ').</li>'; }
+      if (day === iso(today())) refreshTimer = setTimeout(loadDay, 2 * 60 * 1000);
+    }
+    function pickDefaultDay() {
+      var have = Array.from(days()).sort();
+      day = have.length ? (have.indexOf(iso(today())) >= 0 ? iso(today()) : have[have.length - 1]) : iso(today());
+      var d = parse(day); month = new Date(d.getFullYear(), d.getMonth(), 1);
+    }
+    async function loadPeople() {
+      var d = await api("/api/timeline");
+      me = d.me; people = d.people;
+    }
+
+    $("people").addEventListener("click", function(e) {
+      var b = e.target.closest(".chip"); if (!b) return;
+      person = +b.dataset.id; pickDefaultDay(); renderPeople(); renderCal(); loadDay();
+    });
+    $("cal").addEventListener("click", function(e) {
+      var b = e.target.closest(".day"); if (!b || b.disabled) return;
+      day = b.dataset.d; renderCal(); loadDay();
+    });
+    $("prev").onclick = function() { month = new Date(month.getFullYear(), month.getMonth() - 1, 1); renderCal(); };
+    $("next").onclick = function() { month = new Date(month.getFullYear(), month.getMonth() + 1, 1); renderCal(); };
+    $("stops").addEventListener("click", function(e) {
+      var nb = e.target.closest(".namebtn");
+      if (nb) { startNaming(+nb.dataset.i); return; }
+      if (e.target.closest(".naming")) return;
+      var li = e.target.closest(".stop"); if (li) select(+li.dataset.i, false);
+    });
+    function startNaming(i) {
+      var box = document.querySelector('.naming[data-i="' + i + '"]'), it = view.items[i];
+      box.innerHTML = '<input type="text" maxlength="40" placeholder="e.g. Grandma\'s, work, the gym" aria-label="Place name">' +
+        '<button class="namebtn">Save</button><span class="msg"></span>';
+      var input = box.querySelector("input"), msg = box.querySelector(".msg");
+      input.focus();
+      async function save() {
+        try {
+          await api("/api/places", { name: input.value, where: it.lat + ", " + it.lon, radius: 100 });
+          await loadDay();
+        } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }
+      }
+      box.querySelector("button").onclick = save;
+      input.onkeydown = function(e) { if (e.key === "Enter") save(); };
+    }
+    function armed(btn, label, action) {
+      var original = btn.textContent, timer = null;
+      btn.onclick = function() {
+        if (btn.dataset.armed) { clearTimeout(timer); delete btn.dataset.armed; btn.textContent = original; action(); return; }
+        btn.dataset.armed = "1"; btn.textContent = label;
+        timer = setTimeout(function() { delete btn.dataset.armed; btn.textContent = original; }, 4000);
+      };
+    }
+    async function deleteHistory(before) {
+      var msg = $("del-msg");
+      try {
+        var r = await api("/api/timeline/" + person + "/delete", { before: before || null });
+        msg.textContent = r.message; msg.className = "msg ok";
+        await loadPeople(); pickDefaultDay(); renderPeople(); renderCal(); loadDay();
+      } catch (e) { msg.textContent = e.message; msg.className = "msg err"; }
+    }
+    armed($("del-all"), "Tap again: delete everything", function() { deleteHistory(null); });
+    armed($("del-before"), "Tap again to delete", function() {
+      if (!$("before").value) { $("del-msg").textContent = "Pick a date first"; $("del-msg").className = "msg err"; return; }
+      deleteHistory($("before").value);
+    });
+
+    (async function start() {
+      try { await loadPeople(); } catch (e) { $("stops").innerHTML = '<li class="empty">Couldn\'t load (' + esc(e.message) + ').</li>'; return; }
+      if (!people.length) { $("stops").innerHTML = '<li class="empty">Nobody is set up yet. Add people on the Family page.</li>'; return; }
+      var asked = new URLSearchParams(location.search).get("person");
+      person = asked && people.some(function(p) { return p.id === +asked; }) ? +asked : (me !== null ? me : people[0].id);
+      pickDefaultDay(); renderPeople(); renderCal(); loadDay();
+    })();
+  </script>
+</body>
+</html>

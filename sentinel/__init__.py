@@ -1,0 +1,1 @@
+"""Sentinel Home application package."""

@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <meta name="theme-color" content="#001525">
+  <title>Sentinel — Live</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root { color-scheme: dark; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #000;
+      color: #00ffff;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      height: 100vh;
+      height: 100dvh;  /* phones: excludes the browser's own toolbars */
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      padding: 0 1rem;
+      background: #1a1a1a;
+      z-index: 10;
+      height: 40px;
+    }
+    h1 { font-size: 0.9rem; margin: 0; flex: 1; }
+    
+    #grid {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      /* Columns/rows are sized by layoutGrid() so every camera is as large as possible. */
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      grid-auto-rows: 1fr;
+      justify-content: center;
+      align-content: center;
+      gap: 2px;
+      background: #111;
+      padding: 2px;
+      overflow: hidden;
+    }
+    
+    .tile {
+      position: relative;
+      background: #000;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      cursor: pointer;
+    }
+    .tile h2 {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      font-size: 0.75rem;
+      margin: 0;
+      padding: 4px 8px;
+      background: rgba(0,0,0,0.6);
+      z-index: 5;
+    }
+    .tile img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    /* Weather fills the grid's spare cell (3 cameras in a 2x2 grid). Sizes follow the tile. */
+    .tile.weather { cursor: default; container-type: size; background: linear-gradient(160deg, #0b2233, #05121c);
+                    color: #cfefff; justify-content: center; gap: 3cqh; padding: 9cqh 5cqw 4cqh; }
+    .tile.weather[hidden] { display: none; }
+    .wx-top { display: flex; align-items: center; gap: 3cqw; }
+    .wx-icon { font-size: 15cqh; line-height: 1; }
+    .wx-temp { font-size: 22cqh; font-weight: 600; color: #fff; line-height: 1; }
+    .wx-now { display: flex; flex-direction: column; font-size: 5.5cqh; gap: 1cqh; }
+    .wx-now b { font-size: 7cqh; color: #fff; }
+    .wx-meta { font-size: 5cqh; color: #9fd3ee; display: flex; flex-wrap: wrap; gap: 0.5em 1.2em; }
+    .wx-hours { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1cqw; text-align: center; }
+    .wx-hours div { background: rgba(255,255,255,0.06); border-radius: 6px; padding: 1.5cqh 0;
+                    display: flex; flex-direction: column; gap: 0.6cqh; font-size: 5cqh; }
+    .wx-hours .r { color: #7cc4ff; font-size: 4cqh; min-height: 1.2em; }
+    .wx-foot { font-size: 4cqh; color: #7aa3b8; }
+    .wx-windy { color: #ffd166; }
+    .wx-msg { font-size: 6cqh; color: #9fd3ee; text-align: center; }
+    .wx-msg a { color: #00ffff; }
+    /* Family row (OwnTracks phones): a light per person, tap = their spot on a map. */
+    .wx-family { display: flex; flex-wrap: wrap; gap: 1cqh 3cqw; font-size: 5cqh; border-top: 1px solid rgba(255,255,255,0.1);
+                 padding-top: 2cqh; }
+    .wx-family a, .wx-family span.p { color: #e6f7ff; text-decoration: none; display: inline-flex; align-items: center; gap: 0.4em; }
+    .wx-family a:hover { text-decoration: underline; }
+    .wx-family .dot { width: 0.75em; height: 0.75em; border-radius: 50%; display: inline-block; }
+    .wx-family .dot.home { background: #3f3; box-shadow: 0 0 0.4em #3f3; }
+    .wx-family .dot.out { background: #fb3; box-shadow: 0 0 0.4em #fb3; }
+    .wx-family .dot.off { background: #555; }
+    /* With the family row, tighten the weather so everything still fits the tile. */
+    .tile.weather.fam { gap: 1.6cqh; padding-top: 7.5cqh; padding-bottom: 2cqh; }
+    .tile.weather.fam .wx-icon { font-size: 12cqh; }
+    .tile.weather.fam .wx-temp { font-size: 17cqh; }
+    .tile.weather.fam .wx-hours div { padding: 1cqh 0; gap: 0.3cqh; }
+
+    #focus-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #000;
+      z-index: 1000;
+    }
+    #focus-header {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      padding: 10px;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.9), transparent);
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      z-index: 1010;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    #focus-overlay:hover #focus-header { opacity: 1; }
+    
+    #focus-content {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #focus-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain; /* Ensures 100% visibility without cropping */
+    }
+
+    button {
+      background: rgba(0,255,255,0.2);
+      color: #00ffff;
+      border: 1px solid #00ffff;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .logout { border-color: #ff5555; color: #ff5555; font-size: 0.7rem; padding: 2px 8px; }
+    .header-btn { font-size: 0.7rem; padding: 2px 8px; margin-right: 8px; }
+    button.active { background: #00ffff; color: #000; }
+    button:disabled { opacity: 0.35; cursor: default; }
+
+    /* ---- Motion timeline ---- */
+    #timeline {
+      flex: none;
+      background: #0b0b0b;
+      border-top: 1px solid #033;
+      padding: 6px 8px 8px;
+      max-height: 42vh;
+      overflow-y: auto;
+      font-size: 0.75rem;
+    }
+    #tl-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+    #tl-toolbar button { padding: 3px 9px; font-size: 0.75rem; }
+    #tl-date {
+      background: #111; color: #00ffff; border: 1px solid #066;
+      border-radius: 4px; padding: 2px 4px; font: inherit; color-scheme: dark;
+    }
+    #tl-summary { color: #6aa; margin-left: auto; }
+    .tl-zoom { display: inline-flex; gap: 2px; }
+    #tl-body { display: flex; }
+    #tl-labels { flex: none; width: 120px; padding-top: 18px; }
+    .tl-label {
+      height: 26px; line-height: 26px; margin-bottom: 4px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      padding-right: 6px; color: #9ff;
+    }
+    #tl-scroll { flex: 1; overflow-x: auto; overflow-y: hidden; position: relative; }
+    #tl-inner { position: relative; min-width: 100%; }
+    #tl-axis { position: relative; height: 18px; border-bottom: 1px solid #144; }
+    .tl-tick {
+      position: absolute; bottom: 0; height: 5px;
+      border-left: 1px solid #2a6;
+    }
+    .tl-tick span {
+      position: absolute; bottom: 5px; left: 2px;
+      color: #5aa; font-size: 0.65rem; white-space: nowrap;
+    }
+    .tl-track {
+      position: relative; height: 26px; margin-bottom: 4px;
+      background: repeating-linear-gradient(to right, #121212 0, #121212 calc(100% / 24 - 1px), #1c1c1c calc(100% / 24 - 1px), #1c1c1c calc(100% / 24));
+      border-radius: 3px;
+    }
+    .tl-mark {
+      position: absolute; top: 3px; bottom: 3px;
+      min-width: 3px; background: #ff3b3b; border-radius: 1px;
+      cursor: pointer; opacity: 0.85;
+    }
+    .tl-mark:hover { opacity: 1; background: #ff8080; top: 0; bottom: 0; }
+    .tl-mark.clip-request { background: #ffb020; }
+    .tl-mark.g-motion { background: #8a8a8a; opacity: 0.6; }
+    .tl-mark.g-person { background: #ff4d6d; }
+    .tl-mark.g-vehicle { background: #4da3ff; }
+    .tl-mark.g-animal { background: #5fd38a; }
+    .tl-mark.g-delivery { background: #b98cff; }
+    .tl-legend { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+    .tl-legend button { display: inline-flex; align-items: center; gap: 5px; }
+    .tl-legend .sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+    .tl-mark.playing { background: #fff; opacity: 1; top: 0; bottom: 0; }
+    #tl-now {
+      position: absolute; top: 0; bottom: 0; width: 2px;
+      background: #00ffff; box-shadow: 0 0 4px #00ffff; pointer-events: none;
+    }
+    #tl-empty { color: #6aa; padding: 8px 0; }
+
+    /* ---- Clip list (phones; see the mobile layout below) ---- */
+    #tl-list { display: none; margin-top: 8px; }
+    .ev {
+      display: flex; align-items: center; gap: 10px; width: 100%;
+      padding: 10px 8px; margin: 0; border: 0; border-bottom: 1px solid #142424;
+      border-radius: 0; background: none; text-align: left; font-size: 0.9rem; color: #cff;
+    }
+    .ev .sw { flex: none; width: 10px; height: 34px; border-radius: 3px; background: #8a8a8a; }
+    .ev .sw.g-person { background: #ff4d6d; } .ev .sw.g-vehicle { background: #4da3ff; }
+    .ev .sw.g-animal { background: #5fd38a; } .ev .sw.g-delivery { background: #b98cff; }
+    .ev .sw.clip-request { background: #ffb020; }
+    .ev .t { flex: none; width: 4.6em; font-variant-numeric: tabular-nums; color: #00ffff; }
+    .ev .what { flex: 1; min-width: 0; }
+    .ev .what b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ev .what span { color: #7aa; font-size: 0.8rem; }
+    .ev.playing { background: #0d2a2a; }
+    #tl-more { width: 100%; margin-top: 8px; }
+
+    /* ---- Spotify now-playing bar (hidden unless something is playing or paused) ---- */
+    #music {
+      flex: none; display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 10px;
+      background: #0b1a12; border-top: 1px solid #1db954; color: #d8ffe6; font-size: 0.85rem;
+    }
+    #music[hidden] { display: none; }
+    #music img { width: 36px; height: 36px; border-radius: 3px; object-fit: cover; flex: none; }
+    #music .mu-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
+    #music .mu-scroll { display: inline-block; }
+    #music .mu-text.long .mu-scroll { animation: mu-ticker 18s linear infinite; padding-left: 100%; }
+    @keyframes mu-ticker { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+    #music .mu-title { font-weight: 600; }
+    #music .mu-where { color: #7fbf95; }
+    #music button {
+      flex: none; background: none; border: 1px solid #1db954; color: #d8ffe6; border-radius: 4px;
+      min-width: 38px; height: 34px; font-size: 1rem; cursor: pointer;
+    }
+    #music button:focus-visible { outline: 3px solid #fff; }  /* Fire TV remote */
+    #music .mu-vol { color: #7fbf95; font-size: 0.75rem; min-width: 2.5em; text-align: center; }
+
+    /* ---- Bottom tabs (phones only) ---- */
+    #tabs { display: none; }
+
+    /* ---- Phone layout: page scrolls, cameras stack, timeline gets its own tab ---- */
+    @media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
+      body { overflow: auto; height: auto; min-height: 100vh; display: block;
+             padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)); }
+      header { position: sticky; top: 0; height: auto; min-height: 40px; flex-wrap: wrap;
+               gap: 6px; padding: 6px 10px; }
+      header h1 { flex: 1 0 100%; font-size: 0.95rem; }
+      .header-btn { margin-right: 0; font-size: 0.8rem; padding: 5px 10px; }
+      #tl-toggle { display: none; }
+      .logout { font-size: 0.8rem; padding: 5px 10px; }
+      #grid { display: grid; grid-template-columns: 1fr; grid-auto-rows: auto; overflow: visible; }
+      .tile { aspect-ratio: 16 / 9; }
+      #timeline { max-height: none; overflow: visible; border-top: 0; font-size: 0.8rem; }
+      #tl-toolbar button { padding: 6px 10px; font-size: 0.8rem; }
+      #tl-summary { margin-left: 0; }
+      #tl-labels { width: 72px; }
+      #tl-list { display: block; }
+      body.tab-live #timeline { display: none; }
+      body.tab-events #grid { display: none; }
+      #tabs {
+        display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 900;
+        background: #141414; border-top: 1px solid #044;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+      #tabs button {
+        flex: 1; height: 56px; border: 0; border-radius: 0; background: none;
+        color: #6aa; font-size: 0.95rem;
+      }
+      #tabs button.active { color: #00ffff; background: #0b2222; box-shadow: inset 0 3px 0 #00ffff; }
+      #music { position: fixed; left: 0; right: 0; bottom: calc(56px + env(safe-area-inset-bottom, 0px)); z-index: 899; }
+      body.has-music { padding-bottom: calc(104px + env(safe-area-inset-bottom, 0px)); }
+      #music .mu-vol, #music .mu-volbtn { display: none; }
+    }
+    @media (max-height: 500px) and (pointer: coarse) and (orientation: landscape) {
+      /* Short screen: header scrolls away, slimmer tabs, cameras two across. */
+      body { padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px)); }
+      header { position: static; }
+      header h1 { flex: 1; }
+      #tabs button { height: 40px; }
+      #music { bottom: calc(40px + env(safe-area-inset-bottom, 0px)); }
+      body.has-music { padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
+      #grid { grid-template-columns: 1fr 1fr; }
+    }
+
+    /* ---- Clip player ---- */
+    #player-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: #000; z-index: 2000;
+      flex-direction: column;
+    }
+    #player-header {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+      padding: 8px 10px; background: #1a1a1a;
+    }
+    #player-title { flex: 1; min-width: 10rem; font-size: 0.9rem; }
+    #player-body {
+      flex: 1; position: relative; min-height: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #player-video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+    #player-status {
+      position: absolute; padding: 8px 14px; border-radius: 4px;
+      background: rgba(0,0,0,0.75); pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Sentinel Live</h1>
+    <button class="header-btn" id="tl-toggle" type="button" onclick="toggleTimeline()" title="Show or hide the timeline (T). Hidden = bigger cameras.">Timeline: on</button>
+    <button class="header-btn" id="saver-toggle" type="button" onclick="toggleDataSaver()" title="Smaller, less frequent pictures for phone hotspots and mobile data (remembered on this device)">Data saver: off</button>
+    <button class="header-btn" id="zones-toggle" type="button" onclick="toggleZones()" title="Show or hide the zone outlines on the live view (detection is unaffected)" hidden>Zones: on</button>
+    <button class="header-btn" type="button" onclick="location.reload()" title="Reload the page (for TVs and browsers without F5)">⟳ Reload</button>
+    <a class="header-btn" href="{{ url_for('people_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Family</a>
+    <a class="header-btn" href="{{ url_for('timeline_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;" title="Where the family has been, day by day">Family timeline</a>
+    <a class="header-btn" href="{{ url_for('zones_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Zones</a>
+    <a class="header-btn" href="{{ url_for('settings_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Settings</a>
+    <form method="post" action="{{ url_for('logout') }}" style="margin: 0;">
+      <button class="logout" type="submit">Log out</button>
+    </form>
+  </header>
+
+  <div id="grid"></div>
+
+  <section id="timeline" aria-label="Motion timeline">
+    <div id="tl-toolbar">
+      <button type="button" onclick="shiftDay(-1)" id="tl-prev" title="Previous day">◀</button>
+      <input type="date" id="tl-date" onchange="loadTimeline(this.value)">
+      <button type="button" onclick="shiftDay(1)" id="tl-next" title="Next day">▶</button>
+      <button type="button" onclick="loadTimeline(null)">Today</button>
+      <span class="tl-zoom">
+        <button type="button" data-zoom="1" onclick="setZoom(1)">24h</button>
+        <button type="button" data-zoom="4" onclick="setZoom(4)">6h</button>
+        <button type="button" data-zoom="24" onclick="setZoom(24)">1h</button>
+      </span>
+      <button type="button" onclick="playLatest()" id="tl-latest">▶ Latest clip</button>
+      <span class="tl-legend" id="tl-legend">
+        <button type="button" data-filter="all" class="active" onclick="setFilter('all')">All</button>
+        <button type="button" data-filter="person" onclick="setFilter('person')"><span class="sw" style="background:#ff4d6d"></span>People</button>
+        <button type="button" data-filter="vehicle" onclick="setFilter('vehicle')"><span class="sw" style="background:#4da3ff"></span>Vehicles</button>
+        <button type="button" data-filter="delivery" onclick="setFilter('delivery')"><span class="sw" style="background:#b98cff"></span>Deliveries</button>
+        <button type="button" data-filter="animal" onclick="setFilter('animal')"><span class="sw" style="background:#5fd38a"></span>Animals</button>
+      </span>
+      <span id="tl-summary"></span>
+    </div>
+    <div id="tl-body">
+      <div id="tl-labels"></div>
+      <div id="tl-scroll">
+        <div id="tl-inner">
+          <div id="tl-axis"></div>
+          <div id="tl-tracks"></div>
+          <div id="tl-now" hidden></div>
+        </div>
+      </div>
+    </div>
+    <div id="tl-empty" hidden>No motion recorded on this day.</div>
+    <div id="tl-list" aria-label="Clips, newest first"></div>
+  </section>
+
+  <div id="music" hidden aria-label="Now playing on Spotify">
+    <img id="mu-art" alt="" hidden>
+    <div class="mu-text"><span class="mu-scroll" id="mu-line"></span></div>
+    <button type="button" onclick="music('previous')" title="Previous song">⏮</button>
+    <button type="button" id="mu-play" onclick="music(musicNow && musicNow.playing ? 'pause' : 'resume')" title="Play / pause">⏯</button>
+    <button type="button" onclick="music('next')" title="Next song">⏭</button>
+    <button type="button" class="mu-volbtn" onclick="music('volume', '-')" title="Quieter">−</button>
+    <span class="mu-vol" id="mu-vol"></span>
+    <button type="button" class="mu-volbtn" onclick="music('volume', '+')" title="Louder">+</button>
+  </div>
+
+  <nav id="tabs" aria-label="View">
+    <button type="button" data-tab="live" onclick="setTab('live')">📹 Live</button>
+    <button type="button" data-tab="events" onclick="setTab('events')">🕒 Events</button>
+  </nav>
+
+  <div id="player-overlay">
+    <div id="player-header">
+      <button type="button" onclick="closePlayer()">← Back to live</button>
+      <div id="player-title"></div>
+      <button type="button" id="player-prev" onclick="stepClip(-1)">◀ Previous</button>
+      <button type="button" id="player-next" onclick="stepClip(1)">Next ▶</button>
+    </div>
+    <div id="player-body">
+      <video id="player-video" controls autoplay muted playsinline></video>
+      <div id="player-status"></div>
+    </div>
+  </div>
+
+  <div id="focus-overlay">
+    <div id="focus-header">
+      <button onclick="closeFocus()">← Back</button>
+      <div id="focus-title"></div>
+    </div>
+    <div id="focus-content" onclick="closeFocus()">
+      <img id="focus-img" alt="">
+    </div>
+  </div>
+
+  <script type="application/json" id="initial-cameras">{{ cameras | tojson }}</script>
+  
+  <script>
+    var liveCams = [];
+    var focusedCamId = null;
+    var gridTimers = {};
+
+    // ---------------- Data saver (per device) ----------------
+    // Grid: 480 px pictures every ~5 s instead of tile-sized ones every ~1.75 s (about 0.1 GB/hour
+    // instead of 0.4-1.3). Full screen: one sharp picture per second instead of live video.
+    var dataSaver = false;
+    try { dataSaver = localStorage.getItem("sentinel.dataSaver") === "1"; } catch (e) {}
+    var focusTimer = null;
+
+    function showDataSaver() {
+      var b = document.getElementById("saver-toggle");
+      b.textContent = dataSaver ? "Data saver: on" : "Data saver: off";
+      b.classList.toggle("active", dataSaver);
+    }
+    function toggleDataSaver() {
+      dataSaver = !dataSaver;
+      try { localStorage.setItem("sentinel.dataSaver", dataSaver ? "1" : "0"); } catch (e) {}
+      showDataSaver();
+      if (focusedCamId) openFocus(focusedCamId, document.getElementById("focus-title").textContent);
+      else applyCameras(liveCams);  // restart the grid refresh at the new pace
+    }
+
+    function openFocus(camId, displayName) {
+      focusedCamId = camId;
+      var overlay = document.getElementById('focus-overlay');
+      var img = document.getElementById('focus-img');
+      document.getElementById('focus-title').textContent = displayName;
+      clearInterval(focusTimer);
+      focusTimer = null;
+      overlay.style.display = 'block';
+      Object.values(gridTimers).forEach(clearInterval);  // stop grid updates
+      gridTimers = {};
+
+      if (dataSaver) {
+        // One picture a second, at most 960 px wide.
+        img.onerror = null;
+        var w = Math.min(960, Math.ceil(window.innerWidth * Math.min(window.devicePixelRatio || 1, 1.5)));
+        var refresh = function() {
+          if (focusedCamId !== camId) return;
+          var url = "/snapshot.jpg?id=" + encodeURIComponent(camId) + "&w=" + w + "&t=" + Date.now();
+          var loader = new Image();
+          loader.onload = function() { if (focusedCamId === camId) img.src = url; };
+          loader.src = url;
+        };
+        refresh();
+        focusTimer = setInterval(refresh, 1000);
+        return;
+      }
+
+      // High-quality MJPEG for focus
+      img.src = "/stream?id=" + encodeURIComponent(camId);
+      img.onerror = function() {
+        // Stream ended (camera dropped or server restarted): retry while focused.
+        setTimeout(function() {
+          if (focusedCamId === camId) img.src = "/stream?id=" + encodeURIComponent(camId) + "&r=" + Date.now();
+        }, 3000);
+      };
+    }
+
+    function closeFocus() {
+      clearInterval(focusTimer);
+      focusTimer = null;
+      document.getElementById('focus-img').onerror = null;
+      document.getElementById('focus-img').src = "";
+      document.getElementById('focus-overlay').style.display = 'none';
+      focusedCamId = null;
+      applyCameras(liveCams);
+    }
+
+    // Ask for a picture about as wide as the tile is on screen (the server rounds it to a few sizes).
+    function tileWidthParam(imgElement) {
+      // Capped at 1.5x: phones are ~3x and would otherwise pull full-size pictures every refresh
+      // (about 2 GB an hour on mobile data). Full screen uses the full-resolution stream.
+      var w = Math.ceil((imgElement.clientWidth || 640) * Math.min(window.devicePixelRatio || 1, 1.5));
+      if (dataSaver) w = Math.min(w, 480);
+      return "&w=" + w;
+    }
+
+    function updateTile(camId, imgElement) {
+      var url = "/snapshot.jpg?id=" + encodeURIComponent(camId) + tileWidthParam(imgElement) + "&t=" + Date.now();
+      var loader = new Image();
+      loader.onload = function() { imgElement.src = url; };
+      loader.src = url;
+    }
+
+    // ---------------- Weather tile ----------------
+    var weatherTile = document.createElement("div");
+    weatherTile.className = "tile weather";
+    weatherTile.hidden = true;
+    var weather = null;  // last /api/weather answer
+
+    function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
+
+    var family = [];  // last /api/family answer: [{name, state: home|out|off, label, lat, lon}]
+    function familyHtml() {
+      if (!family.length) return "";
+      return '<div class="wx-family">' + family.map(function(p) {
+        var inner = '<span class="dot ' + esc(p.state) + '"></span>' + esc(p.name);
+        var title = esc(p.name + " — " + p.label);
+        if (p.lat == null) return '<span class="p" title="' + title + '">' + inner + '</span>';
+        return '<a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p.lat + "," + p.lon) +
+          '" target="_blank" rel="noopener" title="' + title + '">' + inner + '</a>';
+      }).join("") + '</div>';
+    }
+
+    function renderWeather() {
+      var w = weather;
+      if (!w) { weatherTile.innerHTML = ""; return; }
+      renderWeatherOnly(w);
+      weatherTile.classList.toggle("fam", family.length > 0);
+      weatherTile.insertAdjacentHTML("beforeend", familyHtml());
+    }
+
+    function renderWeatherOnly(w) {
+      if (!w.configured) {
+        weatherTile.innerHTML = '<h2>Weather</h2><div class="wx-msg">Show the weather here: enter your town or ZIP code in ' +
+          '<a href="/settings#weather">Settings → Weather</a>.</div>';
+        return;
+      }
+      if (w.temp == null) {
+        weatherTile.innerHTML = '<h2>Weather</h2><div class="wx-msg">' + (w.error ? esc(w.error) : "Loading the weather…") + '</div>';
+        return;
+      }
+      var deg = "°";
+      var hours = (w.hours || []).map(function(h) {
+        return '<div><span>' + esc(h.label) + '</span><span>' + esc(h.icon) + '</span><span>' + esc(h.temp) + deg +
+          '</span><span class="r">' + (h.rain >= 20 ? "☔ " + esc(h.rain) + "%" : "") + '</span></div>';
+      }).join("");
+      weatherTile.innerHTML =
+        '<h2>Weather — ' + esc(w.place) + '</h2>' +
+        '<div class="wx-top"><div class="wx-icon">' + esc(w.icon) + '</div><div class="wx-temp">' + esc(w.temp) + deg + '</div>' +
+        '<div class="wx-now"><b>' + esc(w.words) + '</b><span>Feels like ' + esc(w.feels) + deg + '</span>' +
+        '<span>High ' + esc(w.high) + deg + ' · Low ' + esc(w.low) + deg + '</span></div></div>' +
+        '<div class="wx-meta"><span>💨 ' + esc(w.wind) + ' mph' + (w.gusts > w.wind + 4 ? ', gusts ' + esc(w.gusts) : '') + '</span>' +
+        '<span>💧 ' + esc(w.humidity) + '%</span><span>☔ ' + esc(w.rain_today) + '% today</span>' +
+        '<span>🌅 ' + esc(w.sunrise) + '</span><span>🌇 ' + esc(w.sunset) + '</span></div>' +
+        '<div class="wx-hours">' + hours + '</div>' +
+        '<div class="wx-foot">' + (w.windy ? '<span class="wx-windy">Windy: expect motion clips from trees. </span>' : '') +
+        'Updated ' + esc(w.updated) + '</div>';
+    }
+
+    async function loadWeather() {
+      var next = 10 * 60 * 1000;
+      try {
+        var r = await fetch("/api/weather");
+        if (r.ok) {
+          weather = await r.json();
+          if (weather.loading) next = 3000;
+          renderWeather();
+          layoutGrid();
+        }
+      } catch (e) { next = 60 * 1000; }
+      setTimeout(loadWeather, next);
+    }
+    loadWeather();
+
+    async function loadFamily() {
+      try {
+        var r = await fetch("/api/family");
+        if (r.ok) { family = (await r.json()).people || []; renderWeather(); }
+      } catch (e) {}
+      setTimeout(loadFamily, 60 * 1000);
+    }
+    loadFamily();
+
+    function applyCameras(cams) {
+      var root = document.getElementById("grid");
+      liveCams = cams;
+      root.innerHTML = "";
+      Object.values(gridTimers).forEach(clearInterval);
+      gridTimers = {};
+
+      cams.forEach(function(c) {
+        var tile = document.createElement('div');
+        tile.className = 'tile';
+        tile.onclick = function() { openFocus(c.id, c.display || c.id); };
+        
+        var h2 = document.createElement('h2');
+        h2.textContent = c.display;
+        
+        var img = document.createElement('img');
+        img.onload = function() {
+          var aspect = img.naturalWidth / img.naturalHeight;
+          if (aspect > 0.5 && aspect < 3 && Math.abs(aspect - camAspect) > 0.01) { camAspect = aspect; layoutGrid(); }
+        };
+        img.src = "/snapshot.jpg?id=" + encodeURIComponent(c.id) + (dataSaver ? "&w=480" : "");
+        
+        tile.appendChild(h2);
+        tile.appendChild(img);
+        root.appendChild(tile);
+
+        // Staggered snapshot updates for the grid (1.5s interval)
+        // This is MUCH more stable for mobile than multiple concurrent MJPEG streams.
+        gridTimers[c.id] = setInterval(function() {
+          if (!focusedCamId && !playerOpen && !(isPhone() && currentTab === "events")) updateTile(c.id, img);
+        }, (dataSaver ? 5000 : 1500) + (Math.random() * 500));
+      });
+      root.appendChild(weatherTile);
+      setTimeout(layoutGrid, 0);  // after the page script has finished setting up
+    }
+
+    (function boot() {
+      try {
+        var raw = document.getElementById("initial-cameras").textContent;
+        applyCameras(JSON.parse(raw || "[]"));
+      } catch (e) {}
+    })();
+
+    var BOOT_ID = "{{ boot_id }}";
+    async function refreshList() {
+      if (focusedCamId) return;
+      try {
+        var r = await fetch("/api/cameras");
+        if (r.status === 401) { location.href = "/login"; return; }  // signed out (e.g. a TV left on)
+        var boot = r.headers.get("X-Sentinel-Boot");
+        if (boot && boot !== BOOT_ID) { if (!playerOpen) location.reload(); return; }  // Sentinel was updated: load the new page
+        var cams = await r.json();
+        var cur = liveCams.map(c => c.id).sort().join(",");
+        var nxt = cams.map(c => c.id).sort().join(",");
+        if (cur !== nxt) applyCameras(cams);
+      } catch (e) {}
+    }
+    setInterval(refreshList, 10000);
+
+    // ---------------- Motion timeline ----------------
+    var tl = null;          // last /api/recordings response
+    var tlZoom = 1;         // 1 = 24h visible, 4 = 6h, 24 = 1h
+    var playerOpen = false;
+    var tlFilter = "all";
+    var GROUPS = { person: "person", bicycle: "vehicle", car: "vehicle", motorcycle: "vehicle", bus: "vehicle",
+                   truck: "vehicle", dog: "animal", cat: "animal", horse: "animal", sheep: "animal", cow: "animal",
+                   bear: "animal", bird: "animal", deer: "animal", delivery: "delivery" };
+
+    function clipGroup(clip) {
+      var groups = (clip.labels || []).map(function(l) { return GROUPS[l]; });
+      if (groups.indexOf("delivery") >= 0) return "delivery";  // usually has a driver in it too
+      if (groups.indexOf("person") >= 0) return "person";
+      if (groups.indexOf("vehicle") >= 0) return "vehicle";
+      if (groups.indexOf("animal") >= 0) return "animal";
+      return "motion";
+    }
+
+    function visibleClips() {
+      if (!tl) return [];
+      return tl.clips.filter(function(c) { return tlFilter === "all" || clipGroup(c) === tlFilter; });
+    }
+
+    function setFilter(f) {
+      tlFilter = f;
+      document.querySelectorAll("#tl-legend button").forEach(function(b) { b.classList.toggle("active", b.dataset.filter === f); });
+      if (tl) renderTimeline(false);
+    }
+    var playingClip = null;
+
+    function store(key, value) {
+      try { localStorage.setItem(key, value); } catch (e) {}
+    }
+    function recall(key) {
+      try { return localStorage.getItem(key); } catch (e) { return null; }
+    }
+
+    function fmtOffset(sec) {
+      sec = Math.max(0, Math.floor(sec));
+      var h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+      return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+    }
+
+    function cameraName(key) {
+      if (!tl) return key;
+      var row = tl.cameras.find(function(c) { return c.key === key; });
+      return row ? row.name : key;
+    }
+
+    // Zone outlines are drawn on the server, so this switches them for every viewer.
+    var zonesShown = true;
+    function showZonesState(on) {
+      zonesShown = on;
+      var b = document.getElementById("zones-toggle");
+      b.textContent = on ? "Zones: on" : "Zones: off";
+      b.classList.toggle("active", on);
+      b.hidden = false;
+    }
+    async function loadZonesState() {
+      try {
+        var r = await fetch("/api/settings");
+        if (r.ok) showZonesState((await r.json()).values["web.show_zones"] !== false);
+      } catch (e) {}
+    }
+    async function toggleZones() {
+      var want = !zonesShown;
+      showZonesState(want);
+      try {
+        var r = await fetch("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+          body: JSON.stringify({ "web.show_zones": want })
+        });
+        if (!r.ok) throw new Error();
+      } catch (e) { showZonesState(!want); }
+    }
+    loadZonesState();
+    showDataSaver();
+
+    // ---------------- Phone layout ----------------
+    var PHONE_QUERY = window.matchMedia("(max-width: 760px), (max-height: 500px) and (pointer: coarse)");
+    var currentTab = "live";
+    function isPhone() { return PHONE_QUERY.matches; }
+
+    // ---------------- Spotify now-playing bar ----------------
+    var musicNow = null, musicTimer = null;
+    function showMusic(now) {
+      musicNow = now;
+      var bar = document.getElementById("music");
+      var show = !!(now && now.connected && now.active);
+      if (bar.hidden === show) {
+        bar.hidden = !show;
+        document.body.classList.toggle("has-music", show);
+        layoutGrid();  // the cameras get a little less height
+      }
+      if (!show) return;
+      var art = document.getElementById("mu-art");
+      if (now.art) { if (art.getAttribute("src") !== now.art) art.src = now.art; art.hidden = false; } else art.hidden = true;
+      var line = document.getElementById("mu-line");
+      line.innerHTML = (now.playing ? "♪ " : "⏸ ") + '<span class="mu-title">' + esc(now.track) + "</span> — " + esc(now.artist) +
+        (now.device ? ' <span class="mu-where">· ' + esc(now.device) + "</span>" : "");
+      var box = line.parentNode;
+      box.classList.remove("long");
+      if (line.offsetWidth > box.clientWidth) box.classList.add("long");  // scroll like a ticker when it doesn't fit
+      document.getElementById("mu-play").textContent = now.playing ? "⏸" : "▶";
+      document.getElementById("mu-vol").textContent = now.volume == null ? "" : now.volume + "%";
+    }
+    async function pollMusic() {
+      clearTimeout(musicTimer);
+      var next = 60000;  // not connected: check now and then
+      try {
+        var r = await fetch("/api/spotify");
+        if (r.ok) {
+          var now = await r.json();
+          showMusic(now);
+          if (now.connected) next = now.active ? (dataSaver ? 15000 : 5000) : 20000;
+        }
+      } catch (e) {}
+      musicTimer = setTimeout(pollMusic, document.hidden ? Math.max(next, 30000) : next);
+    }
+    async function music(action, value) {
+      try {
+        var r = await fetch("/api/spotify/control", {
+          method: "POST", headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+          body: JSON.stringify({ action: action, value: value || "" })
+        });
+        var data = await r.json();
+        if (data.now) showMusic(data.now);
+      } catch (e) {}
+      setTimeout(pollMusic, 1500);  // Spotify takes a moment to report the change
+    }
+
+    function setTab(tab) {
+      currentTab = tab;
+      document.body.classList.toggle("tab-live", tab === "live");
+      document.body.classList.toggle("tab-events", tab === "events");
+      document.querySelectorAll("#tabs button").forEach(function(b) { b.classList.toggle("active", b.dataset.tab === tab); });
+      store("sentinel.tab", tab);
+      if (isPhone()) {
+        document.getElementById("timeline").hidden = false;  // the tab decides on phones
+        window.scrollTo(0, 0);
+        if (tab === "events" && tl) applyZoom(true);  // it had no width while hidden
+        if (tab === "live") liveCams.forEach(function(c, i) {
+          var img = document.querySelectorAll("#grid .tile img")[i];
+          if (img) updateTile(c.id, img);  // refresh right away, not on the next tick
+        });
+      }
+    }
+
+    var LIST_PAGE = 50;
+    var listShown = LIST_PAGE;
+    function renderList() {
+      var root = document.getElementById("tl-list");
+      root.innerHTML = "";
+      var clips = visibleClips().slice().reverse();
+      clips.slice(0, listShown).forEach(function(clip) {
+        var row = document.createElement("button");
+        row.type = "button";
+        row.className = "ev" + (playingClip && playingClip.id === clip.id ? " playing" : "");
+        row.dataset.id = clip.id;
+        var sw = document.createElement("span");
+        sw.className = "sw " + (clip.reason === "telegram_clip_request" ? "clip-request" : "g-" + clipGroup(clip));
+        var t = document.createElement("span");
+        t.className = "t";
+        t.textContent = fmtOffset(clip.s);
+        var what = document.createElement("span");
+        what.className = "what";
+        var title = document.createElement("b");
+        title.textContent = cameraName(clip.cam);
+        var detail = document.createElement("span");
+        var bits = [];
+        if (clip.labels && clip.labels.length) bits.push(clip.labels.join(", "));
+        else if (clip.reason === "telegram_clip_request") bits.push("requested clip");
+        else bits.push("motion");
+        bits.push(Math.max(1, Math.round(clip.e - clip.s)) + "s");
+        if (clip.hd) bits.push("HD");
+        detail.textContent = bits.join(" · ");
+        what.appendChild(title);
+        what.appendChild(detail);
+        row.appendChild(sw); row.appendChild(t); row.appendChild(what);
+        row.onclick = function() { openClip(clip); };
+        root.appendChild(row);
+      });
+      if (clips.length > listShown) {
+        var more = document.createElement("button");
+        more.type = "button";
+        more.id = "tl-more";
+        more.textContent = "Show more (" + (clips.length - listShown) + " older)";
+        more.onclick = function() { listShown += LIST_PAGE; renderList(); };
+        root.appendChild(more);
+      }
+    }
+
+    function toggleTimeline(show) {
+      var el = document.getElementById("timeline");
+      if (typeof show !== "boolean") show = el.hidden;
+      el.hidden = !show;
+      var btn = document.getElementById("tl-toggle");
+      btn.classList.toggle("active", show);
+      btn.textContent = show ? "Timeline: on" : "Timeline: off";
+      store("sentinel.timeline", show ? "1" : "0");
+      layoutGrid();
+      if (show && tl) applyZoom(false);  // it had no width while hidden
+    }
+
+    // Desktop grid: try every column count and keep the one where each camera picture
+    // (16:9, or the cameras' real shape once known) is largest in the space available.
+    var camAspect = 16 / 9;
+    function layoutGrid() {
+      var grid = document.getElementById("grid");
+      var n = grid.querySelectorAll(".tile:not(.weather)").length;
+      if (isPhone() || !n) {
+        grid.style.gridTemplateColumns = grid.style.gridAutoRows = "";
+        // Phones: under the cameras, once a place is set.
+        weatherTile.hidden = !(isPhone() && weather && weather.configured);
+        return;
+      }
+      var gap = 2, pad = 4;
+      var W = grid.clientWidth - pad, H = grid.clientHeight - pad;
+      if (W <= 0 || H <= 0) return;
+      var best = null;
+      for (var cols = 1; cols <= n; cols++) {
+        var rows = Math.ceil(n / cols);
+        var w = Math.min((W - gap * (cols - 1)) / cols, ((H - gap * (rows - 1)) / rows) * camAspect);
+        if (!best || w > best.w + 0.5) best = { cols: cols, w: w };
+      }
+      var tw = Math.floor(best.w), th = Math.floor(best.w / camAspect);
+      grid.style.gridTemplateColumns = "repeat(" + best.cols + ", " + tw + "px)";
+      grid.style.gridAutoRows = th + "px";
+      // Only in a cell that would otherwise be empty: it never shrinks the cameras.
+      weatherTile.hidden = !weather || best.cols * Math.ceil(n / best.cols) <= n;
+    }
+    window.addEventListener("resize", layoutGrid);
+    document.addEventListener("keydown", function(e) {
+      if ((e.key === "t" || e.key === "T") && !e.ctrlKey && !e.metaKey && !e.altKey && !playerOpen && !focusedCamId
+          && !/^(INPUT|SELECT|TEXTAREA)$/.test((e.target.tagName || "")) && !isPhone()) toggleTimeline();
+    });
+
+    function shiftDay(dir) {
+      if (!tl) return;
+      var d = dir < 0 ? tl.prev_date : tl.next_date;
+      if (d) loadTimeline(d);
+    }
+
+    async function loadTimeline(date) {
+      var url = "/api/recordings" + (date ? "?date=" + encodeURIComponent(date) : "");
+      try {
+        var r = await fetch(url);
+        if (r.status === 401) { location.href = "/login"; return; }
+        if (!r.ok) throw new Error(r.status);
+        var data = await r.json();
+        var first = !tl || tl.date !== data.date;
+        tl = data;
+        renderTimeline(first);
+      } catch (e) {
+        document.getElementById("tl-summary").textContent = "Timeline unavailable";
+      }
+    }
+
+    function renderTimeline(scrollToFocus) {
+      document.getElementById("tl-date").value = tl.date;
+      document.getElementById("tl-next").disabled = !tl.next_date;
+      var n = visibleClips().length;
+      document.getElementById("tl-summary").textContent = n + (n === 1 ? " clip" : " clips");
+      document.getElementById("tl-latest").disabled = n === 0;
+      document.getElementById("tl-empty").hidden = n > 0;
+
+      var day = tl.day_seconds;
+      var labels = document.getElementById("tl-labels");
+      var tracks = document.getElementById("tl-tracks");
+      labels.innerHTML = "";
+      tracks.innerHTML = "";
+      var trackByCam = {};
+      tl.cameras.forEach(function(c) {
+        var label = document.createElement("div");
+        label.className = "tl-label";
+        label.textContent = c.name;
+        label.title = c.name;
+        labels.appendChild(label);
+        var track = document.createElement("div");
+        track.className = "tl-track";
+        tracks.appendChild(track);
+        trackByCam[c.key] = track;
+      });
+
+      var frag = {};
+      visibleClips().forEach(function(clip) {
+        var track = trackByCam[clip.cam];
+        if (!track) return;
+        var mark = document.createElement("div");
+        mark.className = "tl-mark " + (clip.reason === "telegram_clip_request" ? "clip-request" : "g-" + clipGroup(clip));
+        if (playingClip && playingClip.id === clip.id) mark.classList.add("playing");
+        mark.style.left = (clip.s / day * 100) + "%";
+        mark.style.width = (Math.max(clip.e - clip.s, 1) / day * 100) + "%";
+        mark.title = cameraName(clip.cam) + " · " + fmtOffset(clip.s) + (clip.labels && clip.labels.length ? " · " + clip.labels.join(", ") : "");
+        mark.dataset.id = clip.id;
+        mark.onclick = function() { openClip(clip); };
+        (frag[clip.cam] = frag[clip.cam] || document.createDocumentFragment()).appendChild(mark);
+      });
+      Object.keys(frag).forEach(function(k) { trackByCam[k].appendChild(frag[k]); });
+      if (scrollToFocus) listShown = LIST_PAGE;
+      renderList();
+
+      var nowLine = document.getElementById("tl-now");
+      if (tl.now_offset != null) {
+        nowLine.hidden = false;
+        nowLine.style.left = (tl.now_offset / day * 100) + "%";
+      } else {
+        nowLine.hidden = true;
+      }
+      applyZoom(scrollToFocus);
+    }
+
+    function renderAxis() {
+      var axis = document.getElementById("tl-axis");
+      axis.innerHTML = "";
+      if (!tl) return;
+      var hours = Math.round(tl.day_seconds / 3600);
+      var step = tlZoom >= 24 ? 0.25 : (tlZoom >= 4 ? 1 : 3);   // hours between labels
+      for (var h = 0; h < hours; h += step) {
+        var tick = document.createElement("div");
+        tick.className = "tl-tick";
+        tick.style.left = (h * 3600 / tl.day_seconds * 100) + "%";
+        var span = document.createElement("span");
+        span.textContent = fmtOffset(h * 3600).slice(0, 5);
+        tick.appendChild(span);
+        axis.appendChild(tick);
+      }
+    }
+
+    function applyZoom(scrollToFocus) {
+      var scroller = document.getElementById("tl-scroll");
+      var inner = document.getElementById("tl-inner");
+      var oldWidth = inner.offsetWidth || 1;
+      var center = (scroller.scrollLeft + scroller.clientWidth / 2) / oldWidth;
+      inner.style.width = (tlZoom * 100) + "%";
+      document.querySelectorAll(".tl-zoom button").forEach(function(b) {
+        b.classList.toggle("active", Number(b.dataset.zoom) === tlZoom);
+      });
+      renderAxis();
+      var newWidth = inner.offsetWidth;
+      if (scrollToFocus && tl) {
+        // New day: show "now" (today) or the last clip (past days).
+        var focus = tl.now_offset != null ? tl.now_offset
+          : (tl.clips.length ? tl.clips[tl.clips.length - 1].s : 0);
+        center = focus / tl.day_seconds;
+      }
+      scroller.scrollLeft = center * newWidth - scroller.clientWidth / 2;
+    }
+
+    function setZoom(z) {
+      tlZoom = z;
+      store("sentinel.timelineZoom", String(z));
+      applyZoom(false);
+    }
+
+    // ---------------- Clip player ----------------
+    function sameCameraClips(clip) {
+      return visibleClips().filter(function(c) { return c.cam === clip.cam; });
+    }
+
+    function openClip(clip) {
+      playingClip = clip;
+      playerOpen = true;
+      var overlay = document.getElementById("player-overlay");
+      var video = document.getElementById("player-video");
+      var status = document.getElementById("player-status");
+      document.getElementById("player-title").textContent =
+        cameraName(clip.cam) + " — " + tl.date + " " + fmtOffset(clip.s) +
+        (clip.labels && clip.labels.length ? "  · " + clip.labels.join(", ") : "") + (clip.hd ? "  · HD" : "");
+      status.textContent = "Preparing clip…";
+      status.hidden = false;
+      video.src = "/recordings/" + clip.id + "/video";
+      overlay.style.display = "flex";
+
+      var list = sameCameraClips(clip);
+      var idx = list.findIndex(function(c) { return c.id === clip.id; });
+      document.getElementById("player-prev").disabled = idx <= 0;
+      document.getElementById("player-next").disabled = idx < 0 || idx >= list.length - 1;
+
+      document.querySelectorAll(".tl-mark.playing, .ev.playing").forEach(function(m) { m.classList.remove("playing"); });
+      document.querySelectorAll('.tl-mark[data-id="' + clip.id + '"], .ev[data-id="' + clip.id + '"]').forEach(function(m) {
+        m.classList.add("playing");
+      });
+      document.getElementById("player-next").focus();
+    }
+
+    function stepClip(dir) {
+      if (!playingClip) return;
+      var list = sameCameraClips(playingClip);
+      var idx = list.findIndex(function(c) { return c.id === playingClip.id; });
+      var next = list[idx + dir];
+      if (next) openClip(next);
+    }
+
+    function playLatest() {
+      var clips = visibleClips();
+      if (clips.length) openClip(clips[clips.length - 1]);
+    }
+
+    function closePlayer() {
+      var video = document.getElementById("player-video");
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+      document.getElementById("player-overlay").style.display = "none";
+      playerOpen = false;
+    }
+
+    (function initPlayer() {
+      var video = document.getElementById("player-video");
+      var status = document.getElementById("player-status");
+      video.addEventListener("loadeddata", function() { status.hidden = true; });
+      video.addEventListener("error", function() {
+        if (!video.getAttribute("src")) return;
+        status.textContent = "This clip could not be played (it may have been deleted).";
+        status.hidden = false;
+      });
+      document.addEventListener("keydown", function(e) {
+        if (!playerOpen) return;
+        if (e.key === "Escape") closePlayer();
+        else if (e.key === "ArrowLeft" && e.target !== video) stepClip(-1);
+        else if (e.key === "ArrowRight" && e.target !== video) stepClip(1);
+      });
+    })();
+
+    (function initTimeline() {
+      var z = Number(recall("sentinel.timelineZoom"));
+      if (z === 1 || z === 4 || z === 24) tlZoom = z;
+      toggleTimeline(recall("sentinel.timeline") !== "0");
+      setTab(recall("sentinel.tab") === "events" ? "events" : "live");
+      PHONE_QUERY.addEventListener("change", function() {
+        if (isPhone()) setTab(currentTab);
+        else toggleTimeline(recall("sentinel.timeline") !== "0");  // back to the desktop preference
+        layoutGrid();
+      });
+      loadTimeline(null);
+      window.addEventListener("resize", function() { if (tl) applyZoom(false); });
+      pollMusic();
+      // Keep today's timeline current.
+      setInterval(function() {
+        if (tl && tl.now_offset != null && !document.hidden) loadTimeline(tl.date);
+      }, 30000);
+    })();
+  </script>
+</body>
+</html>
