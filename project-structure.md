@@ -37,6 +37,7 @@ sentinel-home/                         # repository root
     │   ├── spotify.py                 # Spotify Web API: PKCE sign-in, play/pause/skip/volume, now playing, voice phrases
     │   ├── assistant.py               # Opt-in: Telegram messages Sentinel doesn't understand -> `claude -p`
     │   ├── reminders.py               # "Remind me ..." -> Telegram message at that time (reminders.db)
+    │   ├── switches.py                # Smart plugs/switches (Kasa, local protocol): Live page panel, voice, Telegram
     │   ├── questions.py               # Telegram questions ("did anyone come by?", "is Kate home?")
     │   ├── queries.py                 # "videos <when>" parsing
     │   └── admin.py                   # Settings schema, status, access message helpers

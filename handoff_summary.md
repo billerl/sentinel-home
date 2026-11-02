@@ -238,6 +238,17 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   Wednesday at 9 ..." into the exact command `Remind YYYY-MM-DD HH:MM <what>`; it is saved only after a ✅ tap
   (Telegram) or a spoken yes, then sent on Telegram at that time (voice ones to every chat; late ones say so).
   `Reminders` lists, `Cancel reminder N` removes. Checked every 15 s in the command loop.
+- **Smart plugs and switches** (`sentinel/engine/switches.py`, known devices in `recorded_videos/switches.json`):
+  Kasa plugs/power strips/wall switches over their local protocol (TCP/UDP 9999, XOR-scrambled JSON; no
+  cloud, no new dependency). Found by UDP broadcast at start, every 15 min and on "Find new devices"; known
+  ones are polled every 10 s (changes from the plug's button or the Kasa app are logged as
+  `switch_changed source=outside`). Each outlet of a multi-outlet plug is its own switch (id
+  `kasa-<mac>-<n>`, stable when the router hands out a new address). Names come from the plug (renaming
+  writes back to it). Live page: 💡 Switches drawer (desktop) / Switches tab (phones), `/api/switches*`.
+  Voice and Telegram: "patio lights on", "turn off the patio lights", "are the patio lights on?" (switch
+  immediately; Claude's suggestions ask yes first / show a ✅ button). New makes = another driver class
+  with `discover/status/set/rename` (Shelly and Tasmota have local HTTP APIs). Newer KLAP-only Kasa/Tapo
+  devices don't answer on 9999 and aren't supported. No automations yet (e.g. lights on for a person at night).
 - **Telegram commands added:** `access` (remote-access guide) and `videos <when> [people|vehicles|animals] [camera]` (`sentinel/engine/queries.py`).
 - **Web:** `/settings` covers status, cameras, detection, Telegram, recording, audio, remote access, password and help.
 - **Replay tool idea:** run the detector and tracker over a sample of a day's clips to check accuracy before changing thresholds.

@@ -48,6 +48,9 @@ class TelegramNotifier:
         self.assistant_available: Optional[Callable[[], bool]] = None
         self._pending_free_text: List[Tuple[str, str]] = []
         self._pending_reminders: List[Tuple[str, str]] = []  # (chat_id, "Remind ..." / "Reminders" / "Cancel reminder N")
+        # Set by the engine: is this about a smart plug/switch it knows ("patio lights on")?
+        self.switch_filter: Optional[Callable[[str], bool]] = None
+        self._pending_switches: List[Tuple[str, str]] = []
         # Set by the engine: a 📍 pin someone sent (chat_id, lat, lon, venue title) and a check that
         # may claim the next typed message (the pin's name); returns True when it handled the text.
         self.location_handler: Optional[Callable[[str, float, float, str], None]] = None
@@ -73,6 +76,9 @@ class TelegramNotifier:
             "- Remind me Wednesday at 9am about my PT appointment — in plain words (Claude works out the time; tap ✅ to save)\n"
             "- Remind 2026-11-04 09:00 PT appointment — the exact form, saved straight away\n"
             "- Reminders — what's coming up; Cancel reminder <number>\n\n"
+            "Smart plugs and switches (names from the Kasa app):\n"
+            "- Patio lights on / Turn off the patio lights — switch one\n"
+            "- Are the patio lights on? — check one\n\n"
             "Clip:\n"
             "- Clip — record ~10s per connected camera and upload\n\n"
             "Enable / disable (combine with \"and\" or commas):\n"
@@ -449,6 +455,11 @@ class TelegramNotifier:
         pending, self._pending_reminders = self._pending_reminders, []
         return pending
 
+    def consume_switch_commands(self) -> List[Tuple[str, str]]:
+        """Return and clear (chat_id, text) smart plug/switch commands."""
+        pending, self._pending_switches = self._pending_switches, []
+        return pending
+
     def consume_free_text(self) -> List[Tuple[str, str]]:
         """Return and clear (chat_id, text) messages none of the built-in commands understood."""
         pending, self._pending_free_text = self._pending_free_text, []
@@ -571,10 +582,11 @@ class TelegramNotifier:
         """Is this exactly one of Sentinel's own commands (what a "Do it" button may run)?"""
         from sentinel.engine.queries import is_video_query
         from sentinel.engine.reminders import is_reminder_command
+        from sentinel.engine.switches import COMMAND as SWITCH_COMMAND
 
         t = text.strip()
         if re.fullmatch(r"(?i)(resume|status|help|clip|pause\s+\d{1,4})", t) or cls._is_access_request(t) \
-                or is_reminder_command(t):
+                or is_reminder_command(t) or SWITCH_COMMAND.match(t):
             return True
         changes, err = cls._parse_feature_toggle_command(t)
         return bool(changes) and err is None or is_video_query(t)
@@ -600,6 +612,10 @@ class TelegramNotifier:
 
         if is_reminder_command(text):
             self._pending_reminders.append((chat_id, text.strip()))
+            return
+
+        if self.switch_filter is not None and self.switch_filter(text):
+            self._pending_switches.append((chat_id, text.strip()))
             return
 
         from sentinel.engine.queries import is_video_query

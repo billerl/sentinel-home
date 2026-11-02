@@ -156,6 +156,9 @@ class Engine:
         self.reminders = ReminderStore(VIDEO_DIR)  # "remind me ..." -> a Telegram message at that time
         self._reminders_checked = 0.0
         self._reminder_failed: set = set()  # ids whose send failed (logged once; retried every check)
+        from sentinel.engine.switches import SmartSwitches
+
+        self.switches = SmartSwitches(VIDEO_DIR)  # Kasa smart plugs/switches on the home network
         self._place_pins: Dict[str, Tuple[float, float, float]] = {}  # chat -> pin waiting for a name (lat, lon, until)
         self._location_alerted: Dict[Tuple[int, int], float] = {}  # (person, place) -> last alert
         self._location_asked: Dict[int, float] = {}  # person -> last time we asked their phone for a fresh fix
@@ -337,6 +340,7 @@ class Engine:
         if self.presence is not None:
             self.presence.start()
         self.camera_lights.start()
+        self.switches.start()
 
         def _household_filter(text: str) -> bool:
             from sentinel.engine.questions import household_question
@@ -347,6 +351,7 @@ class Engine:
         self.telegram.question_filter = _household_filter
         self.telegram.location_handler = self._on_telegram_pin
         self.telegram.text_interceptor = self._name_pinned_place
+        self.telegram.switch_filter = lambda text: self.switches.parse(text) is not None
         self.telegram.assistant_available = self.assistant.enabled
         if self.assistant.enabled():
             threading.Thread(target=self._check_assistant, name="assistant-check", daemon=True).start()
@@ -376,6 +381,7 @@ class Engine:
         if self.presence is not None:
             self.presence.stop()
         self.camera_lights.stop()
+        self.switches.stop()
         self._stop_voice()
         self.spotify_player.stop()
         self.telegram.cleanup()
@@ -578,6 +584,9 @@ class Engine:
                 if time.time() - self._reminders_checked >= 15:
                     self._reminders_checked = time.time()
                     self.send_due_reminders()
+                for chat_id, text in self.telegram.consume_switch_commands():
+                    threading.Thread(target=self._switch_reply, args=(chat_id, text), name="switch",
+                                     daemon=True).start()  # a plug that doesn't answer takes seconds
                 for chat_id, text in self.telegram.consume_free_text():
                     threading.Thread(
                         target=self.answer_with_assistant, args=(chat_id, text), name="assistant", daemon=True
@@ -901,7 +910,11 @@ class Engine:
 
         reminders = "\n".join(f"{r.id}. {when_words(r.due, now)}: {r.text}" for r in self.reminders.pending()[:20])
         return build_context(now, events, cameras, home, self.household.vehicles(), weather,
-                             self.telegram._commands_help_text(), reminders)
+                             self.telegram._commands_help_text(), reminders, self.switches.summary())
+
+    def _switch_reply(self, chat_id: str, text: str) -> None:
+        said = self.switches.command(text, source="telegram")
+        self.telegram.reply_to_chat(chat_id, "💡 " + (said or "I don't know that switch."))
 
     def answer_with_assistant(self, chat_id: str, text: str) -> None:
         """A message none of the built-in commands understood: ask Claude (opt-in), else show help."""
@@ -1042,6 +1055,9 @@ class Engine:
         volume = parse_volume_command(low)
         if volume:
             return VoiceReply(self.change_volume(*volume))
+        switched = self.switches.command(low, source="voice")
+        if switched:
+            return VoiceReply(switched)
         music = parse_music_command(low)
         if music and self.spotify.connected():
             said = self.spotify.command(*music)
@@ -1098,6 +1114,9 @@ class Engine:
         if command and is_reminder_command(command):
             return VoiceReply(spoken + " Should I do that? Say yes or no.",
                               lambda: self.reminder_command(None, command))
+        if command and self.switches.parse(command) is not None:
+            return VoiceReply(spoken + " Should I do that? Say yes or no.",
+                              lambda: self.switches.command(command, source="voice") or "I couldn't do that.")
         return VoiceReply(spoken)
 
     def answer_household_question(self, hq) -> str:

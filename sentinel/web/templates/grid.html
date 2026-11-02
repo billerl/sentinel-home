@@ -259,6 +259,66 @@
     #music button:focus-visible { outline: 3px solid #fff; }  /* Fire TV remote */
     #music .mu-vol { color: #7fbf95; font-size: 0.75rem; min-width: 2.5em; text-align: center; }
 
+
+    /* ---- Smart plugs and switches: a drawer on the right (desktop), its own tab (phones) ---- */
+    #sw-open .sw-count { color: #ffc94d; }
+    #sw-open.active .sw-count { color: #000; }
+    #switches {
+      position: fixed; top: 40px; right: 0; bottom: 0; width: min(380px, 100vw); z-index: 950;
+      display: flex; flex-direction: column; background: linear-gradient(180deg, #0b141c, #070b10);
+      border-left: 1px solid #0a4a4a; box-shadow: -12px 0 30px rgba(0,0,0,0.55); color: #d9f6ff;
+      transform: translateX(105%); transition: transform 0.22s ease; visibility: hidden;
+    }
+    #switches.open { transform: none; visibility: visible; }
+    .sw-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; }
+    .sw-head h2 { margin: 0; font-size: 1.05rem; color: #fff; font-weight: 600; flex: 1; }
+    .sw-head h2 small { display: block; font-size: 0.75rem; font-weight: 400; color: #7fb3c4; margin-top: 2px; }
+    .sw-head button { background: none; border: 0; color: #7fb3c4; font-size: 1.2rem; padding: 4px 8px; }
+    #sw-body { flex: 1; overflow-y: auto; padding: 0 16px 8px; scrollbar-color: #1f3a44 transparent; }
+    .sw-group { margin-bottom: 18px; }
+    .sw-group h3 { margin: 4px 0 8px; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em;
+                   text-transform: uppercase; color: #6f9aab; display: flex; gap: 6px; align-items: center; }
+    .sw-group h3 .dot { width: 7px; height: 7px; border-radius: 50%; background: #3f3; box-shadow: 0 0 6px #3f3; }
+    .sw-group h3 .dot.off { background: #f55; box-shadow: none; }
+    .sw-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+    .sw-cell { position: relative; display: flex; }
+    .sw-tile {
+      --on: #ffc94d; --on-bg: rgba(255,190,60,0.16);
+      position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
+      flex: 1; min-width: 0; min-height: 128px; padding: 14px; border-radius: 16px; text-align: left; cursor: pointer;
+      background: #111a22; border: 1px solid #1d2a35; color: #cfe3ea; font: inherit;
+      transition: background 0.25s, border-color 0.25s, box-shadow 0.25s, transform 0.1s;
+    }
+    .sw-tile.k-plug, .sw-tile.k-fan, .sw-tile.k-water { --on: #3ee6d0; --on-bg: rgba(40,220,200,0.13); }
+    .sw-tile:active { transform: scale(0.97); }
+    .sw-tile:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }  /* Fire TV remote */
+    .sw-tile.on { background: radial-gradient(120% 90% at 20% 10%, var(--on-bg), #121a20 70%);
+                  border-color: var(--on); box-shadow: 0 0 22px -6px var(--on); color: #fff; }
+    .sw-tile.offline { opacity: 0.45; cursor: default; }
+    .sw-icon { font-size: 1.9rem; line-height: 1; filter: grayscale(1) brightness(0.7); transition: filter 0.25s; }
+    .sw-tile.on .sw-icon { filter: drop-shadow(0 0 8px var(--on)); }
+    .sw-name { font-weight: 600; font-size: 0.95rem; line-height: 1.2; }
+    .sw-state { font-size: 0.78rem; color: #7f9aa6; margin-top: auto; padding-right: 22px; }
+    .sw-tile.on .sw-state { color: var(--on); }
+    .sw-pill { position: absolute; right: 12px; top: 14px; width: 38px; height: 22px; border-radius: 11px;
+               background: #2a3640; transition: background 0.25s; }
+    .sw-pill::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+                      background: #8aa0aa; transition: transform 0.2s, background 0.2s; }
+    .sw-tile.on .sw-pill { background: var(--on); }
+    .sw-tile.on .sw-pill::after { transform: translateX(16px); background: #fff; }
+    .sw-tile.busy .sw-pill::after { animation: sw-busy 0.8s ease-in-out infinite alternate; }
+    @keyframes sw-busy { from { opacity: 1; } to { opacity: 0.25; } }
+    .sw-tile.shake { animation: sw-shake 0.4s; }
+    @keyframes sw-shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+    .sw-edit { position: absolute; bottom: 8px; right: 8px; background: none; border: 0; color: #5f7d8a;
+               font-size: 0.85rem; padding: 4px 6px; border-radius: 6px; }
+    .sw-edit:hover { color: #fff; background: rgba(255,255,255,0.08); }
+    .sw-empty { color: #8fb0bc; font-size: 0.9rem; line-height: 1.5; padding: 10px 0 18px; }
+    .sw-foot { padding: 10px 16px 16px; border-top: 1px solid #13232d; font-size: 0.75rem; color: #6f8f9c; line-height: 1.45; }
+    .sw-foot button { width: 100%; margin-bottom: 8px; padding: 9px; border-radius: 10px; font-size: 0.85rem; }
+    #sw-msg { color: #ffb3b3; margin-bottom: 6px; }
+    #sw-msg:empty { display: none; }
+
     /* ---- Bottom tabs (phones only) ---- */
     #tabs { display: none; }
 
@@ -281,6 +341,13 @@
       #tl-list { display: block; }
       body.tab-live #timeline { display: none; }
       body.tab-events #grid { display: none; }
+      body.tab-switches #grid, body.tab-switches #timeline { display: none; }
+      #sw-open, .sw-head .sw-x { display: none; }
+      #switches { position: static; width: auto; transform: none; visibility: visible; box-shadow: none;
+                  border-left: 0; background: none; display: none; }
+      body.tab-switches #switches { display: flex; }
+      #sw-body { overflow: visible; }
+      .sw-tiles { grid-template-columns: 1fr 1fr; }
       #tabs {
         display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 900;
         background: #141414; border-top: 1px solid #044;
@@ -335,6 +402,7 @@
     <button class="header-btn" id="tl-toggle" type="button" onclick="toggleTimeline()" title="Show or hide the timeline (T). Hidden = bigger cameras.">Timeline: on</button>
     <button class="header-btn" id="saver-toggle" type="button" onclick="toggleDataSaver()" title="Smaller, less frequent pictures for phone hotspots and mobile data (remembered on this device)">Data saver: off</button>
     <button class="header-btn" id="zones-toggle" type="button" onclick="toggleZones()" title="Show or hide the zone outlines on the live view (detection is unaffected)" hidden>Zones: on</button>
+    <button class="header-btn" id="sw-open" type="button" onclick="toggleSwitches()" title="Smart plugs and switches">💡 Switches<span class="sw-count"></span></button>
     <button class="header-btn" type="button" onclick="location.reload()" title="Reload the page (for TVs and browsers without F5)">⟳ Reload</button>
     <a class="header-btn" href="{{ url_for('people_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Family</a>
     <a class="header-btn" href="{{ url_for('timeline_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;" title="Where the family has been, day by day">Family timeline</a>
@@ -393,9 +461,24 @@
     <button type="button" class="mu-volbtn" onclick="music('volume', '+')" title="Louder">+</button>
   </div>
 
+  <aside id="switches" aria-label="Smart plugs and switches">
+    <div class="sw-head">
+      <h2>Switches<small id="sw-sub">Looking…</small></h2>
+      <button type="button" class="sw-x" onclick="toggleSwitches(false)" title="Close (Esc)">✕</button>
+    </div>
+    <div id="sw-body"></div>
+    <div class="sw-foot">
+      <div id="sw-msg" role="status"></div>
+      <button type="button" id="sw-scan" onclick="scanSwitches()">Find new devices</button>
+      Names come from the Kasa app; ✎ renames (the app gets the new name too).
+      Say “Hey Jarvis, patio lights on”, or send “patio lights on” on Telegram.
+    </div>
+  </aside>
+
   <nav id="tabs" aria-label="View">
     <button type="button" data-tab="live" onclick="setTab('live')">📹 Live</button>
     <button type="button" data-tab="events" onclick="setTab('events')">🕒 Events</button>
+    <button type="button" data-tab="switches" onclick="setTab('switches')">💡 Switches</button>
   </nav>
 
   <div id="player-overlay">
@@ -782,16 +865,165 @@
       setTimeout(pollMusic, 1500);  // Spotify takes a moment to report the change
     }
 
+
+    // ---------------- Smart plugs and switches ----------------
+    var switchList = [], switchTimer = null, switchBusy = {};
+    var SW_ICONS = { light: "💡", tree: "🎄", fan: "🌀", water: "💧", plug: "🔌" };
+    function switchesShown() {
+      return isPhone() ? currentTab === "switches" : document.getElementById("switches").classList.contains("open");
+    }
+    function toggleSwitches(open) {
+      var panel = document.getElementById("switches");
+      if (open === undefined) open = !panel.classList.contains("open");
+      panel.classList.toggle("open", open);
+      document.getElementById("sw-open").classList.toggle("active", open);
+      if (open) pollSwitches();
+    }
+    function onFor(since) {
+      var s = Math.max(0, Date.now() / 1000 - since);
+      if (s < 60) return "On just now";
+      if (s < 3600) return "On for " + Math.floor(s / 60) + " min";
+      if (s < 86400) return "On for " + Math.floor(s / 3600) + " h" + (s % 3600 >= 60 ? " " + Math.floor(s % 3600 / 60) + " min" : "");
+      var d = Math.floor(s / 86400);
+      return "On for " + d + (d === 1 ? " day" : " days");
+    }
+    function niceName(n) { return n ? n.charAt(0).toUpperCase() + n.slice(1) : n; }
+    function renderSwitches(data) {
+      switchList = data.switches || [];
+      var on = switchList.filter(function(s) { return s.on && s.online; }).length;
+      document.querySelector("#sw-open .sw-count").textContent = on ? " · " + on + " on" : "";
+      document.getElementById("sw-sub").textContent = data.scanning && !switchList.length ? "Looking for devices…" :
+        switchList.length ? switchList.length + (switchList.length === 1 ? " switch" : " switches") + " · " + (on ? on + " on" : "all off") : "";
+      document.getElementById("sw-scan").textContent = data.scanning ? "Looking…" : "Find new devices";
+      document.getElementById("sw-scan").disabled = !!data.scanning;
+      var body = document.getElementById("sw-body");
+      if (!switchList.length) {
+        body.innerHTML = '<div class="sw-empty">' + (data.scanning ? "Looking for smart plugs on your Wi-Fi…" :
+          "No smart plugs or switches found yet. Set a new one up in its own app first (Kasa), then tap " +
+          "<b>Find new devices</b>.") + "</div>";
+        return;
+      }
+      var groups = [];
+      switchList.forEach(function(s) {
+        var g = groups.find(function(x) { return x.device === s.device && x.key === s.id.split("-").slice(0, 2).join("-"); });
+        if (!g) groups.push(g = { device: s.device, key: s.id.split("-").slice(0, 2).join("-"), items: [] });
+        g.items.push(s);
+      });
+      var focused = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.id : null;
+      body.innerHTML = "";
+      groups.forEach(function(g) {
+        var box = document.createElement("div");
+        box.className = "sw-group";
+        var online = g.items.every(function(s) { return s.online; });
+        box.innerHTML = '<h3><span class="dot' + (online ? "" : " off") + '"></span>' + esc(g.device) +
+          (g.items.length > 1 ? " · " + g.items.length + " outlets" : "") + (online ? "" : " · not answering") + "</h3>";
+        var tiles = document.createElement("div");
+        tiles.className = "sw-tiles";
+        g.items.forEach(function(s) {
+          var t = document.createElement("div");
+          t.className = "sw-cell";
+          var b = document.createElement("button");
+          b.type = "button";
+          b.dataset.id = s.id;
+          b.className = "sw-tile k-" + s.icon + (s.on ? " on" : "") + (s.online ? "" : " offline") + (switchBusy[s.id] ? " busy" : "");
+          b.setAttribute("aria-pressed", s.on ? "true" : "false");
+          b.title = s.online ? "Turn " + (s.on ? "off" : "on") : "Not answering";
+          b.innerHTML = '<span class="sw-icon">' + (SW_ICONS[s.icon] || SW_ICONS.plug) + '</span><span class="sw-name">' +
+            esc(niceName(s.name)) + '</span><span class="sw-state">' +
+            (!s.online ? "Not answering" : s.on ? (s.since ? onFor(s.since) : "On") : "Off") + '</span><span class="sw-pill"></span>';
+          b.onclick = function() { flipSwitch(s, b); };
+          var e = document.createElement("button");
+          e.type = "button";
+          e.className = "sw-edit";
+          e.title = "Rename";
+          e.textContent = "✎";
+          e.onclick = function(ev) { ev.stopPropagation(); renameSwitch(s); };
+          t.appendChild(b);
+          t.appendChild(e);
+          tiles.appendChild(t);
+        });
+        box.appendChild(tiles);
+        body.appendChild(box);
+      });
+      if (focused) { var f = body.querySelector('[data-id="' + focused + '"]'); if (f) f.focus(); }
+    }
+    async function pollSwitches() {
+      clearTimeout(switchTimer);
+      var next = 30000;  // closed: only the "1 on" count in the header
+      try {
+        var r = await fetch("/api/switches");
+        if (r.ok) {
+          var data = await r.json();
+          if (!Object.keys(switchBusy).length) renderSwitches(data);
+          if (switchesShown() || data.scanning) next = data.scanning ? 2000 : 4000;
+        }
+      } catch (e) {}
+      switchTimer = setTimeout(pollSwitches, document.hidden ? Math.max(next, 60000) : next);
+    }
+    function switchMsg(text) {
+      document.getElementById("sw-msg").textContent = text || "";
+    }
+    async function switchPost(path, body) {
+      var r = await fetch(path, {
+        method: "POST", headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+        body: JSON.stringify(body)
+      });
+      var data = {};
+      try { data = await r.json(); } catch (e) {}
+      if (r.status === 401) location.href = "/login";
+      return { ok: r.ok, data: data };
+    }
+    async function flipSwitch(s, tile) {
+      if (!s.online || switchBusy[s.id]) return;
+      var want = !s.on;
+      switchBusy[s.id] = true;
+      tile.classList.add("busy");
+      tile.classList.toggle("on", want);  // show it straight away; put it back if the plug says no
+      switchMsg("");
+      try {
+        var res = await switchPost("/api/switches/set", { id: s.id, on: want });
+        delete switchBusy[s.id];
+        if (res.data.switches) renderSwitches(res.data);
+        if (!res.ok) {
+          switchMsg(res.data.error || "That didn't work.");
+          var again = document.querySelector('.sw-tile[data-id="' + s.id + '"]');
+          if (again) { again.classList.add("shake"); setTimeout(function() { again.classList.remove("shake"); }, 450); }
+        }
+      } catch (e) {
+        delete switchBusy[s.id];
+        switchMsg("Couldn't reach Sentinel.");
+        pollSwitches();
+      }
+    }
+    async function renameSwitch(s) {
+      var name = prompt("New name for “" + niceName(s.name) + "” (this is also what you say to Jarvis):", s.name);
+      if (name === null || !name.trim() || name.trim() === s.name) return;
+      var res = await switchPost("/api/switches/rename", { id: s.id, name: name.trim() });
+      switchMsg(res.ok ? "" : (res.data.error || "That didn't work."));
+      pollSwitches();
+    }
+    async function scanSwitches() {
+      switchMsg("");
+      await switchPost("/api/switches/scan", {});
+      pollSwitches();
+    }
+    document.addEventListener("keydown", function(e) {
+      if (e.key === "Escape" && !isPhone() && document.getElementById("switches").classList.contains("open")
+          && !playerOpen && !focusedCamId) toggleSwitches(false);
+    });
+
     function setTab(tab) {
       currentTab = tab;
       document.body.classList.toggle("tab-live", tab === "live");
       document.body.classList.toggle("tab-events", tab === "events");
+      document.body.classList.toggle("tab-switches", tab === "switches");
       document.querySelectorAll("#tabs button").forEach(function(b) { b.classList.toggle("active", b.dataset.tab === tab); });
       store("sentinel.tab", tab);
       if (isPhone()) {
         document.getElementById("timeline").hidden = false;  // the tab decides on phones
         window.scrollTo(0, 0);
         if (tab === "events" && tl) applyZoom(true);  // it had no width while hidden
+        if (tab === "switches") pollSwitches();
         if (tab === "live") liveCams.forEach(function(c, i) {
           var img = document.querySelectorAll("#grid .tile img")[i];
           if (img) updateTile(c.id, img);  // refresh right away, not on the next tick
@@ -1080,7 +1312,8 @@
       var z = Number(recall("sentinel.timelineZoom"));
       if (z === 1 || z === 4 || z === 24) tlZoom = z;
       toggleTimeline(recall("sentinel.timeline") !== "0");
-      setTab(recall("sentinel.tab") === "events" ? "events" : "live");
+      var savedTab = recall("sentinel.tab");
+      setTab(savedTab === "events" || savedTab === "switches" ? savedTab : "live");
       PHONE_QUERY.addEventListener("change", function() {
         if (isPhone()) setTab(currentTab);
         else toggleTimeline(recall("sentinel.timeline") !== "0");  // back to the desktop preference
@@ -1089,6 +1322,7 @@
       loadTimeline(null);
       window.addEventListener("resize", function() { if (tl) applyZoom(false); });
       pollMusic();
+      pollSwitches();
       // Keep today's timeline current.
       setInterval(function() {
         if (tl && tl.now_offset != null && !document.hidden) loadTimeline(tl.date);

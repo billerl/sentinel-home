@@ -719,6 +719,44 @@ class WebServer:
             engine.spotify.disconnect()
             return _result(True, "disconnected")
 
+        # ---- smart plugs and switches: the Live page's Switches panel (sentinel/engine/switches.py) ----
+        @app.route("/api/switches")
+        def api_switches():
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            if engine is None:
+                return jsonify({"switches": [], "scanning": False})
+            return jsonify(engine.switches.view())
+
+        @app.route("/api/switches/set", methods=["POST"])
+        def api_switches_set():
+            err = _config_guard()
+            if err:
+                return err
+            body = request.get_json(silent=True) or {}
+            if not isinstance(body.get("on"), bool):
+                return jsonify({"error": "say on or off"}), 400
+            ok, message = engine.switches.set(str(body.get("id") or "")[:40], body["on"], source="web")
+            return (jsonify({"ok": True, "message": message, **engine.switches.view()}) if ok
+                    else (jsonify({"error": message, **engine.switches.view()}), 400))
+
+        @app.route("/api/switches/rename", methods=["POST"])
+        def api_switches_rename():
+            err = _config_guard()
+            if err:
+                return err
+            body = request.get_json(silent=True) or {}
+            return _result(*engine.switches.rename(str(body.get("id") or "")[:40], str(body.get("name") or "")[:60]))
+
+        @app.route("/api/switches/scan", methods=["POST"])
+        def api_switches_scan():
+            err = _config_guard()
+            if err:
+                return err
+            engine.switches.request_scan()
+            return _result(True, "looking")
+
         # ---- this PC as a Spotify speaker (sentinel/audio/spotify_player.py) ----
         @app.route("/api/spotify/speaker")
         def api_spotify_speaker():

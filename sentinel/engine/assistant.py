@@ -199,7 +199,8 @@ def _clock(ts: float) -> str:
 
 
 def build_context(now: float, events: List[Dict], cameras: List[Tuple[str, bool]], home_text: str,
-                  vehicles: List, weather: Optional[Dict], commands: str, reminders: str = "") -> str:
+                  vehicles: List, weather: Optional[Dict], commands: str, reminders: str = "",
+                  switches: str = "") -> str:
     """The DATA Claude answers from: plain text, newest events last, trimmed to the most recent."""
     lines = [f"NOW: {time.strftime('%A %B %d %Y', time.localtime(now))}, {_clock(now)}"]
     lines.append("CAMERAS: " + ", ".join(f"{name} ({'online' if up else 'OFFLINE'})" for name, up in cameras))
@@ -227,5 +228,8 @@ def build_context(now: float, events: List[Dict], cameras: List[Tuple[str, bool]
     lines.append(head + ":\n" + ("\n".join(body) if body else "(none)"))
     if reminders:
         lines.append("REMINDERS ALREADY SET:\n" + reminders)
+    if switches:
+        lines.append("SMART PLUGS AND SWITCHES (name: state; switch one with \"COMMAND: Turn on <name>\" or "
+                     "\"COMMAND: Turn off <name>\"):\n" + switches)
     lines.append("COMMANDS the family can send to Sentinel:\n" + commands)
     return "DATA\n" + "\n\n".join(lines)
