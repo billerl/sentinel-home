@@ -44,6 +44,24 @@ Rules:
   24-hour time from NOW (e.g. "Wednesday at 9" = the next Wednesday, 09:00) and use the command
   "COMMAND: Remind YYYY-MM-DD HH:MM <what to remind them of>". Say the day, date and time back in words so they can
   check it. If they didn't say a time or it's unclear (morning or evening?), ask instead of guessing (no command).
+- Routines ("new routine ...", "every time ... do ...", "when ... turn on ..."): Sentinel runs "when this happens,
+  then do that" routines. Build one and put it alone on the LAST line as
+  COMMAND: Routine {"name": "...", "when": {...}, "only": {...}, "then": [...]}
+  (JSON on one line). "when" is one of:
+  {"type": "seen", "what": ["person"|"vehicle"|"animal"|"delivery", ...], "cameras": [camera names]}  ("something" = all four; [] = any camera)
+  {"type": "motion", "cameras": [...]}  (any movement, even a shadow; prefer "seen" for people/cars/animals)
+  {"type": "time", "at": "sunset"|"sunrise"|"HH:MM", "offset": minutes before (-) or after (+) sunset/sunrise}
+  {"type": "arrive"|"leave", "people": [names]}  (their phone gets home / leaves home; [] = anyone)
+  {"type": "car_arrive"|"car_leave", "cars": [family car names]}  ([] = any family car)
+  "only" (optional): "dark": true (after dark / at night), "light": true (daytime), "from"/"to": "HH:MM",
+  "days": ["mon", ...], "nobody_home": true.
+  "then", up to 5 steps: {"do": "switch", "switch": name, "on": true|false, "for": minutes} or with
+  "until_quiet": minutes instead of "for" (stays on until there's been no motion on the routine's cameras that long;
+  camera routines only); {"do": "telegram", "text": "...", "photo": true (camera routines)}; {"do": "say", "text": "..."}.
+  Use only camera, switch, people and car names from DATA. If the switch or what should happen is unclear, ask
+  instead (no command). For "until there's no motion" without a time, use 2 minutes. Keep your sentence short:
+  Sentinel reads the routine back in its own words before saving. To pause or delete one use
+  "Routine N off" / "Routine N on" / "Delete routine N".
 - Family cars stand for their owners: "Kate's Edge got home" means Kate (Katherine, Mom) got home.
 - Small talk is fine; keep it brief and steer back to what Sentinel can do.
 - No markdown formatting (Telegram shows it raw); emoji are fine."""
@@ -200,7 +218,7 @@ def _clock(ts: float) -> str:
 
 def build_context(now: float, events: List[Dict], cameras: List[Tuple[str, bool]], home_text: str,
                   vehicles: List, weather: Optional[Dict], commands: str, reminders: str = "",
-                  switches: str = "") -> str:
+                  switches: str = "", routines: str = "") -> str:
     """The DATA Claude answers from: plain text, newest events last, trimmed to the most recent."""
     lines = [f"NOW: {time.strftime('%A %B %d %Y', time.localtime(now))}, {_clock(now)}"]
     lines.append("CAMERAS: " + ", ".join(f"{name} ({'online' if up else 'OFFLINE'})" for name, up in cameras))
@@ -231,5 +249,7 @@ def build_context(now: float, events: List[Dict], cameras: List[Tuple[str, bool]
     if switches:
         lines.append("SMART PLUGS AND SWITCHES (name: state; switch one with \"COMMAND: Turn on <name>\" or "
                      "\"COMMAND: Turn off <name>\"):\n" + switches)
+    if routines:
+        lines.append("ROUTINES (and the names routines can use):\n" + routines)
     lines.append("COMMANDS the family can send to Sentinel:\n" + commands)
     return "DATA\n" + "\n\n".join(lines)

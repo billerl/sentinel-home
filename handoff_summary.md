@@ -249,6 +249,20 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   immediately; Claude's suggestions ask yes first / show a ✅ button). New makes = another driver class
   with `discover/status/set/rename` (Shelly and Tasmota have local HTTP APIs). Newer KLAP-only Kasa/Tapo
   devices don't answer on 9999 and aren't supported. No automations yet (e.g. lights on for a person at night).
+- **Routines** (`sentinel/engine/routines.py`, `recorded_videos/routines.db`, page `/routines`, `/api/routines*`):
+  "when X, only if Y, then Z". Triggers: camera sees person/vehicle/animal/delivery (`_on_object`, deliveries also
+  count as vehicles), motion (`_on_motion`, every frame; a motion routine fires at most every 30 s per camera and
+  ignores motion for 20 s after a routine switched a light), sunset/sunrise/clock time (`tick` every 5 s in the
+  command loop), phone arrives/leaves Home (OwnTracks changes), family car arrives/leaves (`_on_household_change`).
+  Limits: dark/light (own sunrise-equation maths from Home place or the weather town; no location = 18:00-07:00),
+  from/to hours (may cross midnight), days, nobody home (all location-sharing phones away). Steps: switch on/off
+  (on "for N min" or "until_quiet N min" = until no motion on the routine's cameras; re-triggers extend it), Telegram
+  text (+ the sighting's photo), say aloud; messages/speech at most every 5 min per routine. A light is only turned
+  off by the routine that turned it on, never one switched on by hand; held lights are listed in
+  `recorded_videos/routine_holds.json` and switched off at the next start. Stored by ids (cameras = host, switches,
+  people, cars); `normalize()` accepts names. By voice/Telegram Claude emits `COMMAND: Routine {json}`; Sentinel
+  describes it in its own words and saves it only after "yes" / the ✅ tap (a typed `Routine {json}` isn't saved).
+  `routines.REQUEST` sends "new routine ..." phrases straight to Claude. Also: the weather card has a clock.
 - **Telegram commands added:** `access` (remote-access guide) and `videos <when> [people|vehicles|animals] [camera]` (`sentinel/engine/queries.py`).
 - **Web:** `/settings` covers status, cameras, detection, Telegram, recording, audio, remote access, password and help.
 - **Replay tool idea:** run the detector and tracker over a sample of a day's clips to check accuracy before changing thresholds.

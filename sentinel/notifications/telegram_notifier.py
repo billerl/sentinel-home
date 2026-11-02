@@ -51,6 +51,7 @@ class TelegramNotifier:
         # Set by the engine: is this about a smart plug/switch it knows ("patio lights on")?
         self.switch_filter: Optional[Callable[[str], bool]] = None
         self._pending_switches: List[Tuple[str, str]] = []
+        self._pending_routines: List[Tuple[str, str]] = []  # "Routines", "Routine 2 off", "Routine {json}" (a ✅ tap)
         # Set by the engine: a 📍 pin someone sent (chat_id, lat, lon, venue title) and a check that
         # may claim the next typed message (the pin's name); returns True when it handled the text.
         self.location_handler: Optional[Callable[[str, float, float, str], None]] = None
@@ -79,6 +80,9 @@ class TelegramNotifier:
             "Smart plugs and switches (names from the Kasa app):\n"
             "- Patio lights on / Turn off the patio lights — switch one\n"
             "- Are the patio lights on? — check one\n\n"
+            "Routines (when this happens, do that):\n"
+            "- New routine: when the back yard camera sees a person after dark, turn on the patio lights until there's no motion for 2 minutes — in plain words (Claude reads it back; tap ✅ to save)\n"
+            "- Routines — list them; Routine 2 off / Routine 2 on; Delete routine 2\n\n"
             "Clip:\n"
             "- Clip — record ~10s per connected camera and upload\n\n"
             "Enable / disable (combine with \"and\" or commas):\n"
@@ -455,6 +459,11 @@ class TelegramNotifier:
         pending, self._pending_reminders = self._pending_reminders, []
         return pending
 
+    def consume_routine_commands(self) -> List[Tuple[str, str]]:
+        """Return and clear (chat_id, text) routine commands."""
+        pending, self._pending_routines = self._pending_routines, []
+        return pending
+
     def consume_switch_commands(self) -> List[Tuple[str, str]]:
         """Return and clear (chat_id, text) smart plug/switch commands."""
         pending, self._pending_switches = self._pending_switches, []
@@ -582,11 +591,12 @@ class TelegramNotifier:
         """Is this exactly one of Sentinel's own commands (what a "Do it" button may run)?"""
         from sentinel.engine.queries import is_video_query
         from sentinel.engine.reminders import is_reminder_command
+        from sentinel.engine.routines import is_routine_command
         from sentinel.engine.switches import COMMAND as SWITCH_COMMAND
 
         t = text.strip()
         if re.fullmatch(r"(?i)(resume|status|help|clip|pause\s+\d{1,4})", t) or cls._is_access_request(t) \
-                or is_reminder_command(t) or SWITCH_COMMAND.match(t):
+                or is_reminder_command(t) or SWITCH_COMMAND.match(t) or is_routine_command(t):
             return True
         changes, err = cls._parse_feature_toggle_command(t)
         return bool(changes) and err is None or is_video_query(t)
@@ -612,6 +622,17 @@ class TelegramNotifier:
 
         if is_reminder_command(text):
             self._pending_reminders.append((chat_id, text.strip()))
+            return
+
+        from sentinel.engine.routines import COMMAND as ROUTINE_JSON, REQUEST as ROUTINE_REQUEST, is_routine_command
+
+        if is_routine_command(text) and (from_button or not ROUTINE_JSON.match(text.strip())):
+            self._pending_routines.append((chat_id, text.strip()))  # a routine itself only from a ✅ tap
+            return
+
+        if not from_button and ROUTINE_REQUEST.search(text) and self.assistant_available is not None \
+                and self.assistant_available():
+            self._pending_free_text.append((chat_id, text))  # "new routine: when ..." -> Claude builds it
             return
 
         if self.switch_filter is not None and self.switch_filter(text):

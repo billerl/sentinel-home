@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <meta name="theme-color" content="#001525">
+  <title>Sentinel — Routines</title>
+  <style>
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; }
+    a { color: #00ffff; }
+    [hidden] { display: none !important; }
+    header { position: sticky; top: 0; z-index: 10; background: #1a1a1a; border-bottom: 1px solid #033; }
+    .bar { display: flex; align-items: center; gap: 12px; padding: 0 1rem; height: 44px; }
+    .bar a { text-decoration: none; font-size: 0.85rem; }
+    h1 { font-size: 0.95rem; margin: 0; flex: 1; color: #00ffff; }
+    main { max-width: 860px; margin: 0 auto; padding: 14px 16px 60px; }
+    .intro { font-size: 0.88rem; line-height: 1.6; color: #9cc; margin: 4px 0 12px; }
+    .sky { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.82rem; color: #8fb6c4; margin-bottom: 16px; }
+    .sky b { color: #fff; font-weight: 600; }
+    .warn { color: #ffd479; }
+    button {
+      background: rgba(0,255,255,0.12); color: #00ffff; border: 1px solid #00a8a8; padding: 7px 12px;
+      border-radius: 8px; cursor: pointer; font: inherit; font-size: 0.85rem;
+    }
+    button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid #fff; outline-offset: 1px; }
+    button.primary { background: #00ffff; color: #000; font-weight: 600; border-color: #00ffff; }
+    button.danger { border-color: #ff5555; color: #ff7b7b; background: rgba(255,85,85,0.08); }
+    button.ghost { background: none; border-color: #1d3a44; color: #9cc; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; }
+    .toolbar .spacer { flex: 1; }
+    .say { font-size: 0.8rem; color: #6f97a5; line-height: 1.5; }
+
+    /* ---- routine cards ---- */
+    .card { background: linear-gradient(180deg, #0c151c, #091015); border: 1px solid #16303a; border-radius: 14px;
+            padding: 14px 16px; margin-bottom: 12px; transition: border-color 0.2s, opacity 0.2s; }
+    .card.off { opacity: 0.55; }
+    .card.live { border-color: #ffc94d; box-shadow: 0 0 18px -8px #ffc94d; }
+    .card .top { display: flex; align-items: center; gap: 12px; }
+    .card .name { flex: 1; min-width: 0; font-weight: 600; color: #fff; font-size: 1rem; }
+    .card .num { color: #5f8796; font-weight: 400; font-size: 0.8rem; margin-left: 6px; }
+    .card .text { margin: 8px 0 0; line-height: 1.55; font-size: 0.92rem; color: #d6eef5; }
+    .card .meta { margin-top: 8px; font-size: 0.78rem; color: #6f97a5; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+    .card .meta .hold { color: #ffc94d; }
+    .card .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .empty { text-align: center; padding: 34px 16px; border: 1px dashed #1d3a44; border-radius: 14px; color: #8fb6c4; line-height: 1.6; }
+    .empty .big { font-size: 2.2rem; }
+    /* on/off switch */
+    .tog { position: relative; width: 44px; height: 26px; flex: none; border-radius: 13px; background: #2a3640;
+           border: 0; padding: 0; transition: background 0.2s; }
+    .tog::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%;
+                  background: #8aa0aa; transition: transform 0.2s, background 0.2s; }
+    .tog.on { background: #00c8c8; }
+    .tog.on::after { transform: translateX(18px); background: #fff; }
+
+    /* ---- editor ---- */
+    #editor { background: #0b1419; border: 1px solid #00a8a8; border-radius: 14px; padding: 16px; margin-bottom: 18px;
+              box-shadow: 0 0 30px -14px #00ffff; }
+    #editor h2 { margin: 0 0 12px; font-size: 1rem; color: #fff; }
+    .part { display: grid; grid-template-columns: 70px 1fr; gap: 10px; padding: 12px 0; border-top: 1px solid #13262e; }
+    .part:first-of-type { border-top: 0; }
+    .part > .label { font-weight: 700; letter-spacing: 0.06em; font-size: 0.75rem; color: #00d8d8; padding-top: 9px; }
+    .part > .body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+    .line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 0.88rem; color: #9cc; }
+    select, input[type=text], input[type=number], input[type=time] {
+      background: #111a20; color: #e6ffff; border: 1px solid #1f4a55; border-radius: 8px; padding: 7px 9px;
+      font: inherit; font-size: 0.9rem; color-scheme: dark; min-width: 0;
+    }
+    input[type=number] { width: 5.5em; }
+    input[type=text] { flex: 1 1 220px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip { border-radius: 999px; padding: 6px 12px; font-size: 0.82rem; background: #111a20; border: 1px solid #1f4a55; color: #9cc; }
+    .chip.on { background: rgba(0,255,255,0.18); border-color: #00ffff; color: #fff; }
+    .chips .note { font-size: 0.78rem; color: #5f8796; align-self: center; }
+    .step { display: flex; flex-direction: column; gap: 8px; background: #0e1a20; border: 1px solid #16303a; border-radius: 10px; padding: 10px; }
+    .step > .line:first-child { justify-content: space-between; }
+    .step .x { background: none; border: 0; color: #6f97a5; font-size: 1rem; padding: 2px 6px; }
+    label.check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+    .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #13262e; }
+    .foot .msg { flex: 1; font-size: 0.85rem; color: #ff8080; min-width: 10rem; }
+    @media (max-width: 560px) {
+      .part { grid-template-columns: 1fr; gap: 6px; }
+      .part > .label { padding-top: 0; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <a href="{{ url_for('index') }}">← Live</a>
+      <h1>Routines</h1>
+      <a href="{{ url_for('people_page') }}">Family</a>
+      <a href="{{ url_for('settings_page') }}">Settings</a>
+    </div>
+  </header>
+
+  <main>
+    <p class="intro">A routine does something for you when something happens: <i>when the back yard camera sees a
+      person after dark, turn on the patio lights until there's been no motion for 2 minutes.</i> Make them here, or
+      just say it: <i>“Hey Jarvis, new routine: …”</i> or send it on Telegram. Sentinel reads it back and saves it
+      when you say yes.</p>
+    <div class="sky" id="sky"></div>
+    <div class="toolbar">
+      <button type="button" class="primary" id="new-btn" onclick="openEditor(null)">＋ New routine</button>
+      <span class="spacer"></span>
+    </div>
+
+    <section id="editor" hidden aria-label="Routine editor">
+      <h2 id="ed-title">New routine</h2>
+      <div class="part">
+        <div class="label">WHEN</div>
+        <div class="body">
+          <div class="line">
+            <select id="when-type" onchange="drawWhen()">
+              <option value="seen">a camera sees…</option>
+              <option value="motion">there's any motion on…</option>
+              <option value="time">it's a time of day…</option>
+              <option value="arrive">someone gets home (phone)</option>
+              <option value="leave">someone leaves home (phone)</option>
+              <option value="car_arrive">a family car pulls in</option>
+              <option value="car_leave">a family car drives off</option>
+            </select>
+          </div>
+          <div id="when-body"></div>
+        </div>
+      </div>
+      <div class="part">
+        <div class="label">ONLY</div>
+        <div class="body">
+          <div class="line">
+            <select id="only-sky">
+              <option value="">any time of day</option>
+              <option value="dark">after dark</option>
+              <option value="light">in daylight</option>
+            </select>
+            <label class="check"><input type="checkbox" id="only-hours" onchange="drawOnly()"> between</label>
+            <span id="hours-box" class="line"><input type="time" id="only-from" value="22:00"> and <input type="time" id="only-to" value="06:00"></span>
+          </div>
+          <div class="chips" id="only-days"></div>
+          <div class="line"><label class="check"><input type="checkbox" id="only-away"> only when nobody's home (everyone sharing their phone's location is away)</label></div>
+        </div>
+      </div>
+      <div class="part">
+        <div class="label">THEN</div>
+        <div class="body">
+          <div id="steps" class="body"></div>
+          <div><button type="button" class="ghost" onclick="addStep()">＋ Add a step</button></div>
+        </div>
+      </div>
+      <div class="part">
+        <div class="label">NAME</div>
+        <div class="body"><div class="line"><input type="text" id="name" maxlength="60" placeholder="optional, e.g. Patio lights at night"></div></div>
+      </div>
+      <div class="foot">
+        <span class="msg" id="ed-msg" role="status"></span>
+        <button type="button" class="ghost" onclick="closeEditor()">Cancel</button>
+        <button type="button" class="primary" id="save-btn" onclick="saveRoutine()">Save routine</button>
+      </div>
+    </section>
+
+    <div id="list"></div>
+    <p class="say">Telegram: <b>Routines</b> lists them; <b>Routine 2 off</b> / <b>Routine 2 on</b>; <b>Delete routine 2</b>.
+      Jarvis: “what are my routines?”. A light a routine turned on goes off again when its time is up; a light someone
+      switched on by hand is left alone.</p>
+  </main>
+
+  <script>
+    var data = { routines: [], catalog: {} };
+    var editing = null;  // routine id being edited, or null for a new one
+    var chips = {};      // chip group name -> Set of selected ids
+    var DAYS = [["mon", "Mon"], ["tue", "Tue"], ["wed", "Wed"], ["thu", "Thu"], ["fri", "Fri"], ["sat", "Sat"], ["sun", "Sun"]];
+    var SEEN = [["person", "🧍 Person"], ["vehicle", "🚗 Vehicle"], ["animal", "🐾 Animal"], ["delivery", "📦 Delivery"]];
+
+    function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
+    function clock(ts) { return new Date(ts * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+    function when(ts) {
+      var d = new Date(ts * 1000), today = new Date();
+      if (d.toDateString() === today.toDateString()) return "today " + clock(ts);
+      var y = new Date(); y.setDate(y.getDate() - 1);
+      if (d.toDateString() === y.toDateString()) return "yesterday " + clock(ts);
+      return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) + " " + clock(ts);
+    }
+    async function post(path, body) {
+      var r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+                                  body: JSON.stringify(body || {}) });
+      if (r.status === 401) { location.href = "/login"; return { ok: false, data: {} }; }
+      var d = {}; try { d = await r.json(); } catch (e) {}
+      return { ok: r.ok, data: d };
+    }
+
+    async function load() {
+      try {
+        var r = await fetch("/api/routines");
+        if (r.status === 401) { location.href = "/login"; return; }
+        data = await r.json();
+      } catch (e) { return; }
+      drawSky();
+      drawList();
+    }
+
+    function drawSky() {
+      var sky = document.getElementById("sky");
+      if (!data.located) {
+        sky.innerHTML = '<span class="warn">“After dark” is guessed as 6 pm to 7 am until Sentinel knows where home is: add Home on the ' +
+          '<a href="/people">Family</a> page or a town under <a href="/settings#weather">Settings → Weather</a>.</span>';
+        return;
+      }
+      sky.innerHTML = '<span>Right now: <b>' + (data.dark ? "🌙 dark" : "☀️ daylight") + '</b></span>' +
+        (data.sunrise ? '<span>🌅 Sunrise <b>' + clock(data.sunrise) + '</b></span>' : "") +
+        (data.sunset ? '<span>🌇 Sunset <b>' + clock(data.sunset) + '</b></span>' : "");
+    }
+
+    function drawList() {
+      var list = document.getElementById("list");
+      if (!data.routines.length) {
+        list.innerHTML = '<div class="empty"><div class="big">✨</div>No routines yet.<br>Tap <b>＋ New routine</b>, or say ' +
+          '<i>“Hey Jarvis, new routine: when the back yard camera sees a person after dark, turn on the patio lights until ' +
+          'there\'s no motion for 2 minutes.”</i></div>';
+        return;
+      }
+      list.innerHTML = "";
+      var now = Date.now() / 1000;
+      data.routines.forEach(function(r) {
+        var live = r.holding_until && r.enabled;
+        var card = document.createElement("div");
+        card.className = "card" + (r.enabled ? "" : " off") + (live ? " live" : "");
+        card.innerHTML =
+          '<div class="top"><button type="button" class="tog' + (r.enabled ? " on" : "") + '" aria-pressed="' + r.enabled +
+          '" title="' + (r.enabled ? "On: tap to pause it" : "Off: tap to turn it on") + '"></button>' +
+          '<div class="name">' + esc(r.name) + '<span class="num">#' + r.id + '</span></div></div>' +
+          '<p class="text">' + esc(r.text) + '</p>' +
+          '<div class="meta"><span>' + (r.last_run ? "Last ran " + when(r.last_run) : "Hasn't run yet") + '</span>' +
+          (live ? '<span class="hold">💡 Holding a light on right now</span>' : "") +
+          (r.enabled ? "" : "<span>Paused</span>") + '</div>' +
+          '<div class="acts"><button type="button" class="ghost" data-a="try" title="Do its steps now, whatever the time">▶ Try it</button>' +
+          '<button type="button" class="ghost" data-a="edit">✎ Edit</button>' +
+          '<button type="button" class="danger" data-a="delete">Delete</button></div>';
+        card.querySelector(".tog").onclick = async function() {
+          var res = await post("/api/routines/" + r.id + "/enable", { on: !r.enabled });
+          if (res.ok) load();
+        };
+        card.querySelector('[data-a="edit"]').onclick = function() { openEditor(r); };
+        card.querySelector('[data-a="try"]').onclick = async function(ev) {
+          var b = ev.currentTarget;
+          b.disabled = true; b.textContent = "Running…";
+          await post("/api/routines/" + r.id + "/try");
+          setTimeout(load, 2500);
+        };
+        card.querySelector('[data-a="delete"]').onclick = async function() {
+          if (!confirm("Delete “" + r.name + "”?")) return;
+          var res = await post("/api/routines/" + r.id + "/delete");
+          if (res.ok) load();
+        };
+        list.appendChild(card);
+      });
+    }
+
+    // ---------------- editor ----------------
+    function chipGroup(name, items, selected, note) {
+      chips[name] = new Set(selected || []);
+      var box = document.createElement("div");
+      box.className = "chips";
+      items.forEach(function(it) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "chip" + (chips[name].has(it[0]) ? " on" : "");
+        b.textContent = it[1];
+        b.onclick = function() {
+          if (chips[name].has(it[0])) chips[name].delete(it[0]); else chips[name].add(it[0]);
+          b.classList.toggle("on", chips[name].has(it[0]));
+        };
+        box.appendChild(b);
+      });
+      if (note) { var n = document.createElement("span"); n.className = "note"; n.textContent = note; box.appendChild(n); }
+      if (!items.length) { var e = document.createElement("span"); e.className = "note"; e.textContent = "(none set up yet)"; box.appendChild(e); }
+      return box;
+    }
+    function pairs(list) { return (list || []).map(function(x) { return [x.id, x.name]; }); }
+
+    function drawWhen(w) {
+      var type = document.getElementById("when-type").value;
+      w = w && w.type === type ? w : { type: type };
+      var body = document.getElementById("when-body");
+      body.innerHTML = "";
+      var cat = data.catalog;
+      if (type === "seen") {
+        body.appendChild(chipGroup("what", SEEN, w.what || ["person"]));
+      }
+      if (type === "seen" || type === "motion") {
+        var l = document.createElement("div"); l.className = "line"; l.textContent = "on";
+        body.appendChild(l);
+        body.appendChild(chipGroup("cameras", pairs(cat.cameras), w.cameras, "none picked = any camera"));
+      } else if (type === "time") {
+        var at = w.at || "sunset";
+        var line = document.createElement("div");
+        line.className = "line";
+        line.innerHTML = '<select id="t-at"><option value="sunset">sunset</option><option value="sunrise">sunrise</option>' +
+          '<option value="clock">at a set time</option></select>' +
+          '<span id="t-off"><input type="number" id="t-min" min="0" max="180" value="' + Math.abs(w.offset || 0) + '"> minutes ' +
+          '<select id="t-dir"><option value="1">after</option><option value="-1">before</option></select></span>' +
+          '<input type="time" id="t-clock" value="' + (at.indexOf(":") > 0 ? at : "21:00") + '">';
+        body.appendChild(line);
+        var sel = line.querySelector("#t-at");
+        sel.value = at.indexOf(":") > 0 ? "clock" : at;
+        line.querySelector("#t-dir").value = (w.offset || 0) < 0 ? "-1" : "1";
+        var sync = function() {
+          line.querySelector("#t-off").hidden = sel.value === "clock";
+          line.querySelector("#t-clock").hidden = sel.value !== "clock";
+        };
+        sel.onchange = sync; sync();
+      } else if (type === "arrive" || type === "leave") {
+        body.appendChild(chipGroup("people", pairs(cat.people), w.people, "none picked = anyone"));
+      } else {
+        body.appendChild(chipGroup("cars", pairs(cat.cars), w.cars, "none picked = any family car"));
+      }
+      document.querySelectorAll(".step").forEach(drawStepFields);  // "until no motion" / photo depend on this
+    }
+
+    function drawOnly() {
+      document.getElementById("hours-box").hidden = !document.getElementById("only-hours").checked;
+    }
+
+    function addStep(a) {
+      a = a || { do: "switch", on: true };
+      var step = document.createElement("div");
+      step.className = "step";
+      var kind = a.do === "switch" ? (a.on ? "on" : "off") : a.do;
+      step.innerHTML = '<div class="line"><select class="s-do"><option value="on">Turn on</option><option value="off">Turn off</option>' +
+        '<option value="telegram">Send a Telegram message</option><option value="say">Say out loud</option></select>' +
+        '<button type="button" class="x" title="Remove this step">✕</button></div><div class="s-fields"></div>';
+      step.querySelector(".s-do").value = kind;
+      step._a = a;
+      step.querySelector(".s-do").onchange = function() { step._a = {}; drawStepFields(step); };
+      step.querySelector(".x").onclick = function() { step.remove(); };
+      document.getElementById("steps").appendChild(step);
+      drawStepFields(step);
+    }
+
+    function drawStepFields(step) {
+      var kind = step.querySelector(".s-do").value, a = step._a || {}, f = step.querySelector(".s-fields");
+      var camera = ["seen", "motion"].indexOf(document.getElementById("when-type").value) >= 0;
+      var keep = f.querySelector(".s-sw") ? f.querySelector(".s-sw").value : null;
+      if (kind === "on" || kind === "off") {
+        var opts = (data.catalog.switches || []).map(function(s) { return '<option value="' + esc(s.id) + '">' + esc(s.name) + '</option>'; }).join("");
+        var html = '<div class="line"><select class="s-sw">' + (opts || '<option value="">(no switches found yet)</option>') + '</select>';
+        if (kind === "on") {
+          var dur = a.until_quiet ? "quiet" : a.for ? "for" : (camera ? "quiet" : "stay");
+          html += '<select class="s-dur"><option value="stay">and leave it on</option><option value="for">for</option>' +
+            (camera ? '<option value="quiet">until no motion for</option>' : "") + '</select>' +
+            '<span class="s-min"><input type="number" class="s-n" min="1" max="720" value="' + (a.for || a.until_quiet || (camera ? 2 : 10)) +
+            '"> minutes</span>';
+        }
+        f.innerHTML = html + "</div>";
+        var sw = f.querySelector(".s-sw");
+        if (a.switch) sw.value = a.switch; else if (keep) sw.value = keep;
+        var d = f.querySelector(".s-dur");
+        if (d) {
+          d.value = dur === "quiet" && !camera ? "for" : dur;
+          var sync = function() { f.querySelector(".s-min").hidden = d.value === "stay"; };
+          d.onchange = sync; sync();
+        }
+      } else if (kind === "telegram") {
+        f.innerHTML = '<div class="line"><input type="text" class="s-text" maxlength="200" placeholder="e.g. Someone is in the back yard"></div>' +
+          (document.getElementById("when-type").value === "seen"
+            ? '<div class="line"><label class="check"><input type="checkbox" class="s-photo"' + (a.photo !== false ? " checked" : "") +
+              '> with the camera\'s photo</label></div>' : "");
+        f.querySelector(".s-text").value = a.text || "";
+      } else {
+        f.innerHTML = '<div class="line"><input type="text" class="s-text" maxlength="200" placeholder="e.g. Welcome home"></div>';
+        f.querySelector(".s-text").value = a.text || "";
+      }
+    }
+
+    function openEditor(r) {
+      editing = r ? r.id : null;
+      var spec = r ? r.spec : { when: { type: "seen", what: ["person"] }, only: { dark: true }, then: [{ do: "switch", on: true, until_quiet: 2 }] };
+      document.getElementById("ed-title").textContent = r ? "Edit “" + r.name + "”" : "New routine";
+      document.getElementById("when-type").value = spec.when.type;
+      drawWhen(spec.when);
+      var o = spec.only || {};
+      document.getElementById("only-sky").value = o.dark ? "dark" : o.light ? "light" : "";
+      document.getElementById("only-hours").checked = !!o.from;
+      if (o.from) { document.getElementById("only-from").value = o.from; document.getElementById("only-to").value = o.to; }
+      drawOnly();
+      var days = document.getElementById("only-days");
+      days.replaceWith(Object.assign(chipGroup("days", DAYS, o.days || [], "none picked = every day"), { id: "only-days" }));
+      document.getElementById("only-away").checked = !!o.nobody_home;
+      document.getElementById("steps").innerHTML = "";
+      spec.then.forEach(addStep);
+      document.getElementById("name").value = r ? r.name : "";
+      document.getElementById("ed-msg").textContent = "";
+      var ed = document.getElementById("editor");
+      ed.hidden = false;
+      document.getElementById("new-btn").hidden = true;
+      ed.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    function closeEditor() {
+      document.getElementById("editor").hidden = true;
+      document.getElementById("new-btn").hidden = false;
+    }
+
+    function readSpec() {
+      var type = document.getElementById("when-type").value, w = { type: type };
+      if (type === "seen") w.what = Array.from(chips.what);
+      if (type === "seen" || type === "motion") w.cameras = Array.from(chips.cameras);
+      if (type === "time") {
+        var at = document.getElementById("t-at").value;
+        if (at === "clock") w.at = document.getElementById("t-clock").value;
+        else { w.at = at; w.offset = (Number(document.getElementById("t-min").value) || 0) * Number(document.getElementById("t-dir").value); }
+      }
+      if (type === "arrive" || type === "leave") w.people = Array.from(chips.people);
+      if (type === "car_arrive" || type === "car_leave") w.cars = Array.from(chips.cars);
+      var only = {}, sky = document.getElementById("only-sky").value;
+      if (sky) only[sky] = true;
+      if (document.getElementById("only-hours").checked) {
+        only.from = document.getElementById("only-from").value; only.to = document.getElementById("only-to").value;
+      }
+      if (chips.days && chips.days.size) only.days = Array.from(chips.days);
+      if (document.getElementById("only-away").checked) only.nobody_home = true;
+      var then = [];
+      document.querySelectorAll(".step").forEach(function(step) {
+        var kind = step.querySelector(".s-do").value;
+        if (kind === "on" || kind === "off") {
+          var a = { do: "switch", switch: step.querySelector(".s-sw").value, on: kind === "on" };
+          var d = step.querySelector(".s-dur");
+          if (d && d.value !== "stay") a[d.value === "quiet" ? "until_quiet" : "for"] = Number(step.querySelector(".s-n").value);
+          then.push(a);
+        } else {
+          var t = { do: kind, text: step.querySelector(".s-text").value };
+          var p = step.querySelector(".s-photo");
+          if (p && p.checked) t.photo = true;
+          then.push(t);
+        }
+      });
+      return { name: document.getElementById("name").value, when: w, only: only, then: then };
+    }
+
+    async function saveRoutine() {
+      var btn = document.getElementById("save-btn"), msg = document.getElementById("ed-msg");
+      btn.disabled = true; msg.textContent = "";
+      var body = { spec: readSpec() };
+      if (editing !== null) body.id = editing;
+      var res = await post("/api/routines", body);
+      btn.disabled = false;
+      if (!res.ok) { msg.textContent = "Can't save yet: " + (res.data.error || "something went wrong") + "."; return; }
+      closeEditor();
+      load();
+    }
+
+    load();
+    setInterval(function() { if (!document.hidden && document.getElementById("editor").hidden) load(); }, 15000);
+  </script>
+</body>
+</html>

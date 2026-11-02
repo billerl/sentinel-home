@@ -757,6 +757,37 @@ class WebServer:
             engine.switches.request_scan()
             return _result(True, "looking")
 
+        # ---- routines: "when this happens, do that" (sentinel/engine/routines.py) ----
+        @app.route("/routines")
+        def routines_page():
+            redir = _require_session()
+            if redir:
+                return redir
+            return render_template("routines.html")
+
+        @app.route("/api/routines")
+        def api_routines():
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            if engine is None:
+                return jsonify({"routines": [], "catalog": {}})
+            return jsonify(engine.routines_view())
+
+        @app.route("/api/routines", methods=["POST"])
+        def api_routines_save():
+            err = _config_guard()
+            if err:
+                return err
+            return _result(*engine.routine_save(request.get_json(silent=True) or {}))
+
+        @app.route("/api/routines/<int:routine_id>/<action>", methods=["POST"])
+        def api_routines_action(routine_id, action):
+            err = _config_guard()
+            if err:
+                return err
+            return _result(*engine.routine_action(routine_id, action, (request.get_json(silent=True) or {}).get("on")))
+
         # ---- this PC as a Spotify speaker (sentinel/audio/spotify_player.py) ----
         @app.route("/api/spotify/speaker")
         def api_spotify_speaker():

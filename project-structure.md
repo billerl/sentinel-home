@@ -38,6 +38,7 @@ sentinel-home/                         # repository root
     │   ├── assistant.py               # Opt-in: Telegram messages Sentinel doesn't understand -> `claude -p`
     │   ├── reminders.py               # "Remind me ..." -> Telegram message at that time (reminders.db)
     │   ├── switches.py                # Smart plugs/switches (Kasa, local protocol): Live page panel, voice, Telegram
+    │   ├── routines.py                # "When X, only if Y, then Z": check/describe, sunrise/sunset maths, runner (routines.db)
     │   ├── questions.py               # Telegram questions ("did anyone come by?", "is Kate home?")
     │   ├── queries.py                 # "videos <when>" parsing
     │   └── admin.py                   # Settings schema, status, access message helpers
@@ -58,8 +59,9 @@ sentinel-home/                         # repository root
     │   ├── bind_util.py               # Refuse binding on camera-only subnets
     │   ├── set_password.py            # CLI: `python -m sentinel.web.set_password`
     │   ├── static/                    # Icons + web app manifest; leaflet/ = Leaflet 1.9.4 (BSD-2, map on the Timeline)
-    │   └── templates/                 # login (+ QR), pair (phone approves a TV), grid (live + weather +
-    │                                  #   family lights + timeline + player), zones, settings, vehicles,
+    │   └── templates/                 # login (+ QR), pair (phone approves a TV), grid (live + weather/clock +
+    │                                  #   family lights + switches + timeline + player), zones, settings, vehicles,
+    │                                  #   routines (when X then Y editor),
     │                                  #   people (Family page), join (setup link opened on a family phone),
     │                                  #   timeline (Family timeline), account (a person picks their own password)
     ├── notifications/

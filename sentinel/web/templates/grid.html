@@ -79,7 +79,12 @@
     .wx-top { display: flex; align-items: center; gap: 3cqw; }
     .wx-icon { font-size: 15cqh; line-height: 1; }
     .wx-temp { font-size: 22cqh; font-weight: 600; color: #fff; line-height: 1; }
-    .wx-now { display: flex; flex-direction: column; font-size: 5.5cqh; gap: 1cqh; }
+    .wx-now { display: flex; flex-direction: column; font-size: 5.5cqh; gap: 1cqh; min-width: 0; }
+    /* Clock: as big as the temperature, readable across the room. */
+    .wx-clock { margin-left: auto; text-align: right; line-height: 1; white-space: nowrap; }
+    .wx-clock .t { font-size: 22cqh; font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+    .wx-clock .ap { font-size: 7cqh; color: #9fd3ee; margin-left: 0.25em; }
+    .wx-clock .d { display: block; font-size: 5cqh; color: #9fd3ee; margin-top: 1.2cqh; }
     .wx-now b { font-size: 7cqh; color: #fff; }
     .wx-meta { font-size: 5cqh; color: #9fd3ee; display: flex; flex-wrap: wrap; gap: 0.5em 1.2em; }
     .wx-hours { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1cqw; text-align: center; }
@@ -103,6 +108,7 @@
     .tile.weather.fam { gap: 1.6cqh; padding-top: 7.5cqh; padding-bottom: 2cqh; }
     .tile.weather.fam .wx-icon { font-size: 12cqh; }
     .tile.weather.fam .wx-temp { font-size: 17cqh; }
+    .tile.weather.fam .wx-clock .t { font-size: 17cqh; }
     .tile.weather.fam .wx-hours div { padding: 1cqh 0; gap: 0.3cqh; }
 
     #focus-overlay {
@@ -406,6 +412,7 @@
     <button class="header-btn" type="button" onclick="location.reload()" title="Reload the page (for TVs and browsers without F5)">⟳ Reload</button>
     <a class="header-btn" href="{{ url_for('people_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Family</a>
     <a class="header-btn" href="{{ url_for('timeline_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;" title="Where the family has been, day by day">Family timeline</a>
+    <a class="header-btn" href="{{ url_for('routines_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;" title="When this happens, do that">Routines</a>
     <a class="header-btn" href="{{ url_for('zones_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Zones</a>
     <a class="header-btn" href="{{ url_for('settings_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Settings</a>
     <form method="post" action="{{ url_for('logout') }}" style="margin: 0;">
@@ -470,6 +477,7 @@
     <div class="sw-foot">
       <div id="sw-msg" role="status"></div>
       <button type="button" id="sw-scan" onclick="scanSwitches()">Find new devices</button>
+      <a href="{{ url_for('routines_page') }}" style="color:#00ffff">Routines</a> switch them for you (patio lights when someone's out back after dark).
       Names come from the Kasa app; ✎ renames (the app gets the new name too).
       Say “Hey Jarvis, patio lights on”, or send “patio lights on” on Telegram.
     </div>
@@ -641,7 +649,8 @@
         '<h2>Weather — ' + esc(w.place) + '</h2>' +
         '<div class="wx-top"><div class="wx-icon">' + esc(w.icon) + '</div><div class="wx-temp">' + esc(w.temp) + deg + '</div>' +
         '<div class="wx-now"><b>' + esc(w.words) + '</b><span>Feels like ' + esc(w.feels) + deg + '</span>' +
-        '<span>High ' + esc(w.high) + deg + ' · Low ' + esc(w.low) + deg + '</span></div></div>' +
+        '<span>High ' + esc(w.high) + deg + ' · Low ' + esc(w.low) + deg + '</span></div>' +
+        '<div class="wx-clock">' + clockHtml() + '</div></div>' +
         '<div class="wx-meta"><span>💨 ' + esc(w.wind) + ' mph' + (w.gusts > w.wind + 4 ? ', gusts ' + esc(w.gusts) : '') + '</span>' +
         '<span>💧 ' + esc(w.humidity) + '%</span><span>☔ ' + esc(w.rain_today) + '% today</span>' +
         '<span>🌅 ' + esc(w.sunrise) + '</span><span>🌇 ' + esc(w.sunset) + '</span></div>' +
@@ -649,6 +658,17 @@
         '<div class="wx-foot">' + (w.windy ? '<span class="wx-windy">Windy: expect motion clips from trees. </span>' : '') +
         'Updated ' + esc(w.updated) + '</div>';
     }
+
+    function clockHtml() {
+      var now = new Date(), h = now.getHours();
+      return '<span class="t">' + (h % 12 || 12) + ":" + String(now.getMinutes()).padStart(2, "0") + '</span><span class="ap">' +
+        (h < 12 ? "am" : "pm") + '</span><span class="d">' +
+        esc(now.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })) + "</span>";
+    }
+    setInterval(function() {
+      var c = weatherTile.querySelector(".wx-clock");
+      if (c) { var html = clockHtml(); if (c.innerHTML !== html) c.innerHTML = html; }
+    }, 5000);
 
     async function loadWeather() {
       var next = 10 * 60 * 1000;

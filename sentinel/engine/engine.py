@@ -159,6 +159,20 @@ class Engine:
         from sentinel.engine.switches import SmartSwitches
 
         self.switches = SmartSwitches(VIDEO_DIR)  # Kasa smart plugs/switches on the home network
+        from sentinel.engine.routines import HOLDS_FILE, RoutineRunner, RoutineStore
+
+        self._last_motion: Dict[str, float] = {}  # camera -> last frame with motion (routines' "until quiet")
+        self.routines = RoutineRunner(RoutineStore(VIDEO_DIR), {
+            "set_switch": self.switches.set,
+            "switch_on": lambda sid: next((s.on for s in self.switches.switches() if s.id == sid and s.online), None),
+            "telegram": self._routine_message,
+            "say": lambda text: self.audio.speak(text) if self.audio is not None else None,
+            "coords": self.home_coords,
+            "nobody_home": self._nobody_home,
+            "last_motion": lambda cam: (max(self._last_motion.values(), default=0.0) if cam is None
+                                        else self._last_motion.get(cam, 0.0)),
+        }, holds_path=os.path.join(VIDEO_DIR, HOLDS_FILE))
+        self._routines_ticked = 0.0
         self._place_pins: Dict[str, Tuple[float, float, float]] = {}  # chat -> pin waiting for a name (lat, lon, until)
         self._location_alerted: Dict[Tuple[int, int], float] = {}  # (person, place) -> last alert
         self._location_asked: Dict[int, float] = {}  # person -> last time we asked their phone for a fresh fix
@@ -429,6 +443,7 @@ class Engine:
         except Exception as e:
             app_logger.log("error", "event_store_failed", error_message=str(e), component="engine",
                            action="on_object")
+        self.routines.seen(pipeline.host, group, jpeg)
         wanted = self.settings.get("object_alert_groups", [])
         # Deliveries are vehicles too: "Vehicles" covers them, "Deliveries" alone means only those.
         if not self.objects_active() or not (group in wanted or (group == "delivery" and "vehicle" in wanted)):
@@ -527,8 +542,11 @@ class Engine:
                            action="household")
         app_logger.log("info", "household_" + kind, vehicle=vehicle.name, camera_display=pipeline.display_name,
                        component="engine", action="presence")
+        self.routines.car("arrive" if kind == "arrived" else "leave", vehicle.id)
 
     def _on_motion(self, pipeline: CameraPipeline) -> None:
+        self._last_motion[pipeline.host] = time.time()
+        self.routines.motion(pipeline.host)
         if self.objects_active():
             return  # alerts come from recognised objects instead (see _on_object)
         if self.audio is not None:
@@ -584,6 +602,11 @@ class Engine:
                 if time.time() - self._reminders_checked >= 15:
                     self._reminders_checked = time.time()
                     self.send_due_reminders()
+                for chat_id, text in self.telegram.consume_routine_commands():
+                    self.telegram.reply_to_chat(chat_id, self.routine_command(text))
+                if time.time() - self._routines_ticked >= 5:
+                    self._routines_ticked = time.time()
+                    self.routines.tick()
                 for chat_id, text in self.telegram.consume_switch_commands():
                     threading.Thread(target=self._switch_reply, args=(chat_id, text), name="switch",
                                      daemon=True).start()  # a plug that doesn't answer takes seconds
@@ -803,7 +826,10 @@ class Engine:
                 self.telegram.edit_text(chat_id, message_id, "OK, I left it as it is.")
                 return
             self.telegram.answer_button(callback_id, "Done")
-            self.telegram.edit_text(chat_id, message_id, f"✅ Sent: {command}")
+            from sentinel.engine.routines import COMMAND as ROUTINE_JSON
+
+            self.telegram.edit_text(chat_id, message_id, "✅ Saving the routine…" if ROUTINE_JSON.match(command)
+                                    else f"✅ Sent: {command}")
             app_logger.log("info", "assistant_command_run", command=command, component="engine", action="button")
             self.telegram.route_text(chat_id, command, from_button=True)  # exactly as if typed
             return
@@ -910,7 +936,8 @@ class Engine:
 
         reminders = "\n".join(f"{r.id}. {when_words(r.due, now)}: {r.text}" for r in self.reminders.pending()[:20])
         return build_context(now, events, cameras, home, self.household.vehicles(), weather,
-                             self.telegram._commands_help_text(), reminders, self.switches.summary())
+                             self.telegram._commands_help_text(), reminders, self.switches.summary(),
+                             self._routines_context())
 
     def _switch_reply(self, chat_id: str, text: str) -> None:
         said = self.switches.command(text, source="telegram")
@@ -935,6 +962,18 @@ class Engine:
             from sentinel.engine.assistant import split_command
 
             text_part, command = split_command(reply)
+            from sentinel.engine.routines import COMMAND as ROUTINE_JSON
+
+            if command and ROUTINE_JSON.match(command):
+                ok, said = self.routine_preview(command)
+                if not ok:
+                    self.telegram.reply_to_chat(chat_id, f"{text_part}\n\n(I couldn't make that into a routine: {said}.)".strip())
+                    return
+                offer = next(self._offer_ids)
+                self._command_offers[offer] = (chat_id, command, time.time())
+                self.telegram.send_text_with_buttons(chat_id, f"New routine:\n{said}\n\nSave it?",
+                                                     [[("✅ Save routine", f"cmd:{offer}"), ("No thanks", f"cmd:{offer}:no")]])
+                return
             if command and self.telegram.is_command(command):
                 offer = next(self._offer_ids)
                 self._command_offers[offer] = (chat_id, command, time.time())
@@ -1055,7 +1094,9 @@ class Engine:
         volume = parse_volume_command(low)
         if volume:
             return VoiceReply(self.change_volume(*volume))
-        switched = self.switches.command(low, source="voice")
+        from sentinel.engine.routines import REQUEST as NEW_ROUTINE
+
+        switched = None if NEW_ROUTINE.search(low) else self.switches.command(low, source="voice")
         if switched:
             return VoiceReply(switched)
         music = parse_music_command(low)
@@ -1080,15 +1121,23 @@ class Engine:
         changes, _err = self.telegram._parse_feature_toggle_command(low)
         if changes:
             return self._voice_toggle(changes)
+        from sentinel.engine.routines import COMMAND as ROUTINE_JSON, REQUEST as ROUTINE_REQUEST, is_routine_command
+
+        if re.fullmatch(r"(?:what are |list |read )?(?:my |the |any )?routines|do i have any routines", low):
+            return VoiceReply(self.routine_command("routines", spoken=True))
+        if is_routine_command(low):
+            if low.startswith(("delete", "remove")):
+                return VoiceReply(f"Should I {low}? Say yes or no.", lambda: self.routine_command(low, spoken=True))
+            return VoiceReply(self.routine_command(low, spoken=True))
         if re.fullmatch(r"(?:what are |list |read )?(?:my |the |any )?reminders|do i have any reminders", low):
             return VoiceReply(self.reminder_command(None, "reminders"))
-        lq = self.location_question(low)
+        lq = None if ROUTINE_REQUEST.search(low) else self.location_question(low)
         if lq is not None:
             return VoiceReply(to_speech(self.answer_location_question(lq)[0]))
-        hq = household_question(low, self.household.vehicles())
+        hq = None if ROUTINE_REQUEST.search(low) else household_question(low, self.household.vehicles())
         if hq is not None:
             return VoiceReply(to_speech(self.answer_household_question(hq)))
-        if is_question(low):
+        if is_question(low) and not ROUTINE_REQUEST.search(low):
             return VoiceReply(to_speech(self.event_question_reply(low)[0]))
         if not self.assistant.enabled():
             return VoiceReply("Sorry, I can't answer that one. Try asking who's home, or did anyone come by today.")
@@ -1114,6 +1163,15 @@ class Engine:
         if command and is_reminder_command(command):
             return VoiceReply(spoken + " Should I do that? Say yes or no.",
                               lambda: self.reminder_command(None, command))
+        if command and ROUTINE_JSON.match(command):
+            ok, said = self.routine_preview(command)
+            if not ok:
+                return VoiceReply(f"Sorry, I couldn't make that into a routine: {said}.")
+            return VoiceReply(to_speech(said, max_lines=6, max_chars=600) + " Should I save it? Say yes or no.",
+                              lambda: self.routine_command(command, spoken=True))
+        if command and is_routine_command(command):
+            return VoiceReply(spoken + " Should I do that? Say yes or no.",
+                              lambda: self.routine_command(command, spoken=True))
         if command and self.switches.parse(command) is not None:
             return VoiceReply(spoken + " Should I do that? Say yes or no.",
                               lambda: self.switches.command(command, source="voice") or "I couldn't do that.")
@@ -1220,6 +1278,8 @@ class Engine:
                 app_logger.log("info", "location_" + change.kind, person=person.name,
                                place=change.place.name if change.place else None, component="engine",
                                action="location")
+                if change.kind in ("arrived", "left") and change.place is not None and change.place.is_home:
+                    self.routines.person("arrive" if change.kind == "arrived" else "leave", person.id)
                 if change.kind != "started" and not (self.settings.get("location_alerts_enabled", True)
                                                      and change.place.alerts):
                     continue
@@ -1280,6 +1340,164 @@ class Engine:
                                                  "(change its size or alerts on the Family page).")
         app_logger.log("info", "location_place_saved", source="telegram", component="engine", action="location")
         return True
+
+    # ---- routines (sentinel/engine/routines.py)
+    def home_coords(self) -> Optional[Tuple[float, float]]:
+        """Where the house is, for sunrise/sunset: the Home place (Family page), else the weather town."""
+        home = next((p for p in self.locations.places() if p.is_home), None)
+        if home is not None:
+            return home.lat, home.lon
+        place = getattr(self.weather, "_place", None)
+        if place and place.get("lat") is not None:
+            return float(place["lat"]), float(place["lon"])
+        return None
+
+    def _nobody_home(self) -> bool:
+        """Every phone that shares its location is away (False when no phone shares one: we don't know)."""
+        views = [v for v in self.person_views().values() if v.fix]
+        return bool(views) and not any(v.place is not None and v.place.is_home for v in views)
+
+    def _routine_message(self, text: str, jpeg: Optional[bytes]) -> None:
+        now = time.time()
+        for chat_id in self.telegram.chat_ids:
+            if self.telegram._is_paused(chat_id, now):
+                continue
+            if jpeg:
+                self.telegram.send_photo(chat_id, jpeg, text)
+            else:
+                self.telegram.reply_to_chat(chat_id, text)
+
+    def routine_catalog(self):
+        from sentinel.engine.routines import Catalog
+
+        return Catalog(cameras={p.host: p.display_name for p in self.cameras.values()},
+                       switches={s.id: s.name for s in self.switches.switches()},
+                       people={p.id: p.name for p in self.locations.people()},
+                       cars={v.id: v.name for v in self.household.vehicles()})
+
+    @staticmethod
+    def _routine_error(e: ValueError) -> str:
+        return "it came out garbled" if isinstance(e, json.JSONDecodeError) else str(e)
+
+    def routine_preview(self, command: str) -> Tuple[bool, str]:
+        """``Routine {json}`` -> (True, what it would do in words) or (False, what's wrong)."""
+        from sentinel.engine.routines import COMMAND, describe, normalize
+
+        m = COMMAND.match(command.strip())
+        cat = self.routine_catalog()
+        try:
+            spec = normalize(json.loads(m.group(1)) if m else None, cat)
+        except ValueError as e:  # (json.JSONDecodeError is one too)
+            return False, self._routine_error(e)
+        return True, describe(spec, cat)
+
+    def routine_command(self, text: str, spoken: bool = False) -> str:
+        """Telegram / voice: ``Routines``, ``Routine 2 off``, ``Delete routine 2``, ``Routine {json}`` (save)."""
+        from sentinel.engine.routines import COMMAND, LIST, TOGGLE, describe, normalize
+
+        t = text.strip()
+        cat = self.routine_catalog()
+        store = self.routines.store
+        m = COMMAND.match(t)
+        if m:
+            try:
+                spec = normalize(json.loads(m.group(1)), cat)
+            except ValueError as e:
+                return f"I couldn't save that routine: {self._routine_error(e)}."
+            rid = store.save(spec)
+            self.routines.reload()
+            app_logger.log("info", "routine_saved", routine=spec["name"], routine_id=rid, component="engine",
+                           action="routine")
+            return (f"Saved. {describe(spec, cat)}" if spoken
+                    else f"✅ Saved routine {rid} ({spec['name']}):\n{describe(spec, cat)}\n\nSee them all on the Routines page.")
+        if LIST.match(t):
+            items = store.all()
+            if not items:
+                return "You don't have any routines yet." if spoken else (
+                    "No routines yet. Make one on the Routines page, or say it in plain words, e.g. "
+                    "“new routine: when the back yard camera sees a person after dark, turn on the patio lights "
+                    "until there's no motion for 2 minutes”.")
+            if spoken:
+                return f"You have {len(items)} routine{'s' if len(items) != 1 else ''}. " + " ".join(
+                    f"Number {r.id}, {r.name}{'' if r.enabled else ', turned off'}." for r in items)
+            return "Routines:\n" + "\n".join(f"{r.id}. {'' if r.enabled else '⏸ (off) '}{r.name}: {describe(r.spec, cat)}"
+                                             for r in items) + "\n\nRoutine 2 off / Routine 2 on / Delete routine 2"
+        m = TOGGLE.match(t)
+        if m and (m.group(1) or m.group(3) or m.group(5)):
+            rid = int(m.group(2) or m.group(4))
+            r = store.get(rid)
+            if r is None:
+                return f"There's no routine {rid}."
+            if m.group(1):
+                store.delete(rid)
+                self.routines.reload()
+                app_logger.log("info", "routine_deleted", routine=r.name, routine_id=rid, component="engine",
+                               action="routine")
+                return f"Deleted routine {rid}, {r.name}."
+            on = (m.group(3) or m.group(5)).lower() == "on"
+            store.set_enabled(rid, on)
+            self.routines.reload()
+            return f"Routine {rid}, {r.name}, is {'on' if on else 'off'}."
+        return "Send Routines to see them, Routine 2 off to pause one, or Delete routine 2."
+
+    def _routines_context(self) -> str:
+        from sentinel.engine.routines import describe
+
+        cat = self.routine_catalog()
+        lines = [f"{r.id}. {r.name}{'' if r.enabled else ' (off)'}: {describe(r.spec, cat)}" for r in self.routines.store.all()]
+        names = (f"Camera names: {', '.join(cat.cameras.values()) or 'none'}. Switch names: "
+                 f"{', '.join(cat.switches.values()) or 'none'}. People with phones: "
+                 f"{', '.join(cat.people.values()) or 'none'}. Family cars: {', '.join(cat.cars.values()) or 'none'}.")
+        return names + "\n" + ("\n".join(lines) if lines else "(no routines yet)")
+
+    def routines_view(self) -> Dict[str, Any]:
+        from sentinel.engine.routines import describe, sun_times
+
+        cat = self.routine_catalog()
+        holding = self.routines.holding()
+        coords = self.home_coords()
+        sun = sun_times(coords[0], coords[1], time.time()) if coords else None
+        return {
+            "routines": [{"id": r.id, "name": r.name, "enabled": r.enabled, "spec": r.spec, "text": describe(r.spec, cat),
+                          "last_run": r.last_run, "holding_until": holding.get(r.id)} for r in self.routines.store.all()],
+            "catalog": {k: [{"id": i, "name": n} for i, n in getattr(cat, k).items()]
+                        for k in ("cameras", "switches", "people", "cars")},
+            "dark": self.routines.is_dark(), "located": coords is not None,
+            "sunrise": sun[0] if sun else None, "sunset": sun[1] if sun else None,
+        }
+
+    def routine_save(self, body: Dict[str, Any]) -> Tuple[bool, str]:
+        from sentinel.engine.routines import normalize
+
+        rid = body.get("id")
+        if rid is not None and (not isinstance(rid, int) or self.routines.store.get(rid) is None):
+            return False, "unknown routine"
+        try:
+            spec = normalize(body.get("spec"), self.routine_catalog())
+        except ValueError as e:
+            return False, str(e)
+        rid = self.routines.store.save(spec, rid)
+        self.routines.reload()
+        app_logger.log("info", "routine_saved", routine=spec["name"], routine_id=rid, component="engine", action="web")
+        return True, str(rid)
+
+    def routine_action(self, rid: int, action: str, on: Any = None) -> Tuple[bool, str]:
+        r = self.routines.store.get(rid)
+        if r is None:
+            return False, "unknown routine"
+        if action == "enable":
+            if not isinstance(on, bool):
+                return False, "say on or off"
+            self.routines.store.set_enabled(rid, on)
+        elif action == "delete":
+            self.routines.store.delete(rid)
+            app_logger.log("info", "routine_deleted", routine=r.name, routine_id=rid, component="engine", action="web")
+        elif action == "try":  # do its steps now, whatever the time (to check it does the right thing)
+            threading.Thread(target=self.routines.run, args=(r,), name="routine", daemon=True).start()
+        else:
+            return False, "unknown action"
+        self.routines.reload()
+        return True, action
 
     # ---- web: People page, join links, Live page lights
     def _owntracks_endpoint(self, base_url: str) -> str:
