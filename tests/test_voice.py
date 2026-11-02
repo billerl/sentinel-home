@@ -445,6 +445,8 @@ class TestWhisperPrompt(unittest.TestCase):
         self.assertTrue(text.startswith("Sentinel. Who's home? Is Emma home? When did Em get home? Did Kate or Ben leave?"))
         self.assertTrue(text.endswith("Cancel."))
         self.assertIn("Did Ben leave?", whisper_prompt(["A", "B", "Ben"]))
+        plugs = whisper_prompt([], ["patio lights", "patio outlet", "patio lights"])
+        self.assertIn("Turn on the patio lights. Patio outlet off. ", plugs)  # what was misheard as "Turn Petty"
 
 
 if __name__ == "__main__":
