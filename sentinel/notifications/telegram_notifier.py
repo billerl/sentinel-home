@@ -47,6 +47,7 @@ class TelegramNotifier:
         # instead of getting the help text.
         self.assistant_available: Optional[Callable[[], bool]] = None
         self._pending_free_text: List[Tuple[str, str]] = []
+        self._pending_reminders: List[Tuple[str, str]] = []  # (chat_id, "Remind ..." / "Reminders" / "Cancel reminder N")
         # Set by the engine: a 📍 pin someone sent (chat_id, lat, lon, venue title) and a check that
         # may claim the next typed message (the pin's name); returns True when it handled the text.
         self.location_handler: Optional[Callable[[str, float, float, str], None]] = None
@@ -68,6 +69,10 @@ class TelegramNotifier:
             "- Family (phones with OwnTracks) — Where is Elizabeth? Who's home? Is Mom at work? When did Ben get to school?\n"
             "- Send a 📍 location pin, then a name, to add a place (home, school, the salon)\n"
             "- Help — this message\n\n"
+            "Reminders (sent here on Telegram):\n"
+            "- Remind me Wednesday at 9am about my PT appointment — in plain words (Claude works out the time; tap ✅ to save)\n"
+            "- Remind 2026-11-04 09:00 PT appointment — the exact form, saved straight away\n"
+            "- Reminders — what's coming up; Cancel reminder <number>\n\n"
             "Clip:\n"
             "- Clip — record ~10s per connected camera and upload\n\n"
             "Enable / disable (combine with \"and\" or commas):\n"
@@ -439,6 +444,11 @@ class TelegramNotifier:
         pending, self._pending_questions = self._pending_questions, []
         return pending
 
+    def consume_reminder_commands(self) -> List[Tuple[str, str]]:
+        """Return and clear (chat_id, text) reminder commands."""
+        pending, self._pending_reminders = self._pending_reminders, []
+        return pending
+
     def consume_free_text(self) -> List[Tuple[str, str]]:
         """Return and clear (chat_id, text) messages none of the built-in commands understood."""
         pending, self._pending_free_text = self._pending_free_text, []
@@ -560,9 +570,11 @@ class TelegramNotifier:
     def is_command(cls, text: str) -> bool:
         """Is this exactly one of Sentinel's own commands (what a "Do it" button may run)?"""
         from sentinel.engine.queries import is_video_query
+        from sentinel.engine.reminders import is_reminder_command
 
         t = text.strip()
-        if re.fullmatch(r"(?i)(resume|status|help|clip|pause\s+\d{1,4})", t) or cls._is_access_request(t):
+        if re.fullmatch(r"(?i)(resume|status|help|clip|pause\s+\d{1,4})", t) or cls._is_access_request(t) \
+                or is_reminder_command(t):
             return True
         changes, err = cls._parse_feature_toggle_command(t)
         return bool(changes) and err is None or is_video_query(t)
@@ -582,6 +594,12 @@ class TelegramNotifier:
 
         if self._is_access_request(text):
             self._pending_access_chat_ids.append(chat_id)
+            return
+
+        from sentinel.engine.reminders import is_reminder_command
+
+        if is_reminder_command(text):
+            self._pending_reminders.append((chat_id, text.strip()))
             return
 
         from sentinel.engine.queries import is_video_query

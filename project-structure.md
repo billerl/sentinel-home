@@ -36,6 +36,7 @@ sentinel-home/                         # repository root
     │   ├── weather.py                 # Weather tile data (Open-Meteo, server-side, cached 10 min)
     │   ├── spotify.py                 # Spotify Web API: PKCE sign-in, play/pause/skip/volume, now playing, voice phrases
     │   ├── assistant.py               # Opt-in: Telegram messages Sentinel doesn't understand -> `claude -p`
+    │   ├── reminders.py               # "Remind me ..." -> Telegram message at that time (reminders.db)
     │   ├── questions.py               # Telegram questions ("did anyone come by?", "is Kate home?")
     │   ├── queries.py                 # "videos <when>" parsing
     │   └── admin.py                   # Settings schema, status, access message helpers

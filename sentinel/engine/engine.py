@@ -151,6 +151,11 @@ class Engine:
         from sentinel.engine.location import LocationStore
 
         self.locations = LocationStore(VIDEO_DIR)  # family phones (OwnTracks) and named places
+        from sentinel.engine.reminders import ReminderStore
+
+        self.reminders = ReminderStore(VIDEO_DIR)  # "remind me ..." -> a Telegram message at that time
+        self._reminders_checked = 0.0
+        self._reminder_failed: set = set()  # ids whose send failed (logged once; retried every check)
         self._place_pins: Dict[str, Tuple[float, float, float]] = {}  # chat -> pin waiting for a name (lat, lon, until)
         self._location_alerted: Dict[Tuple[int, int], float] = {}  # (person, place) -> last alert
         self._location_asked: Dict[int, float] = {}  # person -> last time we asked their phone for a fresh fix
@@ -568,6 +573,11 @@ class Engine:
                     threading.Thread(
                         target=self.answer_question, args=(chat_id, text), name="question", daemon=True
                     ).start()
+                for chat_id, text in self.telegram.consume_reminder_commands():
+                    self.telegram.reply_to_chat(chat_id, self.reminder_command(chat_id, text))
+                if time.time() - self._reminders_checked >= 15:
+                    self._reminders_checked = time.time()
+                    self.send_due_reminders()
                 for chat_id, text in self.telegram.consume_free_text():
                     threading.Thread(
                         target=self.answer_with_assistant, args=(chat_id, text), name="assistant", daemon=True
@@ -823,6 +833,57 @@ class Engine:
         app_logger.log("info", "household_answer", choice="named" if choice.isdigit() else choice,
                        component="engine", action="handle_button")
 
+    # ------------------------------------------------------------ reminders
+    def reminder_command(self, chat_id: Optional[str], text: str) -> str:
+        """Run "Remind <date> <time> <what>", "Reminders" or "Cancel reminder N".
+
+        ``chat_id`` None = said out loud: the reminder goes to every Sentinel chat and the reply is spoken."""
+        from sentinel.engine.reminders import CANCEL, LIST, parse_remind, when_words
+
+        text = (text or "").strip()
+        now = time.time()
+        if LIST.match(text):
+            pending = self.reminders.pending(chat_id)
+            if not pending:
+                return "You have no reminders coming up."
+            if chat_id is None:
+                return "Your reminders: " + "; ".join(f"{when_words(r.due, now)}, {r.text}" for r in pending[:5]) + "."
+            return "Coming up:\n" + "\n".join(f"{r.id}. {when_words(r.due, now)}: {r.text}" for r in pending) \
+                + "\n\nCancel one with: Cancel reminder <number>"
+        m = CANCEL.match(text)
+        if m:
+            ok = self.reminders.cancel(int(m.group(1)), chat_id)
+            app_logger.log("info", "reminder_cancelled" if ok else "reminder_not_found", reminder_id=int(m.group(1)),
+                           component="engine", action="reminder")
+            return "Okay, that reminder is cancelled." if ok else "I couldn't find that reminder."
+        parsed, why = parse_remind(text, now)
+        if parsed is None:
+            return why
+        due, what = parsed
+        r = self.reminders.add(due, what, chat_id or "")
+        app_logger.log("info", "reminder_saved", reminder_id=r.id, due=time.strftime("%Y-%m-%d %H:%M", time.localtime(due)),
+                       voice=chat_id is None, component="engine", action="reminder")
+        where = "" if self.telegram.is_configured() else " (Telegram isn't set up yet, so it can't be sent)"
+        return f"Okay, I'll remind you {when_words(due, now)}: {what}{where}."
+
+    def send_due_reminders(self) -> None:
+        from sentinel.engine.reminders import due_message
+
+        now = time.time()
+        for r in self.reminders.due(now):
+            chats = [r.chat_id] if r.chat_id else list(self.telegram.chat_ids)
+            sent = [c for c in chats if self.telegram.reply_to_chat(c, due_message(r, now))]
+            if sent:
+                self.reminders.mark_sent(r.id)
+                self._reminder_failed.discard(r.id)
+                app_logger.log("info", "reminder_sent", reminder_id=r.id, late_minutes=round((now - r.due) / 60),
+                               component="engine", action="reminder")
+            elif r.id not in self._reminder_failed:
+                self._reminder_failed.add(r.id)
+                app_logger.log("warning", "reminder_send_failed", reminder_id=r.id,
+                               error_message="Telegram didn't accept it; retrying", component="engine",
+                               action="reminder")
+
     def _check_assistant(self) -> None:
         ok, message = self.assistant.check_login()
         app_logger.log("info" if ok else "warning", "assistant_ready" if ok else "assistant_unavailable",
@@ -836,8 +897,11 @@ class Engine:
         cameras = [(p.display_name, bool(p.connected)) for p in self.cameras.values()]
         home = self.answer_household_question(HouseholdQuestion("list")) if self.presence is not None else ""
         weather = self.weather.current() if self.settings.get("weather_location") else None
+        from sentinel.engine.reminders import when_words
+
+        reminders = "\n".join(f"{r.id}. {when_words(r.due, now)}: {r.text}" for r in self.reminders.pending()[:20])
         return build_context(now, events, cameras, home, self.household.vehicles(), weather,
-                             self.telegram._commands_help_text())
+                             self.telegram._commands_help_text(), reminders)
 
     def answer_with_assistant(self, chat_id: str, text: str) -> None:
         """A message none of the built-in commands understood: ask Claude (opt-in), else show help."""
@@ -1000,6 +1064,8 @@ class Engine:
         changes, _err = self.telegram._parse_feature_toggle_command(low)
         if changes:
             return self._voice_toggle(changes)
+        if re.fullmatch(r"(?:what are |list |read )?(?:my |the |any )?reminders|do i have any reminders", low):
+            return VoiceReply(self.reminder_command(None, "reminders"))
         lq = self.location_question(low)
         if lq is not None:
             return VoiceReply(to_speech(self.answer_location_question(lq)[0]))
@@ -1027,6 +1093,11 @@ class Engine:
         changes = self.telegram._parse_feature_toggle_command(command)[0] if command else None
         if changes:
             return VoiceReply(spoken + " Should I do that? Say yes or no.", self._voice_toggle(changes).confirm)
+        from sentinel.engine.reminders import is_reminder_command
+
+        if command and is_reminder_command(command):
+            return VoiceReply(spoken + " Should I do that? Say yes or no.",
+                              lambda: self.reminder_command(None, command))
         return VoiceReply(spoken)
 
     def answer_household_question(self, hq) -> str:

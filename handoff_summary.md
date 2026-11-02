@@ -234,6 +234,10 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   - `alert_mode` is `objects` by default: a Telegram photo plus a natural sentence, then the clip.
   - The per-camera/per-type cooldown is `object_alert_cooldown`.
   - The user's `telegram_motion_alerts` was **off**; it was left off.
+- **Reminders** (`sentinel/engine/reminders.py`, `recorded_videos/reminders.db`): Claude turns "remind me
+  Wednesday at 9 ..." into the exact command `Remind YYYY-MM-DD HH:MM <what>`; it is saved only after a ✅ tap
+  (Telegram) or a spoken yes, then sent on Telegram at that time (voice ones to every chat; late ones say so).
+  `Reminders` lists, `Cancel reminder N` removes. Checked every 15 s in the command loop.
 - **Telegram commands added:** `access` (remote-access guide) and `videos <when> [people|vehicles|animals] [camera]` (`sentinel/engine/queries.py`).
 - **Web:** `/settings` covers status, cameras, detection, Telegram, recording, audio, remote access, password and help.
 - **Replay tool idea:** run the detector and tracker over a sample of a day's clips to check accuracy before changing thresholds.

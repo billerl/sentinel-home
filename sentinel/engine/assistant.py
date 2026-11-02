@@ -40,6 +40,10 @@ Rules:
   -> Enable messages), say so in your reply and put that exact command alone on the LAST line as
   "COMMAND: <command>". Sentinel shows it as a button; it only runs if they tap it. At most one command,
   only from the COMMANDS list, never invented ones.
+- Reminders: Sentinel can send a Telegram message at a set time. For "remind me ..." work out the exact date and
+  24-hour time from NOW (e.g. "Wednesday at 9" = the next Wednesday, 09:00) and use the command
+  "COMMAND: Remind YYYY-MM-DD HH:MM <what to remind them of>". Say the day, date and time back in words so they can
+  check it. If they didn't say a time or it's unclear (morning or evening?), ask instead of guessing (no command).
 - Family cars stand for their owners: "Kate's Edge got home" means Kate (Katherine, Mom) got home.
 - Small talk is fine; keep it brief and steer back to what Sentinel can do.
 - No markdown formatting (Telegram shows it raw); emoji are fine."""
@@ -195,7 +199,7 @@ def _clock(ts: float) -> str:
 
 
 def build_context(now: float, events: List[Dict], cameras: List[Tuple[str, bool]], home_text: str,
-                  vehicles: List, weather: Optional[Dict], commands: str) -> str:
+                  vehicles: List, weather: Optional[Dict], commands: str, reminders: str = "") -> str:
     """The DATA Claude answers from: plain text, newest events last, trimmed to the most recent."""
     lines = [f"NOW: {time.strftime('%A %B %d %Y', time.localtime(now))}, {_clock(now)}"]
     lines.append("CAMERAS: " + ", ".join(f"{name} ({'online' if up else 'OFFLINE'})" for name, up in cameras))
@@ -221,5 +225,7 @@ def build_context(now: float, events: List[Dict], cameras: List[Tuple[str, bool]
             day = d
         body.append(f"{_clock(e['ts'])} {e.get('description') or e.get('label') or e.get('grp')}")
     lines.append(head + ":\n" + ("\n".join(body) if body else "(none)"))
+    if reminders:
+        lines.append("REMINDERS ALREADY SET:\n" + reminders)
     lines.append("COMMANDS the family can send to Sentinel:\n" + commands)
     return "DATA\n" + "\n\n".join(lines)
