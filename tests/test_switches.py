@@ -453,6 +453,8 @@ class TestVoiceHint(unittest.TestCase):
         hint = whisper_prompt(["Kate"], ["patio lights"], ["Netflix", "Disney+", "Paramount+"])
         self.assertIn("Turn on the TV to Netflix. Put on Disney Plus, Paramount Plus.", hint)
         self.assertNotIn("TV to", whisper_prompt(["Kate"], ["patio lights"]))
+        hint = whisper_prompt(["Kate"], [], [], ["Mötley Crüe", "Shinedown", "Def Leppard"])
+        self.assertIn("Play Mötley Crüe. Play some Shinedown, Def Leppard.", hint)
 
 
 class TestRemote(unittest.TestCase):

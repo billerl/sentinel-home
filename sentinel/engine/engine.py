@@ -1056,7 +1056,7 @@ class Engine:
             return
         self.voice = VoiceAssistant(self.settings, self.answer_voice, self.audio, names=self._voice_names,
                                     switches=lambda: [s.name for s in self.switches.switches()],
-                                    apps=self.switches.tv_apps)
+                                    apps=self.switches.tv_apps, artists=self.spotify.artists)
         self.voice.start()
 
     def _voice_names(self) -> List[str]:

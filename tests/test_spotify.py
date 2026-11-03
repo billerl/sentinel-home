@@ -53,6 +53,7 @@ class FakeSpotify:
         self.search = {}
         self.player = {}
         self.token_status = 200
+        self.extra = {}  # path -> (status, answer)
 
     def __call__(self, method, url, headers, body):
         self.calls.append((method, url, headers, body))
@@ -65,6 +66,9 @@ class FakeSpotify:
             if form["grant_type"][0] == "authorization_code":
                 out["refresh_token"] = "ref-1"
             return 200, json.dumps(out).encode()
+        if path in self.extra:
+            status, answer = self.extra[path]
+            return status, json.dumps(answer).encode()
         if path == "/v1/me/player/devices":
             return 200, json.dumps({"devices": self.devices}).encode()
         if path == "/v1/search":
@@ -134,6 +138,28 @@ class TestService(unittest.TestCase):
         self.http.token_status = 400
         self.assertIn("connecting again", self.sp.command("pause"))
         self.assertFalse(self.sp.connected())
+
+    def test_the_familys_artists_for_the_speech_hint(self):
+        self.connect()
+        a = lambda n: {"name": n}  # noqa: E731
+        self.http.extra = {
+            "/v1/me/top/artists": (200, {"items": [a("Shinedown"), a("Mötley Crüe")]}),
+            "/v1/me/following": (200, {"artists": {"items": [a("Tom Petty"), a("Shinedown")]}}),
+            "/v1/me/player/recently-played": (200, {"items": [{"track": {"artists": [a("Def Leppard"), a("Guest")]}}]}),
+        }
+        with mock.patch("sentinel.engine.spotify.threading.Thread") as thread:
+            self.assertEqual(self.sp.artists(), [])  # never waits: fetched in the background
+            thread.return_value.start.assert_called_once()
+        self.sp._fetch_artists()
+        self.assertEqual(self.sp.artists(), ["Shinedown", "Mötley Crüe", "Tom Petty", "Def Leppard"])
+
+    def test_artists_from_an_older_sign_in(self):
+        """Signed in before the permission existed: Spotify says 403, so no artists (and no error)."""
+        self.connect()
+        self.http.extra = {p: (403, {"error": {"status": 403, "message": "Insufficient client scope"}})
+                           for p in ("/v1/me/top/artists", "/v1/me/following", "/v1/me/player/recently-played")}
+        self.sp._fetch_artists()
+        self.assertEqual(self.sp.artists(), [])
 
     def test_the_artist_by_name_even_split_in_two(self):
         """2026-11-03: "play the artist Shinedown" was heard as "the artist's shine down" and played a playlist."""

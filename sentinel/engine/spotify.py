@@ -30,6 +30,10 @@ TOKEN_URL = "https://accounts.spotify.com/api/token"
 API_URL = "https://api.spotify.com/v1"
 REDIRECT_URI = "http://127.0.0.1:8888/callback"
 SCOPES = "user-read-playback-state user-modify-playback-state user-read-currently-playing"
+# The family's own artists, so the speech recogniser expects them ("Mötley Crüe" was heard as "monily crew").
+# Added 2026-11-03: an older sign-in lacks them until Spotify is connected again (artists() then gives none).
+SCOPES += " user-top-read user-follow-read user-read-recently-played"
+ARTISTS_EVERY = 24 * 3600.0
 NO_SUCH_SPEAKER = "I can't see a Spotify speaker called "  # the voice assistant offers the list after it
 # What people call the PC's own Spotify speaker (spotify_player.py) besides its name.
 _THIS_PC = re.compile(r"here|(this|the|that)? ?(speaker|computer|pc|desktop|office computer)")
@@ -115,6 +119,8 @@ class SpotifyService:
         self._now: Tuple[float, Dict[str, Any]] = (0.0, {})
         self._listener: Optional[http.server.HTTPServer] = None
         self.last_error = ""
+        self._artists: Tuple[float, List[str]] = (0.0, [])
+        self._artists_busy = False
 
     # ------------------------------------------------------------ sign-in
     def client_id(self) -> str:
@@ -271,6 +277,42 @@ class SpotifyService:
             err = data.get("error") if isinstance(data.get("error"), dict) else {}
             raise SpotifyError(status, err.get("reason") or err.get("message") or f"Spotify error {status}")
         return data
+
+    # ------------------------------------------------------------ the family's artists
+    def artists(self) -> List[str]:
+        """Names of the artists the family listens to most (top, followed, recently played), for the speech
+        recogniser's hint. Never waits: answers from what it has and refreshes daily in the background."""
+        at, names = self._artists
+        if self.connected() and time.time() - at > ARTISTS_EVERY and not self._artists_busy:
+            self._artists_busy = True
+            threading.Thread(target=self._fetch_artists, daemon=True, name="spotify-artists").start()
+        return list(names)
+
+    def _fetch_artists(self) -> None:
+        names: List[str] = []
+
+        def add(items):
+            for a in items or []:
+                name = (a or {}).get("name")
+                if name and name not in names:
+                    names.append(name)
+        try:
+            for path, params, pick in (
+                    ("/me/top/artists", {"limit": 20, "time_range": "medium_term"}, lambda d: d.get("items")),
+                    ("/me/top/artists", {"limit": 10, "time_range": "short_term"}, lambda d: d.get("items")),
+                    ("/me/following", {"type": "artist", "limit": 30}, lambda d: (d.get("artists") or {}).get("items")),
+                    ("/me/player/recently-played", {"limit": 30},
+                     lambda d: [a for i in d.get("items") or [] for a in ((i.get("track") or {}).get("artists") or [])[:1]])):
+                try:
+                    add(pick(self.api("GET", path, params)))
+                except SpotifyError as e:
+                    if e.status not in (401, 403):  # 403: signed in before the permission existed
+                        raise
+        except SpotifyError:
+            names = names or list(self._artists[1])
+        finally:
+            self._artists = (time.time(), names)
+            self._artists_busy = False
 
     # ------------------------------------------------------------ what's playing
     def now_playing(self, fresh: bool = False) -> Dict[str, Any]:
