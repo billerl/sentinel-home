@@ -520,5 +520,101 @@ class TestRemote(unittest.TestCase):
         self.assertEqual(self.client.get(f"/api/tv/{self.tv_id}/icon/3201808016802").status_code, 404)
 
 
+
+class FakeFireShell:
+    """What a Fire TV answers to the ADB shell commands FireTVDriver sends."""
+
+    def __init__(self):
+        self.awake, self.focus, self.commands = True, "de.ozerov.fully", []
+
+    def __call__(self, host, command, timeout=None):
+        self.commands.append(command)
+        if command.startswith("getprop ro.product.manufacturer"):
+            return "Amazon\nAFTEAMR311\nAlex's 2nd TV\nG000SERIAL00001\n"
+        if command.startswith("dumpsys power"):
+            return "  mWakefulness=" + ("Awake" if self.awake else "Asleep") + "\n"
+        if command.startswith("pm list packages -3"):
+            return ("package:de.ozerov.fully\npackage:com.netflix.ninja\n---\npackage:com.amazon.avod\n"
+                    "package:com.amazon.firebat\npackage:com.amazon.tv.launcher\npackage:com.droidlogic.factory\n"
+                    "package:de.ozerov.fully\npackage:com.netflix.ninja\n")
+        if command.startswith("dumpsys window"):
+            return f"  mCurrentFocus=Window{{7c9a212 u0 {self.focus}/{self.focus}.MainActivity}}\n"
+        if "KEYCODE_WAKEUP" in command and "monkey" not in command:
+            self.awake = True
+        if "KEYCODE_SLEEP" in command:
+            self.awake = False
+        return ""
+
+
+class TestFireTV(unittest.TestCase):
+    def setUp(self):
+        from sentinel.engine.fire_tv import FireTVDriver
+        self.dir = tempfile.mkdtemp(prefix="sentinel-fire-")
+        self.fire = FireTVDriver(self.dir)
+        self.shell = FakeFireShell()
+        self.fire._shell = self.shell
+        self.fire._scan = lambda: ["192.168.1.70"]
+        self.tv = FakeTV()
+        self.sw = SmartSwitches(self.dir, drivers=[FakeKasa(), self.tv, self.fire], clock=lambda: NOW)
+        self.sw.discover()
+        sleeps = [mock.patch("sentinel.engine.switches.time.sleep"), mock.patch("sentinel.engine.fire_tv.time.sleep")]
+        for p in sleeps:
+            p.start()
+            self.addCleanup(p.stop)
+        fire = next(s for s in self.sw.switches() if s.device.startswith("Fire") or s.model.startswith("Fire"))
+        self.assertTrue(self.sw.rename(fire.id, "Sentinel TV")[0])
+        self.fire_id = fire.id
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_found_with_its_real_screen_state(self):
+        fire = next(s for s in self.sw.switches() if s.id == self.fire_id)
+        self.assertEqual((fire.name, fire.icon, fire.on, fire.model), ("Sentinel TV", "tv", True, "Fire TV AFTEAMR311"))
+        self.assertTrue(self.fire_id.startswith("firetv-") and len(self.fire_id) == len("firetv-") + 12)
+        self.assertEqual(self.sw.command("turn off the sentinel tv", "voice"), "Okay, Sentinel TV off.")
+        self.assertIn("input keyevent KEYCODE_SLEEP", self.shell.commands)
+        self.assertFalse(next(s for s in self.sw.switches() if s.id == self.fire_id).on)
+        self.assertEqual(oct(os.stat(os.path.join(self.dir, "fire_tv.json")).st_mode & 0o777), "0o600")
+
+    def test_apps_are_what_people_open(self):
+        self.assertEqual(self.fire.apps("192.168.1.70"), {"de.ozerov.fully": "Sentinel live view",
+                                                          "com.netflix.ninja": "Netflix", "com.amazon.avod": "Prime Video"})
+
+    def test_commands_go_to_the_tv_named(self):
+        self.assertEqual(self.sw.command("open prime video on the sentinel tv", "voice"), "Okay, Prime Video on the Sentinel TV.")
+        self.assertIn("monkey -p com.amazon.avod", self.shell.commands[-1])
+        self.assertEqual(self.sw.command("put on Netflix", "voice"), "Okay, Netflix on the TV.")  # the plain TV: the Samsung
+        self.assertEqual(self.tv.calls[-1], ("launch", "11101200001"))
+        self.assertEqual(self.sw.command("turn the fire tv down", "voice"), "Okay, Sentinel TV quieter.")
+        self.assertIn("KEYCODE_VOLUME_DOWN", self.shell.commands[-1])
+        self.assertEqual(self.sw.command("what's on the sentinel tv", "telegram"), "Sentinel live view is on the Sentinel TV.")
+
+    def test_cameras_on_the_tv(self):
+        self.assertEqual(self.sw.command("put the cameras on the TV", "voice"), "Okay, showing the cameras on the Sentinel TV.")
+        self.assertIn("monkey -p de.ozerov.fully", self.shell.commands[-1])
+        self.assertEqual(self.sw.command("reload the cameras", "telegram"), "Okay, reloading the cameras on the Sentinel TV.")
+        self.assertTrue(any(c == "am force-stop de.ozerov.fully" for c in self.shell.commands))
+        self.assertTrue(self.sw.understands("show the live view on the sentinel tv"))
+        self.assertFalse(self.sw.understands("show the cameras"))  # no TV named: left to the camera questions
+
+    def test_remote(self):
+        v = self.sw.tv_view(self.fire_id)
+        self.assertTrue(v["live"])
+        self.assertNotIn("source", v["keys"])  # no such button on a Fire TV
+        self.assertIn("up", v["keys"])
+        self.assertEqual([a["name"] for a in v["apps"]], ["Netflix", "Prime Video"])  # the live view has its own buttons
+        self.assertEqual(self.sw.tv_key(self.fire_id, "source"), (False, "I don't know that button."))
+        self.assertTrue(self.sw.tv_key(self.fire_id, "ok")[0])
+        self.assertEqual(self.shell.commands[-1], "input keyevent KEYCODE_DPAD_CENTER")
+        self.assertTrue(self.sw.tv_type(self.fire_id, "judge judy; rm -rf /")[0])
+        self.assertEqual(self.shell.commands[-1], "input text judge%sjudy%srm%s-rf%s")  # no shell tricks get through
+        self.sw.tv_type(self.fire_id, "don't stop")
+        self.assertEqual(self.shell.commands[-1], "input text 'don'\"'\"'t%sstop'")
+        self.assertTrue(self.sw.tv_live(self.fire_id, reload=False)[0])
+        with self.assertRaises(ValueError):
+            self.fire.launch("192.168.1.70", "x; reboot")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -9,3 +9,4 @@ segno>=1.6  # QR code for signing in a TV from a phone (pure Python, BSD)
 faster-whisper>=1.2  # voice assistant: speech to text (CPU)
 openwakeword>=0.4  # voice assistant: "Hey Jarvis" wake word
 kokoro-onnx>=0.6  # most natural spoken replies ("Heart" voice); model in models/kokoro/
+adb-shell>=0.4.4  # Fire TV control over ADB (pure Python, Apache-2.0); without it Fire TVs are skipped

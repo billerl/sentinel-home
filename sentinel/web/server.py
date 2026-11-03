@@ -791,6 +791,8 @@ class WebServer:
                 return _result(*engine.switches.tv_open(tv_id, str(body.get("app") or "")[:40]))
             if action == "type":
                 return _result(*engine.switches.tv_type(tv_id, str(body.get("text") or "")[:100]))
+            if action == "live":
+                return _result(*engine.switches.tv_live(tv_id, body.get("reload") is True))
             return jsonify({"error": "unknown action"}), 404
 
         # ---- routines: "when this happens, do that" (sentinel/engine/routines.py) ----

@@ -182,7 +182,7 @@ _ASK = re.compile(r"^(?:is|are)\s+(.+?)\s+on or off$|^(?:is|are)\s+(.+?)\s+(?:on
                   re.IGNORECASE)
 COMMAND = re.compile(r"^turn (?:on|off) [\w' -]{1,40}$|^turn [\w' -]{1,40} (?:on|off)$", re.IGNORECASE)  # Claude's button
 # TVs: apps, volume, mute, "what's on". "Play ..." is left to Spotify.
-_TV = r"(?:the )?(?:tv|television)"
+_TV = r"(?:the )?(?:[\w']+ ){0,2}?(?:tv|television)"  # "the TV", "the Sentinel TV", "the fire TV"
 _TV_APP = re.compile(r"^(?:please )?(?:can you |could you )?(?:open|launch|start|put on|go to|switch to|turn on)\s+(.+?)"
                      r"(?:\s+on " + _TV + r")?(?:\s+please)?$", re.IGNORECASE)
 # "turn on the TV to Netflix", "turn the TV on to Hulu", "put the TV on YouTube TV", "switch the TV to Disney Plus"
@@ -191,6 +191,9 @@ _TV_TO = re.compile(r"^(?:please )?(?:can you |could you )?(?:turn|switch|put|ch
 _TV_VOLUME = re.compile(r"^(?:turn )?" + _TV + r"(?: volume)? (up|down)$|^turn (up|down) " + _TV + r"(?: volume)?$"
                         r"|^" + _TV + r" (louder|quieter)$", re.IGNORECASE)
 _TV_MUTE = re.compile(r"^(mute|unmute) " + _TV + r"$", re.IGNORECASE)
+_TV_LIVE = re.compile(r"^(?:put|show|bring up|switch)\s+(?:the )?(?:cameras?|camera view|live view|security cameras|sentinel)"
+                      r"\s+(?:on|to)\s+" + _TV + r"$|^(reload|refresh|restart)\s+(?:the )?(?:cameras?|camera view|live view)"
+                      r"(?:\s+on\s+" + _TV + r")?$", re.IGNORECASE)
 _TV_WHAT = re.compile(r"^what(?:'s| is) (?:on|playing on) " + _TV + r"$", re.IGNORECASE)
 VOLUME_STEPS = 3
 # The web remote's buttons -> the TV's key names (nothing else is sent).
@@ -217,6 +220,12 @@ class SmartSwitches:
             from sentinel.engine.samsung_tv import SamsungTVDriver
 
             drivers = [KasaDriver(), SamsungTVDriver(root)]
+            try:
+                from sentinel.engine.fire_tv import FireTVDriver
+
+                drivers.append(FireTVDriver(root))
+            except ImportError:  # adb-shell not installed: no Fire TVs
+                pass
         self._drivers = {d.kind: d for d in drivers}
         self._clock = clock
         self._lock = threading.Lock()
@@ -473,6 +482,20 @@ class SmartSwitches:
                 out.append((sw, self._drivers[dev["kind"]], dev["host"]))
         return out
 
+    @staticmethod
+    def _pick_tv(text: str, tvs: List[Tuple[Switch, Any, str]]) -> Tuple[Switch, Any, str]:
+        """The TV a command names ("the Sentinel TV", "the fire TV"), else the plain "TV" (a Samsung before a
+        Fire TV: 'turn the TV down' means the television)."""
+        said = set(_words(text))
+        named = [tv for tv in tvs if set(_words(tv[0].name)) - {"tv"} and set(_words(tv[0].name)) <= said]
+        if named:
+            return max(named, key=lambda tv: len(_words(tv[0].name)))
+        if "fire" in said:
+            fire = [tv for tv in tvs if tv[1].kind == "firetv"]
+            if fire:
+                return fire[0]
+        return sorted(tvs, key=lambda tv: tv[1].kind == "firetv")[0]
+
     def _find_app(self, words: str, driver, host: str) -> Optional[Tuple[str, str]]:
         wanted = _app_words(words)
         if not wanted:
@@ -491,7 +514,12 @@ class SmartSwitches:
         tvs = self._tvs()
         if not tvs:
             return None
-        tv = tvs[0]
+        tv = self._pick_tv(t, tvs)
+        m = _TV_LIVE.match(t)
+        if m:
+            live = [x for x in tvs if hasattr(x[1], "show_live") and x[1].live_app(x[2])]
+            if live:
+                return "live", ((tv if tv in live else live[0]), bool(m.group(1)))
         m = _TV_VOLUME.match(t)
         if m:
             way = next(g for g in m.groups() if g).lower()
@@ -519,6 +547,13 @@ class SmartSwitches:
         what, detail = parsed
         tv = detail[0] if what != "what" else detail
         sw, driver, host = tv
+        if what == "live":
+            try:
+                driver.show_live(host, reload=detail[1])
+            except (OSError, ValueError) as e:
+                return f"The {sw.name} didn't do it ({e})."
+            app_logger.log("info", "tv_live_view", tv=sw.name, reload=detail[1], source=source, component="switches", action="tv")
+            return f"Okay, {'reloading' if detail[1] else 'showing'} the cameras on the {sw.name}."
         if what == "no_app":
             return f"I couldn't find {detail[1]} on the {sw.name}. I can open its apps, like {', '.join(self.tv_apps()[:4])}."
         try:
@@ -554,7 +589,7 @@ class SmartSwitches:
         for _sw, driver, host in self._tvs():
             for name in driver.apps(host).values():
                 short = re.split(r"\s[-:]\s|:", name)[0].strip()
-                if short and short not in TV_SYSTEM_APPS and short not in out:
+                if short and short not in TV_SYSTEM_APPS and short != "Sentinel live view" and short not in out:
                     out.append(short)
         return out
 
@@ -569,12 +604,15 @@ class SmartSwitches:
         sw, driver, host = tv
         apps = [{"id": app_id, "name": re.split(r"\s[-:]\s|:", name)[0].strip()}
                 for app_id, name in driver.apps(host).items()]
-        return {"id": sw.id, "name": sw.name, "on": sw.on, "online": sw.online,
-                "apps": [a for a in apps if a["name"] not in TV_SYSTEM_APPS]}
+        supports = getattr(driver, "supports", lambda key: True)
+        live = hasattr(driver, "show_live") and driver.live_app(host) is not None
+        return {"id": sw.id, "name": sw.name, "on": sw.on, "online": sw.online, "kind": driver.kind,
+                "keys": [k for k, name in TV_KEYS.items() if supports(name)], "live": live,
+                "apps": [a for a in apps if a["name"] not in TV_SYSTEM_APPS and not (live and a["name"] == "Sentinel live view")]}
 
     def tv_key(self, switch_id: str, key: str) -> Tuple[bool, str]:
         tv = self._tv_for(switch_id)
-        if tv is None or key not in TV_KEYS:
+        if tv is None or key not in TV_KEYS or not getattr(tv[1], "supports", lambda k: True)(TV_KEYS[key]):
             return False, "I don't know that button."
         try:
             tv[1].press(tv[2], TV_KEYS[key])
@@ -612,6 +650,16 @@ class SmartSwitches:
         except (OSError, ValueError) as e:
             return False, f"The {tv[0].name} didn't take it ({e})."
         return True, "typed"
+
+    def tv_live(self, switch_id: str, reload: bool) -> Tuple[bool, str]:
+        tv = self._tv_for(switch_id)
+        if tv is None or not hasattr(tv[1], "show_live"):
+            return False, "That TV has no Sentinel live view."
+        try:
+            tv[1].show_live(tv[2], reload=reload)
+        except (OSError, ValueError) as e:
+            return False, f"The {tv[0].name} didn't do it ({e})."
+        return True, "reloaded" if reload else "showing"
 
     def tv_icon(self, switch_id: str, app_id: str) -> Optional[bytes]:
         tv = self._tv_for(switch_id)

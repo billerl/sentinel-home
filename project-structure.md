@@ -39,6 +39,7 @@ sentinel-home/                         # repository root
     │   ├── reminders.py               # "Remind me ..." -> Telegram message at that time (reminders.db)
     │   ├── switches.py                # Smart plugs/switches (Kasa, local protocol): Live page panel, voice, Telegram
     │   ├── samsung_tv.py              # Samsung TVs as a switch (Wake-on-LAN + power key), apps, volume, mute
+    │   ├── fire_tv.py                 # Fire TVs over ADB: switch, remote, apps, "put the cameras on the TV"
     │   ├── routines.py                # "When X, only if Y, then Z": check/describe, sunrise/sunset maths, runner (routines.db)
     │   ├── questions.py               # Telegram questions ("did anyone come by?", "is Kate home?")
     │   ├── queries.py                 # "videos <when>" parsing

@@ -352,8 +352,9 @@
                  background: radial-gradient(circle at 40% 30%, #3a1c1c, #1c0d0d); }
     .tvr-power.on { color: #fff; background: radial-gradient(circle at 40% 30%, #e04848, #8a1f1f); box-shadow: 0 0 14px rgba(255,70,70,0.45); }
     .tvr-x { background: none; border: 0; color: #7fb3c4; font-size: 1.3rem; padding: 6px 10px; cursor: pointer; }
-    .tvr-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0; }
-    .tvr-row.three { grid-template-columns: repeat(3, 1fr); }
+    .tvr-row { display: flex; gap: 8px; margin: 10px 0; }
+    .tvr-row > * { flex: 1; min-width: 0; }
+    .tvr-live .tvr-btn { border-color: #2a6f7e; color: #bff3ff; }
     .tvr-dpad { position: relative; width: 230px; height: 230px; margin: 16px auto; border-radius: 50%; touch-action: none;
                 background: radial-gradient(circle, #1d2c36 0 38%, #141f27 39% 100%); border: 1px solid #23343f;
                 box-shadow: inset 0 2px 10px rgba(0,0,0,0.6); }
@@ -560,6 +561,10 @@
         <div class="t"><b id="tvr-name">TV</b><small id="tvr-state"></small></div>
         <button type="button" class="tvr-x" onclick="closeRemote()" title="Close (Esc)">✕</button>
       </div>
+      <div class="tvr-row tvr-live" id="tvr-live" hidden>
+        <button type="button" class="tvr-btn" onclick="remoteLive(false)">📹 Show cameras</button>
+        <button type="button" class="tvr-btn" onclick="remoteLive(true)">↻ Reload cameras</button>
+      </div>
       <div class="tvr-row">
         <button type="button" class="tvr-btn" data-key="source">⇄ Input</button>
         <button type="button" class="tvr-btn" data-key="home">⌂ Home</button>
@@ -574,7 +579,7 @@
         <button type="button" class="tvr-btn down" data-key="down" data-repeat aria-label="Down">▼</button>
       </div>
       <div class="tvr-hint">Tap the arrows, or swipe anywhere on the circle</div>
-      <div class="tvr-row three">
+      <div class="tvr-row">
         <button type="button" class="tvr-btn" data-key="back">↩ Back</button>
         <button type="button" class="tvr-btn" data-key="info">ⓘ Info</button>
         <button type="button" class="tvr-btn" data-key="exit">⨯ Exit</button>
@@ -1096,7 +1101,7 @@
           e.onclick = function(ev) { ev.stopPropagation(); renameSwitch(s); };
           t.appendChild(b);
           t.appendChild(e);
-          if (s.icon === "tv" && s.id.indexOf("samsung-") === 0) {
+          if (s.icon === "tv" && /^(samsung|firetv)-/.test(s.id)) {
             var r = document.createElement("button");
             r.type = "button";
             r.className = "sw-remote";
@@ -1197,6 +1202,10 @@
         var v = await r.json();
         if (!r.ok) { remoteMsg(v.error || "That TV isn't answering."); return; }
         remoteShow(v);
+        document.querySelectorAll("#tvr [data-key]").forEach(function(b) {  // only the buttons this device has
+          b.style.display = !v.keys || v.keys.indexOf(b.dataset.key) >= 0 ? "" : "none";
+        });
+        document.getElementById("tvr-live").hidden = !v.live;
         v.apps.forEach(function(a) {
           var b = document.createElement("button");
           b.type = "button";
@@ -1256,6 +1265,11 @@
       if (!res.ok) { remoteMsg(res.data.error || "That didn't work."); return; }
       remoteMsg(a.name + " ✓", true);
       if (tvState && !tvState.on) remoteShow(Object.assign({}, tvState, { on: true }));
+    }
+    async function remoteLive(reload) {
+      remoteMsg(reload ? "Reloading the cameras…" : "Showing the cameras…", true);
+      var res = await switchPost("/api/tv/" + encodeURIComponent(tvId) + "/live", { reload: reload });
+      remoteMsg(res.ok ? (reload ? "Reloaded ✓" : "Cameras on ✓") : (res.data.error || "That didn't work."), res.ok);
     }
     async function remoteType() {
       var box = document.getElementById("tvr-text");

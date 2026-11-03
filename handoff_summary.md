@@ -258,6 +258,13 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   Web remote (grid.html `#tvr`, "Open remote" on the TV tile): `/api/tv/<id>` (+ `/key` from the TV_KEYS
   list, `/open`, `/type` = SendInputString, `/icon/<app>` = the TV's own icon via `ed.apps.icon`, cached in
   `recorded_videos/.tv_icons/`). Keys go over a kept-open connection (`_send`, closed after 60 s idle).
+- **Fire TVs** (`sentinel/engine/fire_tv.py`, third SmartSwitches driver, needs `adb-shell`): only ones with
+  ADB debugging on (port 5555; first connection = "Allow USB debugging?" on the TV; key in
+  `recorded_videos/.adb/`). Id = hash of the serial number (Fire OS hides its MAC from ADB). Real screen state
+  from `dumpsys power`; on/off = KEYCODE_WAKEUP/SLEEP; remote keys mapped from the Samsung names (`KEYS`,
+  `supports()` hides the rest in the remote); apps = `pm list packages -3` + known Amazon ones (`APP_NAMES`).
+  A Fire TV running Fully Kiosk (the live view) gets "Show/Reload cameras" (`show_live`) and "put the cameras
+  on the TV" / "reload the cameras". Commands name the TV ("on the Sentinel TV"); unnamed = the Samsung.
 - **Smart plugs and switches** (`sentinel/engine/switches.py`, known devices in `recorded_videos/switches.json`):
   Kasa plugs/power strips/wall switches over their local protocol (TCP/UDP 9999, XOR-scrambled JSON; no
   cloud, no new dependency). Found by UDP broadcast at start, every 15 min and on "Find new devices"; known
