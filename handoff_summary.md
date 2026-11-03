@@ -265,6 +265,10 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   `supports()` hides the rest in the remote); apps = `pm list packages -3` + known Amazon ones (`APP_NAMES`).
   A Fire TV running Fully Kiosk (the live view) gets "Show/Reload cameras" (`show_live`) and "put the cameras
   on the TV" / "reload the cameras". Commands name the TV ("on the Sentinel TV"); unnamed = the Samsung.
+- **Spotify on this PC is blocked by Spotify** (2026-11-03): it refuses audio keys to unofficial players
+  ("Spotify refused the audio key"; spotifyd 0.4.2 and go-librespot 0.10.5 both tried). `spotify_fallback_device`
+  (Settings > Spotify): music asked for on this PC is checked ~8 s after it starts (`_check_this_pc`) and, if not
+  playing there, moved to that speaker; this PC is then skipped for a day (`_pc_broken_until`).
 - **Sound cards** (`sentinel/audio/devices.py`, Settings > Audio): `voice_device` (mic, e.g.
   `plughw:CARD=USB,DEV=0` for a Jabra Speak 410: voice 29 dB above room noise vs 13 dB on the front mic jack,
   Whisper clearly better), `audio_device` (voice/chimes card) and `music_device` ("auto" = the PC's line-out when

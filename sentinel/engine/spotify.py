@@ -34,6 +34,12 @@ SCOPES = "user-read-playback-state user-modify-playback-state user-read-currentl
 # Added 2026-11-03: an older sign-in lacks them until Spotify is connected again (artists() then gives none).
 SCOPES += " user-top-read user-follow-read user-read-recently-played"
 ARTISTS_EVERY = 24 * 3600.0
+# This PC as a speaker (spotifyd) can stop being able to play: since late 2026 Spotify refuses audio keys to
+# unofficial players ("Spotify refused the audio key"; spotifyd and go-librespot alike, 2026-11-03). Music asked
+# for there is checked a few seconds after it starts, and if it isn't playing it moves to the speaker set as
+# "spotify_fallback_device"; this PC is then skipped for a day (and tried again after that).
+PC_CHECK_SECONDS = 6.0
+PC_BROKEN_FOR = 24 * 3600.0
 NO_SUCH_SPEAKER = "I can't see a Spotify speaker called "  # the voice assistant offers the list after it
 # What people call the PC's own Spotify speaker (spotify_player.py) besides its name.
 _THIS_PC = re.compile(r"here|(this|the|that)? ?(speaker|computer|pc|desktop|office computer)")
@@ -121,6 +127,9 @@ class SpotifyService:
         self.last_error = ""
         self._artists: Tuple[float, List[str]] = (0.0, [])
         self._artists_busy = False
+        self._pc_broken_until = 0.0
+        self._sleep = time.sleep
+        self._spawn = lambda fn: threading.Thread(target=fn, daemon=True, name="spotify-pc-check").start()
 
     # ------------------------------------------------------------ sign-in
     def client_id(self) -> str:
@@ -375,6 +384,45 @@ class SpotifyService:
                 or next((d for d in devices if preferred and _words(d.get("name")) == preferred), None)
                 or devices[0])
 
+    def _is_this_pc(self, device: Dict[str, Any]) -> bool:
+        return _words(device.get("name")) == _words(str(self.settings.get("spotify_speaker_name") or "Sentinel"))
+
+    def _fallback(self) -> Optional[Dict[str, Any]]:
+        name = str(self.settings.get("spotify_fallback_device") or "").strip()
+        if not name:
+            return None
+        return next((d for d in self.devices() if _words(d.get("name")) == _words(name)), None)
+
+    def _instead_of_this_pc(self, device: Dict[str, Any]) -> Dict[str, Any]:
+        """This PC, while it's known not to play: the fallback speaker instead (if one is set and on)."""
+        if self._is_this_pc(device) and time.time() < self._pc_broken_until:
+            return self._fallback() or device
+        return device
+
+    def _check_this_pc(self, device_id: str) -> None:
+        """A few seconds after music started on this PC: still there and moving? If not, the fallback speaker."""
+        def check() -> None:
+            try:
+                self._sleep(PC_CHECK_SECONDS)
+                first = self.api("GET", "/me/player") or {}
+                self._sleep(2.0)
+                second = self.api("GET", "/me/player") or {}
+                on_pc = all((p.get("device") or {}).get("id") == device_id for p in (first, second))
+                moving = second.get("is_playing") and (second.get("progress_ms") or 0) > (first.get("progress_ms") or 0)
+                if on_pc and moving:
+                    return
+                fallback = self._fallback()
+                if fallback is None:
+                    return
+                self._pc_broken_until = time.time() + PC_BROKEN_FOR
+                self.api("PUT", "/me/player", body={"device_ids": [fallback["id"]], "play": True})
+                app_logger.log("warning", "spotify_fallback", device=fallback.get("name"), component="spotify",
+                               action="play", error_message="this PC didn't play: moved to the fallback speaker")
+            except SpotifyError as e:
+                app_logger.log("warning", "spotify_fallback_failed", error_message=str(e), component="spotify",
+                               action="play")
+        self._spawn(check)
+
     def _search(self, query: str) -> Tuple[Optional[Dict[str, Any]], str]:
         """(what to play, how to describe it). "some jazz" -> a playlist; an artist's name -> the artist."""
         q = re.sub(r"^(some|a little|a bit of|any|the) ", "", query).strip()
@@ -465,8 +513,11 @@ class SpotifyService:
             device = self._pick_device(arg)
             if device is None:
                 return f"{NO_SUCH_SPEAKER}{arg}."
+            asked, device = device, self._instead_of_this_pc(device)
             self.api("PUT", "/me/player", body={"device_ids": [device["id"]], "play": True})
-            return f"Playing on {device['name']}."
+            if self._is_this_pc(device):
+                self._check_this_pc(device["id"])
+            return f"Playing on {device['name']}" + (f" ({asked['name']} can't play Spotify right now)." if device is not asked else ".")
         if action == "play":
             query, _, where = arg.partition(" @ ")
             device = self._pick_device(where)
@@ -476,8 +527,13 @@ class SpotifyService:
             what, described = self._search(query)
             if what is None:
                 return f"I couldn't find {query} on Spotify."
+            asked, device = device, self._instead_of_this_pc(device)
             self.api("PUT", "/me/player/play", {"device_id": device["id"]}, body=what)
             app_logger.log("info", "spotify_play", query=query[:100], device=device.get("name"),
                            component="spotify", action="play")
+            if self._is_this_pc(device):
+                self._check_this_pc(device["id"])
+            if device is not asked:
+                return f"Playing {described} on {device['name']} ({asked['name']} can't play Spotify right now)."
             return f"Playing {described}" + ("" if device.get("is_active") else f" on {device['name']}") + "."
         raise SpotifyError(400, f"unknown action {action}")

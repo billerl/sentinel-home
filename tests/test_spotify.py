@@ -74,7 +74,8 @@ class FakeSpotify:
         if path == "/v1/search":
             return 200, json.dumps(self.search).encode()
         if path == "/v1/me/player" and method == "GET":
-            return (200, json.dumps(self.player).encode()) if self.player else (204, b"")
+            player = self.player.pop(0) if isinstance(self.player, list) else self.player  # a list: one per call
+            return (200, json.dumps(player).encode()) if player else (204, b"")
         return 204, b""
 
 
@@ -138,6 +139,45 @@ class TestService(unittest.TestCase):
         self.http.token_status = 400
         self.assertIn("connecting again", self.sp.command("pause"))
         self.assertFalse(self.sp.connected())
+
+    def _with_this_pc(self):
+        self.connect()
+        self.http.devices += [{"id": "pc1", "name": "Sentinel", "type": "Speaker", "is_active": False},
+                              {"id": "es1", "name": "Alex's Echo Show", "type": "Speaker", "is_active": False}]
+        self.settings["spotify_fallback_device"] = "Alex's Echo Show"
+        self.http.search = {"artists": {"items": [_artist("Tom Petty", "spotify:artist:tp")]}}
+        self.sp._spawn = lambda fn: fn()  # check straight away, no thread
+        self.sp._sleep = lambda s: None
+
+    def transfers(self):
+        return [json.loads(b) for m, u, h, b in self.http.calls
+                if m == "PUT" and urllib.parse.urlparse(u).path == "/v1/me/player" and b]
+
+    def test_this_pc_that_cant_play_hands_over_to_the_fallback(self):
+        """2026-11-03: Spotify refuses audio keys to unofficial players, so music asked for on this PC was silent."""
+        self._with_this_pc()
+        stuck = {"is_playing": False, "progress_ms": 0, "device": {"id": "pc1"}}
+        self.http.player = [stuck, stuck]
+        self.assertEqual(self.sp.command("play", "tom petty @ sentinel"), "Playing Tom Petty on Sentinel.")
+        self.assertEqual(self.transfers(), [{"device_ids": ["es1"], "play": True}])  # moved to the Echo Show
+        said = self.sp.command("play", "tom petty @ here")  # for a day: straight to the Echo Show
+        self.assertEqual(said, "Playing Tom Petty on Alex's Echo Show (Sentinel can't play Spotify right now).")
+        self.assertEqual(self.last_play()[0]["device_id"], ["es1"])
+
+    def test_this_pc_that_plays_stays(self):
+        self._with_this_pc()
+        self.http.player = [{"is_playing": True, "progress_ms": 1000, "device": {"id": "pc1"}},
+                            {"is_playing": True, "progress_ms": 3000, "device": {"id": "pc1"}}]
+        self.sp.command("play", "tom petty @ sentinel")
+        self.assertEqual(self.transfers(), [])
+        self.assertEqual(self.sp._pc_broken_until, 0.0)
+
+    def test_no_fallback_set_just_stops(self):
+        self._with_this_pc()
+        self.settings["spotify_fallback_device"] = ""
+        self.http.player = [{"is_playing": False, "device": {"id": "pc1"}}] * 2
+        self.sp.command("play", "tom petty @ sentinel")
+        self.assertEqual(self.transfers(), [])
 
     def test_the_familys_artists_for_the_speech_hint(self):
         self.connect()
