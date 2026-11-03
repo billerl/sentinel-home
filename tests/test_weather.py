@@ -31,6 +31,26 @@ class TestWeather(unittest.TestCase):
         self.assertEqual(card["hours"][2]["icon"], "🌙")  # 7 pm, after dark
         self.assertEqual((card["sunrise"], card["sunset"], card["updated"]), ("7:55", "6:37", "4:45"))
 
+    def test_full_screen(self):
+        raw = {**RAW, "current": {**RAW["current"], "wind_direction_10m": 200, "pressure_msl": 1016.3, "visibility": 24140,
+                                  "uv_index": 2.6, "dew_point_2m": 41.2, "cloud_cover": 30},
+               "daily": {**RAW["daily"], "time": ["2026-10-25", "2026-10-26"], "temperature_2m_max": [69.5, 61],
+                         "temperature_2m_min": [40.2, 44], "weather_code": [0, 63], "precipitation_sum": [0, 0.42],
+                         "snowfall_sum": [0, 0], "uv_index_max": [4.1, 1.2], "sunrise": ["2026-10-25T07:55", "2026-10-26T07:56"],
+                         "sunset": ["2026-10-25T18:37", "2026-10-26T18:35"], "precipitation_probability_max": [60, 90]}}
+        full = WeatherService._card(raw, {"name": "Springfield, Ohio"}, "fahrenheit",
+                                    {"current": {"us_aqi": 42.4, "pm2_5": 6.21}, "hourly": {"us_aqi": [30, 55, None]}})["full"]
+        now = full["now"]
+        self.assertEqual((now["dir"], now["pressure"], now["pressure_unit"], now["visibility"], now["uv_words"]),
+                         ("S", 30.01, "inHg", 15.0, "Moderate"))  # 200° is from the south; 24 km is 15 miles
+        self.assertEqual([(d["name"], d["low"], d["high"], d["rain"], d["words"]) for d in full["days"]],
+                         [("Today", 40, 70, 60, "Clear"), ("Mon", 44, 61, 90, "Rain")])
+        self.assertEqual((full["days"][1]["precip"], full["days"][0]["uv_words"], full["days"][0]["sunset"]), (0.42, "Moderate", "6:37 pm"))
+        self.assertEqual(len(full["hours"]), 8)
+        self.assertEqual((full["hours"][5]["label"], full["hours"][5]["rain"], full["hours"][5]["words"]), ("9p", 60, "Light rain"))
+        self.assertEqual(full["air"], {"aqi": 42, "words": "Good", "pm25": 6.2, "max_today": 55})
+        self.assertIsNone(WeatherService._card(raw, {"name": "x"}, "fahrenheit")["full"]["air"])  # air service down: still a card
+
     def test_not_configured_makes_no_requests(self):
         with mock.patch.object(weather, "_get_json") as get:
             self.assertEqual(WeatherService({}).current(), {"configured": False})

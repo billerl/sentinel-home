@@ -73,7 +73,7 @@
     }
 
     /* Weather fills the grid's spare cell (3 cameras in a 2x2 grid). Sizes follow the tile. */
-    .tile.weather { cursor: default; container-type: size; background: linear-gradient(160deg, #0b2233, #05121c);
+    .tile.weather { cursor: pointer; container-type: size; background: linear-gradient(160deg, #0b2233, #05121c);
                     color: #cfefff; justify-content: center; gap: 3cqh; padding: 9cqh 5cqw 4cqh; }
     .tile.weather[hidden] { display: none; }
     .wx-top { display: flex; align-items: center; gap: 3cqw; }
@@ -110,6 +110,91 @@
     .tile.weather.fam .wx-temp { font-size: 17cqh; }
     .tile.weather.fam .wx-clock .t { font-size: 17cqh; }
     .tile.weather.fam .wx-hours div { padding: 1cqh 0; gap: 0.3cqh; }
+    .tile.weather:focus-visible { outline: 3px solid #fff; outline-offset: -3px; }
+
+    /* ---- Full-screen weather (tap the weather tile) ---- */
+    #wxf { position: fixed; inset: 0; z-index: 1100; display: none; overflow-y: auto; color: #d9f6ff;
+           background: radial-gradient(120% 70% at 20% 0%, #12354a, #06121b 60%, #040a10); scrollbar-color: #1f3a44 transparent; }
+    #wxf.open { display: block; }
+    .wxf-wrap { max-width: 1500px; margin: 0 auto; padding: 18px 24px 28px; display: grid; gap: 18px;
+                grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+                grid-template-areas: "head head" "now days" "tiles days" "hours hours"; }
+    .wxf-head { grid-area: head; display: flex; align-items: center; gap: 12px; }
+    .wxf-head h2 { margin: 0; flex: 1; font-size: 1.15rem; font-weight: 600; color: #fff; }
+    .wxf-head h2 small { font-weight: 400; color: #7fb3c4; font-size: 0.8rem; margin-left: 8px; }
+    .wxf-x { background: rgba(255,255,255,0.06); border: 1px solid #23343f; color: #d9f6ff; border-radius: 12px;
+             font: inherit; font-size: 1rem; padding: 8px 16px; cursor: pointer; }
+    .wxf-x:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+    .wxf-card { background: rgba(255,255,255,0.045); border: 1px solid rgba(127,232,255,0.12); border-radius: 18px; padding: 16px 18px; }
+    .wxf-card h3 { margin: 0 0 10px; font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: #7fb3c4; font-weight: 600; }
+    .wxf-now { grid-area: now; display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+    .wxf-now .ic { font-size: 5rem; line-height: 1; }
+    .wxf-now .t { font-size: 5.2rem; font-weight: 600; color: #fff; line-height: 1; letter-spacing: -0.03em; }
+    .wxf-now .w { display: flex; flex-direction: column; gap: 6px; font-size: 1.05rem; }
+    .wxf-now .w b { font-size: 1.5rem; color: #fff; }
+    .wxf-now .w span { color: #a9d3e2; }
+    .wxf-clock { margin-left: auto; text-align: right; line-height: 1; white-space: nowrap; }
+    .wxf-clock .t { font-size: 5.2rem; font-weight: 600; color: #fff; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+    .wxf-clock .ap { font-size: 1.4rem; color: #9fd3ee; margin-left: 0.25em; }
+    .wxf-clock .d { display: block; font-size: 1rem; color: #9fd3ee; margin-top: 8px; }
+    .wxf-tiles { grid-area: tiles; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .wxf-tile { background: rgba(255,255,255,0.045); border: 1px solid rgba(127,232,255,0.1); border-radius: 14px; padding: 12px 14px; min-width: 0; }
+    .wxf-tile .k { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: #7fb3c4; }
+    .wxf-tile .v { font-size: 1.45rem; font-weight: 600; color: #fff; margin-top: 4px; display: flex; align-items: center; gap: 8px; }
+    .wxf-tile .v small { font-size: 0.8rem; font-weight: 400; color: #a9d3e2; }
+    .wxf-tile .s { font-size: 0.8rem; color: #a9d3e2; margin-top: 2px; }
+    .wxf-arrow { display: inline-block; font-size: 1.1rem; color: #7fe8ff; }
+    .wxf-days { grid-area: days; }
+    .wxf-day { display: grid; grid-template-columns: 4.2em 2.2em 3.6em 2.6em minmax(60px, 1fr) 2.6em; align-items: center; gap: 10px;
+               padding: 9px 0; border-top: 1px solid rgba(255,255,255,0.06); font-size: 1.02rem; }
+    .wxf-day:first-of-type { border-top: 0; }
+    .wxf-day .n { color: #fff; font-weight: 600; }
+    .wxf-day .ic { font-size: 1.5rem; text-align: center; }
+    .wxf-day .r { color: #7cc4ff; font-size: 0.85rem; }
+    .wxf-day .lo { color: #a9d3e2; text-align: right; }
+    .wxf-day .hi { color: #fff; font-weight: 600; }
+    .wxf-day .x { grid-column: 1 / -1; font-size: 0.78rem; color: #7f9aa6; margin-top: -4px; }
+    .wxf-range { position: relative; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.08); }
+    .wxf-range i { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: #7fe8ff; }
+    .wxf-range b { position: absolute; top: -3px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%;
+                   background: #fff; box-shadow: 0 0 0 2px #06121b; }
+    .wxf-hours { grid-area: hours; position: relative; }
+    .wxf-chart { position: relative; }
+    .wxf-chart svg { display: block; width: 100%; overflow: visible; }
+    .wxf-chart text { fill: #7f9aa6; font-size: 12px; }
+    .wxf-chart .lbl { fill: #fff; font-size: 13px; font-weight: 600; }
+    .wxf-tip { position: absolute; top: 0; pointer-events: none; background: #0d1d27; border: 1px solid #2a4b59; border-radius: 10px;
+               padding: 8px 10px; font-size: 0.82rem; line-height: 1.45; color: #d9f6ff; white-space: nowrap; display: none; z-index: 2;
+               box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+    .wxf-tip b { color: #fff; }
+    .wxf-note { font-size: 0.75rem; color: #6f8f9c; margin-top: 8px; }
+    /* A TV (a Fire TV's page is ~960x540): everything on one screen, no scrolling with a remote */
+    @media (min-width: 760px) and (max-height: 640px) {
+      .wxf-wrap { padding: 10px 18px 12px; gap: 10px; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
+      .wxf-head h2 { font-size: 1rem; }
+      .wxf-x { padding: 4px 12px; font-size: 0.85rem; }
+      .wxf-card { padding: 10px 12px; border-radius: 12px; }
+      .wxf-card h3 { margin-bottom: 4px; font-size: 0.68rem; }
+      .wxf-now { gap: 12px; flex-wrap: nowrap; }
+      .wxf-now { padding: 8px 14px; }
+      .wxf-now .ic { font-size: 3rem; } .wxf-now .t, .wxf-clock .t { font-size: 4rem; }  /* as big as on the tile: read across the room */
+      .wxf-clock .ap { font-size: 1rem; } .wxf-clock .d { font-size: 0.8rem; margin-top: 4px; }
+      .wxf-now .w { gap: 2px; font-size: 0.8rem; } .wxf-now .w b { font-size: 1.05rem; }
+      .wxf-now .wx-windy, .wxf-tile .s:empty { display: none; }
+      .wxf-tiles { gap: 6px; }
+      .wxf-tile { padding: 6px 9px; border-radius: 10px; }
+      .wxf-tile .k { font-size: 0.6rem; } .wxf-tile .v { font-size: 1.05rem; margin-top: 1px; } .wxf-tile .s { font-size: 0.66rem; }
+      .wxf-day { padding: 3px 0; font-size: 0.85rem; gap: 6px; } .wxf-day .ic { font-size: 1.05rem; } .wxf-day .x { display: none; }
+      .wxf-note { display: none; }
+    }
+    @media (max-width: 900px) {
+      .wxf-clock .t { font-size: 3.8rem; }
+      .wxf-day { grid-template-columns: 3.4em 1.8em 3.6em 2.3em minmax(30px, 1fr) 2.3em; gap: 6px; }
+      .wxf-wrap { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "now" "tiles" "hours" "days"; padding: 12px 14px 24px;
+                  padding-top: calc(12px + env(safe-area-inset-top, 0px)); }
+      .wxf-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .wxf-now .ic { font-size: 3.6rem; } .wxf-now .t { font-size: 3.8rem; }
+    }
 
     #focus-overlay {
       display: none;
@@ -554,6 +639,17 @@
     </div>
   </aside>
 
+  <div id="wxf" role="dialog" aria-modal="true" aria-label="Weather forecast">
+    <div class="wxf-wrap">
+      <div class="wxf-head"><h2 id="wxf-title">Weather</h2><button type="button" class="wxf-x" id="wxf-close" onclick="closeWeatherFull()">✕ Close</button></div>
+      <div class="wxf-card wxf-now" id="wxf-now"></div>
+      <div class="wxf-tiles" id="wxf-tiles"></div>
+      <div class="wxf-card wxf-days"><h3>Next 7 days</h3><div id="wxf-days"></div></div>
+      <div class="wxf-card wxf-hours"><h3>Next 48 hours</h3><div class="wxf-chart" id="wxf-chart"></div>
+        <div class="wxf-note">Hover or tap the chart for that hour's details.</div></div>
+    </div>
+  </div>
+
   <div id="tvr" role="dialog" aria-modal="true" aria-label="TV remote" onclick="if (event.target === this) closeRemote()">
     <div class="tvr-panel">
       <div class="tvr-head">
@@ -807,9 +903,175 @@
         esc(now.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })) + "</span>";
     }
     setInterval(function() {
-      var c = weatherTile.querySelector(".wx-clock");
-      if (c) { var html = clockHtml(); if (c.innerHTML !== html) c.innerHTML = html; }
+      var html = clockHtml();
+      document.querySelectorAll(".wx-clock, .wxf-clock").forEach(function(c) { if (c.innerHTML !== html) c.innerHTML = html; });
     }, 5000);
+
+    // ---------------- Full-screen weather ----------------
+    var WXF_IDLE_MS = 2 * 60 * 1000;  // a TV showing the cameras goes back to them by itself
+    var wxfTimer = null;
+    weatherTile.tabIndex = 0;
+    weatherTile.setAttribute("role", "button");
+    weatherTile.setAttribute("aria-label", "Open the full weather forecast");
+    weatherTile.addEventListener("click", function(e) {
+      if (e.target.closest("a")) return;  // a family member's name opens their map instead
+      openWeatherFull();
+    });
+    weatherTile.addEventListener("keydown", function(e) {
+      if ((e.key === "Enter" || e.key === " ") && !e.target.closest("a")) { e.preventDefault(); openWeatherFull(); }
+    });
+    function weatherFullOpen() { return document.getElementById("wxf").classList.contains("open"); }
+    function wxfPoke() {
+      clearTimeout(wxfTimer);
+      wxfTimer = setTimeout(function() { if (weatherFullOpen()) closeWeatherFull(); }, WXF_IDLE_MS);
+    }
+    function openWeatherFull() {
+      if (!weather || !weather.full) return;
+      var box = document.getElementById("wxf");
+      box.classList.add("open");
+      box.scrollTop = 0;
+      renderWeatherFull();
+      if (location.hash !== "#weather") history.pushState({ wxf: 1 }, "", "#weather");  // Back (phone, Fire TV) closes it
+      document.getElementById("wxf-close").focus();
+      wxfPoke();
+    }
+    function closeWeatherFull(fromHistory) {
+      if (!weatherFullOpen()) return;
+      document.getElementById("wxf").classList.remove("open");
+      clearTimeout(wxfTimer);
+      if (!fromHistory && location.hash === "#weather") history.back();
+      weatherTile.focus({ preventScroll: true });
+    }
+    window.addEventListener("popstate", function() { if (location.hash !== "#weather") closeWeatherFull(true); });
+    ["pointerdown", "keydown", "wheel", "touchmove"].forEach(function(t) {
+      document.getElementById("wxf").addEventListener(t, wxfPoke, { passive: true });
+    });
+    document.addEventListener("keydown", function(e) {
+      if (e.key === "Escape" && weatherFullOpen()) { closeWeatherFull(); e.stopImmediatePropagation(); }
+    }, true);
+    window.addEventListener("resize", function() { if (weatherFullOpen()) renderWeatherChart(); });
+
+    function renderWeatherFull() {
+      var w = weather, f = w.full, n = f.now, deg = "°";
+      document.getElementById("wxf-title").innerHTML = "Weather — " + esc(w.place) + "<small>Updated " + esc(w.updated) + "</small>";
+      var today = f.days[0] || {};
+      document.getElementById("wxf-now").innerHTML =
+        '<div class="ic">' + esc(w.icon) + '</div><div class="t">' + esc(w.temp) + deg + '</div>' +
+        '<div class="w"><b>' + esc(w.words) + '</b><span>Feels like ' + esc(w.feels) + deg + '</span>' +
+        '<span>High ' + esc(w.high) + deg + ' · Low ' + esc(w.low) + deg + (w.rain_today ? ' · ☔ ' + esc(w.rain_today) + '% today' : '') + '</span>' +
+        (w.windy ? '<span class="wx-windy">Windy: expect motion clips from trees.</span>' : '') + '</div>' +
+        '<div class="wxf-clock">' + clockHtml() + '</div>';
+      function tile(k, v, sub) {
+        return '<div class="wxf-tile"><div class="k">' + k + '</div><div class="v">' + v + '</div>' + (sub ? '<div class="s">' + sub + '</div>' : '') + '</div>';
+      }
+      var arrow = n.dir_deg == null ? "" : '<span class="wxf-arrow" style="transform: rotate(' + (n.dir_deg + 180) + 'deg)" aria-hidden="true">↑</span>';
+      var vis = n.visibility == null ? "–" : (n.visibility >= 10 && n.visibility_unit === "mi" ? "10+" : esc(n.visibility));
+      var html = tile("Wind", arrow + esc(n.wind) + "<small>mph</small>", "from " + esc(n.dir || "–") + (n.gusts > n.wind + 4 ? " · gusts " + esc(n.gusts) : "")) +
+        tile("Humidity", esc(n.humidity) + "<small>%</small>", "dew point " + esc(n.dew) + deg) +
+        tile("UV index", esc(n.uv == null ? "–" : n.uv), esc(n.uv_words) + (today.uv != null ? " · top " + esc(today.uv) : "")) +
+        (f.air ? tile("Air quality", esc(f.air.aqi) + "<small>US AQI</small>", esc(f.air.words) + (f.air.max_today != null ? " · up to " + esc(f.air.max_today) : "")) : "") +
+        tile("Pressure", esc(n.pressure == null ? "–" : n.pressure) + "<small>" + esc(n.pressure_unit) + "</small>", "") +
+        tile("Visibility", vis + "<small>" + esc(n.visibility_unit) + "</small>", "") +
+        tile("Clouds", esc(n.clouds) + "<small>%</small>", "") +
+        tile("Sun", '<span style="font-size:1.05rem">🌅 ' + esc(today.sunrise) + "</span>", "🌇 sets " + esc(today.sunset));
+      document.getElementById("wxf-tiles").innerHTML = html;
+      var lows = f.days.map(function(d) { return d.low; }), highs = f.days.map(function(d) { return d.high; });
+      var min = Math.min.apply(null, lows), max = Math.max.apply(null, highs), span = Math.max(1, max - min);
+      document.getElementById("wxf-days").innerHTML = f.days.map(function(d, i) {
+        var left = (d.low - min) / span * 100, width = Math.max(2, (d.high - d.low) / span * 100);
+        var dot = i === 0 && w.temp != null ? '<b style="left:' + Math.min(100, Math.max(0, (w.temp - min) / span * 100)) + '%" title="Now ' + esc(w.temp) + deg + '"></b>' : "";
+        var extra = [];
+        if (d.precip > 0) extra.push(esc(d.precip) + " " + esc(n.precip_unit) + " rain");
+        if (d.snow > 0) extra.push(esc(d.snow) + " " + esc(n.snow_unit) + " snow");
+        extra.push("wind " + esc(d.wind) + (d.gusts > d.wind + 4 ? "–" + esc(d.gusts) : "") + " mph " + esc(d.dir));
+        if (d.uv != null) extra.push("UV " + esc(d.uv));
+        return '<div class="wxf-day" title="' + esc(d.words) + '"><span class="n">' + esc(d.name) + '</span><span class="ic">' + esc(d.icon) + '</span>' +
+          '<span class="r">' + (d.rain >= 10 ? "☔ " + esc(d.rain) + "%" : "") + '</span><span class="lo">' + esc(d.low) + deg + '</span>' +
+          '<span class="wxf-range"><i style="left:' + left + '%;width:' + width + '%"></i>' + dot + '</span><span class="hi">' + esc(d.high) + deg + '</span>' +
+          '<span class="x">' + esc(d.words) + " · " + extra.join(" · ") + '</span></div>';
+      }).join("");
+      renderWeatherChart();
+    }
+
+    // The next 48 hours: temperature as a line, rain chance as bars underneath (two charts on one time axis,
+    // never two scales on one chart); hover/tap for that hour.
+    function renderWeatherChart() {
+      var box = document.getElementById("wxf-chart"), f = weather && weather.full;
+      if (!f || !f.hours.length) { box.innerHTML = ""; return; }
+      var tv = window.innerWidth >= 760 && window.innerHeight <= 640;  // the compact one-screen layout
+      var hrs = f.hours, W = Math.max(320, box.clientWidth), padL = 34, padR = 10, top = 22,
+          H1 = tv ? 58 : 170, gap = tv ? 24 : 34, H2 = tv ? 20 : 54;
+      var H = top + H1 + gap + H2 + 22, step = (W - padL - padR) / (hrs.length - 1);
+      var temps = hrs.map(function(h) { return h.temp; }), tmin = Math.min.apply(null, temps), tmax = Math.max.apply(null, temps);
+      var lo = Math.floor((tmin - 2) / 5) * 5, hi = Math.ceil((tmax + 2) / 5) * 5;
+      function x(i) { return padL + i * step; }
+      function y(t) { return top + (hi - t) / (hi - lo) * H1; }
+      var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" height="' + H + '" role="img" aria-label="Temperature and rain chance, next 48 hours">';
+      [lo, (lo + hi) / 2, hi].forEach(function(t) {  // recessive grid: three lines
+        svg += '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y(t) + '" y2="' + y(t) + '" stroke="rgba(255,255,255,0.07)"/>' +
+               '<text x="' + (padL - 6) + '" y="' + (y(t) + 4) + '" text-anchor="end">' + Math.round(t) + '°</text>';
+      });
+      hrs.forEach(function(h, i) {
+        if (i > 0 && h.t.slice(11, 13) === "00") {  // midnight: the day's name
+          var dn = new Date(h.day + "T12:00").toLocaleDateString([], { weekday: "short" });
+          svg += '<line x1="' + x(i) + '" x2="' + x(i) + '" y1="' + (top - 14) + '" y2="' + (H - 18) + '" stroke="rgba(127,232,255,0.22)" stroke-dasharray="3 4"/>' +
+                 '<text x="' + (x(i) + 5) + '" y="' + (top - 6) + '" style="fill:#a9d3e2">' + esc(dn) + '</text>';
+        }
+        if (i % (step * 3 < 36 ? 6 : 3) === 0) svg += '<text x="' + x(i) + '" y="' + (H - 4) + '" text-anchor="middle">' + esc(h.label) + '</text>';
+      });
+      var path = hrs.map(function(h, i) { return (i ? "L" : "M") + x(i).toFixed(1) + " " + y(h.temp).toFixed(1); }).join(" ");
+      svg += '<defs><linearGradient id="wxf-g" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#7fe8ff" stop-opacity="0.22"/>' +
+             '<stop offset="1" stop-color="#7fe8ff" stop-opacity="0"/></linearGradient></defs>' +
+             '<path d="' + path + ' L' + x(hrs.length - 1) + ' ' + (top + H1) + ' L' + x(0) + ' ' + (top + H1) + ' Z" fill="url(#wxf-g)"/>' +
+             '<path d="' + path + '" fill="none" stroke="#7fe8ff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+      // direct labels: only the warmest and coldest hours
+      [temps.indexOf(tmax), temps.indexOf(tmin)].forEach(function(i, k) {
+        svg += '<circle cx="' + x(i) + '" cy="' + y(temps[i]) + '" r="4" fill="#7fe8ff" stroke="#06121b" stroke-width="2"/>' +
+               '<text class="lbl" x="' + Math.min(W - padR - 14, Math.max(padL + 16, x(i))) + '" y="' + (y(temps[i]) + (k ? 18 : -9)) +
+               '" text-anchor="middle">' + temps[i] + '°</text>';
+      });
+      var by = top + H1 + gap;  // rain chance, 0-100%
+      svg += '<text x="' + padL + '" y="' + (by - 8) + '" style="fill:#7cc4ff">Rain chance</text>' +
+             '<line x1="' + padL + '" x2="' + (W - padR) + '" y1="' + (by + H2) + '" y2="' + (by + H2) + '" stroke="rgba(255,255,255,0.1)"/>' +
+             '<text x="' + (padL - 6) + '" y="' + (by + 4) + '" text-anchor="end">100%</text>';
+      var bw = Math.max(2, step - 2);
+      hrs.forEach(function(h, i) {
+        if (!h.rain) return;
+        var bh = h.rain / 100 * H2;
+        svg += '<rect x="' + (x(i) - bw / 2) + '" y="' + (by + H2 - bh) + '" width="' + bw + '" height="' + bh + '" rx="' + Math.min(2, bw / 2) + '" fill="#7cc4ff" opacity="0.85"/>';
+      });
+      svg += '<line id="wxf-cross" x1="0" x2="0" y1="' + (top - 4) + '" y2="' + (by + H2) + '" stroke="rgba(255,255,255,0.5)" visibility="hidden"/>' +
+             '<circle id="wxf-dot" r="5" fill="#fff" stroke="#06121b" stroke-width="2" visibility="hidden"/>' +
+             '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="transparent" id="wxf-hit"/></svg>';
+      box.innerHTML = svg + '<div class="wxf-tip" id="wxf-tip"></div>';
+      var hit = document.getElementById("wxf-hit"), tip = document.getElementById("wxf-tip");
+      function show(ev) {
+        var rect = box.getBoundingClientRect(), px = (ev.clientX - rect.left) * W / rect.width;
+        var i = Math.max(0, Math.min(hrs.length - 1, Math.round((px - padL) / step))), h = hrs[i];
+        document.getElementById("wxf-cross").setAttribute("x1", x(i));
+        document.getElementById("wxf-cross").setAttribute("x2", x(i));
+        document.getElementById("wxf-cross").setAttribute("visibility", "visible");
+        var dot = document.getElementById("wxf-dot");
+        dot.setAttribute("cx", x(i)); dot.setAttribute("cy", y(h.temp)); dot.setAttribute("visibility", "visible");
+        var day = new Date(h.day + "T12:00").toLocaleDateString([], { weekday: "short" });
+        tip.innerHTML = '<b>' + esc(day) + ' ' + esc(h.label) + '</b> ' + esc(h.icon) + ' ' + esc(h.words) + '<br>' +
+          '<b>' + esc(h.temp) + '°</b> · feels ' + esc(h.feels) + '°<br>☔ ' + esc(h.rain) + '%' +
+          (h.precip > 0 ? ' · ' + esc(h.precip) + ' ' + esc(f.now.precip_unit) : '') + '<br>💨 ' + esc(h.wind) + ' mph ' + esc(h.dir) +
+          (h.gusts > h.wind + 4 ? ', gusts ' + esc(h.gusts) : '') + ' · 💧 ' + esc(h.humidity) + '%';
+        tip.style.display = "block";
+        var left = x(i) * rect.width / W + 12;
+        if (left + tip.offsetWidth > rect.width) left = x(i) * rect.width / W - tip.offsetWidth - 12;
+        tip.style.left = Math.max(0, left) + "px";
+      }
+      function hide() {
+        tip.style.display = "none";
+        document.getElementById("wxf-cross").setAttribute("visibility", "hidden");
+        document.getElementById("wxf-dot").setAttribute("visibility", "hidden");
+      }
+      hit.addEventListener("pointermove", show);
+      hit.addEventListener("pointerdown", show);
+      hit.addEventListener("pointerleave", function(e) { if (e.pointerType === "mouse") hide(); });
+    }
 
     async function loadWeather() {
       var next = 10 * 60 * 1000;
@@ -819,6 +1081,7 @@
           weather = await r.json();
           if (weather.loading) next = 3000;
           renderWeather();
+          if (weatherFullOpen()) renderWeatherFull();
           layoutGrid();
         }
       } catch (e) { next = 60 * 1000; }

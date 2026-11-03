@@ -1,5 +1,6 @@
 """
-Weather for the live grid's spare tile (3 cameras in a 2x2 grid leave one empty).
+Weather for the live grid's spare tile (3 cameras in a 2x2 grid leave one empty), and its full-screen
+view (tap the tile): now in detail, 48 hours, 7 days and the air quality.
 
 From Open-Meteo: free, no account or key, and it is only sent the town/ZIP's rough
 coordinates. The server fetches it (at most every 10 minutes, shared by every
@@ -17,9 +18,15 @@ from sentinel.logging_utils import app_logger
 
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+AIR_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"  # also free, no key
 REFRESH_SECONDS = 10 * 60
 RETRY_SECONDS = 2 * 60
 WINDY_MPH = 20  # gusts this strong set trees and bushes moving: expect motion clips
+COMPASS = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+# US AQI bands (EPA): upper bound -> words
+AQI_BANDS = ((50, "Good"), (100, "Moderate"), (150, "Unhealthy for sensitive groups"), (200, "Unhealthy"),
+             (300, "Very unhealthy"), (10_000, "Hazardous"))
+UV_BANDS = ((2, "Low"), (5, "Moderate"), (7, "High"), (10, "Very high"), (99, "Extreme"))
 
 # WMO weather codes -> (words, day icon, night icon)
 _CODES: Dict[int, Tuple[str, str, str]] = {
@@ -108,12 +115,22 @@ class WeatherService:
             raw = _get_json(FORECAST_URL, {
                 "latitude": place["lat"], "longitude": place["lon"], "timezone": "auto",
                 "current": "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,"
-                           "wind_speed_10m,wind_gusts_10m,is_day,precipitation",
-                "hourly": "temperature_2m,weather_code,precipitation_probability,is_day",
-                "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset",
-                "temperature_unit": units, "wind_speed_unit": "mph", "forecast_days": 2, "forecast_hours": 12,
+                           "wind_speed_10m,wind_gusts_10m,wind_direction_10m,is_day,precipitation,pressure_msl,"
+                           "cloud_cover,dew_point_2m,visibility,uv_index",
+                "hourly": "temperature_2m,apparent_temperature,weather_code,precipitation_probability,precipitation,"
+                          "wind_speed_10m,wind_gusts_10m,wind_direction_10m,relative_humidity_2m,uv_index,is_day",
+                "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,"
+                         "precipitation_sum,snowfall_sum,wind_speed_10m_max,wind_gusts_10m_max,"
+                         "wind_direction_10m_dominant,uv_index_max,sunrise,sunset",
+                "temperature_unit": units, "wind_speed_unit": "mph", "forecast_days": 7, "forecast_hours": 48,
+                "precipitation_unit": "mm" if units == "celsius" else "inch",
             })
-            data = self._card(raw, place, units)
+            try:  # the air quality is a separate service: the card works without it
+                air = _get_json(AIR_URL, {"latitude": place["lat"], "longitude": place["lon"], "timezone": "auto",
+                                          "current": "us_aqi,pm2_5", "hourly": "us_aqi", "forecast_days": 1})
+            except Exception:
+                air = {}
+            data = self._card(raw, place, units, air)
             data["key"] = (query, units)
             with self._lock:
                 self._place, self._data, self._fetched_at = place, data, time.time()
@@ -141,7 +158,7 @@ class WeatherService:
         return {"query": query, "name": name, "lat": r["latitude"], "lon": r["longitude"]}
 
     @staticmethod
-    def _card(raw: Dict[str, Any], place: Dict[str, Any], units: str) -> Dict[str, Any]:
+    def _card(raw: Dict[str, Any], place: Dict[str, Any], units: str, air: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         cur, hourly, daily = raw.get("current") or {}, raw.get("hourly") or {}, raw.get("daily") or {}
         is_day = bool(cur.get("is_day", 1))
         words, icon = describe_code(cur.get("weather_code"), is_day)
@@ -172,4 +189,69 @@ class WeatherService:
             "sunset": hhmm((daily.get("sunset") or [""])[0]),
             "hours": hours,
             "updated": hhmm(cur.get("time") or ""),
+            "full": _full(raw, air or {}, units),
         }
+
+
+def _band(value: Optional[float], bands) -> str:
+    return next((words for top, words in bands if value is not None and value <= top), "")
+
+
+def _compass(degrees: Optional[float]) -> str:
+    return COMPASS[int((degrees % 360) / 45 + 0.5) % 8] if degrees is not None else ""
+
+
+def _full(raw: Dict[str, Any], air: Dict[str, Any], units: str) -> Dict[str, Any]:
+    """The full-screen view: now in detail, the next 48 hours, 7 days, the air quality."""
+    cur, hourly, daily = raw.get("current") or {}, raw.get("hourly") or {}, raw.get("daily") or {}
+    metric = units == "celsius"
+
+    def col(src: Dict[str, Any], key: str, i: int, default: Any = None) -> Any:
+        values = src.get(key) or []
+        return values[i] if i < len(values) and values[i] is not None else default
+
+    def num(value: Any, digits: int = 0) -> Optional[float]:
+        return None if value is None else (round(value) if digits == 0 else round(value, digits))
+
+    hours = []
+    for i, t in enumerate(hourly.get("time") or []):
+        words, icon = describe_code(col(hourly, "weather_code", i), bool(col(hourly, "is_day", i, 1)))
+        hour = int(t[11:13])
+        hours.append({"t": t, "label": f"{hour % 12 or 12}{'a' if hour < 12 else 'p'}", "day": t[:10],
+                      "temp": num(col(hourly, "temperature_2m", i)), "feels": num(col(hourly, "apparent_temperature", i)),
+                      "rain": col(hourly, "precipitation_probability", i, 0),
+                      "precip": num(col(hourly, "precipitation", i, 0), 2), "wind": num(col(hourly, "wind_speed_10m", i)),
+                      "gusts": num(col(hourly, "wind_gusts_10m", i)), "dir": _compass(col(hourly, "wind_direction_10m", i)),
+                      "humidity": col(hourly, "relative_humidity_2m", i), "uv": num(col(hourly, "uv_index", i), 1),
+                      "words": words, "icon": icon})
+    hhmm = lambda s: f"{int(s[11:13]) % 12 or 12}:{s[14:16]} {'am' if int(s[11:13]) < 12 else 'pm'}" if s else ""  # noqa: E731
+    days = []
+    for i, d in enumerate(daily.get("time") or []):
+        words, icon = describe_code(col(daily, "weather_code", i), True)
+        name = time.strftime("%a", time.strptime(d, "%Y-%m-%d"))
+        days.append({"date": d, "name": "Today" if i == 0 else name, "words": words, "icon": icon,
+                     "high": num(col(daily, "temperature_2m_max", i)), "low": num(col(daily, "temperature_2m_min", i)),
+                     "rain": col(daily, "precipitation_probability_max", i, 0),
+                     "precip": num(col(daily, "precipitation_sum", i, 0), 2),
+                     "snow": num(col(daily, "snowfall_sum", i, 0), 1),  # cm, or inches with precipitation_unit=inch
+                     "wind": num(col(daily, "wind_speed_10m_max", i)), "gusts": num(col(daily, "wind_gusts_10m_max", i)),
+                     "dir": _compass(col(daily, "wind_direction_10m_dominant", i)),
+                     "uv": num(col(daily, "uv_index_max", i), 1), "uv_words": _band(col(daily, "uv_index_max", i), UV_BANDS),
+                     "sunrise": hhmm(col(daily, "sunrise", i, "")), "sunset": hhmm(col(daily, "sunset", i, ""))})
+    visibility = cur.get("visibility")
+    pressure = cur.get("pressure_msl")
+    now = {"wind": num(cur.get("wind_speed_10m")), "gusts": num(cur.get("wind_gusts_10m")),
+           "dir": _compass(cur.get("wind_direction_10m")), "dir_deg": cur.get("wind_direction_10m"),
+           "humidity": cur.get("relative_humidity_2m"), "dew": num(cur.get("dew_point_2m")),
+           "pressure": None if pressure is None else (round(pressure) if metric else round(pressure * 0.02953, 2)),
+           "pressure_unit": "hPa" if metric else "inHg", "clouds": cur.get("cloud_cover"),
+           "visibility": None if visibility is None else (round(visibility / 1000, 1) if metric else round(visibility / 1609.34, 1)),
+           "visibility_unit": "km" if metric else "mi", "uv": num(cur.get("uv_index"), 1),
+           "uv_words": _band(cur.get("uv_index"), UV_BANDS), "precip_unit": "mm" if metric else "in",
+           "snow_unit": "cm" if metric else "in"}
+    aqi = (air.get("current") or {}).get("us_aqi")
+    today_aqi = [v for v in ((air.get("hourly") or {}).get("us_aqi") or []) if v is not None]
+    return {"now": now, "hours": hours, "days": days,
+            "air": None if aqi is None else {"aqi": round(aqi), "words": _band(aqi, AQI_BANDS),
+                                             "pm25": num((air.get("current") or {}).get("pm2_5"), 1),
+                                             "max_today": round(max(today_aqi)) if today_aqi else None}}
