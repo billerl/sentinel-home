@@ -337,9 +337,11 @@ class SpotifyService:
         """(what to play, how to describe it). "some jazz" -> a playlist; an artist's name -> the artist."""
         q = re.sub(r"^(some|a little|a bit of|any|the) ", "", query).strip()
         q = re.sub(r" (music|songs|tunes)$", "", q) if not re.match(r"^(songs|music) by ", q) else q
-        by = re.match(r"^(?:songs |music |something )?by (.+)$", q)
+        # "songs by X", and "the artist X" / "the band X" (2026-11-03: "play the artist Shinedown" was heard as
+        # "the artist's shine down" and played a playlist of that name)
+        by = re.match(r"^(?:songs |music |something )?by (.+)$|^(?:the )?(?:artist|band|group|singer)(?:'?s)? (.+)$", q)
         if by:
-            q = by.group(1)
+            q = by.group(1) or by.group(2)
         data = self.api("GET", "/search", {"q": q, "type": "artist,track,playlist,album", "limit": 5})
         artists = [a for a in (data.get("artists") or {}).get("items") or [] if a]
         tracks = [t for t in (data.get("tracks") or {}).get("items") or [] if t]
@@ -348,7 +350,8 @@ class SpotifyService:
         playlists = [p for p in (data.get("playlists") or {}).get("items") or []
                      if p and (p.get("owner") or {}).get("id") != "spotify"]
         wq = _words(q)
-        artist = next((a for a in artists if _words(a.get("name")) == wq), None)
+        joined = wq.replace(" ", "")  # "shine down" is Shinedown
+        artist = next((a for a in artists if _words(a.get("name")) == wq or _words(a.get("name")).replace(" ", "") == joined), None)
         if artist or (by and artists):
             artist = artist or artists[0]
             return {"context_uri": artist["uri"]}, artist["name"]

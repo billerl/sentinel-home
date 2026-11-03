@@ -135,6 +135,19 @@ class TestService(unittest.TestCase):
         self.assertIn("connecting again", self.sp.command("pause"))
         self.assertFalse(self.sp.connected())
 
+    def test_the_artist_by_name_even_split_in_two(self):
+        """2026-11-03: "play the artist Shinedown" was heard as "the artist's shine down" and played a playlist."""
+        self.connect()
+        self.settings["spotify_device"] = "Fire TV Living Room"
+        self.http.search = {"artists": {"items": [_artist("Shinedown", "spotify:artist:sd")]},
+                            "playlists": {"items": [{"name": "a artist's shine down", "uri": "spotify:playlist:x",
+                                                     "owner": {"id": "someone"}}]}}
+        said = self.sp.command("play", "the artist's shine down")
+        self.assertEqual(self.last_play()[1], {"context_uri": "spotify:artist:sd"})
+        self.assertEqual(said, "Playing Shinedown on Fire TV Living Room.")
+        self.sp.command("play", "shine down")
+        self.assertEqual(self.last_play()[1], {"context_uri": "spotify:artist:sd"})
+
     def test_play_artist_on_preferred_device_when_nothing_active(self):
         self.connect()
         self.settings["spotify_device"] = "Fire TV Living Room"
