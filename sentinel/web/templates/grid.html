@@ -757,9 +757,9 @@
       return '<div class="wx-family">' + family.map(function(p) {
         var inner = '<span class="dot ' + esc(p.state) + '"></span>' + esc(p.name);
         var title = esc(p.name + " — " + p.label);
-        if (p.lat == null) return '<span class="p" title="' + title + '">' + inner + '</span>';
-        return '<a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p.lat + "," + p.lon) +
-          '" target="_blank" rel="noopener" title="' + title + '">' + inner + '</a>';
+        if (p.lat == null || p.id == null) return '<span class="p" title="' + title + '">' + inner + '</span>';
+        // Sentinel's own map (the Family timeline), in this window: a new tab is a pop-up to a TV's kiosk browser
+        return '<a href="/timeline?person=' + encodeURIComponent(p.id) + '" title="' + title + '">' + inner + '</a>';
       }).join("") + '</div>';
     }
 

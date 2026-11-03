@@ -1606,10 +1606,10 @@ class Engine:
         out = []
         for v in self.person_views().values():
             if not v.fix:
-                out.append({"name": v.person.name, "state": "off", "label": "not sharing location"})
+                out.append({"id": v.person.id, "name": v.person.name, "state": "off", "label": "not sharing location"})
                 continue
             home = v.place is not None and v.place.is_home
-            out.append({"name": v.person.name, "state": "home" if home else "out",
+            out.append({"id": v.person.id, "name": v.person.name, "state": "home" if home else "out",
                         "label": whereabouts(v, places, now), "lat": round(v.fix["lat"], 6),
                         "lon": round(v.fix["lon"], 6), "ts": v.fix["ts"]})
         return out
