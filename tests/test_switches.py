@@ -626,8 +626,8 @@ class TestFireTV(unittest.TestCase):
         self.fire.press("192.168.1.70", "KEY_UP")
         self.assertEqual(self.shell.commands[-1], "sendevent /dev/input/event3 1 103 1; sendevent /dev/input/event3 0 0 0; "
                                                   "sendevent /dev/input/event3 1 103 0; sendevent /dev/input/event3 0 0 0")
-        self.fire.press("192.168.1.70", "KEY_ENTER")
-        self.assertIn(" 1 353 1;", self.shell.commands[-1])  # its select key
+        self.fire.press("192.168.1.70", "KEY_ENTER")  # select: Android's own key (353 written directly selected nothing)
+        self.assertEqual(self.shell.commands[-1], "input keyevent KEYCODE_DPAD_CENTER")
         self.fire.press("192.168.1.70", "KEY_CHUP")  # a key that device can't send: the slow way still works
         self.assertEqual(self.shell.commands[-1], "input keyevent KEYCODE_CHANNEL_UP")
         self.assertEqual(sum(c.startswith("getevent") for c in self.shell.commands), 1)  # looked up once
@@ -648,7 +648,7 @@ class TestFireTV(unittest.TestCase):
         self.assertEqual([a["name"] for a in v["apps"]], ["Netflix", "Prime Video"])  # the live view has its own buttons
         self.assertEqual(self.sw.tv_key(self.fire_id, "source"), (False, "I don't know that button."))
         self.assertTrue(self.sw.tv_key(self.fire_id, "ok")[0])
-        self.assertIn("sendevent /dev/input/event3 1 353 1;", self.shell.commands[-1])
+        self.assertEqual(self.shell.commands[-1], "input keyevent KEYCODE_DPAD_CENTER")
         self.assertTrue(self.sw.tv_type(self.fire_id, "judge judy; rm -rf /")[0])
         self.assertEqual(self.shell.commands[-1], "input text judge%sjudy%srm%s-rf%s")  # no shell tricks get through
         self.sw.tv_type(self.fire_id, "don't stop")

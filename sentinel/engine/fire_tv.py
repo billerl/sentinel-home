@@ -42,12 +42,14 @@ KEYS = {"KEY_UP": "KEYCODE_DPAD_UP", "KEY_DOWN": "KEYCODE_DPAD_DOWN", "KEY_LEFT"
 # The same keys as Linux input codes, best first, for writing straight into one of the Fire TV's input devices
 # (`sendevent`, a few ms; `input keyevent` starts a Java program per press, ~0.5-1 s on a Fire TV).
 LINUX_KEYS = {"KEYCODE_DPAD_UP": [103], "KEYCODE_DPAD_DOWN": [108], "KEYCODE_DPAD_LEFT": [105],
-              "KEYCODE_DPAD_RIGHT": [106], "KEYCODE_DPAD_CENTER": [353, 352, 28], "KEYCODE_BACK": [158],
+              "KEYCODE_DPAD_RIGHT": [106], "KEYCODE_BACK": [158],
               "KEYCODE_HOME": [172], "KEYCODE_MENU": [139], "KEYCODE_VOLUME_UP": [115], "KEYCODE_VOLUME_DOWN": [114],
               "KEYCODE_VOLUME_MUTE": [113], "KEYCODE_MEDIA_PLAY": [200, 207], "KEYCODE_MEDIA_PAUSE": [201],
               "KEYCODE_MEDIA_REWIND": [168], "KEYCODE_MEDIA_FAST_FORWARD": [208], "KEYCODE_CHANNEL_UP": [402],
               "KEYCODE_CHANNEL_DOWN": [403], "KEYCODE_GUIDE": [365], "KEYCODE_INFO": [358],
               **{f"KEYCODE_{n}": [11 if n == 0 else n + 1] for n in range(10)}}
+# Not DPAD_CENTER: written as KEY_SELECT (353) the Fire TV took it but didn't select anything (2026-11-03;
+# each input device's key layout differs), so the select button always goes through `input keyevent`.
 SLOW_PRESS_MS = 400  # presses slower than this are logged (to see where remote lag comes from)
 # Package -> the name people say (Fire OS can't report app labels over ADB without extra tools).
 APP_NAMES = {
