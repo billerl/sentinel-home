@@ -8,8 +8,13 @@ shows an "Allow" pop-up for "Sentinel"; the token it then hands out is kept in s
 only). Turning on: a powered-off TV doesn't answer at all, so it gets a Wake-on-LAN packet (the TV's
 "Power On with Mobile" setting must be on; it works over Wi-Fi too), which wakes its network with the
 screen still dark, then the power button. Tested 2026-11-03 on a UN65NU6900 (2018): off within 5 s;
-on ~10 s after the wake packet, picture once the power button followed. Answering = on: an older TV
-has no "screen on" flag, and when the picture goes off it stops answering within seconds.
+on ~10 s after the wake packet, picture once the power button followed.
+
+Is the picture on? A 2018 TV has no "screen on" flag, and switched off it still wakes its network now and
+then with the screen dark (93-133 s at a time, every few minutes; everything it serves looks the same as
+when the picture is on, 2026-11-03). So Sentinel keeps track itself: on when it turned the TV on, off when
+it turned it off or the TV stops answering, and on when the TV has answered for SCREEN_AFTER without a break
+(someone used the TV's own remote). Turning on while it's awake but dark is just the power button.
 """
 
 import base64
@@ -30,6 +35,7 @@ STATE_FILE = "samsung_tv.json"
 REST_PORT, WS_PORT = 8001, 8002
 CLIENT_NAME = "Sentinel"
 WAKE_SECONDS = 25  # how long a wake (packet, then waiting for its network) may take
+SCREEN_AFTER = 240.0  # answering this long without a break = the picture is on (dark wake-ups last ~2 min)
 APPS_EVERY = 3600.0
 # Apps a TV may have, by the ids Samsung's store uses (the TV's own list is used once it has allowed us).
 COMMON_APPS = {
@@ -52,6 +58,7 @@ class SamsungTVDriver:
         self._lock = threading.Lock()
         self._tvs: Dict[str, Dict[str, Any]] = {}  # mac -> {host, token, name, model, apps, apps_at, on_since}
         self._off_at: Dict[str, float] = {}  # host -> when we pressed power to turn it off
+        self._net_since: Dict[str, float] = {}  # host -> answering without a break since
         try:
             with open(self.path) as f:
                 self._tvs = {k: v for k, v in json.load(f).items() if isinstance(v, dict)}
@@ -242,38 +249,59 @@ class SamsungTVDriver:
                 found.append((host, self._info(mac, self._tvs[mac], True)))
         return found
 
+    def _screen(self, mac: str, on: bool) -> None:
+        if bool(self._tvs.get(mac, {}).get("on_since")) != on:
+            self._remember(mac, on_since=time.time() if on else None)
+
+    def _app_on_screen(self, host: str) -> bool:
+        """An app showing = the picture is on (the home screen or an input like cable show none)."""
+        _, tv = self._tv(host)
+        for app_id in (tv.get("apps") or COMMON_APPS):
+            try:
+                if self._rest(host, f"applications/{app_id}", timeout=1.0).get("visible"):
+                    return True
+            except (OSError, ValueError):
+                continue
+        return False
+
     def status(self, host: str) -> Dict[str, Any]:
         """Off is normal for a TV: it just doesn't answer (raises only for a TV we've never met)."""
         mac, tv = self._tv(host)
         if mac is None:
             raise OSError("unknown TV")
-        reply = self.answering(host)
-        if reply is not None and time.time() - self._off_at.get(host, 0.0) < 15:
-            reply = None  # just switched off: its network goes a few seconds after the picture
-        on = reply is not None
-        if on and not tv.get("on_since"):
-            self._remember(mac, on_since=time.time())
-        elif not on and tv.get("on_since"):
-            self._remember(mac, on_since=None)
-        return self._info(mac, self._tvs[mac], on)
+        now = time.time()
+        if self.answering(host) is None:
+            self._net_since.pop(host, None)
+            self._screen(mac, False)
+        else:
+            since = self._net_since.setdefault(host, now)
+            if not tv.get("on_since") and now - since >= SCREEN_AFTER and now - self._off_at.get(host, 0.0) >= SCREEN_AFTER:
+                self._screen(mac, True)  # up all along: turned on with the TV's own remote, not a dark wake-up
+        return self._info(mac, self._tvs[mac], bool(self._tvs[mac].get("on_since")))
 
     def set(self, host: str, child_id: Optional[str], on: bool) -> None:
-        mac, _ = self._tv(host)
+        mac, tv = self._tv(host)
         if mac is None:
             raise OSError("unknown TV")
         recently_off = time.time() - self._off_at.get(host, 0.0) < 15
         if not on:
-            if self.answering(host) is not None and not recently_off:
+            if self.answering(host) is not None and not recently_off and (tv.get("on_since") or self._app_on_screen(host)):
                 self.press(host, "KEY_POWER")
                 self._off_at[host] = time.time()
+            self._screen(mac, False)  # (answering with nothing on screen and not known to be on: a dark wake-up)
             return
+        if tv.get("on_since") and self.answering(host) is not None:
+            return  # on, as far as we know: pressing power would switch it off
         if recently_off:  # wait for its network to go, or the wake below would be taken for "already on"
             end = time.time() + 15
             while time.time() < end and self.answering(host, timeout=1.0) is not None:
                 time.sleep(1)
             self._off_at.pop(host, None)
         if self.answering(host) is not None:
-            return  # already on
+            if not self._app_on_screen(host):
+                self.press(host, "KEY_POWER")  # awake but dark (a wake-up of its own): the button lights it
+            self._screen(mac, True)
+            return
         end = time.time() + WAKE_SECONDS
         while time.time() < end:
             self._wake(mac, host)
@@ -284,6 +312,7 @@ class SamsungTVDriver:
             raise OSError("the TV didn't wake up (is 'Power On with Mobile' on in its network settings?)")
         time.sleep(1)
         self.press(host, "KEY_POWER")  # the wake packet only wakes its network: the picture needs the button
+        self._screen(mac, True)
 
     def rename(self, host: str, child_id: Optional[str], name: str) -> None:
         mac, _ = self._tv(host)

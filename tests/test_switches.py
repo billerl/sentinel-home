@@ -397,10 +397,37 @@ class TestSamsungDriver(unittest.TestCase):
 
     def test_off_presses_power_once(self):
         self.net = self.picture = True
+        self.drv._screen("001122334455", True)  # known to be on
         self.drv.set("192.168.1.60", None, False)
         self.drv.set("192.168.1.60", None, False)
         self.assertEqual(self.log, [("KEY_POWER",)])
         self.assertFalse(self.picture)
+
+    def test_a_dark_wake_up_isnt_on(self):
+        """Switched off, the TV wakes its network for ~2 minutes now and then with the screen dark."""
+        clock = [NOW]
+        with mock.patch("sentinel.engine.samsung_tv.time.time", side_effect=lambda: clock[0]):
+            self.net = True  # awake, picture dark
+            self.assertEqual(self.drv.status("192.168.1.60")["relay_state"], 0)
+            clock[0] += 130
+            self.assertEqual(self.drv.status("192.168.1.60")["relay_state"], 0)
+            self.drv.set("192.168.1.60", None, False)  # "off" now must not press power (it would light it)
+            self.assertEqual(self.log, [])
+            self.drv.set("192.168.1.60", None, True)  # 2026-11-03 13:18: this used to be taken for "already on"
+            self.assertEqual(self.log, [("KEY_POWER",)])  # no wake packet needed: it's awake
+            self.assertTrue(self.picture)
+            self.assertEqual(self.drv.status("192.168.1.60")["relay_state"], 1)
+
+    def test_on_with_its_own_remote_shows_after_a_while(self):
+        clock = [NOW]
+        with mock.patch("sentinel.engine.samsung_tv.time.time", side_effect=lambda: clock[0]):
+            self.net = self.picture = True
+            self.assertEqual(self.drv.status("192.168.1.60")["relay_state"], 0)
+            clock[0] += 250  # longer than any dark wake-up
+            self.assertEqual(self.drv.status("192.168.1.60")["relay_state"], 1)
+            self.net = self.picture = False  # off with its own remote: gone at once
+            clock[0] += 10
+            self.assertEqual(self.drv.status("192.168.1.60")["relay_state"], 0)
 
     def test_never_woken_tv_says_so(self):
         self.drv._wake = lambda mac, host: self.log.append("wake")  # "Power On with Mobile" is off
