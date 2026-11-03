@@ -377,7 +377,8 @@ class TestPresenceFlipFlops(TestPresence):
 
 class TestDaylightRecheck(unittest.TestCase):
     """2026-11-03: a grey sedan pulled in before sunrise, was named the blue pickup in infrared, and kept that
-    name all morning. A name given in the dark is checked again once paint colours can be seen."""
+    name all morning; then the pickup, parked elsewhere, was named the sedan. A guessed name is checked again
+    once paint colours can be seen."""
     BOX = (100, 100, 200, 150)
 
     def setUp(self):
@@ -454,6 +455,26 @@ class TestDaylightRecheck(unittest.TestCase):
             self.scan(self.red, unit(60 + i, self.shape, 0.01))
         self.assertEqual(self.renames, [])
         self.assertEqual(parked.vehicle_id, self.sierra)
+
+    def test_two_swapped_guesses_are_both_put_right(self):
+        other = (400, 100, 200, 150)
+        self.arrive_in_the_dark()  # the red Fusion, on BOX, named as the Sierra
+        frame = self.red.copy(); frame[:, 380:] = self.blue[:, 380:]  # by day; the blue Sierra on the other spot
+        tracker = self.tracker
+        tracker.scan(self.cam, frame, self.t)  # (no boxes change yet: just daylight)
+        for i in range(3):  # the Sierra pulls in; "the Sierra" is taken, so it's guessed to be the Fusion
+            self.det.boxes = [self.BOX, other]
+            self.clf.next = unit(90 + i, self.shape, 0.01)
+            self.t += 60
+            tracker.scan(self.cam, frame, self.t)
+        for i in range(8):
+            self.det.boxes = [self.BOX, other]
+            self.clf.next = unit(100 + i, self.shape, 0.01)
+            self.t += 60
+            tracker.scan(self.cam, frame, self.t)
+        spots = {p.box: p.vehicle_id for p in tracker.present()["192.168.0.9"]}
+        self.assertEqual(spots, {self.BOX: self.fusion, other: self.sierra})
+        self.assertEqual(self.asked, [])  # sorted out without bothering anyone
 
     def test_the_got_home_record_is_corrected(self):
         from sentinel.recordings.store import RecordingStore

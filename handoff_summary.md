@@ -88,8 +88,8 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     departures go into the events table (grp `household`) and answer "when did X get home / leave",
     "is X home", "what cars are in the driveway". Infrared detection (`is_greyscale`) uses per-pixel
     channel spread (IR ≈ 3, day 20+). CLIP separates cars well by day, poorly at night — rely on spot
-    stickiness and naming at dawn rather than lowering thresholds. A name given in the dark (`named_in_dark`)
-    is re-checked by daylight (`_recheck`): paint colour doubting it + the same other car matched
+    stickiness and naming at dawn rather than lowering thresholds. A guessed name (`unchecked`: any name the family didn't
+    give, in the dark or by elimination) is re-checked by daylight (`_recheck`, ruling out only other spots' sure names): paint colour doubting it + the same other car matched
     RENAME_AGREE (3) checks in a row renames it (`on_renamed` relabels its "got home" event); DOUBT_SCANS (10)
     doubts without a better match drop the name (event removed, whose-car question, re-recorded once named;
     the doubted car is `ruled_out` for that parking). Names the family gave are never overruled.
