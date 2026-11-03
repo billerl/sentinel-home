@@ -260,6 +260,7 @@ class Engine:
             on_status=self._on_camera_status,
             detection_worker=self.detection_worker,
             on_object=self._on_object,
+            on_maybe_person=self._on_maybe_person,
         )
 
     def _init_objects(self) -> None:
@@ -458,6 +459,13 @@ class Engine:
         if self.settings.get("telegram_motion_alerts", True) and jpeg:
             self.telegram.trigger_photo_alert(event.description, jpeg, self._car_fix_button(pipeline, event))
             self._clip_for_alert[pipeline.host] = (event.timestamp, event.description)
+
+    def _on_maybe_person(self, pipeline: CameraPipeline, track) -> None:
+        """A moving person-shaped track too unsure to alert about (e.g. dim in infrared): enough for routines
+        that only switch lights (runs on the detection thread)."""
+        app_logger.log("info", "maybe_person", camera_display=pipeline.display_name, score=round(track.best_score, 2),
+                       hits=track.hits, component="engine", action="on_maybe_person")
+        self.routines.seen(pipeline.host, "person", sure=False)
 
     # ----------------------------------------------- "Wrong car?" under car alerts
     CAR_FIX_KEEP = 40  # newest alerts that can still be corrected (each holds a camera frame)

@@ -152,6 +152,16 @@ class TestRunner(unittest.TestCase):
         self.runner.tick()
         self.assertEqual(self.fake.calls, [])
 
+    def test_unsure_sighting_only_switches_lights(self):
+        self.add(PATIO)
+        self.add({"when": {"type": "seen", "what": ["person"], "cameras": ["Back Yard"]},
+                  "then": [{"do": "telegram", "text": "Someone's out back"}]})
+        self.runner.seen("192.168.0.9", "person", sure=False)
+        self.assertEqual(self.fake.calls, [("kasa-9c53220000aa-1", True)])
+        self.assertEqual(self.fake.messages, [])  # a message waits for a real sighting
+        self.runner.seen("192.168.0.9", "person")
+        self.assertEqual(self.fake.messages, [("Someone's out back", None)])
+
     def test_paused_routine_does_nothing(self):
         rid = self.add(PATIO)
         self.store.set_enabled(rid, False)

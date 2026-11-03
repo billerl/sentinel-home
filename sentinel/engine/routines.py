@@ -442,10 +442,15 @@ class RoutineRunner:
         return True
 
     # ------------------------------------------------------------ events from the engine
-    def seen(self, camera: str, group: str, jpeg: Optional[bytes] = None) -> None:
+    def seen(self, camera: str, group: str, jpeg: Optional[bytes] = None, sure: bool = True) -> None:
+        """``sure=False``: a moving person too dim to alert about. Enough to switch a light, but routines
+        that send a message or speak wait for a real sighting."""
         groups = {group, "vehicle"} if group == "delivery" else {group}  # a delivery van is a vehicle too
+        only = None
+        if not sure:
+            only = {r.id for r in self._routines if all(a["do"] == "switch" for a in r.spec["then"])}
         self._fire(lambda w: w["type"] == "seen" and groups & set(w["what"]) and (not w["cameras"] or camera in w["cameras"]),
-                   camera, jpeg)
+                   camera, jpeg, keep=only)
 
     def motion(self, camera: str) -> None:
         """Called on every frame with motion: cheap unless a motion routine is due."""
@@ -497,10 +502,10 @@ class RoutineRunner:
 
     # ------------------------------------------------------------ doing it
     def _fire(self, match: Callable[[Dict[str, Any]], Any], camera: Optional[str], jpeg: Optional[bytes],
-              only: Optional[set] = None) -> None:
+              only: Optional[set] = None, keep: Optional[set] = None) -> None:
         now = self._clock()
         todo = [r for r in self._routines if r.enabled and (r.id in only if only is not None else match(r.spec["when"]))
-                and self._allowed(r, now)]
+                and (keep is None or r.id in keep) and self._allowed(r, now)]
         for r in todo:
             self._spawn(self.run, r, camera, jpeg)
 

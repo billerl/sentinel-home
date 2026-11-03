@@ -262,7 +262,12 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   `recorded_videos/routine_holds.json` and switched off at the next start. Stored by ids (cameras = host, switches,
   people, cars); `normalize()` accepts names. By voice/Telegram Claude emits `COMMAND: Routine {json}`; Sentinel
   describes it in its own words and saves it only after "yes" / the ✅ tap (a typed `Routine {json}` isn't saved).
-  `routines.REQUEST` sends "new routine ..." phrases straight to Claude. Also: the weather card has a clock.
+  `routines.REQUEST` sends "new routine ..." phrases straight to Claude.
+  Routines that only switch lights also fire on "maybe a person" (`CameraObjectTracker.maybe_people`): a moving
+  (`Track.walked`, measured against the narrowest box) person track in the zone at >= 0.33 (`ROUTINE_PERSON_SCORE`),
+  logged as `maybe_person`. Alerts are unchanged. Why: a person walking through the back yard in IR scored 0.38
+  (alert bar 0.45). Replayed 1,042 Back Yard night clips (Oct 27-Nov 2): 3 extra triggers (the real walk, a bug
+  on the lens that also fooled the alert path, patio chairs at dusk once). Also: the weather card has a clock.
 - **Telegram commands added:** `access` (remote-access guide) and `videos <when> [people|vehicles|animals] [camera]` (`sentinel/engine/queries.py`).
 - **Web:** `/settings` covers status, cameras, detection, Telegram, recording, audio, remote access, password and help.
 - **Replay tool idea:** run the detector and tracker over a sample of a day's clips to check accuracy before changing thresholds.

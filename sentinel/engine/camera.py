@@ -88,6 +88,7 @@ class CameraPipeline:
         on_status: Callable[["CameraPipeline", bool, Optional[str]], None],
         detection_worker: Optional["DetectionWorker"] = None,
         on_object: Optional[Callable[["CameraPipeline", "ObjectEvent"], None]] = None,
+        on_maybe_person: Optional[Callable[["CameraPipeline", Any], None]] = None,
     ) -> None:
         self.camera_id = camera_id
         self.source = source
@@ -106,6 +107,7 @@ class CameraPipeline:
         self._on_status = on_status
         self._detections = detection_worker
         self._on_object = on_object
+        self._on_maybe_person = on_maybe_person  # routines: a moving person too unsure for an alert
         self._clip_labels: set = set()
         self.tracker = None
         if detection_worker is not None:
@@ -326,6 +328,9 @@ class CameraPipeline:
             if track.group in ("person", "animal") and not track.subject_checked:
                 self._check_subject(checker, track)
         confirmed = [t for t in confirmed if not t.not_a_subject]
+        if self._on_maybe_person is not None:
+            for track in self.tracker.maybe_people(in_zone, w):
+                self._on_maybe_person(self, track)
         if self.detector.recording:
             # A parked car seen while the wind moves the trees doesn't make it a "car" clip.
             self._clip_labels.update(

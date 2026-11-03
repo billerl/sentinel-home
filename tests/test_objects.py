@@ -52,6 +52,33 @@ class TestTracker(unittest.TestCase):
         self.assertEqual(_feed(t, [(300, 100, 40, 120)], label="person"), [])
 
 
+class TestMaybePeople(unittest.TestCase):
+    """Routines' lower bar: a moving, dim person counts (lights only); still things and alerts don't change."""
+
+    def feed(self, boxes, score, in_zone=_always):
+        t = CameraObjectTracker("cam")
+        ready, maybe = [], []
+        for i, box in enumerate(boxes):
+            ready += t.update([Detection("person", score, box)], GREY, 1000.0 + i, in_zone)
+            maybe += t.maybe_people(in_zone, W)
+        return ready, maybe
+
+    def test_dim_person_walking_through(self):
+        # The back yard, 2026-11-02 (scaled to this frame): two sightings at 0.38, the second box much wider.
+        ready, maybe = self.feed([(491, 158, 50, 93), (390, 191, 166, 149)], 0.38)
+        self.assertEqual(ready, [])  # too unsure for an alert
+        self.assertEqual(len(maybe), 1)
+
+    def test_still_things_and_one_off_sightings_dont_count(self):
+        self.assertEqual(self.feed([(583, 260, 25, 55), (582, 261, 26, 54), (583, 259, 25, 55)], 0.38)[1], [])  # a post
+        self.assertEqual(self.feed([(491, 158, 50, 93)], 0.5)[1], [])
+        self.assertEqual(self.feed([(100, 100, 40, 90), (160, 110, 40, 90)], 0.31)[1], [])  # below the bar
+        self.assertEqual(self.feed([(100, 100, 40, 90), (160, 110, 40, 90)], 0.4, in_zone=lambda b: False)[1], [])
+
+    def test_reported_once(self):
+        self.assertEqual(len(self.feed([(100 + 40 * i, 100, 40, 90) for i in range(5)], 0.4)[1]), 1)
+
+
 class TestTrackerLearning(unittest.TestCase):
     def test_label_is_majority_vote(self):
         t = CameraObjectTracker("cam")

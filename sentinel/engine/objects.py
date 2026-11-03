@@ -37,6 +37,9 @@ STATIC_MEMORY_SECONDS = 7 * 86400
 # a fan in a dim garage scored 0.53-0.65 (handled by static-spot learning + zones).
 MIN_SCORE = {"person": 0.45, "animal": 0.6, "vehicle": 0.5}
 CONFIDENT_SCORE = 0.62  # below this, a track needs EXTRA_HITS sightings
+# Routines only (switching on a light, never an alert): a person walking through the back yard in
+# infrared scored just 0.38 (2026-11-02), so a moving person-shaped track this sure is enough there.
+ROUTINE_PERSON_SCORE = 0.33
 EXTRA_HITS = 3
 # Vehicle type (CLIP) is checked when a vehicle first alerts, then again as it comes
 # closer (box area grown by TYPE_RECHECK_GROWTH), up to TYPE_MAX_CHECKS times.
@@ -73,6 +76,7 @@ class Track:
     type_checks: int = 0
     type_checked_area: int = 0
     left_spot: bool = False  # a parked car whose parking spot is now empty: it's leaving
+    routine_seen: bool = False  # reported to routines as "maybe a person" (maybe_people)
 
     def see(self, frame: np.ndarray, box: Tuple[int, int, int, int], now: float = 0.0) -> None:
         if self.big_box is None or box[2] * box[3] > self.big_box[2] * self.big_box[3]:
@@ -114,6 +118,14 @@ class Track:
         widths = sorted(b[2] for _, b in self.boxes)
         limit = max(frame_width * VEHICLE_MIN_TRAVEL, widths[len(widths) // 2])
         return max(abs(dx), abs(dy)) < limit
+
+    def walked(self, frame_width: int) -> bool:
+        """Moved at least half its narrowest box (and 3% of the frame) from where it was first seen.
+        Uses the narrowest box: one wide box (a person merged with their shadow) shouldn't hide a walk."""
+        limit = max(frame_width * VEHICLE_MIN_TRAVEL, 0.5 * min(b[2] for _, b in self.boxes))
+        x0, y0 = self.center(0)
+        return any(max(abs(x0 - (b[0] + b[2] / 2.0)), abs(y0 - (b[1] + b[3] / 2.0))) >= limit
+                   for _, b in self.boxes)
 
     def stayed_put(self, frame_width: int) -> bool:
         """is_still for the whole path, not just where it started and ended: a delivery driver who
@@ -436,6 +448,18 @@ class CameraObjectTracker:
             ready.append(track)
 
         return ready
+
+    def maybe_people(self, in_zone: Callable[[Tuple[int, int, int, int]], bool], frame_w: int) -> List[Track]:
+        """Moving person-like tracks, even ones too unsure to alert about, each once: for routines
+        (a light coming on for a cat costs nothing; a missed person in the dark is the whole point)."""
+        out = []
+        for t in self.tracks:
+            if (t.routine_seen or t.group != "person" or t.not_a_subject or t.hits < MIN_HITS
+                    or t.best_score < ROUTINE_PERSON_SCORE or not in_zone(t.box) or not t.walked(frame_w)):
+                continue
+            t.routine_seen = True
+            out.append(t)
+        return out
 
     def _expire(self, now: float, frame_w: int) -> None:
         """Drop tracks not seen recently; remember where motionless 'people' were."""
