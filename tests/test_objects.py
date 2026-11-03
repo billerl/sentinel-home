@@ -175,10 +175,10 @@ class TestDescribe(unittest.TestCase):
     def test_person_phrases(self):
         still = self._track("person", "person", [(300, 100, 40, 120)] * 2)
         self.assertEqual(describe(still, "Front Door", None, GREY, W), "🚶 Someone is at the Front Door.")
-        self.assertEqual(describe(still, "Rear Door", "Patio", GREY, W), "🚶 Someone is on the Patio (Rear Door).")
+        self.assertEqual(describe(still, "Rear Door", "Patio", GREY, W), "🚶 Someone is on the Patio.")
         self.assertEqual(describe(still, "Back Yard", "Back Yard", GREY, W), "🚶 Someone is in the Back Yard.")
         self.assertEqual(describe(still, "Front Door", "Front Door", GREY, W), "🚶 Someone is at the Front Door.")
-        self.assertEqual(describe(still, "Garage", "Driveway", GREY, W), "🚶 Someone is in the Driveway (Garage).")
+        self.assertEqual(describe(still, "Garage", "Driveway", GREY, W), "🚶 Someone is in the Driveway.")
         self.assertEqual(describe(still, "Front Door", None, GREY, W, companions=1), "🚶 2 people are at the Front Door.")
         walking = self._track("person", "person", [(100, 100, 40, 120), (300, 100, 40, 120)])
         self.assertEqual(describe(walking, "Front Door", None, GREY, W), "🚶 Someone is walking past the Front Door.")
@@ -188,7 +188,7 @@ class TestDescribe(unittest.TestCase):
         frame[:] = (40, 40, 40)
         frame[200:300, 200:400] = (30, 30, 200)  # BGR red car
         car = self._track("car", "vehicle", [(200, 60, 200, 100), (200, 200, 200, 100)])
-        self.assertEqual(describe(car, "Garage", "Driveway", frame, W), "🚗 A red car pulled into the Driveway (Garage).")
+        self.assertEqual(describe(car, "Garage", "Driveway", frame, W), "🚗 A red car pulled into the Driveway.")
 
     def test_uncertain_vehicle_type_is_generic(self):
         bus = self._track("bus", "vehicle", [(0, 150, 150, 90), (300, 150, 150, 90)])

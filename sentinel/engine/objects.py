@@ -253,10 +253,9 @@ _ON_PLACES = {"porch", "deck", "patio", "street", "road", "sidewalk", "steps", "
 
 
 def _place(zone_name: Optional[str], camera_name: str) -> str:
-    """'the Driveway (Garage)'; just 'the Back Yard' when the zone is named after its camera."""
-    if not zone_name or zone_name.strip().lower() == camera_name.strip().lower():
-        return f"the {zone_name or camera_name}"
-    return f"the {zone_name} ({camera_name})"
+    """'the Driveway' (the zone's name), else 'the Garage' (the camera's), never both: the user found
+    'the Driveway (Garage)' wordy (2026-11-03), and the photo shows which camera it was."""
+    return f"the {zone_name or camera_name}"
 
 
 def _preposition(name: str) -> str:
@@ -268,14 +267,14 @@ def _preposition(name: str) -> str:
 
 def describe(track: Track, camera_name: str, zone_name: Optional[str], frame: np.ndarray,
              frame_width: int, companions: int = 0) -> str:
-    """One short sentence about what was seen, e.g. 'A red car pulled into the Driveway (Garage).'"""
+    """One short sentence about what was seen, e.g. 'A red car pulled into the Driveway.'"""
     emoji = _EMOJI.get(track.label, "👀")
     dx, dy = track.travel()
     if track.group == "vehicle":
         moving = track.vehicle_moved(frame_width)
     else:
         moving = not track.is_still(frame_width)
-    # "in the Driveway (Garage)" with a named zone, otherwise "at the Front Door"
+    # "in the Driveway" with a named zone, otherwise "at the Front Door"
     # (A bare camera name keeps "at": "in the Garage" would sound like inside it.)
     at = f"{_preposition(zone_name) if zone_name else 'at'} {_place(zone_name, camera_name)}"
     past = _place(zone_name, camera_name)

@@ -43,7 +43,7 @@ ARRIVING = [(200, 60, 200, 100), (200, 200, 200, 100)]
 class TestWording(unittest.TestCase):
     def test_delivery_phrases(self):
         self.assertEqual(describe(_track("truck", ARRIVING, _vt("ups")), "Garage", "Driveway", GREY, W),
-                         "📦 A UPS truck pulled into the Driveway (Garage).")
+                         "📦 A UPS truck pulled into the Driveway.")
         self.assertEqual(describe(_track("car", ARRIVING, _vt("amazon")), "Front Door", None, GREY, W),
                          "📦 An Amazon van pulled in at the Front Door.")
         parked = _track("truck", [(200, 150, 200, 100)] * 2, _vt("usps"))
@@ -55,7 +55,7 @@ class TestWording(unittest.TestCase):
         frame[200:300, 200:400] = (30, 30, 200)  # BGR red
         truck = _track("truck", ARRIVING, _vt("pickup"))
         self.assertEqual(describe(truck, "Garage", "Driveway", frame, W),
-                         "🛻 A red pickup truck pulled into the Driveway (Garage).")
+                         "🛻 A red pickup truck pulled into the Driveway.")
         self.assertEqual(describe(_track("car", ARRIVING, _vt("suv")), "Garage", None, GREY, W),
                          "🚙 An SUV pulled in at the Garage.")
 
