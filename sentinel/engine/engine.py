@@ -1131,8 +1131,9 @@ class Engine:
 
         return VoiceReply(f"Should I {what}? Say yes or no.", run)
 
-    def answer_voice(self, text: str, say: Callable[[str], None]):
-        """What to say back to a spoken request: Sentinel's own answers first, then Claude (opt-in)."""
+    def answer_voice(self, text: str, say: Callable[[str], None], doubtful: bool = False):
+        """What to say back to a spoken request: Sentinel's own answers first, then Claude (opt-in).
+        doubtful (a follow-up that may be room talk): None instead of asking Claude."""
         from sentinel.audio.voice import VoiceReply, to_speech
         from sentinel.engine.assistant import split_command
         from sentinel.engine.questions import _fmt_clock, household_question, is_question
@@ -1194,6 +1195,8 @@ class Engine:
             return VoiceReply(to_speech(self.answer_household_question(hq)))
         if is_question(low) and not ROUTINE_REQUEST.search(low):
             return VoiceReply(to_speech(self.event_question_reply(low)[0]))
+        if doubtful:
+            return None
         if not self.assistant.enabled():
             return VoiceReply("Sorry, I can't answer that one. Try asking who's home, or did anyone come by today.")
         reply = None

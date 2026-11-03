@@ -41,6 +41,10 @@ DICTATE_PROMPT = "A note for Claude about changes to the Sentinel home security 
 FOLLOW_UP_WAIT = 5.0  # after an answer, a follow-up question needs no wake word...
 MAX_TURNS = 5  # ...but a TV can't keep it talking forever
 NO_SPEECH_MAX = 0.6  # Whisper's own "this was noise" score; above it the words are usually invented
+# A follow-up (no wake word) scoring above this is doubtful: acted on only if Sentinel understands it itself,
+# never sent to Claude. Room talk got answered ("I don't want to get in the candy box", 0.42, 2026-11-03), while
+# real short follow-ups score high too ("Pause" 0.58, "Stop" 0.53-0.58), so they can't simply be dropped.
+FOLLOW_UP_DOUBT = 0.3
 # Whisper's favourite inventions on silence and noise.
 HALLUCINATIONS = {"you", "thank you", "thanks", "thank you very much", "thanks for watching", "bye", "okay", "so",
                   "thank you for watching", "the end", "hmm", "uh", "um"}
@@ -138,6 +142,11 @@ def normalise(audio: np.ndarray, peak: float = 0.9) -> np.ndarray:
     return (audio * (peak / top)).astype(np.float32) if top > 1e-4 else audio.astype(np.float32)
 
 
+def doubt(segments) -> float:
+    """How likely Whisper thinks the kept words were noise (the worst kept segment)."""
+    return max([s.no_speech_prob for s in segments if s.no_speech_prob <= NO_SPEECH_MAX] or [0.0])
+
+
 def clean_transcript(segments) -> str:
     """Whisper segments -> the words actually said (noise segments and stock inventions dropped)."""
     words = " ".join(s.text.strip() for s in segments if s.no_speech_prob <= NO_SPEECH_MAX).strip()
@@ -209,6 +218,7 @@ class VoiceAssistant:
         self.apps = apps  # TV app names, likewise
         self.artists = artists  # the family's Spotify artists, likewise
         self.answer = answer
+        self.last_doubt = 0.0  # Whisper's noise score for the last words heard (doubt())
         self.speaker = speaker  # AudioAlertSystem: speak(text), tone(kind)
         self._popen = popen
         self._stop = threading.Event()
@@ -419,6 +429,7 @@ class VoiceAssistant:
                                                       vad_filter=False, condition_on_previous_text=False)
         segments = list(segments)
         text = clean_transcript(segments)
+        self.last_doubt = doubt(segments)
         app_logger.log("info", "voice_heard", text=text[:200], seconds=round(time.time() - started, 1),
                        audio_seconds=round(len(audio) / RATE, 1),
                        no_speech=[round(s.no_speech_prob, 2) for s in segments], component="voice", action="hear")
@@ -438,8 +449,13 @@ class VoiceAssistant:
         elif text:
             self.speaker.speak(text)
 
-    def _respond(self, text: str) -> None:
-        reply = self.answer(text, self._say)
+    def _respond(self, text: str, doubtful: bool = False) -> bool:
+        """Answer it; False when a doubtful follow-up wasn't one of Sentinel's own commands (ignored)."""
+        reply = self.answer(text, self._say, doubtful=True) if doubtful else self.answer(text, self._say)
+        if reply is None:
+            app_logger.log("info", "voice_ignored", text=text[:200], doubt=round(self.last_doubt, 2),
+                           component="voice", action="respond")
+            return False
         app_logger.log("info", "voice_replied", text=(reply.text or "")[:300], confirm=reply.confirm is not None,
                        component="voice", action="respond")
         self._say(reply.text)
@@ -449,12 +465,13 @@ class VoiceAssistant:
             self._say("Okay, cancelled." if is_cancel(said) else reply.dictate(said or ""))
             return
         if reply.confirm is None:
-            return
+            return True
         answer = self._hear(wait=4.0) or ""
         if is_yes(answer):
             self._say(reply.confirm())
         else:
             self._say("Okay, I won't.")
+        return True
 
     def _conversation(self) -> None:
         self.speaker.busy = True
@@ -473,7 +490,9 @@ class VoiceAssistant:
                     else:
                         self.speaker.tone("cancel")
                     return
-                self._respond(text)
+                if not self._respond(text, doubtful=turn > 0 and self.last_doubt > FOLLOW_UP_DOUBT):
+                    self.speaker.tone("cancel")
+                    return
                 if turn == MAX_TURNS - 1 or not self.settings.get("voice_follow_up", True):
                     return
                 self.speaker.tone("listen")

@@ -409,6 +409,13 @@ class TestEngineMusic(unittest.TestCase):
         self.assertEqual(self.engine.answer_voice("Set your volume to 5", lambda s: None).text, "Okay, my voice is at 10 percent.")
         self.assertEqual(self.engine.settings["volume"], 0.1)
 
+    def test_doubtful_follow_up_never_goes_to_claude(self):
+        with mock.patch.object(self.engine.assistant, "enabled", return_value=True), \
+                mock.patch.object(self.engine.assistant, "ask", return_value="Good call!") as ask:
+            self.assertIsNone(self.engine.answer_voice("I don't want to get in the candy box.", lambda s: None, doubtful=True))
+            self.assertEqual(self.engine.answer_voice("stop", lambda s: None, doubtful=True).text, "Okay.")
+            ask.assert_not_called()
+
     def test_stop_is_cancel_when_not_connected(self):
         self.assertEqual(self.engine.answer_voice("Stop.", lambda s: None).text, "Okay.")
         self.assertIn("isn't connected", self.engine.answer_voice("play some jazz", lambda s: None).text)

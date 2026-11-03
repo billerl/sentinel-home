@@ -205,6 +205,32 @@ class TestConversation(unittest.TestCase):
         va._persona("hey_jarvis_v0.1")
         self.assertEqual((va.speaking_as, va._reply_voice), ("Jezebel", ""))
 
+    def test_doubtful_follow_up_only_for_sentinels_own_commands(self):
+        asked = []
+
+        def answer(text, say, doubtful=False):
+            asked.append((text, doubtful))
+            return None if doubtful and text != "pause" else VoiceReply("ok")
+        for follow_up, doubt_score, want in (("I don't want to get in the candy box", 0.42, ["ok", "<listen>", "<cancel>"]),
+                                             ("pause", 0.58, ["ok", "<listen>", "ok", "<listen>", "<cancel>"]),
+                                             ("and the weather", 0.05, ["ok", "<listen>", "ok", "<listen>", "<cancel>"])):
+            speaker = FakeSpeaker()
+            va = VoiceAssistant({}, answer, speaker)
+            heard = iter([("who's home", 0.5), (follow_up, doubt_score), (None, 0.0)])  # the first had the wake word
+
+            def hear(**kwargs):
+                text, va.last_doubt = next(heard)
+                return text
+            with mock.patch.object(va, "_hear", side_effect=hear):
+                va._conversation()
+            self.assertEqual(speaker.said[1:], want, follow_up)
+        self.assertEqual(asked, [("who's home", False), ("I don't want to get in the candy box", True),
+                                 ("who's home", False), ("pause", True), ("who's home", False), ("and the weather", False)])
+
+    def test_doubt_is_the_worst_kept_segment(self):
+        self.assertEqual(v.doubt([seg("hi", 0.1), seg("there", 0.42), seg("noise", 0.9)]), 0.42)
+        self.assertEqual(v.doubt([]), 0.0)
+
     def test_follow_ups_are_capped(self):
         with mock.patch.object(v, "MAX_TURNS", 3):
             said, _ = self.run_talk(["blah"] * 10, VoiceReply("ok"))

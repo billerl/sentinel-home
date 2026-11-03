@@ -142,7 +142,9 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     starts at the wake word, so one-breath "Hey Jarvis, who's home?" works. `Engine.answer_voice`: time,
     weather, enable/disable (asks first), household and event questions locally (`to_speech` strips emoji,
     bullets, links, long lists), else Claude with `VOICE_SYSTEM_PROMPT`; Claude's COMMAND needs a spoken
-    "yes". Follow-ups without the wake word for 5 s, at most 5 turns. Alerts stay silent during a
+    "yes". Follow-ups without the wake word for 5 s, at most 5 turns. A follow-up Whisper doubts (no-speech > `FOLLOW_UP_DOUBT` 0.3)
+    is acted on only if Sentinel understands it itself (`answer_voice(doubtful=True)` returns None before Claude),
+    else ignored (`voice_ignored`): room talk had been answered by Claude, but real "Pause"/"Stop" score ~0.55. Alerts stay silent during a
     conversation (`AudioAlertSystem.busy`/play lock). openWakeWord's `reset()` keeps its audio buffer, so
     2 s of silence is pushed through after each conversation or it re-wakes on the old "Hey Jarvis".
     `audio_output: remote` plays via `paplay` to /run/user/<uid>/pulse/native (the xrdp session), falling
