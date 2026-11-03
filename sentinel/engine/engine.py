@@ -371,7 +371,7 @@ class Engine:
         self.telegram.question_filter = _household_filter
         self.telegram.location_handler = self._on_telegram_pin
         self.telegram.text_interceptor = self._name_pinned_place
-        self.telegram.switch_filter = lambda text: self.switches.parse(text) is not None
+        self.telegram.switch_filter = self.switches.understands
         self.telegram.assistant_available = self.assistant.enabled
         if self.assistant.enabled():
             threading.Thread(target=self._check_assistant, name="assistant-check", daemon=True).start()
@@ -1222,7 +1222,7 @@ class Engine:
         if command and is_routine_command(command):
             return VoiceReply(spoken + " Should I do that? Say yes or no.",
                               lambda: self.routine_command(command, spoken=True))
-        if command and self.switches.parse(command) is not None:
+        if command and self.switches.understands(command):
             return VoiceReply(spoken + " Should I do that? Say yes or no.",
                               lambda: self.switches.command(command, source="voice") or "I couldn't do that.")
         return VoiceReply(spoken)

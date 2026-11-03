@@ -38,6 +38,7 @@ sentinel-home/                         # repository root
     │   ├── assistant.py               # Opt-in: Telegram messages Sentinel doesn't understand -> `claude -p`
     │   ├── reminders.py               # "Remind me ..." -> Telegram message at that time (reminders.db)
     │   ├── switches.py                # Smart plugs/switches (Kasa, local protocol): Live page panel, voice, Telegram
+    │   ├── samsung_tv.py              # Samsung TVs as a switch (Wake-on-LAN + power key), apps, volume, mute
     │   ├── routines.py                # "When X, only if Y, then Z": check/describe, sunrise/sunset maths, runner (routines.db)
     │   ├── questions.py               # Telegram questions ("did anyone come by?", "is Kate home?")
     │   ├── queries.py                 # "videos <when>" parsing

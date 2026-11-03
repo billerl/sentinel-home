@@ -247,6 +247,13 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   Wednesday at 9 ..." into the exact command `Remind YYYY-MM-DD HH:MM <what>`; it is saved only after a ✅ tap
   (Telegram) or a spoken yes, then sent on Telegram at that time (voice ones to every chat; late ones say so).
   `Reminders` lists, `Cancel reminder N` removes. Checked every 15 s in the command loop.
+- **Samsung TVs** (`sentinel/engine/samsung_tv.py`, a second SmartSwitches driver; TV state, token and app
+  list in `recorded_videos/samsung_tv.json`, mode 600): found by SSDP; REST :8001 (who it is, apps, launch)
+  and the remote-control websocket :8002 (keys; minimal RFC 6455 client, no new dependency). First use
+  needs "Allow" on the TV. Answering = on (2018 models have no PowerState; the network drops within ~5 s
+  of the picture). On = Wake-on-LAN until it answers (~10 s, needs "Power On with Mobile"), then KEY_POWER
+  (the packet only wakes its network). `tv_parse`/`tv_command` in switches.py: open/put on <app>, volume,
+  mute, "what's on"; `understands()` routes Telegram/Claude suggestions. Can't pick channels inside apps.
 - **Smart plugs and switches** (`sentinel/engine/switches.py`, known devices in `recorded_videos/switches.json`):
   Kasa plugs/power strips/wall switches over their local protocol (TCP/UDP 9999, XOR-scrambled JSON; no
   cloud, no new dependency). Found by UDP broadcast at start, every 15 min and on "Find new devices"; known

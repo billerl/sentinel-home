@@ -249,3 +249,158 @@ class TestWeb(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FakeTV:
+    """A Samsung TV as SamsungTVDriver presents it to SmartSwitches."""
+    kind = "samsung"
+
+    def __init__(self):
+        self.on, self.calls, self.visible = False, [], None
+        self.info = {"mac": "00:11:22:33:44:55", "model": "Samsung UN65NU6900", "alias": "TV"}
+
+    def discover(self, wait=2.0):
+        return [("192.168.1.60", self.status("192.168.1.60"))]
+
+    def status(self, host):
+        return {**self.info, "relay_state": int(self.on), "on_time": 0}
+
+    def set(self, host, child_id, on):
+        self.calls.append(("power", on))
+        self.on = on
+
+    def rename(self, host, child_id, name):
+        self.info["alias"] = name
+
+    def apps(self, host):
+        return {"11101200001": "Netflix", "3201901017640": "Disney+", "3201707014489": "YouTube TV",
+                "111299001912": "YouTube", "3201606009684": "Spotify - Music and Podcasts",
+                "3201808016802": "Pluto TV: Free Movies & Shows"}
+
+    def launch(self, host, app_id):
+        self.calls.append(("launch", app_id))
+        self.visible = self.apps(host)[app_id]
+
+    def press(self, host, *keys):
+        self.calls.append(("press",) + keys)
+
+    def showing(self, host):
+        return self.visible
+
+
+class TestTV(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="sentinel-switches-")
+        self.kasa, self.tv = FakeKasa(), FakeTV()
+        self.sw = SmartSwitches(self.dir, drivers=[self.kasa, self.tv], clock=lambda: NOW)
+        self.sw.discover()
+        sleep = mock.patch("sentinel.engine.switches.time.sleep")
+        sleep.start()
+        self.addCleanup(sleep.stop)
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_a_tv_is_a_switch(self):
+        tv = next(s for s in self.sw.switches() if s.name == "TV")
+        self.assertEqual(tv.icon, "tv")
+        self.assertEqual(self.sw.command("turn on the TV", "voice"), "Okay, TV on.")
+        self.assertEqual(self.tv.calls, [("power", True)])
+        self.assertEqual(self.sw.command("is the tv on", "telegram"), "TV is on.")
+
+    def test_apps_by_name(self):
+        self.assertEqual(self.sw.command("put on Netflix", "voice"), "Okay, Netflix on the TV.")
+        self.assertEqual(self.tv.calls, [("power", True), ("launch", "11101200001")])  # it was off: on first
+        self.assertEqual(self.sw.command("open disney plus on the tv", "voice"), "Okay, Disney+ on the TV.")
+        self.assertEqual(self.sw.command("turn on youtube tv", "voice"), "Okay, YouTube TV on the TV.")
+        self.assertEqual(self.sw.command("open youtube", "voice"), "Okay, YouTube on the TV.")
+        self.assertEqual(self.sw.command("launch pluto", "voice"), "Okay, Pluto TV: Free Movies & Shows on the TV.")
+        self.assertEqual(self.sw.command("what's on the tv", "voice"), "Pluto TV: Free Movies & Shows is on the TV.")
+
+    def test_volume_and_mute(self):
+        self.assertEqual(self.sw.command("tv volume up", "voice"), "The TV is off.")
+        self.tv.on = True
+        self.sw.poll()
+        self.assertEqual(self.sw.command("turn the tv down", "voice"), "Okay, TV quieter.")
+        self.assertEqual(self.tv.calls[-1], ("press", "KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN"))
+        self.assertEqual(self.sw.command("mute the TV", "telegram"), "Okay, TV muted.")
+        self.assertEqual(self.tv.calls[-1], ("press", "KEY_MUTE"))
+
+    def test_other_words_are_left_alone(self):
+        self.assertEqual(self.sw.command("turn on the patio lights", "voice"), "Okay, patio lights on.")
+        self.assertNotIn(("launch",), [c[:1] for c in self.tv.calls])
+        for text in ("put on some music", "play some Tom Petty", "open the garage", "turn on alerts"):
+            self.assertIsNone(self.sw.command(text, "voice"), text)
+            self.assertFalse(self.sw.understands(text), text)
+        self.assertTrue(self.sw.understands("put on Netflix"))
+        self.assertIn("TV apps (say 'open <app>'):", self.sw.summary())
+        self.assertIn("Pluto TV", self.sw.summary())
+
+
+class TestSamsungDriver(unittest.TestCase):
+    """The power dance: a TV that's off doesn't answer; the wake packet wakes only its network (picture
+    still dark) and the power button lights the picture. Tested on a UN65NU6900, 2026-11-03."""
+
+    def setUp(self):
+        from sentinel.engine.samsung_tv import SamsungTVDriver
+        self.dir = tempfile.mkdtemp(prefix="sentinel-tv-")
+        self.drv = SamsungTVDriver(self.dir)
+        self.net, self.picture, self.log = False, False, []
+        self.drv._rest = self.rest
+        self.drv._wake = lambda mac, host: self.log.append("wake") or setattr(self, "net", True)
+        self.drv.press = lambda host, *keys: self.log.append(keys) or self.power()
+        patches = [mock.patch("sentinel.engine.samsung_tv.time.sleep")]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        self.drv._learn("192.168.1.60", {"device": {"type": "Samsung SmartTV", "name": "[TV] TV",
+                                                    "modelName": "UN65NU6900", "wifiMac": "00:11:22:33:44:55"}})
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def rest(self, host, path="", method="GET", timeout=None):
+        if not self.net:
+            raise OSError("timed out")
+        return {"device": {"type": "Samsung SmartTV"}}
+
+    def power(self):
+        self.picture = not self.picture
+        self.net = self.picture
+
+    def test_learns_the_tv(self):
+        info = self.drv.status("192.168.1.60")
+        self.assertEqual((info["alias"], info["model"], info["mac"], info["relay_state"]),
+                         ("TV", "Samsung UN65NU6900", "001122334455", 0))  # off: not answering, no error
+        with open(os.path.join(self.dir, "samsung_tv.json")) as f:
+            self.assertIn("001122334455", json.load(f))
+        self.assertEqual(oct(os.stat(os.path.join(self.dir, "samsung_tv.json")).st_mode & 0o777), "0o600")
+
+    def test_on_wakes_then_presses_power(self):
+        self.drv.set("192.168.1.60", None, True)
+        self.assertEqual(self.log, ["wake", ("KEY_POWER",)])
+        self.assertTrue(self.picture)
+        self.log.clear()
+        self.drv.set("192.168.1.60", None, True)  # already on: no button (it would switch it off)
+        self.assertEqual(self.log, [])
+
+    def test_off_presses_power_once(self):
+        self.net = self.picture = True
+        self.drv.set("192.168.1.60", None, False)
+        self.drv.set("192.168.1.60", None, False)
+        self.assertEqual(self.log, [("KEY_POWER",)])
+        self.assertFalse(self.picture)
+
+    def test_never_woken_tv_says_so(self):
+        self.drv._wake = lambda mac, host: self.log.append("wake")  # "Power On with Mobile" is off
+        with mock.patch("sentinel.engine.samsung_tv.time.time", side_effect=[NOW + i for i in range(200)]):
+            with self.assertRaises(OSError):
+                self.drv.set("192.168.1.60", None, True)
+        self.assertNotIn(("KEY_POWER",), self.log)
+
+    def test_app_names(self):
+        from sentinel.engine.switches import _app_words
+        self.assertEqual(_app_words("Disney+"), _app_words("disney plus"))
+        self.assertEqual(_app_words("Spotify - Music and Podcasts"), ["spotify"])
+        self.assertEqual(_app_words("Pluto TV: Free Movies & Shows"), ["pluto", "tv"])
+        self.assertNotEqual(_app_words("YouTube TV"), _app_words("YouTube"))

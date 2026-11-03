@@ -8,8 +8,9 @@ involved. A plug with several outlets (the EP40 outdoor plug, power strips) show
 outlet. Names are the ones set in the Kasa app; renaming here writes the new name back to the plug, so
 the app, the web page and voice all use the same one.
 
-Other makes can be added later as another driver with the same three methods (discover, status, set):
-Shelly and Tasmota have simple local HTTP APIs. Newer Kasa/Tapo devices that only speak the encrypted
+Other makes are other drivers with the same methods (discover, status, set, rename): Samsung TVs
+(samsung_tv.py) are one, with apps, volume and mute on top ("put on Netflix", "mute the TV"). Shelly and
+Tasmota have simple local HTTP APIs. Newer Kasa/Tapo devices that only speak the encrypted
 KLAP protocol don't answer on 9999 and aren't supported yet.
 
 Known devices (MAC -> last address) are kept in switches.json next to the other stores, so a restart
@@ -147,6 +148,8 @@ class Switch:
 
 def guess_icon(name: str) -> str:
     n = name.lower()
+    if re.search(r"\b(tv|television)\b", n):
+        return "tv"
     if re.search(r"\b(christmas|xmas|tree|holiday|decorations?|inflatable)\b", n):
         return "tree"
     if re.search(r"\b(lights?|lamps?|lanterns?|bulbs?|sconces?|porch|string)\b", n):
@@ -178,13 +181,32 @@ _TURN = re.compile(r"^(?:please )?(?:can you |could you )?(?:turn|switch|shut|po
 _ASK = re.compile(r"^(?:is|are)\s+(.+?)\s+on or off$|^(?:is|are)\s+(.+?)\s+(?:on|off|still on|turned on|switched on)$",
                   re.IGNORECASE)
 COMMAND = re.compile(r"^turn (?:on|off) [\w' -]{1,40}$|^turn [\w' -]{1,40} (?:on|off)$", re.IGNORECASE)  # Claude's button
+# TVs: apps, volume, mute, "what's on". "Play ..." is left to Spotify.
+_TV = r"(?:the )?(?:tv|television)"
+_TV_APP = re.compile(r"^(?:please )?(?:can you |could you )?(?:open|launch|start|put on|go to|switch to|turn on)\s+(.+?)"
+                     r"(?:\s+on " + _TV + r")?(?:\s+please)?$", re.IGNORECASE)
+_TV_VOLUME = re.compile(r"^(?:turn )?" + _TV + r"(?: volume)? (up|down)$|^turn (up|down) " + _TV + r"(?: volume)?$"
+                        r"|^" + _TV + r" (louder|quieter)$", re.IGNORECASE)
+_TV_MUTE = re.compile(r"^(mute|unmute) " + _TV + r"$", re.IGNORECASE)
+_TV_WHAT = re.compile(r"^what(?:'s| is) (?:on|playing on) " + _TV + r"$", re.IGNORECASE)
+VOLUME_STEPS = 3
+
+
+def _app_words(name: str) -> List[str]:
+    """'Disney+' and 'disney plus' alike; store suffixes ('- Music and Podcasts') dropped."""
+    name = re.split(r"\s[-:]\s|:", name.replace("+", " plus").replace("＆", "&"))[0]
+    return _words(name)
 
 
 class SmartSwitches:
     def __init__(self, root: str, drivers: Optional[List[Any]] = None,
                  clock: Callable[[], float] = time.time) -> None:
         self.path = os.path.join(os.path.abspath(root), KNOWN_FILE)
-        self._drivers = {d.kind: d for d in (drivers if drivers is not None else [KasaDriver()])}
+        if drivers is None:
+            from sentinel.engine.samsung_tv import SamsungTVDriver
+
+            drivers = [KasaDriver(), SamsungTVDriver(root)]
+        self._drivers = {d.kind: d for d in drivers}
         self._clock = clock
         self._lock = threading.Lock()
         self._known: Dict[str, Dict[str, Any]] = {}  # device key ("kasa-<mac>") -> {kind, host, model}
@@ -430,11 +452,94 @@ class SmartSwitches:
         found = self.find(words)
         return (on.lower() == "on", found) if found else None
 
-    def command(self, text: str, source: str) -> Optional[str]:
-        """Do a parsed switch command and say what happened; None when the words aren't a switch command."""
-        parsed = self.parse(text)
+    # ------------------------------------------------------------ TVs
+    def _tvs(self) -> List[Tuple[Switch, Any, str]]:
+        """(switch, driver, address) for each TV."""
+        out = []
+        for sw in self.switches():
+            key, dev, _ = self._locate(sw.id)
+            if key is not None and hasattr(self._drivers[dev["kind"]], "launch"):
+                out.append((sw, self._drivers[dev["kind"]], dev["host"]))
+        return out
+
+    def _find_app(self, words: str, driver, host: str) -> Optional[Tuple[str, str]]:
+        wanted = _app_words(words)
+        if not wanted:
+            return None
+        apps = driver.apps(host)
+        for want_all in (True, False):  # every word of the app's name said, else a name starting with what was said
+            for app_id, name in apps.items():
+                have = _app_words(name)
+                if (want_all and have == wanted) or (not want_all and have[:len(wanted)] == wanted):
+                    return app_id, name
+        return None
+
+    def tv_parse(self, text: str) -> Optional[Tuple[str, Any]]:
+        """('app', (tv, app id, app name)) / ('volume', (tv, 'up')) / ('mute', (tv, 'mute')) / ('what', tv), or None."""
+        t = re.sub(r"\s+", " ", re.sub(r"[^\w\s'+-]", " ", text or "")).strip()
+        tvs = self._tvs()
+        if not tvs:
+            return None
+        tv = tvs[0]
+        m = _TV_VOLUME.match(t)
+        if m:
+            way = next(g for g in m.groups() if g).lower()
+            return "volume", (tv, "up" if way in ("up", "louder") else "down")
+        m = _TV_MUTE.match(t)
+        if m:
+            return "mute", (tv, m.group(1).lower())
+        if _TV_WHAT.match(t):
+            return "what", tv
+        m = _TV_APP.match(t)
+        if m and not self.find(m.group(1)):  # "turn on the patio lights" is a switch, not an app
+            app = self._find_app(m.group(1), tv[1], tv[2])
+            if app:
+                return "app", (tv, app[0], app[1])
+        return None
+
+    def tv_command(self, text: str, source: str) -> Optional[str]:
+        parsed = self.tv_parse(text)
         if parsed is None:
             return None
+        what, detail = parsed
+        tv = detail[0] if what != "what" else detail
+        sw, driver, host = tv
+        try:
+            if what == "what":
+                if not sw.on:
+                    return f"The {sw.name} is off."
+                app = driver.showing(host)
+                return f"{app} is on the {sw.name}." if app else f"The {sw.name} is on (no app open: the home screen or an input)."
+            if what == "app":
+                if not sw.on:
+                    ok, message = self.set(sw.id, True, source)
+                    if not ok:
+                        return message
+                    time.sleep(3)  # let it finish starting up (it opens its last app first)
+                driver.launch(host, detail[1])
+                app_logger.log("info", "tv_app", app=detail[2], source=source, component="switches", action="tv")
+                return f"Okay, {detail[2]} on the {sw.name}."
+            if not sw.on:
+                return f"The {sw.name} is off."
+            if what == "volume":
+                driver.press(host, *(["KEY_VOLUP" if detail[1] == "up" else "KEY_VOLDOWN"] * VOLUME_STEPS))
+                return f"Okay, {sw.name} {'louder' if detail[1] == 'up' else 'quieter'}."
+            driver.press(host, "KEY_MUTE")  # the TV has one button for both
+            return f"Okay, {sw.name} {'muted' if detail[1] == 'mute' else 'unmuted'}."
+        except (OSError, ValueError) as e:
+            app_logger.log("warning", "tv_failed", what=what, error_message=str(e), source=source,
+                           component="switches", action="tv")
+            return f"The {sw.name} didn't do it ({e})."
+
+    def understands(self, text: str) -> bool:
+        """A switch or TV command (for routing Telegram messages and Claude's suggestions)."""
+        return self.parse(text) is not None or self.tv_parse(text) is not None
+
+    def command(self, text: str, source: str) -> Optional[str]:
+        """Do a parsed switch (or TV) command and say what happened; None when the words aren't one."""
+        parsed = self.parse(text)
+        if parsed is None:
+            return self.tv_command(text, source)
         on, found = parsed
         if on is None:
             return " ".join(f"{s.name} {'is' if not s.name.lower().endswith('s') else 'are'} "
@@ -445,6 +550,10 @@ class SmartSwitches:
         return " ".join(msg for _, msg in results)
 
     def summary(self) -> str:
-        """For Claude's context: one line per switch."""
-        return "\n".join(f"{s.name}: {'not answering' if not s.online else ('on' if s.on else 'off')}"
-                         for s in self.switches())
+        """For Claude's context: one line per switch (a TV with its apps)."""
+        lines = [f"{s.name}: {'not answering' if not s.online else ('on' if s.on else 'off')}" for s in self.switches()]
+        for sw, driver, host in self._tvs():
+            apps = sorted(set(re.split(r"\s[-:]\s|:", n)[0] for n in driver.apps(host).values()))
+            if apps:
+                lines.append(f"{sw.name} apps (say 'open <app>'): {', '.join(apps)}")
+        return "\n".join(lines)
