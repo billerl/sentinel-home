@@ -489,6 +489,68 @@ class TestDaylightRecheck(unittest.TestCase):
         self.assertEqual(store.event_count(), 0)
 
 
+class TestFingerprintModel(unittest.TestCase):
+    """2026-11-03: DINOv2 fingerprints replace CLIP's for telling the family's cars apart; the saved photos
+    are redone from their crops, keeping the family's labels and CLIP's embedding (for the body type)."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="sentinel-fp-")
+        self.store = HouseholdStore(self.dir)
+        self.sierra = self.store.save_vehicle("Alex's Sierra", "Alex", [], "pickup")
+        self.blue = np.zeros((360, 640, 3), np.uint8); self.blue[:] = (200, 70, 20)
+        self.red = np.zeros((360, 640, 3), np.uint8); self.red[:] = (20, 40, 200)
+        self.ids = [self.store.add_sighting(0, "cam", "Garage", self.blue, (10, 10, 100, 80), unit(10 + i, SIERRA, 0.008),
+                                            self.sierra) for i in range(3)]
+        self.stranger = self.store.add_sighting(0, "cam", "Garage", self.red, (10, 10, 100, 80), unit(30))
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    @staticmethod
+    def fake_dino(crop):
+        """384 numbers from the crop's colour: blue crops alike, red ones different."""
+        v = np.random.default_rng(int(crop.mean(axis=(0, 1)).argmax())).normal(size=384)
+        return (v / np.linalg.norm(v)).astype(np.float32)
+
+    def test_saved_photos_are_redone_and_keep_their_labels(self):
+        self.assertEqual(self.store.use_fingerprint("dinov2", self.fake_dino), 4)
+        rows = {r["id"]: r for r in self.store.sightings(limit=10)}
+        self.assertEqual({len(r["embedding"]) for r in rows.values()}, {384})
+        self.assertEqual([rows[i]["vehicle_id"] for i in self.ids], [self.sierra] * 3)
+        self.assertGreater(float(rows[self.ids[0]]["clip"] @ SIERRA), 0.95)  # CLIP kept for the body type
+        self.assertEqual(self.store.bars.match, 0.84)
+        look = self.store.look(self.blue, (10, 10, 100, 80))
+        self.assertEqual(self.store.identify(look, False)[0], self.sierra)
+        self.assertIsNone(self.store.identify(self.store.look(self.red, (10, 10, 100, 80)), False)[0])
+        self.assertEqual(self.store.use_fingerprint("dinov2", self.fake_dino), 0)  # next start: nothing to redo
+
+    def test_new_photos_keep_both(self):
+        self.store.use_fingerprint("dinov2", self.fake_dino)
+        sid = self.store.add_sighting(0, "cam", "Garage", self.blue, (10, 10, 100, 80),
+                                      self.store.look(self.blue, (10, 10, 100, 80)), clip=unit(40))
+        row = next(r for r in self.store.sightings(limit=10) if r["id"] == sid)
+        self.assertEqual((len(row["embedding"]), len(row["clip"])), (384, 512))
+
+    def test_nothing_is_named_while_photos_are_redone(self):
+        self.store.ready = False
+        self.assertEqual(self.store.identify(unit(41, SIERRA, 0.008), False), (None, 0.0))
+        self.assertIsNone(self.store.confident(unit(41, SIERRA, 0.008), False))
+
+    def test_parked_cars_are_fingerprinted_with_the_new_model(self):
+        self.store.use_fingerprint("dinov2", self.fake_dino)
+        det, clf = _Det(), _Clf()
+        clf.next = unit(50)  # CLIP: only for the body type now
+        changes = []
+        tracker = PresenceTracker(self.store, det, clf, cameras=lambda: [],
+                                  on_change=lambda kind, cam, v, ts, jpeg: changes.append((kind, v.name)))
+        cam = types.SimpleNamespace(host="192.168.0.9", display_name="Garage")
+        box = (100, 100, 200, 150)
+        for t, boxes in ((0, []), (60, [box]), (120, [box])):
+            det.boxes = boxes
+            tracker.scan(cam, self.blue, 1000.0 + t)
+        self.assertEqual(changes, [("arrived", "Alex's Sierra")])
+
+
 VEHICLES = [Vehicle(1, "Elizabeth's Fusion", "Elizabeth", ["Lizzy"], "sedan"),
             Vehicle(2, "Ben's Jeep", "Ben", [], "suv"),
             Vehicle(3, "Katherine's Edge", "Katherine", ["Kate"], "suv"),

@@ -534,7 +534,8 @@ class CameraPipeline:
                 parked = presence.home_ids() if presence is not None else ()  # it isn't one of those
                 lights = getattr(self._detections, "lights", None)
                 lit = lights is not None and lights.is_on(self.host)
-                vehicle_id, _ = household.identify(embedding, is_greyscale(frame), exclude=parked,
+                vehicle_id, _ = household.identify(household.look(frame, box, embedding), is_greyscale(frame),
+                                                   exclude=parked,
                                                    colour=crop_colour(frame, box, lit), lit=lit)
                 if vehicle_id is not None:
                     track.known_vehicle = household.vehicle(vehicle_id)

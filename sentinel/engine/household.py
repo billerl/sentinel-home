@@ -4,9 +4,11 @@ track of which ones are parked at home ("When did Elizabeth get home?", "What ca
 in the driveway?").
 
 How it works:
-- Every vehicle crop is turned into a CLIP image embedding (the same encoder used for
-  delivery vans). A known vehicle is just a name plus the embeddings of photos the user
-  confirmed are that car, collected separately for day and infrared (night) views.
+- Every vehicle crop is turned into a fingerprint: DINOv2 (``car_fingerprint.py``) when its model
+  is installed, else the CLIP embedding used for delivery vans. A known vehicle is just a name
+  plus the fingerprints of photos the user confirmed are that car, collected separately for day
+  and infrared (night) views. Each model has its own thresholds (``BARS``); switching models
+  re-fingerprints the saved photos from their crops (``migrate``), keeping the user's labels.
 - ``identify`` compares a crop with those references (mean of the best three matches)
   and only answers when the best car is clearly ahead of the next one.
 - ``PresenceTracker`` looks at each camera every minute. A car seen at the same spot in
@@ -68,6 +70,41 @@ LIT_MATCH_MIN = 0.80  # under Sentinel's white light at night shapes match less 
 LIT_POOL = 0.06  # ... so colour picks among the cars this close to the best shape match
 COLOUR_VETO = 0.05  # a daytime photo this much closer in paint colour to another car isn't filed automatically
 MAX_REFS_PER_LIGHT = 80  # per car, per day/night: plenty, and keeps matching fast
+
+
+@dataclass(frozen=True)
+class Bars:
+    """Similarity thresholds for one fingerprint model (the constants above are CLIP's)."""
+    match: float
+    margin: float
+    match_night: float
+    margin_night: float
+    auto: float
+    auto_margin: float
+    group: float
+    group_night: float
+    ignore: float
+    colour_pool: float
+    lit_match: float
+    lit_pool: float
+    far: float = 2.0  # also named when at least this alike and clearly ahead of every other car ...
+    far_margin: float = 1.0  # ... by this much (by day) ...
+    far_margin_night: float = 1.0  # ... or this much (infrared)
+
+
+# DINOv2, calibrated 2026-11-03 on the household's 1,550 saved photos (each against photos > 6 h apart;
+# the visitors' cars, with family references only, as strangers). Naming by day: CLIP 224 of 301 right,
+# 5 wrong + 23 of 48 visitors called a family car; DINOv2 198 right, 1 wrong + 6 visitors (a parked car
+# is re-checked every minute, so fewer names per photo just means a minute's wait). Infrared: CLIP 123 of
+# 217, DINOv2 173, neither with a mistake. Filing (auto): 142 of 301 by day, none wrong, 1 visitor.
+# Grouping: different cars above 0.84 in 0.4% of pairs (CLIP above 0.88: 9%). DINOv2's scores spread wider (a
+# new parking spot or angle can score 0.75 for the right car), so a car far ahead of the rest is named too:
+# by day 221 right, 1 wrong + 7 visitors; infrared 188 right, none wrong.
+BARS = {
+    "clip": Bars(MATCH_MIN, MATCH_MARGIN, MATCH_MIN, MATCH_MARGIN, AUTO_MATCH, AUTO_MARGIN, GROUP_SIMILARITY,
+                 GROUP_SIMILARITY_NIGHT, IGNORE_SIMILARITY, COLOUR_POOL, LIT_MATCH_MIN, LIT_POOL),
+    "dinov2": Bars(0.84, 0.02, 0.82, 0.04, 0.88, 0.04, 0.84, 0.86, 0.88, 0.03, 0.76, 0.06, 0.70, 0.12, 0.08),
+}
 MIN_DAYS = 2  # only cars seen on this many different days are suggested (skips visitors, deliveries)
 
 ASK_AFTER_SCANS = 3  # parked and still unknown after ~3 minutes: worth asking whose it is
@@ -181,6 +218,10 @@ class HouseholdStore:
         # Optional embedding -> body type ("car", "suv", "pickup", "van"), from the CLIP
         # classifier; photos are only grouped with others of the same body type.
         self.body_of: Optional[Callable[[np.ndarray], str]] = None
+        # Fingerprint model: crop -> unit vector (``use_fingerprint``). None: callers' CLIP embeddings are used.
+        self.fingerprint: Optional[Callable[[np.ndarray], np.ndarray]] = None
+        self.bars = BARS["clip"]
+        self.ready = True  # False while saved photos are being re-fingerprinted
         with self._connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
@@ -195,6 +236,55 @@ class HouseholdStore:
             columns = {row[1] for row in conn.execute("PRAGMA table_info(sightings)")}
             if "auto" not in columns:  # filed automatically (not by the user)
                 conn.execute("ALTER TABLE sightings ADD COLUMN auto INTEGER NOT NULL DEFAULT 0")
+            if "clip" not in columns:  # the CLIP embedding (body type), when ``embedding`` is another model's
+                conn.execute("ALTER TABLE sightings ADD COLUMN clip BLOB")
+
+    # -------------------------------------------------------- fingerprints
+    def use_fingerprint(self, name: str, embed: Callable[[np.ndarray], np.ndarray], clip_embed=None,
+                        progress: Optional[Callable[[int, int], None]] = None) -> int:
+        """Fingerprint with ``embed`` (model ``name`` in BARS) from now on. Saved photos fingerprinted by
+        another model are redone from their crops first; meanwhile ``ready`` is False and nothing is named.
+        Returns how many photos were redone."""
+        dim = len(embed(np.zeros((224, 224, 3), np.uint8)))
+        self.ready = False
+        try:
+            done = self._migrate(embed, dim, clip_embed, progress)
+            with self._lock:
+                done += self._migrate(embed, dim, clip_embed, progress)  # any added meanwhile
+                self.fingerprint, self.bars = embed, BARS[name]
+                self._ref_cache = None
+        finally:
+            self.ready = True
+        return done
+
+    def _migrate(self, embed, dim: int, clip_embed, progress) -> int:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT id, embedding, clip FROM sightings WHERE length(embedding) != ?",
+                                (dim * 4,)).fetchall()
+        for n, r in enumerate(rows):
+            crop = cv2.imread(self.crop_path(r["id"]))
+            with self._lock, self._connect() as conn:
+                if crop is None:  # nothing left to compare it with
+                    conn.execute("DELETE FROM sightings WHERE id = ?", (r["id"],))
+                    continue
+                old = np.frombuffer(r["embedding"], dtype=np.float32)
+                clip = r["clip"]
+                if clip is None:  # keep the CLIP embedding for the body type
+                    clip = old.tobytes() if len(old) == 512 else (
+                        clip_embed(crop).astype(np.float32).tobytes() if clip_embed else None)
+                conn.execute("UPDATE sightings SET embedding = ?, clip = ? WHERE id = ?",
+                             (embed(crop).astype(np.float32).tobytes(), clip, r["id"]))
+            if progress is not None and n % 100 == 0:
+                progress(n, len(rows))
+        return len(rows)
+
+    def look(self, frame: np.ndarray, box: Tuple[int, int, int, int],
+             clip: Optional[np.ndarray] = None) -> Optional[np.ndarray]:
+        """The fingerprint of a vehicle in a frame (the crop as saved for sightings), or ``clip``
+        when no fingerprint model is in use."""
+        if self.fingerprint is None:
+            return clip
+        return self.fingerprint(crop_for_clip(frame, box, pad=0.08))
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=30)
@@ -232,14 +322,16 @@ class HouseholdStore:
     # ----------------------------------------------------------- sightings
     def add_sighting(self, ts: float, camera_key: str, camera_name: str, frame: np.ndarray,
                      box: Tuple[int, int, int, int], embedding: np.ndarray,
-                     vehicle_id: Optional[int] = None, auto: bool = False) -> int:
+                     vehicle_id: Optional[int] = None, auto: bool = False, clip: Optional[np.ndarray] = None) -> int:
+        """``embedding``: the fingerprint (``look``); ``clip``: the CLIP embedding, when that's another."""
         night = is_greyscale(frame)
         with self._lock, self._connect() as conn:
             cur = conn.execute(
-                "INSERT INTO sightings (ts, camera_key, camera_name, box, night, embedding, vehicle_id, auto)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO sightings (ts, camera_key, camera_name, box, night, embedding, vehicle_id, auto, clip)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (ts, camera_key, camera_name, json.dumps(list(map(int, box))), int(night),
-                 embedding.astype(np.float32).tobytes(), vehicle_id, int(auto)),
+                 embedding.astype(np.float32).tobytes(), vehicle_id, int(auto),
+                 clip.astype(np.float32).tobytes() if clip is not None else None),
             )
             sid = int(cur.lastrowid)
         crop = crop_for_clip(frame, box, pad=0.08)
@@ -272,7 +364,7 @@ class HouseholdStore:
     def ignored_embeddings(self) -> np.ndarray:
         with self._connect() as conn:
             rows = conn.execute("SELECT embedding FROM sightings WHERE ignored = 1 AND auto = 0").fetchall()
-        return np.array([np.frombuffer(r[0], dtype=np.float32) for r in rows]) if rows else np.zeros((0, 512), np.float32)
+        return np.array([np.frombuffer(r[0], dtype=np.float32) for r in rows]) if rows else np.zeros((0, 0), np.float32)
 
     def auto_file(self) -> int:
         """File unlabelled photos that clearly match a named car (or something marked
@@ -286,14 +378,14 @@ class HouseholdStore:
             e = s["embedding"]
             scores = sorted(self.scores(e, bool(s["night"])).items(), key=lambda kv: -kv[1])
             not_ours = float((ignored @ e).max()) if len(ignored) else 0.0
-            if not_ours >= IGNORE_SIMILARITY and not_ours >= (scores[0][1] if scores else 0.0) + AUTO_MARGIN:
+            if not_ours >= self.bars.ignore and not_ours >= (scores[0][1] if scores else 0.0) + self.bars.auto_margin:
                 hidden.append(s["id"])
                 continue
             if not scores:
                 continue
             best_id, best = scores[0]
             runner = scores[1][1] if len(scores) > 1 else 0.0
-            if best >= AUTO_MATCH and best - runner >= AUTO_MARGIN and \
+            if best >= self.bars.auto and best - runner >= self.bars.auto_margin and \
                     (s["night"] or self.colour_agrees(best_id, self._colour_of(s["id"]))):
                 filed.setdefault((best_id, bool(s["night"])), []).append(s["id"])
         n = 0
@@ -325,6 +417,7 @@ class HouseholdStore:
         for r in rows:
             d = dict(r)
             d["embedding"] = np.frombuffer(r["embedding"], dtype=np.float32)
+            d["clip"] = np.frombuffer(r["clip"], dtype=np.float32) if r["clip"] is not None else d["embedding"]
             d["box"] = json.loads(r["box"])
             out.append(d)
         return out
@@ -412,31 +505,39 @@ class HouseholdStore:
         """(vehicle id, similarity) when one known vehicle clearly matches, else (None, best).
         ``exclude``: cars that can't be this one (parked somewhere else right now). ``colour``
         (daytime crop_colour) settles near-ties between cars that are shaped alike."""
+        if not self.ready:
+            return None, 0.0
         scores = sorted(self.scores(embedding, night, exclude).items(), key=lambda kv: -kv[1])
         if not scores:
             return None, 0.0
         best_id, best = scores[0]
         runner = scores[1][1] if len(scores) > 1 else 0.0
-        if best >= MATCH_MIN and best - runner >= MATCH_MARGIN:
+        bars = self.bars
+        least, margin = (bars.match_night, bars.margin_night) if night else (bars.match, bars.margin)
+        if best >= least and best - runner >= margin:
             return best_id, best
-        if best >= MATCH_MIN and colour is not None and not night:
-            pick = self._colour_pick(colour, [vid for vid, score in scores if score >= best - COLOUR_POOL])
+        if best >= bars.far and best - runner >= (bars.far_margin_night if night else bars.far_margin):
+            return best_id, best
+        if best >= least and colour is not None and not night:
+            pick = self._colour_pick(colour, [vid for vid, score in scores if score >= best - bars.colour_pool])
             if pick is not None:
                 return pick, dict(scores)[pick]
-        if lit and colour is not None and best >= LIT_MATCH_MIN:
-            # 2026-10-29 21:44, white light on: Edge shape 0.88 / Fusion 0.85, but paint 0.81 / 0.67.
-            pick = self._colour_pick(colour, [vid for vid, score in scores if score >= best - LIT_POOL])
+        if lit and colour is not None and best >= bars.lit_match:
+            # 2026-10-29 21:44, white light on: Edge shape 0.88 / Fusion 0.85, but paint 0.81 / 0.67 (CLIP).
+            pick = self._colour_pick(colour, [vid for vid, score in scores if score >= best - bars.lit_pool])
             if pick is not None:
                 return pick, dict(scores)[pick]
         return None, best
 
     def confident(self, embedding: np.ndarray, night: bool) -> Optional[int]:
         """The car this photo clearly is (strict bar, used before filing it as a reference)."""
+        if not self.ready:
+            return None
         scores = sorted(self.scores(embedding, night).items(), key=lambda kv: -kv[1])
         if not scores:
             return None
         runner = scores[1][1] if len(scores) > 1 else 0.0
-        return scores[0][0] if scores[0][1] >= AUTO_MATCH and scores[0][1] - runner >= AUTO_MARGIN else None
+        return scores[0][0] if scores[0][1] >= self.bars.auto and scores[0][1] - runner >= self.bars.auto_margin else None
 
     def suggestion_groups(self, limit: int = 8, min_days: int = MIN_DAYS) -> List[Dict[str, Any]]:
         """Daytime photos not yet filed, grouped by look, for the Vehicles page. Only groups
@@ -448,7 +549,7 @@ class HouseholdStore:
             return []
         vecs = np.array([s["embedding"] for s in items])
         sims = vecs @ vecs.T
-        bodies = [self.body_of(v) if self.body_of else "" for v in vecs]
+        bodies = [self.body_of(s["clip"]) if self.body_of else "" for s in items]
         groups: List[List[int]] = []
         for i in range(len(items)):
             # Join the group this photo resembles best, but only if it resembles *every*
@@ -458,7 +559,7 @@ class HouseholdStore:
                 if items[g[0]]["night"] != items[i]["night"] or bodies[g[0]] != bodies[i]:
                     continue  # day and infrared photos of a car look nothing alike
                 worst = float(sims[i, g].min())
-                bar = GROUP_SIMILARITY_NIGHT if items[i]["night"] else GROUP_SIMILARITY
+                bar = self.bars.group_night if items[i]["night"] else self.bars.group
                 if worst >= bar and worst > best_score:
                     best, best_score = g, worst
             if best is not None:
@@ -637,8 +738,8 @@ class PresenceTracker:
             photo_due = p.last_night != night or now - p.last_photo >= SIGHTING_EVERY
             embedding = None
             recheck = p.vehicle_id is not None and p.unchecked and daylight
-            if p.vehicle_id is None or photo_due or recheck:
-                embedding = self.classifier.embed(crop_for_clip(frame, p.box))
+            if (p.vehicle_id is None or photo_due or recheck) and self.store.ready:
+                embedding = self._look(frame, p.box)
                 if p.vehicle_id is None and not p.ignored:
                     # Unknown so far (e.g. arrived in the dark): try again every scan, and name it once
                     # two checks in a row agree (one lucky match would stick for the whole parking).
@@ -664,9 +765,10 @@ class PresenceTracker:
                         # A car we already know, parked in the same spot: its photo (including the
                         # first infrared one at dusk) is filed under it without asking.
                         self.store.add_sighting(now, key, cam.display_name, frame, p.box, embedding,
-                                                vehicle_id=p.vehicle_id, auto=True)
+                                                vehicle_id=p.vehicle_id, auto=True, clip=self._clip(frame, p.box))
                     else:
-                        self.store.add_sighting(now, key, cam.display_name, frame, p.box, embedding)
+                        self.store.add_sighting(now, key, cam.display_name, frame, p.box, embedding,
+                                                clip=self._clip(frame, p.box))
                     p.last_photo, p.last_night = now, night
             if p.seen >= CONFIRM_SCANS:
                 p.confirmed = True
@@ -674,7 +776,8 @@ class PresenceTracker:
                     and not night and p.seen >= ASK_AFTER_SCANS and embedding is not None
                     and p.box[0] > 2 and p.box[0] + p.box[2] < frame.shape[1] - 2):  # whole car in view
                 p.asked = True
-                sid = self.store.add_sighting(now, key, cam.display_name, frame, p.box, embedding)
+                sid = self.store.add_sighting(now, key, cam.display_name, frame, p.box, embedding,
+                                              clip=self._clip(frame, p.box))
                 self.on_unknown(cam, p, frame, sid, self.store.scores(embedding, night))
             if p.confirmed and p.vehicle_id is not None and not p.announced:
                 p.announced = True
@@ -684,6 +787,16 @@ class PresenceTracker:
                 if vehicle is not None:
                     ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     self.on_change("arrived", cam, vehicle, p.first_seen, jpeg.tobytes() if ok else None)
+
+    def _look(self, frame: np.ndarray, box) -> np.ndarray:
+        """A parked car's fingerprint (CLIP's embedding when no fingerprint model is in use)."""
+        if self.store.fingerprint is not None:
+            return self.store.look(frame, box)
+        return self.classifier.embed(crop_for_clip(frame, box))
+
+    def _clip(self, frame: np.ndarray, box) -> Optional[np.ndarray]:
+        """CLIP's embedding to keep beside a saved photo's fingerprint (for its body type)."""
+        return self.classifier.embed(crop_for_clip(frame, box)) if self.store.fingerprint is not None else None
 
     def _recheck(self, cam, p: "Parked", embedding: np.ndarray, colour: Optional[np.ndarray]) -> None:
         """A car whose name was a guess, seen by daylight: keep its name, or put it right."""

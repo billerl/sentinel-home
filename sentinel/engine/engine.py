@@ -304,6 +304,10 @@ class Engine:
 
             self.household.body_of = _body
         self.detection_worker.start()
+        if classifier is not None:
+            self.household.ready = False  # until the fingerprint model is chosen (and saved photos match it)
+            threading.Thread(target=self._use_car_fingerprints, args=(classifier, device), name="fingerprints",
+                             daemon=True).start()
         if classifier is not None and self.settings.get("household_tracking_enabled", True):
             from sentinel.engine.household import PresenceTracker
 
@@ -522,7 +526,8 @@ class Engine:
         self._car_fixes.pop(fix_id, None)
         pipeline, frame, box = fix["camera"], fix["frame"], fix["box"]
         embedding = classifier.embed(crop_for_clip(frame, box))
-        sid = self.household.add_sighting(fix["ts"], pipeline.host, pipeline.display_name, frame, box, embedding)
+        sid = self.household.add_sighting(fix["ts"], pipeline.host, pipeline.display_name, frame, box,
+                                          self.household.look(frame, box, embedding), clip=embedding)
         self.household.assign([sid], vehicle.id if vehicle else None, ignore=vehicle is None)
         if self.presence is not None:  # still parked here? then that parking is this car from now on
             parked = self.presence.parked_spot(pipeline.host, box)
@@ -534,6 +539,24 @@ class Engine:
         self.telegram.edit_caption(chat_id, message_id, f"{fix['caption']}\n{note}")
         app_logger.log("info", "car_corrected", choice="named" if vehicle else "x", component="engine",
                        action="handle_button")
+
+    def _use_car_fingerprints(self, classifier, device: str) -> None:
+        """DINOv2 tells the family's cars apart better than CLIP (car_fingerprint.py); without its model,
+        CLIP. Saved photos made with the other model are redone first (a minute or two, cars unnamed)."""
+        from sentinel.detection.car_fingerprint import CarFingerprint
+
+        fp = CarFingerprint(device=device)
+        name, embed = (fp.name, fp.embed) if fp.available else ("clip", classifier.embed)
+        started = time.time()
+        try:
+            done = self.household.use_fingerprint(name, embed, clip_embed=classifier.embed)
+        except Exception as e:
+            app_logger.log("error", "car_fingerprints_failed", error_message=str(e), component="engine",
+                           action="init_objects")
+            return
+        app_logger.log("info", "car_fingerprints_ready", model=name, device=fp.device if fp.available else None,
+                       error_message=fp.error, redone=done, seconds=round(time.time() - started),
+                       component="engine", action="init_objects")
 
     def _on_household_change(self, kind: str, pipeline, vehicle, ts: float, jpeg: Optional[bytes]) -> None:
         """A family car parked ('arrived') or drove off ('left'); kept for "when did X get home?"."""

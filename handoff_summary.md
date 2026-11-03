@@ -93,6 +93,11 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     RENAME_AGREE (3) checks in a row renames it (`on_renamed` relabels its "got home" event); DOUBT_SCANS (10)
     doubts without a better match drop the name (event removed, whose-car question, re-recorded once named;
     the doubted car is `ruled_out` for that parking). Names the family gave are never overruled.
+    Fingerprints: DINOv2-small (`car_fingerprint.py`) when its model is installed, else CLIP; each model has
+    its own thresholds (`BARS`, DINOv2's calibrated on the household's photos, incl. a "far ahead of every other
+    car" rule). `HouseholdStore.use_fingerprint` redoes saved photos made with the other model from their crops
+    at startup (engine thread `_use_car_fingerprints`; `ready` False meanwhile, so nothing is named); the
+    `clip` column keeps CLIP's embedding for the body type used in suggestion groups.
   - Live page on phones (≤760 px wide, or a short touch screen in landscape): page scrolls, cameras stack
     (two across in landscape), and "Live / Events" tabs at the bottom; Events adds a tap-friendly clip
     list (newest first) under the timeline bars. Desktop layout is unchanged.

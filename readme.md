@@ -80,6 +80,8 @@ mkdir -p models/detector && curl -L -o models/detector/yolox_tiny.onnx \
 # optional: delivery-van / vehicle-type recognition (CLIP ViT-B/32, MIT)
 mkdir -p models/classifier && curl -L -o models/classifier/clip_vit_b32_vision.onnx \
   https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model.onnx
+# optional: telling your own cars apart (DINOv2-small, Apache-2.0; without it CLIP is used, less accurately)
+curl -L -o models/classifier/dinov2_small.onnx https://huggingface.co/Xenova/dinov2-small/resolve/main/onnx/model.onnx
 # optional: natural voice (Kokoro, Apache-2.0)
 mkdir -p models/kokoro && for f in kokoro-v1.0.onnx voices-v1.0.bin; do curl -L -o models/kokoro/$f \
   https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/$f; done

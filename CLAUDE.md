@@ -20,8 +20,8 @@ If `CLAUDE.local.md` exists (git-ignored), read it too: it holds the notes for o
 - Web UI on 127.0.0.1:8088 by default; reach it remotely through a Cloudflare Tunnel or Tailscale.
 - Detection can run on an Intel iGPU via OpenVINO (`inference_device: auto`); the user must be in the
   `render` group. Compiled models are cached in `models/.ov_cache`.
-- Models are not in git: `models/detector/yolox_tiny.onnx`, `models/classifier/clip_vit_b32_vision.onnx`
-  (download commands in readme). Piper voice models in `models/` are tracked.
+- Models are not in git: `models/detector/yolox_tiny.onnx`, `models/classifier/clip_vit_b32_vision.onnx`,
+  `models/classifier/dinov2_small.onnx` (download commands in readme). Piper voice models in `models/` are tracked.
 - The repo is public: no real names, addresses, coordinates, site addresses or credentials in tracked
   files. Examples use made-up people (Alex, Katherine/Kate, Elizabeth/Liz, Ben, Grace).
 
@@ -53,8 +53,9 @@ If `CLAUDE.local.md` exists (git-ignored), read it too: it holds the notes for o
 - `recorded_videos/household.db` and `.household/` hold the user's own labels (which photo is whose car).
   Never delete or rebuild sightings without checking `vehicle_id`/`ignored` first — the user may be
   labelling on the Vehicles page while you work.
-- Night = infrared: use `is_greyscale` (per-pixel channel spread), not saturation. CLIP tells cars apart
-  well by day but poorly in IR; family-car identity at night comes from parking-spot stickiness.
+- Night = infrared: use `is_greyscale` (per-pixel channel spread), not saturation. Car fingerprints (DINOv2,
+  else CLIP) tell cars apart better by day than in IR; family-car identity at night leans on parking-spot
+  stickiness, and guessed names are re-checked by daylight.
 - In the web editors, never grow JS arrays by setting `.length` — the holes are sent as `null` (this
   once named a zone "None"). Server-side cleaners must treat non-strings as "".
 

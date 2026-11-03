@@ -47,6 +47,7 @@ sentinel-home/                         # repository root
     │   ├── nuisance.py                # Mutes spots where motion never stops (web on the lens, branches)
     │   ├── objects.py                 # YOLOX object detector (OpenVINO)
     │   ├── vehicle_type.py            # CLIP zero-shot vehicle type / delivery-company recognition
+    │   ├── car_fingerprint.py         # DINOv2 fingerprints: which of the family's cars is this?
     │   ├── vehicle_prompts.npz        # Precomputed CLIP text embeddings (tools/build_vehicle_prompts.py)
     │   └── network_discovery.py       # RTSP discovery / resolve / endpoints
     ├── recordings/
