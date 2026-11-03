@@ -39,6 +39,11 @@ WAKE_SECONDS = 25  # how long a wake (packet, then waiting for its network) may 
 SCREEN_AFTER = 240.0  # answering this long without a break = the picture is on (dark wake-ups last ~2 min)
 APPS_EVERY = 3600.0
 IDLE_SECONDS = 60.0  # the remote-control connection is kept open this long between button presses
+# Just after being switched off the TV is still shutting down for a few minutes: a power press then is lost and
+# its app service goes away for ~30-40 s (2026-11-03 18:39, 2.5 min after switch-off; a press at 18:40 worked).
+# So after pressing power, watch it this long; if it goes away, wait for it to come back and press again.
+PRESS_CHECK_SECONDS = 8
+COME_BACK_SECONDS = 60
 ICONS_DIRNAME = ".tv_icons"
 # Apps a TV may have, by the ids Samsung's store uses (the TV's own list is used once it has allowed us).
 COMMON_APPS = {
@@ -236,6 +241,29 @@ class SamsungTVDriver:
         finally:
             sock.close()
 
+    def _power_on(self, mac: str, host: str) -> None:
+        """The power button for a TV whose network is awake and picture dark, pressed again if the first press
+        is lost (the TV was still shutting down, PRESS_CHECK_SECONDS)."""
+        self.press(host, "KEY_POWER")
+        for _ in range(PRESS_CHECK_SECONDS):
+            time.sleep(1)
+            if self.answering(host, timeout=1.0) is None:
+                break
+        else:
+            return  # stayed up: the picture is coming on
+        self._drop(host)
+        for _ in range(COME_BACK_SECONDS // 2):
+            self._wake(mac, host)
+            if self.answering(host, timeout=1.5) is not None:
+                break
+            time.sleep(1)
+        else:
+            raise OSError("the TV was still switching off and didn't come back")
+        app_logger.log("info", "tv_power_again", component="switches", action="tv",
+                       error_message="the first power press was lost (the TV was still switching off)")
+        time.sleep(1)
+        self.press(host, "KEY_POWER")
+
     def answering(self, host: str, timeout: Optional[float] = None) -> Optional[Dict[str, Any]]:
         try:
             return self._rest(host, timeout=timeout)
@@ -343,7 +371,7 @@ class SamsungTVDriver:
             self._off_at.pop(host, None)
         if self.answering(host) is not None:
             if not self._app_on_screen(host):
-                self.press(host, "KEY_POWER")  # awake but dark (a wake-up of its own): the button lights it
+                self._power_on(mac, host)  # awake but dark (a wake-up of its own): the button lights it
             self._screen(mac, True)
             return
         end = time.time() + WAKE_SECONDS
@@ -355,7 +383,7 @@ class SamsungTVDriver:
         else:
             raise OSError("the TV didn't wake up (is 'Power On with Mobile' on in its network settings?)")
         time.sleep(1)
-        self.press(host, "KEY_POWER")  # the wake packet only wakes its network: the picture needs the button
+        self._power_on(mac, host)  # the wake packet only wakes its network: the picture needs the button
         self._screen(mac, True)
 
     def rename(self, host: str, child_id: Optional[str], name: str) -> None:

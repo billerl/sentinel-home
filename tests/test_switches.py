@@ -429,6 +429,28 @@ class TestSamsungDriver(unittest.TestCase):
             self.assertTrue(self.picture)
             self.assertEqual(self.drv.status("192.168.1.60")["relay_state"], 1)
 
+    def test_power_press_lost_while_switching_off_is_pressed_again(self):
+        """2026-11-03 18:39: 2.5 min after switch-off the TV still answered, the press was lost and it went away."""
+        self.net, gone, first = True, [0], [True]
+        real_rest = self.rest
+
+        def rest(*a, **k):
+            if gone[0]:
+                gone[0] -= 1
+                raise OSError("timed out")
+            return real_rest(*a, **k)
+
+        def press(host, *keys):
+            self.log.append(keys)
+            if first.pop() if first else False:
+                gone[0] = 3  # finishing its shutdown: away for a while, then back with the picture still dark
+                return
+            self.power()
+        self.drv._rest, self.drv.press = rest, press
+        self.drv.set("192.168.1.60", None, True)
+        self.assertEqual([x for x in self.log if x != "wake"], [("KEY_POWER",), ("KEY_POWER",)])
+        self.assertTrue(self.picture)
+
     def test_on_with_its_own_remote_shows_after_a_while(self):
         clock = [NOW]
         with mock.patch("sentinel.engine.samsung_tv.time.time", side_effect=lambda: clock[0]):
