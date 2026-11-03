@@ -80,7 +80,7 @@ class TelegramNotifier:
             "Smart plugs and switches (names from the Kasa app):\n"
             "- Patio lights on / Turn off the patio lights — switch one\n"
             "- Are the patio lights on? — check one\n"
-            "- TV on / TV off; Put on Netflix (any app on the TV); TV volume up / down; Mute the TV; What's on the TV?\n\n"
+            "- TV on / TV off; Put on Netflix / Turn on the TV to Hulu (any app on the TV); TV volume up / down; Mute the TV; What's on the TV?\n\n"
             "Routines (when this happens, do that):\n"
             "- New routine: when the back yard camera sees a person after dark, turn on the patio lights until there's no motion for 2 minutes — in plain words (Claude reads it back; tap ✅ to save)\n"
             "- Routines — list them; Routine 2 off / Routine 2 on; Delete routine 2\n\n"

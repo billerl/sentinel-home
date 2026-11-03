@@ -317,6 +317,17 @@ class TestTV(unittest.TestCase):
         self.assertEqual(self.sw.command("launch pluto", "voice"), "Okay, Pluto TV: Free Movies & Shows on the TV.")
         self.assertEqual(self.sw.command("what's on the tv", "voice"), "Pluto TV: Free Movies & Shows is on the TV.")
 
+    def test_turn_on_the_tv_to_an_app(self):
+        for text, app in (("turn on the TV to Netflix", "Netflix"), ("turn the tv on to disney plus", "Disney+"),
+                          ("put the TV on YouTube TV", "YouTube TV"), ("switch the TV to youtube", "YouTube"),
+                          ("Turn on the TV to Pluto TV please", "Pluto TV: Free Movies & Shows")):
+            self.assertEqual(self.sw.command(text, "voice"), f"Okay, {app} on the TV.", text)
+        self.assertEqual(self.tv.calls[:2], [("power", True), ("launch", "11101200001")])
+        said = self.sw.command("turn on the TV to Judge Judy", "voice")
+        self.assertTrue(said.startswith("I couldn't find Judge Judy on the TV. I can open its apps, like Netflix"), said)
+        self.assertEqual(self.sw.command("turn the TV on", "voice"), "Okay, TV on.")  # no app: just power
+        self.assertNotIn("Gallery", self.sw.tv_apps())
+
     def test_volume_and_mute(self):
         self.assertEqual(self.sw.command("tv volume up", "voice"), "The TV is off.")
         self.tv.on = True
@@ -404,3 +415,11 @@ class TestSamsungDriver(unittest.TestCase):
         self.assertEqual(_app_words("Spotify - Music and Podcasts"), ["spotify"])
         self.assertEqual(_app_words("Pluto TV: Free Movies & Shows"), ["pluto", "tv"])
         self.assertNotEqual(_app_words("YouTube TV"), _app_words("YouTube"))
+
+
+class TestVoiceHint(unittest.TestCase):
+    def test_tv_apps_in_the_hint(self):
+        from sentinel.audio.voice import whisper_prompt
+        hint = whisper_prompt(["Kate"], ["patio lights"], ["Netflix", "Disney+", "Paramount+"])
+        self.assertIn("Turn on the TV to Netflix. Put on Disney Plus, Paramount Plus.", hint)
+        self.assertNotIn("TV to", whisper_prompt(["Kate"], ["patio lights"]))

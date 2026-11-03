@@ -185,11 +185,15 @@ COMMAND = re.compile(r"^turn (?:on|off) [\w' -]{1,40}$|^turn [\w' -]{1,40} (?:on
 _TV = r"(?:the )?(?:tv|television)"
 _TV_APP = re.compile(r"^(?:please )?(?:can you |could you )?(?:open|launch|start|put on|go to|switch to|turn on)\s+(.+?)"
                      r"(?:\s+on " + _TV + r")?(?:\s+please)?$", re.IGNORECASE)
+# "turn on the TV to Netflix", "turn the TV on to Hulu", "put the TV on YouTube TV", "switch the TV to Disney Plus"
+_TV_TO = re.compile(r"^(?:please )?(?:can you |could you )?(?:turn|switch|put|change|set)\s+(?:on\s+)?" + _TV +
+                    r"(?:\s+on)?\s+(?:to|on)\s+(.+?)(?:\s+please)?$", re.IGNORECASE)
 _TV_VOLUME = re.compile(r"^(?:turn )?" + _TV + r"(?: volume)? (up|down)$|^turn (up|down) " + _TV + r"(?: volume)?$"
                         r"|^" + _TV + r" (louder|quieter)$", re.IGNORECASE)
 _TV_MUTE = re.compile(r"^(mute|unmute) " + _TV + r"$", re.IGNORECASE)
 _TV_WHAT = re.compile(r"^what(?:'s| is) (?:on|playing on) " + _TV + r"$", re.IGNORECASE)
 VOLUME_STEPS = 3
+TV_SYSTEM_APPS = {"Gallery", "Internet", "e-Manual", "PrivacyChoices", "Universal Guide"}
 
 
 def _app_words(name: str) -> List[str]:
@@ -490,6 +494,10 @@ class SmartSwitches:
             return "mute", (tv, m.group(1).lower())
         if _TV_WHAT.match(t):
             return "what", tv
+        m = _TV_TO.match(t)
+        if m:
+            app = self._find_app(m.group(1), tv[1], tv[2])
+            return ("app", (tv, app[0], app[1])) if app else ("no_app", (tv, m.group(1)))
         m = _TV_APP.match(t)
         if m and not self.find(m.group(1)):  # "turn on the patio lights" is a switch, not an app
             app = self._find_app(m.group(1), tv[1], tv[2])
@@ -504,6 +512,8 @@ class SmartSwitches:
         what, detail = parsed
         tv = detail[0] if what != "what" else detail
         sw, driver, host = tv
+        if what == "no_app":
+            return f"I couldn't find {detail[1]} on the {sw.name}. I can open its apps, like {', '.join(self.tv_apps()[:4])}."
         try:
             if what == "what":
                 if not sw.on:
@@ -530,6 +540,16 @@ class SmartSwitches:
             app_logger.log("warning", "tv_failed", what=what, error_message=str(e), source=source,
                            component="switches", action="tv")
             return f"The {sw.name} didn't do it ({e})."
+
+    def tv_apps(self) -> List[str]:
+        """The TVs' apps by their short names (for the speech recogniser's hint and replies)."""
+        out: List[str] = []
+        for _sw, driver, host in self._tvs():
+            for name in driver.apps(host).values():
+                short = re.split(r"\s[-:]\s|:", name)[0].strip()
+                if short and short not in TV_SYSTEM_APPS and short not in out:
+                    out.append(short)
+        return out
 
     def understands(self, text: str) -> bool:
         """A switch or TV command (for routing Telegram messages and Claude's suggestions)."""

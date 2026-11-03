@@ -297,8 +297,10 @@ class SamsungTVDriver:
         mac, tv = self._tv(host)
         if mac is None:
             return {}
-        if tv.get("apps") and time.time() - tv.get("apps_at", 0) < APPS_EVERY:
-            return dict(tv["apps"])
+        if tv.get("apps") and (time.time() - tv.get("apps_at", 0) < APPS_EVERY or not tv.get("on_since")):
+            return dict(tv["apps"])  # fresh, or the TV is off (asking would only time out)
+        if not tv.get("on_since"):
+            return {}
         found: Dict[str, str] = {}
         try:
             s = self._remote(host)

@@ -54,9 +54,10 @@ PROMPT_REST = ("Did anyone come by today? Any deliveries? What's the weather? Fr
 PROMPT = PROMPT_START + PROMPT_REST
 MAX_PROMPT_NAMES = 8
 MAX_PROMPT_SWITCHES = 6
+MAX_PROMPT_APPS = 12
 
 
-def whisper_prompt(names: List[str], switches: Optional[List[str]] = None) -> str:
+def whisper_prompt(names: List[str], switches: Optional[List[str]] = None, apps: Optional[List[str]] = None) -> str:
     """The hint for Whisper, with this household's names (and smart plugs) said the way people ask about them.
     Without the plugs, "turn the patio light on" came out as "Turn Petty, or light home." (2026-11-02)."""
     names = [n for n in dict.fromkeys(n.strip() for n in names) if n][:MAX_PROMPT_NAMES]
@@ -69,6 +70,9 @@ def whisper_prompt(names: List[str], switches: Optional[List[str]] = None) -> st
         said += f"Did {', '.join(rest[:-1]) + ' or ' + rest[-1] if len(rest) > 1 else rest[0]} leave? "
     if plugs:
         said += f"Turn on the {plugs[0]}. " + "".join(f"{p[:1].upper()}{p[1:]} off. " for p in plugs[1:])
+    apps = [a.replace("+", " Plus") for a in dict.fromkeys((a or "").strip() for a in (apps or [])) if a][:MAX_PROMPT_APPS]
+    if apps:  # TV apps: "Paramount Plus", "Peacock", "Fubo" are easy to mishear
+        said += f"Turn on the TV to {apps[0]}. " + ("Put on " + ", ".join(apps[1:]) + ". " if len(apps) > 1 else "")
     return PROMPT_START + said + PROMPT_REST
 
 
@@ -191,10 +195,12 @@ def set_mixer(card: str = "0", run: Callable = subprocess.run) -> List[str]:
 class VoiceAssistant:
     def __init__(self, settings, answer: Callable[[str, Callable[[str], None]], VoiceReply], speaker,
                  popen: Callable = subprocess.Popen, names: Optional[Callable[[], List[str]]] = None,
-                 switches: Optional[Callable[[], List[str]]] = None) -> None:
+                 switches: Optional[Callable[[], List[str]]] = None,
+                 apps: Optional[Callable[[], List[str]]] = None) -> None:
         self.settings = settings
         self.names = names  # the family's names and nicknames, for Whisper's hint
         self.switches = switches  # smart plug names, likewise
+        self.apps = apps  # TV app names, likewise
         self.answer = answer
         self.speaker = speaker  # AudioAlertSystem: speak(text), tone(kind)
         self._popen = popen
@@ -396,7 +402,8 @@ class VoiceAssistant:
         audio = normalise(np.concatenate(chunks))
         if prompt is None:
             try:
-                prompt = whisper_prompt(self.names() if self.names else [], self.switches() if self.switches else [])
+                prompt = whisper_prompt(self.names() if self.names else [], self.switches() if self.switches else [],
+                                        self.apps() if self.apps else [])
             except Exception:  # a database hiccup shouldn't cost the question
                 prompt = PROMPT
         started = time.time()
