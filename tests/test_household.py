@@ -375,6 +375,99 @@ class TestPresenceFlipFlops(TestPresence):
         self.assertEqual(len([x for x in self.store.sightings(labelled=True) if x["vehicle_id"] == self.sierra]), filed)
 
 
+class TestDaylightRecheck(unittest.TestCase):
+    """2026-11-03: a grey sedan pulled in before sunrise, was named the blue pickup in infrared, and kept that
+    name all morning. A name given in the dark is checked again once paint colours can be seen."""
+    BOX = (100, 100, 200, 150)
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="sentinel-recheck-")
+        self.store = HouseholdStore(self.dir)
+        self.blue = np.zeros((360, 640, 3), np.uint8); self.blue[:] = (200, 70, 20)
+        self.red = np.zeros((360, 640, 3), np.uint8); self.red[:] = (20, 40, 200)
+        self.shape, self.ir = unit(3), unit(4)  # look-alikes from above by day; only the Sierra known in infrared
+        self.sierra = self.store.save_vehicle("Alex's Sierra", "Alex", [], "pickup")
+        self.fusion = self.store.save_vehicle("Elizabeth's Fusion", "Elizabeth", [], "sedan")
+        for i in range(4):
+            self.store.add_sighting(0, "cam", "Garage", self.blue, self.BOX, unit(10 + i, self.shape, 0.01), self.sierra)
+            self.store.add_sighting(0, "cam", "Garage", self.red, self.BOX, unit(20 + i, self.shape, 0.01), self.fusion)
+            self.store.add_sighting(0, "cam", "Garage", NIGHT, self.BOX, unit(30 + i, self.ir, 0.01), self.sierra)
+        self.det, self.clf = _Det(), _Clf()
+        self.changes, self.renames, self.asked = [], [], []
+        self.cam = types.SimpleNamespace(host="192.168.0.9", display_name="Garage")
+        self.tracker = PresenceTracker(
+            self.store, self.det, self.clf, cameras=lambda: [self.cam],
+            on_change=lambda kind, cam, v, ts, jpeg: self.changes.append((kind, v.name)),
+            on_unknown=lambda cam, p, frame, sid, scores: self.asked.append(sid),
+            on_renamed=lambda cam, p, old, new: self.renames.append((old.name, new.name if new else None)))
+        self.t = 1000.0
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def scan(self, frame, look, boxes=None):
+        self.det.boxes = [self.BOX] if boxes is None else boxes
+        self.clf.next = look
+        self.tracker.scan(self.cam, frame, self.t)
+        self.t += 60
+
+    def arrive_in_the_dark(self):
+        self.scan(NIGHT, unit(50, self.ir, 0.01), boxes=[])
+        self.scan(NIGHT, unit(51, self.ir, 0.01)); self.scan(NIGHT, unit(52, self.ir, 0.01))
+        self.assertEqual(self.changes, [("arrived", "Alex's Sierra")])  # infrared: the best guess
+        return self.tracker.present()["192.168.0.9"][0]
+
+    def test_daylight_puts_a_wrong_name_right(self):
+        parked = self.arrive_in_the_dark()
+        for i in range(2):
+            self.scan(self.red, unit(60 + i, self.shape, 0.01))
+        self.assertEqual(self.renames, [])  # one or two doubtful looks aren't enough
+        self.scan(self.red, unit(62, self.shape, 0.01))
+        self.assertEqual(self.renames, [("Alex's Sierra", "Elizabeth's Fusion")])
+        self.assertEqual(parked.vehicle_id, self.fusion)
+        for i in range(3):
+            self.scan(self.red, unit(63 + i, self.shape, 0.01), boxes=[])
+        self.assertEqual(self.changes[-1], ("left", "Elizabeth's Fusion"))  # "X is leaving" uses the right name
+
+    def test_a_right_name_stands(self):
+        parked = self.arrive_in_the_dark()
+        for i in range(6):
+            self.scan(self.blue, unit(60 + i, self.shape, 0.01))
+        self.assertEqual(self.renames, [])
+        self.assertEqual(parked.vehicle_id, self.sierra)
+
+    def test_not_that_car_but_whose_then_asks(self):
+        parked = self.arrive_in_the_dark()
+        for i in range(10):
+            self.scan(self.red, unit(70 + i))  # red paint, but a shape it doesn't know
+        self.assertEqual(self.renames, [("Alex's Sierra", None)])
+        self.assertIsNone(parked.vehicle_id)
+        self.assertEqual(len(self.asked), 1)  # "Whose car is this?"
+        self.scan(self.red, unit(80, self.shape, 0.01)); self.scan(self.red, unit(81, self.shape, 0.01))
+        self.assertEqual(parked.vehicle_id, self.fusion)  # named by daylight, never the ruled-out Sierra
+        self.assertEqual(self.changes[-1], ("arrived", "Elizabeth's Fusion"))
+
+    def test_a_name_the_family_gave_isnt_overruled(self):
+        parked = self.arrive_in_the_dark()
+        self.tracker.set_identity(parked, self.sierra)
+        for i in range(5):
+            self.scan(self.red, unit(60 + i, self.shape, 0.01))
+        self.assertEqual(self.renames, [])
+        self.assertEqual(parked.vehicle_id, self.sierra)
+
+    def test_the_got_home_record_is_corrected(self):
+        from sentinel.recordings.store import RecordingStore
+        store = RecordingStore(os.path.join(self.dir, "rec"))
+        store.add_event(500.0, "cam", "Garage", "household", "🏠 Alex's Sierra got home (Garage).",
+                        label="arrived", vehicle_type=str(self.sierra))
+        store.relabel_household_event(self.sierra, 500.0, self.fusion, "🏠 Elizabeth's Fusion got home (Garage).")
+        self.assertIsNone(store.last_household_event(self.sierra, "arrived"))
+        self.assertEqual(store.last_household_event(self.fusion, "arrived")["description"],
+                         "🏠 Elizabeth's Fusion got home (Garage).")
+        store.relabel_household_event(self.fusion, 500.0, None, "")
+        self.assertEqual(store.event_count(), 0)
+
+
 VEHICLES = [Vehicle(1, "Elizabeth's Fusion", "Elizabeth", ["Lizzy"], "sedan"),
             Vehicle(2, "Ben's Jeep", "Ben", [], "suv"),
             Vehicle(3, "Katherine's Edge", "Katherine", ["Kate"], "suv"),

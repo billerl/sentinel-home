@@ -313,6 +313,7 @@ class Engine:
                 on_change=self._on_household_change,
                 state_path=os.path.join(self.household.crops_dir, "presence.json"),
                 on_unknown=self._ask_whose_car,
+                on_renamed=self._on_household_renamed,
             )
             self.detection_worker.presence = self.presence
             self.presence.lights = self.camera_lights
@@ -551,6 +552,23 @@ class Engine:
         app_logger.log("info", "household_" + kind, vehicle=vehicle.name, camera_display=pipeline.display_name,
                        component="engine", action="presence")
         self.routines.car("arrive" if kind == "arrived" else "leave", vehicle.id)
+
+    def _on_household_renamed(self, pipeline, parked, old, new) -> None:
+        """Daylight showed that a car named in the dark is another one: put its "got home" right (or remove it
+        until we know whose car it is; the arrival is recorded again once it has a name)."""
+        from sentinel.engine.household import sentence_case
+
+        if old is None:
+            return
+        text = f"🏠 {sentence_case(new.name)} got home ({pipeline.display_name})." if new is not None else ""
+        try:
+            self.recording_store.relabel_household_event(old.id, parked.first_seen,
+                                                         new.id if new is not None else None, text)
+        except Exception as e:
+            app_logger.log("error", "event_store_failed", error_message=str(e), component="engine",
+                           action="household")
+        app_logger.log("info", "household_renamed", vehicle=old.name, now=new.name if new is not None else None,
+                       camera_display=pipeline.display_name, component="engine", action="presence")
 
     def _on_motion(self, pipeline: CameraPipeline) -> None:
         self._last_motion[pipeline.host] = time.time()

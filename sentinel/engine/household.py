@@ -78,6 +78,14 @@ LEAVE_SCANS = 3  # missing this many scans in a row = left
 LEAVE_SCANS_UNSURE = 8  # ... when its spot can't be compared (only seen in the other light: first dusk, headlights)
 SAME_LOOK = 0.6  # a missed car's spot looking this much like when it was last seen = still there
 MIN_BOX_FRACTION = 0.015  # ignore vehicles smaller than this share of the frame (far street)
+# A name given in the dark (infrared shapes are a near-tie between family cars) is checked again by daylight.
+# 2026-11-03 the grey Fusion pulled in before sunrise, was named the blue truck, and kept that name all morning
+# ("Luke's truck is leaving"). Replayed on the labelled daytime photos (each against photos > 6 h apart): paint
+# colour said "not the truck" for 60 of 63 Fusion photos; a right name was both doubted by colour and matched
+# by shape to another car in about 1 photo in 70, so a rename needs several checks in a row.
+RENAME_AGREE = 3  # daylight checks in a row that doubt the name and agree on the same other car: rename it
+DOUBT_SCANS = 10  # ... that doubt it without knowing whose it is: drop the name (and ask whose car it is)
+RECHECK_SCANS = 60  # daylight checks without a doubt: the name from the dark stands
 SIGHTING_EVERY = 3600.0  # keep a new photo of a parked car at most hourly (and on day/night change)
 MAX_UNLABELLED = 1500
 
@@ -497,6 +505,10 @@ class Parked:
     empty_since: float = 0.0
     empty_frames: int = 0
     leaving_at: float = 0.0  # when motion detection saw this car drive off its spot ("X is leaving")
+    named_in_dark: bool = False  # named from an infrared (or lamp-lit) look: check again by daylight
+    doubts: int = 0  # daylight checks in a row whose paint colour says it's another car
+    rechecks: int = 0
+    ruled_out: set = field(default_factory=set)  # cars daylight showed it isn't
 
 
 class PresenceTracker:
@@ -506,13 +518,15 @@ class PresenceTracker:
                  cameras: Callable[[], List[Any]],
                  on_change: Callable[[str, Any, Vehicle, float, Optional[bytes]], None],
                  state_path: Optional[str] = None, interval: float = SCAN_INTERVAL,
-                 on_unknown: Optional[Callable[[Any, "Parked", np.ndarray, int, Dict[int, float]], None]] = None) -> None:
+                 on_unknown: Optional[Callable[[Any, "Parked", np.ndarray, int, Dict[int, float]], None]] = None,
+                 on_renamed: Optional[Callable[[Any, "Parked", Optional[Vehicle], Optional[Vehicle]], None]] = None) -> None:
         self.store = store
         self.detector = detector
         self.classifier = classifier
         self.cameras = cameras  # -> objects with host, display_name, snapshot(), zone_name_at()
         self.on_change = on_change  # (kind 'arrived'/'left', camera, vehicle, ts, jpeg)
         self.on_unknown = on_unknown  # (camera, parked, frame, sighting id, scores): ask whose car it is
+        self.on_renamed = on_renamed  # (camera, parked, old car, new car or None): its arrival was another car's
         self.state_path = state_path
         self.interval = interval
         self.parked: Dict[str, List[Parked]] = {}
@@ -578,6 +592,7 @@ class PresenceTracker:
         key = cam.host
         night = is_greyscale(frame)
         lit = self.lights is not None and self.lights.is_on(key)
+        daylight = not night and not lit and is_daylight(frame)  # paint colours are real
         parked = self.parked.setdefault(key, [])
         baseline = key not in self._baseline  # first look after start: cars already here didn't "arrive"
         self._baseline.add(key)
@@ -620,18 +635,22 @@ class PresenceTracker:
                 continue  # hidden this time (someone walking past); keep its identity
             photo_due = p.last_night != night or now - p.last_photo >= SIGHTING_EVERY
             embedding = None
-            if p.vehicle_id is None or photo_due:
+            recheck = p.vehicle_id is not None and p.named_in_dark and daylight
+            if p.vehicle_id is None or photo_due or recheck:
                 embedding = self.classifier.embed(crop_for_clip(frame, p.box))
                 if p.vehicle_id is None and not p.ignored:
                     # Unknown so far (e.g. arrived in the dark): try again every scan, and name it once
                     # two checks in a row agree (one lucky match would stick for the whole parking).
-                    guess, _ = self.store.identify(embedding, night, exclude=self._home_except(p),
+                    guess, _ = self.store.identify(embedding, night, exclude=self._home_except(p) | p.ruled_out,
                                                    colour=crop_colour(frame, p.box, lit), lit=lit)
                     if guess is not None:
                         p.candidate_hits = p.candidate_hits + 1 if guess == p.candidate else 1
                         p.candidate = guess
                         if p.candidate_hits >= IDENTIFY_AGREE:
                             p.vehicle_id = guess
+                            p.named_in_dark = night or lit
+                elif recheck:
+                    self._recheck(cam, p, embedding, crop_colour(frame, p.box, lit))
                 if not night and p.vehicle_id is not None and not p.day_sure:
                     p.day_sure = self.store.confident(embedding, False) == p.vehicle_id
                 if photo_due:
@@ -665,6 +684,38 @@ class PresenceTracker:
                 if vehicle is not None:
                     ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     self.on_change("arrived", cam, vehicle, p.first_seen, jpeg.tobytes() if ok else None)
+
+    def _recheck(self, cam, p: "Parked", embedding: np.ndarray, colour: Optional[np.ndarray]) -> None:
+        """A car named in the dark, seen by daylight: keep its name, or put it right."""
+        p.rechecks += 1
+        if self.store.colour_agrees(p.vehicle_id, colour):
+            p.doubts, p.candidate, p.candidate_hits = 0, None, 0
+            if p.rechecks >= RECHECK_SCANS or self.store.confident(embedding, False) == p.vehicle_id:
+                p.named_in_dark = False
+            return
+        p.doubts += 1
+        guess, _ = self.store.identify(embedding, False, exclude=self._home_except(p) | p.ruled_out, colour=colour)
+        if guess is not None and guess != p.vehicle_id:
+            p.candidate_hits = p.candidate_hits + 1 if guess == p.candidate else 1
+            p.candidate = guess
+        else:
+            p.candidate, p.candidate_hits = None, 0
+        if p.candidate_hits >= RENAME_AGREE:
+            self._rename(cam, p, guess)
+        elif p.doubts >= DOUBT_SCANS:
+            self._rename(cam, p, None)
+
+    def _rename(self, cam, p: "Parked", vehicle_id: Optional[int]) -> None:
+        old, announced = p.vehicle_id, p.announced
+        p.ruled_out.add(old)
+        p.vehicle_id, p.named_in_dark, p.doubts, p.rechecks = vehicle_id, False, 0, 0
+        p.candidate, p.candidate_hits, p.day_sure = None, 0, False
+        if vehicle_id is None:
+            p.asked = False  # whose is it, then?
+            p.announced = False  # its arrival is recorded once it has a name
+        if announced and self.on_renamed is not None:
+            self.on_renamed(cam, p, self.store.vehicle(old),
+                            self.store.vehicle(vehicle_id) if vehicle_id is not None else None)
 
     @staticmethod
     def _remember_look(p: "Parked", frame: np.ndarray, night: bool) -> None:
@@ -713,13 +764,14 @@ class PresenceTracker:
             parked.vehicle_id = vehicle_id
             parked.ignored = ignored
             parked.day_sure = vehicle_id is not None  # the family said so: its night photos may be filed
+            parked.named_in_dark, parked.doubts = False, 0  # ... and daylight doesn't overrule them
 
     def forget_identities(self) -> None:
         """After the user relabels photos: re-identify parked cars on the next scan."""
         with self._lock:
             for cars in self.parked.values():
                 for p in cars:
-                    p.vehicle_id = None
+                    p.vehicle_id, p.named_in_dark = None, False
 
     def parked_spot(self, camera_key: str, box: Tuple[int, int, int, int], min_iou: float = 0.4) -> Optional[Parked]:
         """The parked car (confirmed) that ``box`` sits on, if any."""
@@ -740,7 +792,8 @@ class PresenceTracker:
             return
         with self._lock:
             data = {k: [{"box": list(p.box), "first_seen": p.first_seen, "last_seen": p.last_seen,
-                         "vehicle_id": p.vehicle_id, "confirmed": p.confirmed} for p in v]
+                         "vehicle_id": p.vehicle_id, "confirmed": p.confirmed,
+                         "named_in_dark": p.named_in_dark} for p in v]
                     for k, v in self.parked.items()}
         tmp = self.state_path + ".tmp"
         try:
@@ -763,6 +816,6 @@ class PresenceTracker:
         for key, cars in data.items():
             self.parked[key] = [Parked(tuple(c["box"]), c["first_seen"], c["last_seen"], seen=CONFIRM_SCANS,
                                        vehicle_id=c.get("vehicle_id"), confirmed=c.get("confirmed", False),
-                                       announced=True, asked=True)
+                                       announced=True, asked=True, named_in_dark=c.get("named_in_dark", False))
                                 for c in cars if c.get("last_seen", 0) >= cutoff]
             self._baseline.add(key)  # restored: changes from here on are real

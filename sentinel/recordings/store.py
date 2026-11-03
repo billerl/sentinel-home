@@ -184,6 +184,17 @@ class RecordingStore:
                                "ORDER BY ts DESC LIMIT 1", (str(vehicle_id), kind)).fetchone()
         return dict(row) if row else None
 
+    def relabel_household_event(self, vehicle_id: int, ts: float, new_vehicle_id: Optional[int],
+                                description: str) -> int:
+        """A car's 'arrived' event at ``ts`` was really another car's: relabel it, or remove it
+        (``new_vehicle_id`` None: not known whose yet)."""
+        where = "grp = 'household' AND label = 'arrived' AND vehicle_type = ? AND abs(ts - ?) < 1"
+        with self._lock, self._connect() as conn:
+            if new_vehicle_id is None:
+                return conn.execute(f"DELETE FROM events WHERE {where}", (str(vehicle_id), ts)).rowcount
+            return conn.execute(f"UPDATE events SET vehicle_type = ?, description = ? WHERE {where}",
+                                (str(new_vehicle_id), description, str(vehicle_id), ts)).rowcount
+
     def event_count(self) -> int:
         with self._connect() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0])
