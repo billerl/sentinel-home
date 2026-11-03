@@ -38,8 +38,9 @@ STATIC_MEMORY_SECONDS = 7 * 86400
 MIN_SCORE = {"person": 0.45, "animal": 0.6, "vehicle": 0.5}
 CONFIDENT_SCORE = 0.62  # below this, a track needs EXTRA_HITS sightings
 # Routines only (switching on a light, never an alert): a person walking through the back yard in
-# infrared scored just 0.38 (2026-11-02), so a moving person-shaped track this sure is enough there.
-ROUTINE_PERSON_SCORE = 0.33
+# infrared scored 0.31-0.38 (2026-11-02), so any moving person-shaped track (the detector reports from 0.30)
+# is enough there. A week of back yard night clips replayed at 0.30: one false trigger (patio chairs at dusk).
+ROUTINE_PERSON_SCORE = 0.30
 EXTRA_HITS = 3
 # Vehicle type (CLIP) is checked when a vehicle first alerts, then again as it comes
 # closer (box area grown by TYPE_RECHECK_GROWTH), up to TYPE_MAX_CHECKS times.

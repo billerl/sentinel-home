@@ -264,7 +264,7 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   describes it in its own words and saves it only after "yes" / the ✅ tap (a typed `Routine {json}` isn't saved).
   `routines.REQUEST` sends "new routine ..." phrases straight to Claude.
   Routines that only switch lights also fire on "maybe a person" (`CameraObjectTracker.maybe_people`): a moving
-  (`Track.walked`, measured against the narrowest box) person track in the zone at >= 0.33 (`ROUTINE_PERSON_SCORE`),
+  (`Track.walked`, measured against the narrowest box) person track in the zone at >= 0.30 (`ROUTINE_PERSON_SCORE`; 0.33 caught the walk ~20 s late),
   logged as `maybe_person`. Alerts are unchanged. Why: a person walking through the back yard in IR scored 0.38
   (alert bar 0.45). Replayed 1,042 Back Yard night clips (Oct 27-Nov 2): 3 extra triggers (the real walk, a bug
   on the lens that also fooled the alert path, patio chairs at dusk once). Also: the weather card has a clock.

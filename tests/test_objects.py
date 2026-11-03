@@ -72,7 +72,7 @@ class TestMaybePeople(unittest.TestCase):
     def test_still_things_and_one_off_sightings_dont_count(self):
         self.assertEqual(self.feed([(583, 260, 25, 55), (582, 261, 26, 54), (583, 259, 25, 55)], 0.38)[1], [])  # a post
         self.assertEqual(self.feed([(491, 158, 50, 93)], 0.5)[1], [])
-        self.assertEqual(self.feed([(100, 100, 40, 90), (160, 110, 40, 90)], 0.31)[1], [])  # below the bar
+        self.assertEqual(self.feed([(100, 100, 40, 90), (160, 110, 40, 90)], 0.29)[1], [])  # below the bar
         self.assertEqual(self.feed([(100, 100, 40, 90), (160, 110, 40, 90)], 0.4, in_zone=lambda b: False)[1], [])
 
     def test_reported_once(self):
