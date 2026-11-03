@@ -117,7 +117,7 @@
            background: radial-gradient(120% 70% at 20% 0%, #12354a, #06121b 60%, #040a10); scrollbar-color: #1f3a44 transparent; }
     #wxf.open { display: block; }
     .wxf-wrap { max-width: 1500px; margin: 0 auto; padding: 18px 24px 28px; display: grid; gap: 18px;
-                grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+                grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
                 grid-template-areas: "head head" "now days" "tiles days" "hours hours"; }
     .wxf-head { grid-area: head; display: flex; align-items: center; gap: 12px; }
     .wxf-head h2 { margin: 0; flex: 1; font-size: 1.15rem; font-weight: 600; color: #fff; }
@@ -127,36 +127,38 @@
     .wxf-x:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
     .wxf-card { background: rgba(255,255,255,0.045); border: 1px solid rgba(127,232,255,0.12); border-radius: 18px; padding: 16px 18px; }
     .wxf-card h3 { margin: 0 0 10px; font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: #7fb3c4; font-weight: 600; }
-    .wxf-now { grid-area: now; display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+    .wxf-now { grid-area: now; display: flex; align-items: center; gap: 22px; flex-wrap: wrap; row-gap: 10px; align-content: center; }
     .wxf-now .ic { font-size: 5rem; line-height: 1; }
     .wxf-now .t { font-size: 5.2rem; font-weight: 600; color: #fff; line-height: 1; letter-spacing: -0.03em; }
-    .wxf-now .w { display: flex; flex-direction: column; gap: 6px; font-size: 1.05rem; }
+    .wxf-now .w { order: 3; flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px; font-size: 1.1rem; }
     .wxf-now .w b { font-size: 1.5rem; color: #fff; }
     .wxf-now .w span { color: #a9d3e2; }
+    .wxf-now .w .sun { color: #ffd98a; }
     .wxf-clock { margin-left: auto; text-align: right; line-height: 1; white-space: nowrap; }
     .wxf-clock .t { font-size: 5.2rem; font-weight: 600; color: #fff; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
     .wxf-clock .ap { font-size: 1.4rem; color: #9fd3ee; margin-left: 0.25em; }
     .wxf-clock .d { display: block; font-size: 1rem; color: #9fd3ee; margin-top: 8px; }
-    .wxf-tiles { grid-area: tiles; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .wxf-tiles { grid-area: tiles; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
     .wxf-tile { background: rgba(255,255,255,0.045); border: 1px solid rgba(127,232,255,0.1); border-radius: 14px; padding: 12px 14px; min-width: 0; }
     .wxf-tile .k { font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: #7fb3c4; }
     .wxf-tile .v { font-size: 1.45rem; font-weight: 600; color: #fff; margin-top: 4px; display: flex; align-items: center; gap: 8px; }
     .wxf-tile .v small { font-size: 0.8rem; font-weight: 400; color: #a9d3e2; }
     .wxf-tile .s { font-size: 0.8rem; color: #a9d3e2; margin-top: 2px; }
     .wxf-arrow { display: inline-block; font-size: 1.1rem; color: #7fe8ff; }
-    .wxf-days { grid-area: days; }
-    .wxf-day { display: grid; grid-template-columns: 4.2em 2.2em 3.6em 2.6em minmax(60px, 1fr) 2.6em; align-items: center; gap: 10px;
-               padding: 9px 0; border-top: 1px solid rgba(255,255,255,0.06); font-size: 1.02rem; }
+    .wxf-days { grid-area: days; display: flex; flex-direction: column; }
+    #wxf-days { flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
+    .wxf-day { display: grid; grid-template-columns: 4.4em 2em 3.6em 2.4em minmax(60px, 1fr) 2.4em; align-items: center; gap: 12px;
+               padding: 10px 0; border-top: 1px solid rgba(255,255,255,0.06); font-size: 1.35rem; }
     .wxf-day:first-of-type { border-top: 0; }
     .wxf-day .n { color: #fff; font-weight: 600; }
-    .wxf-day .ic { font-size: 1.5rem; text-align: center; }
-    .wxf-day .r { color: #7cc4ff; font-size: 0.85rem; }
+    .wxf-day .ic { font-size: 1.6em; text-align: center; }
+    .wxf-day .r { color: #7cc4ff; font-size: 0.8em; }
     .wxf-day .lo { color: #a9d3e2; text-align: right; }
     .wxf-day .hi { color: #fff; font-weight: 600; }
-    .wxf-day .x { grid-column: 1 / -1; font-size: 0.78rem; color: #7f9aa6; margin-top: -4px; }
-    .wxf-range { position: relative; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.08); }
+    .wxf-day .x { grid-column: 1 / -1; font-size: 0.62em; color: #7f9aa6; margin-top: -4px; }
+    .wxf-range { position: relative; height: 8px; border-radius: 4px; background: rgba(255,255,255,0.08); }
     .wxf-range i { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: #7fe8ff; }
-    .wxf-range b { position: absolute; top: -3px; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%;
+    .wxf-range b { position: absolute; top: -3px; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%;
                    background: #fff; box-shadow: 0 0 0 2px #06121b; }
     .wxf-hours { grid-area: hours; position: relative; }
     .wxf-chart { position: relative; }
@@ -170,13 +172,14 @@
     .wxf-note { font-size: 0.75rem; color: #6f8f9c; margin-top: 8px; }
     /* A TV (a Fire TV's page is ~960x540): everything on one screen, no scrolling with a remote */
     @media (min-width: 760px) and (max-height: 640px) {
-      .wxf-wrap { padding: 10px 18px 12px; gap: 10px; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
+      .wxf-wrap { padding: 10px 18px 12px; gap: 10px; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); }
       .wxf-head h2 { font-size: 1rem; }
       .wxf-x { padding: 4px 12px; font-size: 0.85rem; }
       .wxf-card { padding: 10px 12px; border-radius: 12px; }
       .wxf-card h3 { margin-bottom: 4px; font-size: 0.68rem; }
-      .wxf-now { gap: 12px; flex-wrap: nowrap; }
-      .wxf-now { padding: 8px 14px; }
+      .wxf-now { gap: 12px; }
+      .wxf-now { padding: 8px 14px; row-gap: 4px; }
+      .wxf-now .w { gap: 2px 16px; }
       .wxf-now .ic { font-size: 3rem; } .wxf-now .t, .wxf-clock .t { font-size: 4rem; }  /* as big as on the tile: read across the room */
       .wxf-clock .ap { font-size: 1rem; } .wxf-clock .d { font-size: 0.8rem; margin-top: 4px; }
       .wxf-now .w { gap: 2px; font-size: 0.8rem; } .wxf-now .w b { font-size: 1.05rem; }
@@ -184,12 +187,12 @@
       .wxf-tiles { gap: 6px; }
       .wxf-tile { padding: 6px 9px; border-radius: 10px; }
       .wxf-tile .k { font-size: 0.6rem; } .wxf-tile .v { font-size: 1.05rem; margin-top: 1px; } .wxf-tile .s { font-size: 0.66rem; }
-      .wxf-day { padding: 3px 0; font-size: 0.85rem; gap: 6px; } .wxf-day .ic { font-size: 1.05rem; } .wxf-day .x { display: none; }
+      .wxf-day { padding: 2px 0; font-size: 1.12rem; gap: 8px; } .wxf-day .ic { font-size: 1.3em; } .wxf-day .x { display: none; }
       .wxf-note { display: none; }
     }
     @media (max-width: 900px) {
       .wxf-clock .t { font-size: 3.8rem; }
-      .wxf-day { grid-template-columns: 3.4em 1.8em 3.6em 2.3em minmax(30px, 1fr) 2.3em; gap: 6px; }
+      .wxf-day { grid-template-columns: 3.4em 1.8em 3.6em 2.3em minmax(30px, 1fr) 2.3em; gap: 6px; font-size: 1.05rem; }
       .wxf-wrap { grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "now" "tiles" "hours" "days"; padding: 12px 14px 24px;
                   padding-top: calc(12px + env(safe-area-inset-top, 0px)); }
       .wxf-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -959,6 +962,7 @@
         '<div class="ic">' + esc(w.icon) + '</div><div class="t">' + esc(w.temp) + deg + '</div>' +
         '<div class="w"><b>' + esc(w.words) + '</b><span>Feels like ' + esc(w.feels) + deg + '</span>' +
         '<span>High ' + esc(w.high) + deg + ' · Low ' + esc(w.low) + deg + (w.rain_today ? ' · ☔ ' + esc(w.rain_today) + '% today' : '') + '</span>' +
+        '<span class="sun">🌅 ' + esc(today.sunrise) + ' · 🌇 ' + esc(today.sunset) + '</span>' +
         (w.windy ? '<span class="wx-windy">Windy: expect motion clips from trees.</span>' : '') + '</div>' +
         '<div class="wxf-clock">' + clockHtml() + '</div>';
       function tile(k, v, sub) {
@@ -969,11 +973,9 @@
       var html = tile("Wind", arrow + esc(n.wind) + "<small>mph</small>", "from " + esc(n.dir || "–") + (n.gusts > n.wind + 4 ? " · gusts " + esc(n.gusts) : "")) +
         tile("Humidity", esc(n.humidity) + "<small>%</small>", "dew point " + esc(n.dew) + deg) +
         tile("UV index", esc(n.uv == null ? "–" : n.uv), esc(n.uv_words) + (today.uv != null ? " · top " + esc(today.uv) : "")) +
-        (f.air ? tile("Air quality", esc(f.air.aqi) + "<small>US AQI</small>", esc(f.air.words) + (f.air.max_today != null ? " · up to " + esc(f.air.max_today) : "")) : "") +
         tile("Pressure", esc(n.pressure == null ? "–" : n.pressure) + "<small>" + esc(n.pressure_unit) + "</small>", "") +
         tile("Visibility", vis + "<small>" + esc(n.visibility_unit) + "</small>", "") +
-        tile("Clouds", esc(n.clouds) + "<small>%</small>", "") +
-        tile("Sun", '<span style="font-size:1.05rem">🌅 ' + esc(today.sunrise) + "</span>", "🌇 sets " + esc(today.sunset));
+        tile("Clouds", esc(n.clouds) + "<small>%</small>", "");
       document.getElementById("wxf-tiles").innerHTML = html;
       var lows = f.days.map(function(d) { return d.low; }), highs = f.days.map(function(d) { return d.high; });
       var min = Math.min.apply(null, lows), max = Math.max.apply(null, highs), span = Math.max(1, max - min);
