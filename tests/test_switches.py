@@ -521,6 +521,25 @@ class TestRemote(unittest.TestCase):
 
 
 
+GETEVENT = """add device 1: /dev/input/event0
+  name:     "aml_keypad"
+  events:
+    KEY (0001): 0074
+  input props:
+    <none>
+add device 2: /dev/input/event3
+  name:     "cec_input"
+  events:
+    KEY (0001): 0001  0002  0003  0004  0005  0006  0007  0008
+                0009  000a  000b  001c  0067  0069  006a  006c
+                0071  0072  0073  008b  009e  00a4  00a8  00ac
+                00c8  00c9  00d0  0161
+    MSC (0004): 0004
+  input props:
+    <none>
+"""
+
+
 class FakeFireShell:
     """What a Fire TV answers to the ADB shell commands FireTVDriver sends."""
 
@@ -537,6 +556,10 @@ class FakeFireShell:
             return ("package:de.ozerov.fully\npackage:com.netflix.ninja\n---\npackage:com.amazon.avod\n"
                     "package:com.amazon.firebat\npackage:com.amazon.tv.launcher\npackage:com.droidlogic.factory\n"
                     "package:de.ozerov.fully\npackage:com.netflix.ninja\n")
+        if command.startswith("getevent -p"):
+            return GETEVENT
+        if command.startswith("sendevent /dev/input/event3 0 0 0 && echo ok"):
+            return "ok\n"
         if command.startswith("dumpsys window"):
             return f"  mCurrentFocus=Window{{7c9a212 u0 {self.focus}/{self.focus}.MainActivity}}\n"
         if "KEYCODE_WAKEUP" in command and "monkey" not in command:
@@ -587,7 +610,7 @@ class TestFireTV(unittest.TestCase):
         self.assertEqual(self.sw.command("put on Netflix", "voice"), "Okay, Netflix on the TV.")  # the plain TV: the Samsung
         self.assertEqual(self.tv.calls[-1], ("launch", "11101200001"))
         self.assertEqual(self.sw.command("turn the fire tv down", "voice"), "Okay, Sentinel TV quieter.")
-        self.assertIn("KEYCODE_VOLUME_DOWN", self.shell.commands[-1])
+        self.assertEqual(self.shell.commands[-1].count(" 1 114 1;"), 3)  # volume down x3, straight to its input device
         self.assertEqual(self.sw.command("what's on the sentinel tv", "telegram"), "Sentinel live view is on the Sentinel TV.")
 
     def test_cameras_on_the_tv(self):
@@ -598,6 +621,25 @@ class TestFireTV(unittest.TestCase):
         self.assertTrue(self.sw.understands("show the live view on the sentinel tv"))
         self.assertFalse(self.sw.understands("show the cameras"))  # no TV named: left to the camera questions
 
+    def test_buttons_go_straight_to_its_input_device(self):
+        """`input keyevent` starts a Java program per press (~0.5-1 s on a Fire TV): the remote lagged."""
+        self.fire.press("192.168.1.70", "KEY_UP")
+        self.assertEqual(self.shell.commands[-1], "sendevent /dev/input/event3 1 103 1; sendevent /dev/input/event3 0 0 0; "
+                                                  "sendevent /dev/input/event3 1 103 0; sendevent /dev/input/event3 0 0 0")
+        self.fire.press("192.168.1.70", "KEY_ENTER")
+        self.assertIn(" 1 353 1;", self.shell.commands[-1])  # its select key
+        self.fire.press("192.168.1.70", "KEY_CHUP")  # a key that device can't send: the slow way still works
+        self.assertEqual(self.shell.commands[-1], "input keyevent KEYCODE_CHANNEL_UP")
+        self.assertEqual(sum(c.startswith("getevent") for c in self.shell.commands), 1)  # looked up once
+
+    def test_without_access_to_its_input_devices(self):
+        self.shell.commands.clear()
+        self.fire._input.clear()
+        with mock.patch.object(FakeFireShell, "__call__", lambda me, host, command, timeout=None:
+                               me.commands.append(command) or ("" if command.startswith(("getevent", "sendevent")) else "")):
+            self.fire.press("192.168.1.70", "KEY_UP")
+        self.assertEqual(self.shell.commands[-1], "input keyevent KEYCODE_DPAD_UP")
+
     def test_remote(self):
         v = self.sw.tv_view(self.fire_id)
         self.assertTrue(v["live"])
@@ -606,7 +648,7 @@ class TestFireTV(unittest.TestCase):
         self.assertEqual([a["name"] for a in v["apps"]], ["Netflix", "Prime Video"])  # the live view has its own buttons
         self.assertEqual(self.sw.tv_key(self.fire_id, "source"), (False, "I don't know that button."))
         self.assertTrue(self.sw.tv_key(self.fire_id, "ok")[0])
-        self.assertEqual(self.shell.commands[-1], "input keyevent KEYCODE_DPAD_CENTER")
+        self.assertIn("sendevent /dev/input/event3 1 353 1;", self.shell.commands[-1])
         self.assertTrue(self.sw.tv_type(self.fire_id, "judge judy; rm -rf /")[0])
         self.assertEqual(self.shell.commands[-1], "input text judge%sjudy%srm%s-rf%s")  # no shell tricks get through
         self.sw.tv_type(self.fire_id, "don't stop")

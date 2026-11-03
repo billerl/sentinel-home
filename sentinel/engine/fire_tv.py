@@ -39,6 +39,16 @@ KEYS = {"KEY_UP": "KEYCODE_DPAD_UP", "KEY_DOWN": "KEYCODE_DPAD_DOWN", "KEY_LEFT"
         "KEY_CHUP": "KEYCODE_CHANNEL_UP", "KEY_CHDOWN": "KEYCODE_CHANNEL_DOWN", "KEY_GUIDE": "KEYCODE_GUIDE",
         "KEY_INFO": "KEYCODE_INFO", "KEY_POWER": "KEYCODE_POWER",
         **{f"KEY_{n}": f"KEYCODE_{n}" for n in range(10)}}
+# The same keys as Linux input codes, best first, for writing straight into one of the Fire TV's input devices
+# (`sendevent`, a few ms; `input keyevent` starts a Java program per press, ~0.5-1 s on a Fire TV).
+LINUX_KEYS = {"KEYCODE_DPAD_UP": [103], "KEYCODE_DPAD_DOWN": [108], "KEYCODE_DPAD_LEFT": [105],
+              "KEYCODE_DPAD_RIGHT": [106], "KEYCODE_DPAD_CENTER": [353, 352, 28], "KEYCODE_BACK": [158],
+              "KEYCODE_HOME": [172], "KEYCODE_MENU": [139], "KEYCODE_VOLUME_UP": [115], "KEYCODE_VOLUME_DOWN": [114],
+              "KEYCODE_VOLUME_MUTE": [113], "KEYCODE_MEDIA_PLAY": [200, 207], "KEYCODE_MEDIA_PAUSE": [201],
+              "KEYCODE_MEDIA_REWIND": [168], "KEYCODE_MEDIA_FAST_FORWARD": [208], "KEYCODE_CHANNEL_UP": [402],
+              "KEYCODE_CHANNEL_DOWN": [403], "KEYCODE_GUIDE": [365], "KEYCODE_INFO": [358],
+              **{f"KEYCODE_{n}": [11 if n == 0 else n + 1] for n in range(10)}}
+SLOW_PRESS_MS = 400  # presses slower than this are logged (to see where remote lag comes from)
 # Package -> the name people say (Fire OS can't report app labels over ADB without extra tools).
 APP_NAMES = {
     "com.netflix.ninja": "Netflix", "com.amazon.firetv.youtube": "YouTube", "com.google.android.youtube.tv": "YouTube",
@@ -85,6 +95,7 @@ class FireTVDriver:
         self._lock = threading.RLock()
         self._devices: Dict[str, Any] = {}  # host -> connected AdbDeviceTcp
         self._last_scan = 0.0
+        self._input: Dict[str, Optional[Tuple[str, set]]] = {}  # host -> (input device, its key codes) or None
         self._tvs: Dict[str, Dict[str, Any]] = {}  # mac -> {host, name, model, apps, apps_at}
         try:
             with open(self.path) as f:
@@ -131,6 +142,7 @@ class FireTVDriver:
         return ""
 
     def _close(self, host: str) -> None:
+        self._input.pop(host, None)
         dev = self._devices.pop(host, None)
         if dev is not None:
             try:
@@ -235,10 +247,61 @@ class FireTVDriver:
     def supports(self, key: str) -> bool:
         return key in KEYS
 
+    def _input_device(self, host: str) -> Optional[Tuple[str, set]]:
+        """The Fire TV's input device with the most remote keys (often its HDMI-CEC one), if Sentinel may write to
+        it; found once per connection. None: use `input keyevent`."""
+        if host in self._input:
+            return self._input[host]
+        found = None
+        try:
+            devices: Dict[str, set] = {}
+            current, section = None, None
+            for line in self._shell(host, "getevent -p 2>/dev/null").splitlines():
+                m = re.match(r"add device \d+: (/dev/input/event\d+)", line)
+                if m:
+                    current = m.group(1)
+                    devices[current] = set()
+                    section = None
+                    continue
+                m = re.match(r"\s+(\w+) \(([0-9a-f]{4})\):(.*)", line)
+                if m:
+                    section = m.group(2)
+                    line = m.group(3)
+                elif not line.startswith("        ") or current is None:
+                    section = None if not line.startswith(" ") else section
+                if current and section == "0001":  # EV_KEY: the codes it can send
+                    devices[current].update(int(c, 16) for c in re.findall(r"\b([0-9a-f]{4})\b", line))
+            wanted = {codes[0] for codes in LINUX_KEYS.values()}
+            best = max(devices.items(), key=lambda kv: len(kv[1] & wanted), default=None)
+            if best and len(best[1] & {103, 108, 105, 106}) == 4 and \
+                    "ok" in self._shell(host, f"sendevent {best[0]} 0 0 0 && echo ok"):
+                found = best
+        except (OSError, ValueError):
+            found = None
+        self._input[host] = found
+        app_logger.log("info", "firetv_keys", method=f"sendevent {found[0]}" if found else "input keyevent",
+                       component="switches", action="firetv")
+        return found
+
     def press(self, host: str, *keys: str) -> None:
-        codes = [KEYS[k] for k in keys if k in KEYS]
-        if codes:
-            self._shell(host, "; ".join(f"input keyevent {c}" for c in codes))
+        names = [KEYS[k] for k in keys if k in KEYS]
+        if not names:
+            return
+        started = time.time()
+        device = self._input_device(host) if "KEY_POWER" not in keys else None
+        commands = []
+        for name in names:
+            code = next((c for c in LINUX_KEYS.get(name, []) if device and c in device[1]), None)
+            if code is None:
+                commands.append(f"input keyevent {name}")
+            else:
+                dev = device[0]
+                commands.append(f"sendevent {dev} 1 {code} 1; sendevent {dev} 0 0 0; "
+                                f"sendevent {dev} 1 {code} 0; sendevent {dev} 0 0 0")
+        self._shell(host, "; ".join(commands))
+        took = int((time.time() - started) * 1000)
+        if took > SLOW_PRESS_MS:
+            app_logger.log("info", "firetv_slow_key", keys=",".join(names), ms=took, component="switches", action="firetv")
 
     def type_text(self, host: str, text: str) -> None:
         # `input text` takes %s for spaces; quote the rest for the shell
