@@ -21,6 +21,7 @@ import base64
 import json
 import os
 import re
+import select
 import socket
 import ssl
 import struct
@@ -37,6 +38,8 @@ CLIENT_NAME = "Sentinel"
 WAKE_SECONDS = 25  # how long a wake (packet, then waiting for its network) may take
 SCREEN_AFTER = 240.0  # answering this long without a break = the picture is on (dark wake-ups last ~2 min)
 APPS_EVERY = 3600.0
+IDLE_SECONDS = 60.0  # the remote-control connection is kept open this long between button presses
+ICONS_DIRNAME = ".tv_icons"
 # Apps a TV may have, by the ids Samsung's store uses (the TV's own list is used once it has allowed us).
 COMMON_APPS = {
     "11101200001": "Netflix", "3201907018807": "Netflix", "111299001912": "YouTube", "3201707014489": "YouTube TV",
@@ -59,6 +62,9 @@ class SamsungTVDriver:
         self._tvs: Dict[str, Dict[str, Any]] = {}  # mac -> {host, token, name, model, apps, apps_at, on_since}
         self._off_at: Dict[str, float] = {}  # host -> when we pressed power to turn it off
         self._net_since: Dict[str, float] = {}  # host -> answering without a break since
+        self._conns: Dict[str, List[Any]] = {}  # host -> [open remote-control socket, last used]
+        self._conn_lock = threading.Lock()
+        self.icons_dir = os.path.join(os.path.abspath(root), ICONS_DIRNAME)
         try:
             with open(self.path) as f:
                 self._tvs = {k: v for k, v in json.load(f).items() if isinstance(v, dict)}
@@ -168,15 +174,53 @@ class SamsungTVDriver:
             s.close()
             raise
 
+    def _drop(self, host: str) -> None:
+        conn = self._conns.pop(host, None)
+        if conn:
+            try:
+                conn[0].close()
+            except OSError:
+                pass
+
+    def _send(self, host: str, messages: List[Dict[str, Any]], gap: float = 0.35) -> None:
+        """Send on the kept-open remote-control connection (a fresh TLS handshake per press made the
+        remote's arrows lag), reconnecting once if the TV closed it."""
+        with self._conn_lock:
+            for attempt in (0, 1):
+                conn = self._conns.get(host)
+                try:
+                    if conn and time.time() - conn[1] > IDLE_SECONDS:
+                        self._drop(host)
+                        conn = None
+                    if conn:  # anything waiting? the TV's own messages, or that it hung up
+                        while select.select([conn[0]], [], [], 0)[0]:
+                            if not conn[0].recv(65536):
+                                raise OSError("the TV closed the connection")
+                    else:
+                        conn = self._conns[host] = [self._remote(host), 0.0]
+                    for i, message in enumerate(messages):
+                        if i:
+                            time.sleep(gap)
+                        self._write(conn[0], message)
+                    conn[1] = time.time()
+                    return
+                except ValueError:
+                    self._drop(host)
+                    raise  # not allowed: trying again won't help
+                except OSError:
+                    self._drop(host)
+                    if attempt:
+                        raise
+
     def press(self, host: str, *keys: str) -> None:
-        s = self._remote(host)
-        try:
-            for key in keys:
-                self._write(s, {"method": "ms.remote.control", "params": {
-                    "Cmd": "Click", "DataOfCmd": key, "Option": "false", "TypeOfRemote": "SendRemoteKey"}})
-                time.sleep(0.35)
-        finally:
-            s.close()
+        self._send(host, [{"method": "ms.remote.control", "params": {
+            "Cmd": "Click", "DataOfCmd": key, "Option": "false", "TypeOfRemote": "SendRemoteKey"}} for key in keys])
+
+    def type_text(self, host: str, text: str) -> None:
+        """Into whatever box the TV's on-screen keyboard is showing (an app's search)."""
+        self._send(host, [{"method": "ms.remote.control", "params": {
+            "Cmd": base64.b64encode(text.encode()).decode(), "DataOfCmd": "base64", "TypeOfRemote": "SendInputString"}},
+            {"method": "ms.remote.control", "params": {"TypeOfRemote": "SendInputEnd"}}])
 
     def _wake(self, mac: str, host: str) -> None:
         packet = b"\xff" * 6 + bytes.fromhex(mac) * 16
@@ -326,7 +370,8 @@ class SamsungTVDriver:
         mac, tv = self._tv(host)
         if mac is None:
             return {}
-        if tv.get("apps") and (time.time() - tv.get("apps_at", 0) < APPS_EVERY or not tv.get("on_since")):
+        fresh = time.time() - tv.get("apps_at", 0) < APPS_EVERY and "icons" in tv
+        if tv.get("apps") and (fresh or not tv.get("on_since")):
             return dict(tv["apps"])  # fresh, or the TV is off (asking would only time out)
         if not tv.get("on_since"):
             return {}
@@ -338,14 +383,16 @@ class SamsungTVDriver:
                 for _ in range(20):
                     msg = self._read(s)
                     if msg and msg.get("event") == "ed.installedApp.get":
-                        found = {str(a.get("appId")): str(a.get("name")) for a in (msg.get("data") or {}).get("data", [])
-                                 if a.get("appId") and a.get("name")}
+                        listed = [a for a in (msg.get("data") or {}).get("data", []) if a.get("appId") and a.get("name")]
+                        found = {str(a["appId"]): str(a["name"]) for a in listed}
+                        self._remember(mac, icons={str(a["appId"]): str(a["icon"]) for a in listed if a.get("icon")})
                         break
             finally:
                 s.close()
         except (OSError, ValueError):
             pass
-        if not found:  # not allowed yet, or an older TV: ask about the common ones
+        if not found:  # not allowed yet, or an older TV: ask about the common ones (no icons that way)
+            self._remember(mac, icons={})
             for app_id, name in COMMON_APPS.items():
                 try:
                     found[app_id] = str(self._rest(host, f"applications/{app_id}").get("name") or name)
@@ -367,3 +414,44 @@ class SamsungTVDriver:
             except (OSError, ValueError):
                 continue
         return None
+
+    # ------------------------------------------------------------ app icons (the TV's own, for the remote)
+    def icon(self, host: str, app_id: str) -> Optional[bytes]:
+        """The app's icon as the TV shows it (fetched once over the remote connection, then kept on disk)."""
+        if not re.fullmatch(r"[\w.]{1,40}", app_id or ""):
+            return None
+        path = os.path.join(self.icons_dir, f"{app_id}.png")
+        try:
+            with open(path, "rb") as f:
+                return f.read()
+        except OSError:
+            pass
+        _, tv = self._tv(host)
+        icon_path = (tv.get("icons") or {}).get(app_id)
+        if not icon_path or not tv.get("on_since"):
+            return None
+        data = None
+        try:
+            s = self._remote(host, timeout=6.0)
+            try:
+                self._write(s, {"method": "ms.channel.emit", "params": {
+                    "event": "ed.apps.icon", "to": "host", "data": {"iconPath": icon_path}}})
+                for _ in range(20):
+                    msg = self._read(s)
+                    if msg and msg.get("event") == "ed.apps.icon":
+                        data = base64.b64decode((msg.get("data") or {}).get("imageBase64") or "")
+                        break
+            finally:
+                s.close()
+        except (OSError, ValueError):
+            return None
+        if not data:
+            return None
+        try:
+            os.makedirs(self.icons_dir, exist_ok=True)
+            with open(path + ".tmp", "wb") as f:
+                f.write(data)
+            os.replace(path + ".tmp", path)
+        except OSError:
+            pass
+        return data

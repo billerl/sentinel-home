@@ -757,6 +757,42 @@ class WebServer:
             engine.switches.request_scan()
             return _result(True, "looking")
 
+        # ---- the TV remote (a Samsung TV among the switches; sentinel/engine/samsung_tv.py) ----
+        @app.route("/api/tv/<tv_id>")
+        def api_tv(tv_id):
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            view = engine.switches.tv_view(tv_id[:40]) if engine is not None else None
+            return jsonify(view) if view else (jsonify({"error": "no such TV"}), 404)
+
+        @app.route("/api/tv/<tv_id>/icon/<app_id>")
+        def api_tv_icon(tv_id, app_id):
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            data = engine.switches.tv_icon(tv_id[:40], app_id[:40]) if engine is not None else None
+            if not data:
+                return "", 404
+            resp = app.response_class(data, mimetype="image/png")
+            resp.headers["Cache-Control"] = "private, max-age=604800"
+            return resp
+
+        @app.route("/api/tv/<tv_id>/<action>", methods=["POST"])
+        def api_tv_action(tv_id, action):
+            err = _config_guard()
+            if err:
+                return err
+            body = request.get_json(silent=True) or {}
+            tv_id = tv_id[:40]
+            if action == "key":
+                return _result(*engine.switches.tv_key(tv_id, str(body.get("key") or "")[:12]))
+            if action == "open":
+                return _result(*engine.switches.tv_open(tv_id, str(body.get("app") or "")[:40]))
+            if action == "type":
+                return _result(*engine.switches.tv_type(tv_id, str(body.get("text") or "")[:100]))
+            return jsonify({"error": "unknown action"}), 404
+
         # ---- routines: "when this happens, do that" (sentinel/engine/routines.py) ----
         @app.route("/routines")
         def routines_page():

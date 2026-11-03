@@ -254,6 +254,10 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   of the picture). On = Wake-on-LAN until it answers (~10 s, needs "Power On with Mobile"), then KEY_POWER
   (the packet only wakes its network). `tv_parse`/`tv_command` in switches.py: open/put on <app>, volume,
   mute, "what's on"; `understands()` routes Telegram/Claude suggestions. Can't pick channels inside apps.
+  Power state is tracked by Sentinel (dark network wake-ups every few minutes look like "on"; SCREEN_AFTER).
+  Web remote (grid.html `#tvr`, "Open remote" on the TV tile): `/api/tv/<id>` (+ `/key` from the TV_KEYS
+  list, `/open`, `/type` = SendInputString, `/icon/<app>` = the TV's own icon via `ed.apps.icon`, cached in
+  `recorded_videos/.tv_icons/`). Keys go over a kept-open connection (`_send`, closed after 60 s idle).
 - **Smart plugs and switches** (`sentinel/engine/switches.py`, known devices in `recorded_videos/switches.json`):
   Kasa plugs/power strips/wall switches over their local protocol (TCP/UDP 9999, XOR-scrambled JSON; no
   cloud, no new dependency). Found by UDP broadcast at start, every 15 min and on "Find new devices"; known

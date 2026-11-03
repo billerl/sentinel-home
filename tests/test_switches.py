@@ -247,9 +247,6 @@ class TestWeb(unittest.TestCase):
         self.assertEqual(len(self.kasa.calls), 1)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class FakeTV:
     """A Samsung TV as SamsungTVDriver presents it to SmartSwitches."""
@@ -286,6 +283,12 @@ class FakeTV:
 
     def showing(self, host):
         return self.visible
+
+    def type_text(self, host, text):
+        self.calls.append(("type", text))
+
+    def icon(self, host, app_id):
+        return b"\x89PNG fake" if app_id == "11101200001" else None
 
 
 class TestTV(unittest.TestCase):
@@ -450,3 +453,72 @@ class TestVoiceHint(unittest.TestCase):
         hint = whisper_prompt(["Kate"], ["patio lights"], ["Netflix", "Disney+", "Paramount+"])
         self.assertIn("Turn on the TV to Netflix. Put on Disney Plus, Paramount Plus.", hint)
         self.assertNotIn("TV to", whisper_prompt(["Kate"], ["patio lights"]))
+
+
+class TestRemote(unittest.TestCase):
+    """The web remote: buttons from a fixed list, apps by id, typing, the TV's own app icons."""
+
+    def setUp(self):
+        import socket
+
+        import bcrypt
+
+        from sentinel.web.frame_broker import FrameBroker
+        from sentinel.web.server import WebServer
+
+        self.dir = tempfile.mkdtemp(prefix="sentinel-switches-")
+        self.tv = FakeTV()
+        self.sw = SmartSwitches(self.dir, drivers=[FakeKasa(), self.tv])
+        self.sw.discover()
+        sleep = mock.patch("sentinel.engine.switches.time.sleep")
+        sleep.start()
+        self.addCleanup(sleep.stop)
+        manager = SettingsManager(settings_file=os.path.join(self.dir, "settings.json"))
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        manager.settings["web"].update({"enabled": True, "port": port})
+        manager.settings["web"]["auth"].update({"username": "alex", "password_hash": bcrypt.hashpw(
+            b"pw", bcrypt.gensalt(rounds=4)).decode()})
+        self.server = WebServer(manager, FrameBroker(), engine=mock.Mock(switches=self.sw))
+        self.assertTrue(self.server.start())
+        self.server._auth.validate_session = lambda token, ip: mock.Mock(username="alex")
+        self.client = self.server._app.test_client()
+        self.tv_id = "samsung-001122334455"
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def post(self, path, body, header=True):
+        return self.client.post(path, json=body, headers={"X-Sentinel-Request": "1"} if header else {})
+
+    def test_view_lists_apps_without_system_ones(self):
+        self.tv.apps = lambda host: {"11101200001": "Netflix", "x1": "Gallery", "3201808016802": "Pluto TV: Free Movies & Shows"}
+        v = self.client.get(f"/api/tv/{self.tv_id}").get_json()
+        self.assertEqual(v["name"], "TV")
+        self.assertEqual([a["name"] for a in v["apps"]], ["Netflix", "Pluto TV"])
+        self.assertEqual(self.client.get("/api/tv/kasa-50c7bf000001").status_code, 404)  # a plug has no remote
+
+    def test_buttons(self):
+        self.assertEqual(self.post(f"/api/tv/{self.tv_id}/key", {"key": "up"}).status_code, 200)
+        self.assertEqual(self.post(f"/api/tv/{self.tv_id}/key", {"key": "vol_down"}).status_code, 200)
+        self.assertEqual(self.tv.calls, [("press", "KEY_UP"), ("press", "KEY_VOLDOWN")])
+        self.assertEqual(self.post(f"/api/tv/{self.tv_id}/key", {"key": "KEY_FACTORY"}).status_code, 400)  # not on the list
+        self.assertEqual(self.post(f"/api/tv/{self.tv_id}/key", {"key": "up"}, header=False).status_code, 400)
+        self.assertEqual(len(self.tv.calls), 2)
+
+    def test_apps_and_typing(self):
+        self.assertEqual(self.post(f"/api/tv/{self.tv_id}/open", {"app": "11101200001"}).status_code, 200)
+        self.assertEqual(self.tv.calls, [("power", True), ("launch", "11101200001")])  # it was off
+        self.assertEqual(self.post(f"/api/tv/{self.tv_id}/open", {"app": "999"}).status_code, 400)
+        self.assertEqual(self.post(f"/api/tv/{self.tv_id}/type", {"text": "judge judy"}).status_code, 200)
+        self.assertEqual(self.tv.calls[-1], ("type", "judge judy"))
+
+    def test_icons(self):
+        r = self.client.get(f"/api/tv/{self.tv_id}/icon/11101200001")
+        self.assertEqual((r.status_code, r.mimetype, r.data), (200, "image/png", b"\x89PNG fake"))
+        self.assertEqual(self.client.get(f"/api/tv/{self.tv_id}/icon/3201808016802").status_code, 404)
+
+
+if __name__ == "__main__":
+    unittest.main()

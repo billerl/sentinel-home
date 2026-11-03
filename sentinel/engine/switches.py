@@ -193,6 +193,13 @@ _TV_VOLUME = re.compile(r"^(?:turn )?" + _TV + r"(?: volume)? (up|down)$|^turn (
 _TV_MUTE = re.compile(r"^(mute|unmute) " + _TV + r"$", re.IGNORECASE)
 _TV_WHAT = re.compile(r"^what(?:'s| is) (?:on|playing on) " + _TV + r"$", re.IGNORECASE)
 VOLUME_STEPS = 3
+# The web remote's buttons -> the TV's key names (nothing else is sent).
+TV_KEYS = {"up": "KEY_UP", "down": "KEY_DOWN", "left": "KEY_LEFT", "right": "KEY_RIGHT", "ok": "KEY_ENTER",
+           "back": "KEY_RETURN", "home": "KEY_HOME", "menu": "KEY_MENU", "source": "KEY_SOURCE", "guide": "KEY_GUIDE",
+           "info": "KEY_INFO", "exit": "KEY_EXIT", "vol_up": "KEY_VOLUP", "vol_down": "KEY_VOLDOWN", "mute": "KEY_MUTE",
+           "ch_up": "KEY_CHUP", "ch_down": "KEY_CHDOWN", "ch_list": "KEY_CH_LIST", "play": "KEY_PLAY",
+           "pause": "KEY_PAUSE", "rewind": "KEY_REWIND", "forward": "KEY_FF",
+           **{str(n): f"KEY_{n}" for n in range(10)}}
 TV_SYSTEM_APPS = {"Gallery", "Internet", "e-Manual", "PrivacyChoices", "Universal Guide"}
 
 
@@ -550,6 +557,65 @@ class SmartSwitches:
                 if short and short not in TV_SYSTEM_APPS and short not in out:
                     out.append(short)
         return out
+
+    # ------------------------------------------------------------ the web remote
+    def _tv_for(self, switch_id: str) -> Optional[Tuple[Switch, Any, str]]:
+        return next((tv for tv in self._tvs() if tv[0].id == switch_id), None)
+
+    def tv_view(self, switch_id: str) -> Optional[Dict[str, Any]]:
+        tv = self._tv_for(switch_id)
+        if tv is None:
+            return None
+        sw, driver, host = tv
+        apps = [{"id": app_id, "name": re.split(r"\s[-:]\s|:", name)[0].strip()}
+                for app_id, name in driver.apps(host).items()]
+        return {"id": sw.id, "name": sw.name, "on": sw.on, "online": sw.online,
+                "apps": [a for a in apps if a["name"] not in TV_SYSTEM_APPS]}
+
+    def tv_key(self, switch_id: str, key: str) -> Tuple[bool, str]:
+        tv = self._tv_for(switch_id)
+        if tv is None or key not in TV_KEYS:
+            return False, "I don't know that button."
+        try:
+            tv[1].press(tv[2], TV_KEYS[key])
+        except (OSError, ValueError) as e:
+            return False, f"The {tv[0].name} didn't answer ({e})." if tv[0].on else f"The {tv[0].name} is off."
+        return True, key
+
+    def tv_open(self, switch_id: str, app_id: str) -> Tuple[bool, str]:
+        tv = self._tv_for(switch_id)
+        if tv is None:
+            return False, "I don't know that TV."
+        sw, driver, host = tv
+        name = driver.apps(host).get(app_id)
+        if name is None:
+            return False, "That app isn't on the TV."
+        if not sw.on:
+            ok, message = self.set(sw.id, True, "web")
+            if not ok:
+                return False, message
+            time.sleep(3)  # let it finish starting up (it opens its last app first)
+        try:
+            driver.launch(host, app_id)
+        except (OSError, ValueError) as e:
+            return False, f"The {sw.name} didn't open it ({e})."
+        app_logger.log("info", "tv_app", app=name, source="web", component="switches", action="tv")
+        return True, name
+
+    def tv_type(self, switch_id: str, text: str) -> Tuple[bool, str]:
+        tv = self._tv_for(switch_id)
+        text = (text or "").strip()[:100]
+        if tv is None or not text:
+            return False, "Nothing to type."
+        try:
+            tv[1].type_text(tv[2], text)
+        except (OSError, ValueError) as e:
+            return False, f"The {tv[0].name} didn't take it ({e})."
+        return True, "typed"
+
+    def tv_icon(self, switch_id: str, app_id: str) -> Optional[bytes]:
+        tv = self._tv_for(switch_id)
+        return tv[1].icon(tv[2], app_id) if tv is not None else None
 
     def understands(self, text: str) -> bool:
         """A switch or TV command (for routing Telegram messages and Claude's suggestions)."""
