@@ -186,6 +186,9 @@ class Engine:
         self.spotify = SpotifyService(self.settings, lambda: self.settings_manager.save_settings(force=True))
         from sentinel.audio.spotify_player import SpotifyPlayer  # (sentinel.audio loads the speech engines)
 
+        from sentinel.audio import devices
+
+        devices.use_cards(self.settings.get("audio_device"), self.settings.get("music_device", "auto"))  # line-out or USB
         self.spotify_player = SpotifyPlayer(self.settings)  # this PC as a Spotify speaker (spotifyd)
         self._command_offers: Dict[int, Tuple[str, str, float]] = {}  # "Do it" buttons under Claude's replies
         self._offer_ids = itertools.count(1)
@@ -2099,6 +2102,7 @@ class Engine:
             "secrets": {key: bool(self.settings.get(key)) for key in admin.WRITE_ONLY_SETTINGS},
             "voices": admin.available_voices(),
             "detector_models": admin.available_detector_models(),
+            "sound_cards": __import__("sentinel.audio.devices", fromlist=["sound_cards"]).sound_cards(),
         }
 
     def update_settings(self, changes: Dict[str, Any]) -> Tuple[bool, str]:
@@ -2139,9 +2143,16 @@ class Engine:
                 self.audio = self._init_audio()
             else:
                 self.audio.update_settings(self.settings)
+        if {"audio_device", "music_device"} & cleaned.keys():  # another speaker: voice, chimes and Spotify move to it
+            from sentinel.audio import devices
+
+            devices.use_cards(self.settings.get("audio_device"), self.settings.get("music_device", "auto"))
+            if self.audio is not None:
+                self.audio.update_settings(self.settings)
+            self.spotify_player.restart()
         if "spotify_speaker_name" in cleaned:
             self.spotify_player.settings_changed()
-        if {"voice_enabled", "volume"} & cleaned.keys() and self._started:
+        if {"voice_enabled", "volume", "voice_device", "audio_device", "music_device"} & cleaned.keys() and self._started:
             self._stop_voice()
             self._start_voice()
 

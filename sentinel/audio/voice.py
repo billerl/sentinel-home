@@ -282,7 +282,8 @@ class VoiceAssistant:
             app_logger.log("error", "voice_unavailable", error_message=self.last_error, component="voice",
                            action="start")
             return
-        failed = set_mixer()
+        device = str(self.settings.get("voice_device") or DEVICE)
+        failed = set_mixer() if device in (DEVICE, "plughw:CARD=PCH,DEV=0") else []  # the PC's front mic jack only
         if failed:
             app_logger.log("warning", "voice_mixer_failed", controls=failed, component="voice", action="start")
         backoff = 5.0

@@ -269,6 +269,12 @@
         <div class="row"><div class="field" style="flex: 0 1 320px"><span>Play sounds on</span>
           <select data-key="audio_output"><option value="speakers">This PC's speakers</option><option value="remote">Remote Desktop session (for testing from another computer)</option></select></div></div>
         <p class="hint" style="margin-top:0">“Remote Desktop session” plays alerts and voice answers on the computer you're connected from. When nobody is connected it uses this PC's speakers instead.</p>
+        <div class="row">
+          <div class="field" style="flex: 0 1 280px"><span>Microphone (voice assistant)</span><select data-key="voice_device" id="mic-select"></select></div>
+          <div class="field" style="flex: 0 1 280px"><span>Speaker (voice, alerts)</span><select data-key="audio_device" id="speaker-select"></select></div>
+          <div class="field" style="flex: 0 1 280px"><span>Music (this PC as a Spotify speaker)</span><select data-key="music_device" id="music-select"></select></div>
+        </div>
+        <p class="hint" style="margin-top:0">Music on “Automatic” plays through speakers plugged into this PC's jack, else through the voice's speaker. A USB speakerphone (like a Jabra Speak) shows up here once it's plugged in. Its mic hears speech across a room far better than a mic in the PC's jack, and it doesn't hear its own voice.</p>
         <div class="row"><label><input type="checkbox" data-key="voice_enabled"> Voice assistant: answer the wake word (“Jezebel”, or “Hey Jarvis”) through the microphone</label></div>
         <p class="hint" style="margin-top:0">Listens only for the wake word; nothing is recorded or saved, and speech is understood on this PC. Needs the volume above 0. Questions Sentinel can't answer itself go to Claude if “ask Claude” is on under <a href="#telegram">Telegram</a>.</p>
         <div class="row"><label><input type="checkbox" data-key="voice_follow_up"> After an answer, listen for another question without “Hey Jarvis” (about 5 seconds)</label></div>
@@ -482,7 +488,7 @@
       recording: ["recording_retention_enabled", "recording_retention_days", "recording_min_free_percent",
                   "night_bug_start_hour", "night_bug_end_hour", "auto_reconnect_enabled",
                   "reconnect_interval_seconds", "feed_fps", "web.max_fps", "web.show_zones"],
-      audio: ["volume", "speech_speed", "voice_id", "voice_jarvis_id", "audio_output", "voice_enabled", "voice_follow_up"],
+      audio: ["volume", "speech_speed", "voice_id", "voice_jarvis_id", "audio_output", "voice_device", "audio_device", "music_device", "voice_enabled", "voice_follow_up"],
       access: ["remote_web_url", "remote_rdp_user"],
       spotify: ["spotify_client_id", "spotify_device", "spotify_speaker_name"],
       weather: ["weather_location", "weather_units"],
@@ -536,6 +542,30 @@
         var cur = document.createElement("option"); cur.value = v.voice_id; cur.textContent = v.voice_id + " (current)"; sel.appendChild(cur);
       }
       sel.value = v.voice_id || "";
+      function cardChoices(select, first, cards, valueOf, current) {  // sound cards: the PC's own first
+        select.innerHTML = "";
+        var o = document.createElement("option"); o.value = ""; o.textContent = first; select.appendChild(o);
+        cards.forEach(function(c) {
+          var opt = document.createElement("option"); opt.value = valueOf(c); opt.textContent = c.name; select.appendChild(opt);
+        });
+        if (current && !cards.some(function(c) { return valueOf(c) === current; })) {
+          var gone = document.createElement("option"); gone.value = current; gone.textContent = current + " (not plugged in)"; select.appendChild(gone);
+        }
+        select.value = current || "";
+      }
+      var cards = (settings.sound_cards || []).filter(function(c) { return c.id !== "PCH"; });
+      cardChoices($("mic-select"), "This PC's mic jack", cards.filter(function(c) { return c.mic; }),
+                  function(c) { return "plughw:CARD=" + c.id + ",DEV=0"; }, v.voice_device);
+      cardChoices($("speaker-select"), "This PC's speaker jack", cards.filter(function(c) { return c.speaker; }),
+                  function(c) { return c.id; }, v.audio_device);
+      var music = $("music-select");
+      cardChoices(music, "This PC's speaker jack", cards.filter(function(c) { return c.speaker; }),
+                  function(c) { return c.id; }, v.music_device === "auto" ? "" : v.music_device);
+      var auto = document.createElement("option");
+      auto.value = "auto"; auto.textContent = "Automatic: the speaker jack when something's plugged in";
+      music.insertBefore(auto, music.firstChild);
+      music.querySelector('option[value=""]').value = "PCH";
+      music.value = !v.music_device || v.music_device === "auto" ? "auto" : v.music_device;
       var js = $("jarvis-voice-select");  // Kokoro voices only: they all come from the one loaded model
       js.innerHTML = "";
       var same = document.createElement("option"); same.value = ""; same.textContent = "Same as above"; js.appendChild(same);

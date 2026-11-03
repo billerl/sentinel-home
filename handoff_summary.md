@@ -265,6 +265,12 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   `supports()` hides the rest in the remote); apps = `pm list packages -3` + known Amazon ones (`APP_NAMES`).
   A Fire TV running Fully Kiosk (the live view) gets "Show/Reload cameras" (`show_live`) and "put the cameras
   on the TV" / "reload the cameras". Commands name the TV ("on the Sentinel TV"); unnamed = the Samsung.
+- **Sound cards** (`sentinel/audio/devices.py`, Settings > Audio): `voice_device` (mic, e.g.
+  `plughw:CARD=USB,DEV=0` for a Jabra Speak 410: voice 29 dB above room noise vs 13 dB on the front mic jack,
+  Whisper clearly better), `audio_device` (voice/chimes card) and `music_device` ("auto" = the PC's line-out when
+  its jack-sense says something's plugged in, else the voice's card). Cards by ALSA id, not number. Non-default
+  choices write a runtime ALSA conf (`use_cards`, its own dmix ipc_key per card) used via `alsa_env()`; volume
+  follows the card ("Master" on PCH, "PCM" on the Jabra). The front-mic mixer setup runs only for the PC's jack.
 - **Smart plugs and switches** (`sentinel/engine/switches.py`, known devices in `recorded_videos/switches.json`):
   Kasa plugs/power strips/wall switches over their local protocol (TCP/UDP 9999, XOR-scrambled JSON; no
   cloud, no new dependency). Found by UDP broadcast at start, every 15 min and on "Find new devices"; known

@@ -132,7 +132,7 @@ class TestDucking(unittest.TestCase):
             audio.busy = False
         levels = [c.args[0][-1] for c in run.call_args_list]
         self.assertEqual(levels, ["60%", "100%"])
-        self.assertEqual(run.call_args.args[0][:5], ["amixer", "-q", "-c", "0", "sset"])
+        self.assertEqual(run.call_args.args[0][:5], ["amixer", "-q", "-c", "PCH", "sset"])  # the music's card
 
 
 if __name__ == "__main__":

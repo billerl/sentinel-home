@@ -164,6 +164,10 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "audio_output": lambda v: _choice(v or "speakers", ("speakers", "remote")),
     "voice_wake_threshold": _num(0.1, 0.95),
     "voice_gain": _num(1, 20),
+    # Settings > Audio: which sound card listens and speaks ("" = the PC's own jacks; see sentinel/audio/devices.py)
+    "voice_device": lambda v: str(v or "") if re.fullmatch(r"(plughw:CARD=\w{1,32},DEV=\d)?", str(v or "")) else "",
+    "audio_device": lambda v: str(v or "") if re.fullmatch(r"\w{0,32}", str(v or "")) else "",
+    "music_device": lambda v: str(v or "auto") if re.fullmatch(r"\w{1,32}", str(v or "auto")) else "auto",
     "assistant_daily_limit": _num(0, 200, int),
     "assistant_model": lambda v: _choice(v or "sonnet", ("haiku", "sonnet")),
     "weather_units": lambda v: _choice(v or "fahrenheit", ("fahrenheit", "celsius")),

@@ -19,6 +19,7 @@ from typing import Dict, Any, List, Optional
 import numpy as np
 import pyttsx3
 
+from sentinel.audio import devices
 from sentinel.constants import (
     DEFAULT_SPEECH_SPEED,
     DEFAULT_VOLUME,
@@ -35,32 +36,44 @@ KOKORO_RATE = 24000
 # The PC's own sound card (front line-out jack). Named directly: the service has no desktop sound server,
 # so ALSA's "default" (PipeWire) fails there with "Host is down". alsa-sentinel.conf shares the jack with
 # the Spotify speaker (spotify_player.py); without it, the bare card plays one sound at a time.
-ALSA_CONF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alsa-sentinel.conf")
+ALSA_CONF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alsa-sentinel.conf")  # see devices.py
 SYSTEM_ALSA_CONF = "/usr/share/alsa/alsa.conf"
 MUSIC_CONTROL = "Sentinel Music"  # the Spotify speaker's own volume, created by alsa-sentinel.conf
 MUSIC_DUCKED = "60%"  # softvol's scale is in dB: 60% is about -20 dB, music well under the voice
 
 
 def shared_speaker() -> bool:
-    return os.path.exists(ALSA_CONF) and os.path.exists(SYSTEM_ALSA_CONF)
+    return os.path.exists(devices.alsa_conf_path()) and os.path.exists(SYSTEM_ALSA_CONF)
 
 
 def alsa_env() -> Dict[str, str]:
     """Environment for ALSA programs (aplay, spotifyd) that use the shared speaker devices."""
     env = dict(os.environ)
     if shared_speaker():
-        env["ALSA_CONFIG_PATH"] = f"{SYSTEM_ALSA_CONF}:{ALSA_CONF}"
+        env["ALSA_CONFIG_PATH"] = f"{SYSTEM_ALSA_CONF}:{devices.alsa_conf_path()}"
     return env
 
 
 def speaker_device() -> str:
-    return "sentinel_speaker" if shared_speaker() else "plughw:0,0"
+    return "sentinel_speaker" if shared_speaker() else f"plughw:CARD={devices.speaker_card()},DEV=0"
+
+
+def _volume_control(card: str) -> str:
+    """The card's main volume: "Master" on the PC's own, "PCM" on a USB speakerphone."""
+    try:
+        out = subprocess.run(["amixer", "-c", card, "scontrols"], capture_output=True, text=True, timeout=3).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return "Master"
+    names = re.findall(r"'([^']+)',0", out)
+    return next((n for n in ("Master", "PCM", "Speaker") if n in names), "Master")
 
 
 def pc_volume() -> Optional[int]:
-    """The sound card's Master volume in percent (everything on the line-out: voice, alerts, music)."""
+    """The speaker card's main volume in percent (everything on it: voice, alerts, music)."""
+    card = devices.volume_card()
     try:
-        out = subprocess.run(["amixer", "-c", "0", "sget", "Master"], capture_output=True, text=True, timeout=3).stdout
+        out = subprocess.run(["amixer", "-c", card, "sget", _volume_control(card)], capture_output=True, text=True,
+                             timeout=3).stdout
     except (OSError, subprocess.TimeoutExpired):
         return None
     m = re.search(r"\[(\d+)%\]", out)
@@ -68,8 +81,9 @@ def pc_volume() -> Optional[int]:
 
 
 def set_pc_volume(percent: int) -> bool:
+    card = devices.volume_card()
     try:
-        return subprocess.run(["amixer", "-q", "-c", "0", "sset", "Master", f"{max(0, min(100, int(percent)))}%"],
+        return subprocess.run(["amixer", "-q", "-c", card, "sset", _volume_control(card), f"{max(0, min(100, int(percent)))}%"],
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -352,7 +366,7 @@ class AudioAlertSystem:
     def duck_music(on: bool) -> None:
         """Turn the PC's Spotify speaker down (or back up) so the voice assistant can hear and be heard."""
         try:
-            subprocess.run(["amixer", "-q", "-c", "0", "sset", MUSIC_CONTROL, MUSIC_DUCKED if on else "100%"],
+            subprocess.run(["amixer", "-q", "-c", devices.music_card(), "sset", MUSIC_CONTROL, MUSIC_DUCKED if on else "100%"],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
         except (OSError, subprocess.TimeoutExpired):
             pass  # no amixer, or the control doesn't exist yet (the Spotify speaker hasn't played)
