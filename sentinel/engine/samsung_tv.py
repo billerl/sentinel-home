@@ -357,10 +357,15 @@ class SamsungTVDriver:
             raise OSError("unknown TV")
         recently_off = time.time() - self._off_at.get(host, 0.0) < 15
         if not on:
-            if self.answering(host) is not None and not recently_off and (tv.get("on_since") or self._app_on_screen(host)):
+            # Answering = on, unless Sentinel switched it off itself lately (its network stays up a few minutes).
+            # Someone asking for "off" sees it on: the TV can't say whether its picture is on, and watching cable
+            # or an antenna shows no app, so a TV turned on with its own remote looked off for its first
+            # SCREEN_AFTER and "turn off the TV" did nothing (2026-11-03 18:43). The rare miss, asked during a
+            # dark wake-up, lights it instead, and asking again switches it off.
+            if self.answering(host) is not None and time.time() - self._off_at.get(host, 0.0) >= SCREEN_AFTER:
                 self.press(host, "KEY_POWER")
                 self._off_at[host] = time.time()
-            self._screen(mac, False)  # (answering with nothing on screen and not known to be on: a dark wake-up)
+            self._screen(mac, False)
             return
         if tv.get("on_since") and self.answering(host) is not None:
             return  # on, as far as we know: pressing power would switch it off

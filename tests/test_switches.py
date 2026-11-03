@@ -422,8 +422,6 @@ class TestSamsungDriver(unittest.TestCase):
             self.assertEqual(self.drv.status("192.168.1.60")["relay_state"], 0)
             clock[0] += 130
             self.assertEqual(self.drv.status("192.168.1.60")["relay_state"], 0)
-            self.drv.set("192.168.1.60", None, False)  # "off" now must not press power (it would light it)
-            self.assertEqual(self.log, [])
             self.drv.set("192.168.1.60", None, True)  # 2026-11-03 13:18: this used to be taken for "already on"
             self.assertEqual(self.log, [("KEY_POWER",)])  # no wake packet needed: it's awake
             self.assertTrue(self.picture)
@@ -450,6 +448,20 @@ class TestSamsungDriver(unittest.TestCase):
         self.drv.set("192.168.1.60", None, True)
         self.assertEqual([x for x in self.log if x != "wake"], [("KEY_POWER",), ("KEY_POWER",)])
         self.assertTrue(self.picture)
+
+    def test_off_works_on_a_tv_turned_on_with_its_own_remote(self):
+        """2026-11-03 18:43: on with its own remote (cable, no app showing), "turn off the TV" said OK but did nothing."""
+        clock = [NOW]
+        with mock.patch("sentinel.engine.samsung_tv.time.time", side_effect=lambda: clock[0]):
+            self.net = self.picture = True
+            self.assertEqual(self.drv.status("192.168.1.60")["relay_state"], 0)  # not known to be on yet
+            self.drv.set("192.168.1.60", None, False)
+            self.assertEqual(self.log, [("KEY_POWER",)])
+            self.assertFalse(self.picture)
+            self.net = True  # still answering while it shuts down: asking again mustn't switch it back on
+            clock[0] += 60
+            self.drv.set("192.168.1.60", None, False)
+            self.assertEqual(self.log, [("KEY_POWER",)])
 
     def test_on_with_its_own_remote_shows_after_a_while(self):
         clock = [NOW]
