@@ -331,6 +331,14 @@ class TestTV(unittest.TestCase):
         self.assertEqual(self.sw.command("turn the TV on", "voice"), "Okay, TV on.")  # no app: just power
         self.assertNotIn("Gallery", self.sw.tv_apps())
 
+    def test_open_spotify_for_play_on_the_tv(self):
+        self.assertEqual(self.sw.open_app("tv", "spotify", "spotify"), "TV")
+        self.assertEqual(self.tv.calls, [("power", True), ("launch", "3201606009684")])  # it was off: on first
+        self.assertEqual(self.sw.open_app("tv", "spotify", "spotify"), "TV")
+        self.assertEqual(self.tv.calls[-1], ("launch", "3201606009684"))
+        self.assertEqual(len(self.tv.calls), 3)  # already on: no power button
+        self.assertIsNone(self.sw.open_app("tv", "pandora", "spotify"))
+
     def test_volume_and_mute(self):
         self.assertEqual(self.sw.command("tv volume up", "voice"), "The TV is off.")
         self.tv.on = True

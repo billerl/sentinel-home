@@ -184,6 +184,7 @@ class Engine:
         self.weather = WeatherService(self.settings)
         self.assistant = Assistant(self.settings)
         self.spotify = SpotifyService(self.settings, lambda: self.settings_manager.save_settings(force=True))
+        self.spotify.open_on_tv = lambda words: self.switches.open_app(words, "spotify", "spotify")
         from sentinel.audio.spotify_player import SpotifyPlayer  # (sentinel.audio loads the speech engines)
 
         from sentinel.audio import devices
@@ -1155,7 +1156,7 @@ class Engine:
             return VoiceReply(switched)
         music = parse_music_command(low)
         if music and self.spotify.connected():
-            said = self.spotify.command(*music)
+            said = self.spotify.command(*music, say=say)
             if said.startswith(NO_SUCH_SPEAKER):
                 return VoiceReply(said + " Do you want to hear the list of speakers?", confirm=self.spotify.speaker_list)
             return VoiceReply(said)

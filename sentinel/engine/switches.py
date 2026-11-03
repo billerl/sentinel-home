@@ -593,6 +593,28 @@ class SmartSwitches:
                     out.append(short)
         return out
 
+    def open_app(self, tv_words: str, app_words: str, source: str) -> Optional[str]:
+        """Turn on the TV a phrase names (else the plain "TV") and open an app on it, for "play X on the TV"
+        (Spotify): the TV's name, or None when that TV hasn't got the app. Raises OSError when it didn't do it."""
+        tvs = self._tvs()
+        if not tvs:
+            return None
+        sw, driver, host = self._pick_tv(tv_words, tvs)
+        app = self._find_app(app_words, driver, host)
+        if app is None:
+            return None
+        if not sw.on:
+            ok, message = self.set(sw.id, True, source)
+            if not ok:
+                raise OSError(message)
+            time.sleep(3)  # let it finish starting up (it opens its last app first)
+        try:
+            driver.launch(host, app[0])
+        except ValueError as e:
+            raise OSError(str(e)) from e
+        app_logger.log("info", "tv_app", app=app[1], source=source, component="switches", action="tv")
+        return sw.name
+
     # ------------------------------------------------------------ the web remote
     def _tv_for(self, switch_id: str) -> Optional[Tuple[Switch, Any, str]]:
         return next((tv for tv in self._tvs() if tv[0].id == switch_id), None)

@@ -251,6 +251,62 @@ class TestService(unittest.TestCase):
         self.assertEqual(self.last_play()[0]["device_id"], ["tv1"])
         self.assertIn("can't see a Spotify speaker called kitchen", self.sp.command("play", "song @ kitchen"))
 
+    def tv_app(self, appears=True):
+        """No TV among the speakers; opening the TV's Spotify app (SmartSwitches.open_app) makes one."""
+        self.http.devices = [d for d in self.http.devices if d["type"] != "TV"]
+        self.sp._sleep = lambda s: None
+        self.opened = []
+
+        def open_on_tv(words):
+            self.opened.append(words)
+            if appears:
+                self.http.devices.append({"id": "sam1", "name": "[TV] Samsung 6 Series (65)", "type": "TV",
+                                          "is_active": False})
+            return "TV"
+        self.sp.open_on_tv = open_on_tv
+
+    def test_play_on_the_tv_opens_its_spotify_app(self):
+        self.connect()
+        self.tv_app()
+        self.http.search = {"tracks": {"items": [_track("Song", "Band", "spotify:track:s")]}}
+        said = []
+        self.assertEqual(self.sp.command("play", "song @ tv", say=said.append), "Playing Song by Band on the TV.")
+        self.assertEqual(said, ["Opening Spotify on the TV."])
+        self.assertEqual(self.opened, ["tv"])
+        self.assertEqual(self.last_play()[0]["device_id"], ["sam1"])
+        self.assertEqual(self.sp.command("play", "song @ tv"), "Playing Song by Band on [TV] Samsung 6 Series (65).")
+        self.assertEqual(self.opened, ["tv"])  # a speaker now: not opened again
+
+    def test_move_to_the_tv_opens_it_too(self):
+        self.connect()
+        self.tv_app()
+        self.assertEqual(self.sp.command("move", "tv"), "Playing on the TV.")
+        transfer = [c for c in self.http.calls if c[0] == "PUT" and c[1].endswith("/me/player")][-1]
+        self.assertEqual(json.loads(transfer[3])["device_ids"], ["sam1"])
+
+    def test_tv_spotify_app_that_never_shows_up(self):
+        self.connect()
+        self.tv_app(appears=False)
+        said = self.sp.command("play", "song @ tv")
+        self.assertTrue(said.startswith("I opened Spotify on the TV, but it didn't show up"), said)
+        self.assertFalse([c for c in self.http.calls if "/me/player/play" in c[1]])
+
+    def test_only_a_tv_is_opened(self):
+        self.connect()
+        self.tv_app()
+        self.assertIn("can't see a Spotify speaker called kitchen", self.sp.command("play", "song @ kitchen"))
+        self.assertEqual(self.opened, [])
+
+    def test_a_listed_tv_thats_gone_is_opened(self):
+        self.connect()
+        self.tv_app()
+        self.http.devices.append({"id": "sam1", "name": "[TV] Samsung 6 Series (65)", "type": "TV", "is_active": False})
+        self.http.search = {"tracks": {"items": [_track("Song", "Band", "spotify:track:s")]}}
+        self.http.extra["/v1/me/player/play"] = (404, {"error": {"status": 404, "message": "Device not found"}})
+        self.sp.open_on_tv = lambda words: self.http.extra.clear() or "TV"  # its app is back on Spotify
+        self.assertEqual(self.sp.command("play", "song @ tv"), "Playing Song by Band on the TV.")
+        self.assertEqual(self.last_play()[0]["device_id"], ["sam1"])
+
     def test_this_speaker_means_the_pc(self):
         self.connect()
         self.http.devices.append({"id": "pc1", "name": "Sentinel", "type": "Speaker", "is_active": False})
@@ -318,7 +374,7 @@ class TestEngineMusic(unittest.TestCase):
         with mock.patch.object(self.engine.spotify, "connected", return_value=True), \
                 mock.patch.object(self.engine.spotify, "command", return_value="Playing a jazz playlist.") as cmd:
             reply = self.engine.answer_voice("Play some jazz.", lambda s: None)
-        cmd.assert_called_once_with("play", "play some jazz".split(" ", 1)[1])
+        cmd.assert_called_once_with("play", "play some jazz".split(" ", 1)[1], say=mock.ANY)
         self.assertEqual(reply.text, "Playing a jazz playlist.")
 
     def test_unknown_speaker_offers_the_list(self):

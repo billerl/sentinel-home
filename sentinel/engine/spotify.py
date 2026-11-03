@@ -41,6 +41,10 @@ ARTISTS_EVERY = 24 * 3600.0
 PC_CHECK_SECONDS = 6.0
 PC_BROKEN_FOR = 24 * 3600.0
 NO_SUCH_SPEAKER = "I can't see a Spotify speaker called "  # the voice assistant offers the list after it
+# "Play X on the TV" when the TV isn't a Spotify speaker (off, or its Spotify app closed): the TV is turned on and
+# its Spotify app opened (SpotifyService.open_on_tv), then given this long to show up in Spotify's speaker list.
+TV_APPEAR_SECONDS = 30.0
+_A_TV = re.compile(r"\b(tv|television)\b")
 # What people call the PC's own Spotify speaker (spotify_player.py) besides its name.
 _THIS_PC = re.compile(r"here|(this|the|that)? ?(speaker|computer|pc|desktop|office computer)")
 NOW_PLAYING_SECONDS = 3.0  # shared by every open page (Fire TV, phones)
@@ -130,6 +134,9 @@ class SpotifyService:
         self._pc_broken_until = 0.0
         self._sleep = time.sleep
         self._spawn = lambda fn: threading.Thread(target=fn, daemon=True, name="spotify-pc-check").start()
+        # words naming a TV -> turns it on and opens its Spotify app: the TV's name, or None (no such TV / no
+        # Spotify on it); raises OSError when the TV didn't do it. Set by the engine (SmartSwitches.open_app).
+        self.open_on_tv: Optional[Callable[[str], Optional[str]]] = None
 
     # ------------------------------------------------------------ sign-in
     def client_id(self) -> str:
@@ -384,6 +391,65 @@ class SpotifyService:
                 or next((d for d in devices if preferred and _words(d.get("name")) == preferred), None)
                 or devices[0])
 
+    def _open_tv(self, wanted: str, say: Optional[Callable[[str], None]]) -> Tuple[Optional[Dict[str, Any]], str]:
+        """Turn on the TV named and open its Spotify app, then wait for it in the speaker list.
+        (the speaker or None, the TV's name or "" when no TV has Spotify)."""
+        try:
+            tv = self.open_on_tv(wanted) if self.open_on_tv and _A_TV.search(_words(wanted)) else None
+        except OSError as e:
+            raise SpotifyError(503, f"the TV didn't open Spotify ({e})")
+        if not tv:
+            return None, ""
+        if say:
+            say(f"Opening Spotify on the {tv}.")
+        for _ in range(int(TV_APPEAR_SECONDS / 2)):
+            self._sleep(2.0)
+            device = self._pick_device(wanted)
+            if device is not None:
+                app_logger.log("info", "spotify_tv_opened", tv=tv, device=device.get("name"), component="spotify",
+                               action="play")
+                return device, tv
+        app_logger.log("warning", "spotify_tv_missing", tv=tv, component="spotify", action="play",
+                       error_message="the TV's Spotify app opened but never showed up as a speaker")
+        return None, tv
+
+    def _speaker(self, wanted: str, say) -> Tuple[Optional[Dict[str, Any]], str]:
+        """_pick_device, opening Spotify on a TV that isn't a speaker yet. (speaker, the TV's name if opened now)"""
+        device = self._pick_device(wanted)
+        return (device, "") if device is not None or not wanted else self._open_tv(wanted, say)
+
+    def _send(self, device: Dict[str, Any], wanted: str, opened: str, say,
+              send: Callable[[Dict[str, Any]], Any]) -> Tuple[Optional[Dict[str, Any]], str]:
+        """send(device); a TV Spotify still lists but that has gone (switched off with its own remote) is
+        turned on and its Spotify app opened, then sent to again until it's ready."""
+        try:
+            send(device)
+            return device, opened
+        except SpotifyError as e:
+            if e.status != 404 or device.get("type") != "TV" or opened or not wanted:
+                raise
+        device, opened = self._open_tv(wanted, say)
+        if device is None:
+            return None, opened
+        for attempt in range(int(TV_APPEAR_SECONDS / 2)):
+            try:
+                send(device)
+                return device, opened
+            except SpotifyError as e:
+                if e.status != 404 or attempt == int(TV_APPEAR_SECONDS / 2) - 1:
+                    raise
+                self._sleep(2.0)
+                device = self._pick_device(wanted) or device
+        return device, opened
+
+    @staticmethod
+    def _no_speaker(wanted: str, opened: str) -> str:
+        if opened:
+            return (f"I opened Spotify on the {opened}, but it didn't show up as a Spotify speaker. Check that the "
+                    f"TV's Spotify app is signed in to the same Spotify account as Sentinel, then ask again.")
+        return (f"{NO_SUCH_SPEAKER}{wanted}." if wanted else
+                "I can't find a Spotify speaker that's on. Open Spotify on the TV or your phone, then ask again.")
+
     def _is_this_pc(self, device: Dict[str, Any]) -> bool:
         return _words(device.get("name")) == _words(str(self.settings.get("spotify_speaker_name") or "Sentinel"))
 
@@ -460,10 +526,10 @@ class SpotifyService:
             return {"context_uri": playlists[0]["uri"]}, playlists[0].get("name") or q
         return None, q
 
-    def command(self, action: str, arg: str = "") -> str:
-        """Do it; returns a short sentence to say or show."""
+    def command(self, action: str, arg: str = "", say: Optional[Callable[[str], None]] = None) -> str:
+        """Do it; returns a short sentence to say or show (say: for "Opening Spotify on the TV" while it starts)."""
         try:
-            return self._command(action, arg)
+            return self._command(action, arg, say)
         except SpotifyError as e:
             self.last_error = str(e)
             app_logger.log("warning", "spotify_failed", action_name=action, status=e.status, error_message=str(e),
@@ -480,7 +546,7 @@ class SpotifyService:
         finally:
             self._now = (0.0, {})
 
-    def _command(self, action: str, arg: str) -> str:
+    def _command(self, action: str, arg: str, say: Optional[Callable[[str], None]] = None) -> str:
         if action == "now":
             now = self.now_playing(fresh=True)
             if not now.get("active"):
@@ -510,30 +576,40 @@ class SpotifyService:
             self.api("PUT", "/me/player/volume", {"volume_percent": level})
             return f"Volume {level}."
         if action == "move":
-            device = self._pick_device(arg)
+            device, opened = self._speaker(arg, say)
             if device is None:
-                return f"{NO_SUCH_SPEAKER}{arg}."
+                return self._no_speaker(arg, opened)
             asked, device = device, self._instead_of_this_pc(device)
-            self.api("PUT", "/me/player", body={"device_ids": [device["id"]], "play": True})
+            device, opened = self._send(device, arg, opened, say, lambda d: self.api(
+                "PUT", "/me/player", body={"device_ids": [d["id"]], "play": True}))
+            if device is None:
+                return self._no_speaker(arg, opened)
+            if opened:
+                return f"Playing on the {opened}."
             if self._is_this_pc(device):
                 self._check_this_pc(device["id"])
-            return f"Playing on {device['name']}" + (f" ({asked['name']} can't play Spotify right now)." if device is not asked else ".")
+            return f"Playing on {device['name']}" + (f" ({asked['name']} can't play Spotify right now)."
+                                                      if device.get("id") != asked.get("id") else ".")
         if action == "play":
             query, _, where = arg.partition(" @ ")
-            device = self._pick_device(where)
+            device, opened = self._speaker(where, say)
             if device is None:
-                return (f"{NO_SUCH_SPEAKER}{where}." if where else
-                        "I can't find a Spotify speaker that's on. Open Spotify on the TV or your phone, then ask again.")
+                return self._no_speaker(where, opened)
             what, described = self._search(query)
             if what is None:
                 return f"I couldn't find {query} on Spotify."
             asked, device = device, self._instead_of_this_pc(device)
-            self.api("PUT", "/me/player/play", {"device_id": device["id"]}, body=what)
+            device, opened = self._send(device, where, opened, say, lambda d: self.api(
+                "PUT", "/me/player/play", {"device_id": d["id"]}, body=what))
+            if device is None:
+                return self._no_speaker(where, opened)
             app_logger.log("info", "spotify_play", query=query[:100], device=device.get("name"),
                            component="spotify", action="play")
             if self._is_this_pc(device):
                 self._check_this_pc(device["id"])
-            if device is not asked:
+            if device.get("id") != asked.get("id"):
                 return f"Playing {described} on {device['name']} ({asked['name']} can't play Spotify right now)."
+            if opened:
+                return f"Playing {described} on the {opened}."
             return f"Playing {described}" + ("" if device.get("is_active") else f" on {device['name']}") + "."
         raise SpotifyError(400, f"unknown action {action}")

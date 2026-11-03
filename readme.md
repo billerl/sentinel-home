@@ -47,6 +47,7 @@ viewer with a live camera grid, a DVR-style motion timeline, and a zone editor.
   change only after a spoken "yes". With the opt-in Claude fallback it also answers general questions.
 - **Spotify (optional, Premium):** "play some jazz", pause, skip, volume, "what's playing?" by voice,
   on the household's own Spotify devices (TV app, phones, Echo); a now-playing bar on the live page.
+  "Play X on the TV" turns a Samsung TV on and opens its Spotify app first when it isn't a speaker yet.
   PKCE sign-in with your own free developer app's Client ID (redirect `http://127.0.0.1:8888/callback`).
   Optionally the PC itself is a Spotify speaker ("play Spotify on Sentinel", "play Spotify here"),
   through spotifyd on its line-out jack; the music turns down while the voice assistant talks.

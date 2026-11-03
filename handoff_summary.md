@@ -159,6 +159,10 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     SpotifyService on the live settings (a refresh can rotate the token and log the engine out; the dev
     harness blanks it). Live page: now-playing bar (/api/spotify, polled 5 s; ticker on phones).
     An unknown speaker name by voice ("play Spotify on the kitchen") offers the list (VoiceReply.confirm).
+    "Play X on the TV" when no TV is a speaker (2026-11-03): `SpotifyService.open_on_tv` (engine wires it to
+    `SmartSwitches.open_app`) turns the TV on and opens its Spotify app, says "Opening Spotify on the TV", then
+    polls the speaker list for up to 30 s (`TV_APPEAR_SECONDS`). A TV Spotify still lists but that answers 404
+    (switched off with its own remote) gets the same treatment. Only words naming a TV do this.
   - The PC as a Spotify speaker (2026-10-28, `sentinel/audio/spotify_player.py`, setting
     `spotify_speaker_name` [default "Sentinel"]): supervises `bin/spotifyd` (v0.4.2 release binary, not in
     git) with `.spotifyd/spotifyd.conf` (generated each start) and `.spotifyd/oauth/credentials.json` (from
