@@ -1158,6 +1158,8 @@ class Engine:
         music = parse_music_command(low)
         if music and self.spotify.connected():
             said = self.spotify.command(*music, say=say)
+            if music[0] == "pause" and said == "Nothing is playing.":
+                return None  # "stop"/"pause" with no music: meant "never mind" (or was room talk): just the end chime
             if said.startswith(NO_SUCH_SPEAKER):
                 return VoiceReply(said + " Do you want to hear the list of speakers?", confirm=self.spotify.speaker_list)
             return VoiceReply(said)

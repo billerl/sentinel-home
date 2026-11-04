@@ -409,6 +409,16 @@ class TestEngineMusic(unittest.TestCase):
         self.assertEqual(self.engine.answer_voice("Set your volume to 5", lambda s: None).text, "Okay, my voice is at 10 percent.")
         self.assertEqual(self.engine.settings["volume"], 0.1)
 
+    def test_stop_with_nothing_playing_is_never_mind(self):
+        """Four "Nothing is playing." replies in a day (2026-11-03), mostly a "stop" meant for Jarvis."""
+        sp = self.engine.spotify
+        with mock.patch.object(sp, "connected", return_value=True), \
+                mock.patch.object(sp, "command", return_value="Nothing is playing."):
+            self.assertIsNone(self.engine.answer_voice("Stop.", lambda s: None))
+        with mock.patch.object(sp, "connected", return_value=True), \
+                mock.patch.object(sp, "command", return_value="Paused."):
+            self.assertEqual(self.engine.answer_voice("Pause.", lambda s: None).text, "Paused.")
+
     def test_doubtful_follow_up_never_goes_to_claude(self):
         with mock.patch.object(self.engine.assistant, "enabled", return_value=True), \
                 mock.patch.object(self.engine.assistant, "ask", return_value="Good call!") as ask:
