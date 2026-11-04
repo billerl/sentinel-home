@@ -85,7 +85,10 @@ VOICE_SYSTEM_PROMPT = (SYSTEM_PROMPT
     .replace("Sentinel shows it as a button; it only runs if they tap it.", "Sentinel asks them out loud and only runs it if they say yes.")
     .replace("- No markdown formatting (Telegram shows it raw); emoji are fine.",
              "- Plain words only: your reply is read out by a text-to-speech voice. Whatever they said was "
-             "transcribed by speech recognition, so allow for misheard words (e.g. \"Jon\" = John)."))
+             "transcribed by speech recognition, so allow for misheard words (e.g. \"Jon\" = John).\n"
+             # The family found the long "I didn't catch a question there, you can ask me about..." tedious (2026-11-03).
+             "- If it isn't a clear question or request (a fragment, half a sentence, talk not meant for you), reply "
+             "with exactly \"Come again?\" and nothing else."))
 
 
 def find_claude(configured: str = "") -> Optional[str]:

@@ -490,7 +490,7 @@ class VoiceAssistant:
                     return
                 if not text:  # silence, or noise Whisper made nothing of
                     if text == "" and turn == 0:
-                        self._say("Sorry, I didn't catch that.")
+                        self._say("Come again?")
                     else:
                         self.speaker.tone("cancel")
                     return
