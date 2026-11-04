@@ -180,7 +180,8 @@
 
     function ensureMap() {
       if (map) return;
-      map = L.map("map", { zoomControl: true, attributionControl: true });
+      // keyboard: false - with arrow keys the map took a TV remote's arrows and never gave them back (Fire TV, 2026-11-03)
+      map = L.map("map", { zoomControl: true, attributionControl: true, keyboard: false });
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19, referrerPolicy: "strict-origin-when-cross-origin",
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'
