@@ -218,7 +218,7 @@
       opacity: 0;
       transition: opacity 0.3s;
     }
-    #focus-overlay:hover #focus-header { opacity: 1; }
+    #focus-overlay:hover #focus-header, #focus-header:focus-within { opacity: 1; }
     
     #focus-content {
       width: 100%;
@@ -744,7 +744,7 @@
 
   <div id="focus-overlay">
     <div id="focus-header">
-      <button onclick="closeFocus()">← Back</button>
+      <button id="focus-back" onclick="closeFocus()">← Back</button>
       <div id="focus-title"></div>
     </div>
     <div id="focus-content" onclick="closeFocus()">
@@ -787,6 +787,8 @@
       clearInterval(focusTimer);
       focusTimer = null;
       overlay.style.display = 'block';
+      // A TV remote's OK goes to the focused element: on Back, OK again returns to the grid (Fire TV, 2026-11-03)
+      try { document.getElementById('focus-back').focus({ preventScroll: true }); } catch (e) {}
       Object.values(gridTimers).forEach(clearInterval);  // stop grid updates
       gridTimers = {};
 
