@@ -371,6 +371,7 @@ class TestSamsungDriver(unittest.TestCase):
         self.drv._rest = self.rest
         self.drv._wake = lambda mac, host: self.log.append("wake") or setattr(self, "net", True)
         self.drv.press = lambda host, *keys: self.log.append(keys) or self.power()
+        self.drv._ready = lambda host: self.net  # fully awake (port 9197) as soon as it answers, unless a test says
         patches = [mock.patch("sentinel.engine.samsung_tv.time.sleep")]
         for p in patches:
             p.start()
@@ -447,6 +448,28 @@ class TestSamsungDriver(unittest.TestCase):
         self.drv._rest, self.drv.press = rest, press
         self.drv.set("192.168.1.60", None, True)
         self.assertEqual([x for x in self.log if x != "wake"], [("KEY_POWER",), ("KEY_POWER",)])
+        self.assertTrue(self.picture)
+
+    def test_power_waits_until_fully_awake(self):
+        """2026-11-03 18:48: power pressed 1 s after the wake was ignored; its last services start ~30 s later."""
+        starting = [3]
+
+        def ready(host):
+            if starting[0]:
+                starting[0] -= 1
+                self.log.append("not ready")
+                return False
+            return self.net
+        self.drv._ready = ready
+        self.drv.set("192.168.1.60", None, True)
+        self.assertEqual(self.log.index(("KEY_POWER",)), len(self.log) - 1)  # pressed only after...
+        self.assertEqual(self.log.count("not ready"), 3)  # ...waiting through the start-up
+        self.assertTrue(self.picture)
+
+    def test_another_model_without_that_service_still_gets_the_press(self):
+        self.drv._ready = lambda host: False
+        self.drv.set("192.168.1.60", None, True)
+        self.assertIn(("KEY_POWER",), self.log)
         self.assertTrue(self.picture)
 
     def test_off_works_on_a_tv_turned_on_with_its_own_remote(self):

@@ -43,7 +43,12 @@ IDLE_SECONDS = 60.0  # the remote-control connection is kept open this long betw
 # its app service goes away for ~30-40 s (2026-11-03 18:39, 2.5 min after switch-off; a press at 18:40 worked).
 # So after pressing power, watch it this long; if it goes away, wait for it to come back and press again.
 PRESS_CHECK_SECONDS = 8
-COME_BACK_SECONDS = 60
+# The power button only works once the TV is fully awake. Its services start in stages after a wake (8187 first,
+# the media service on 9197 among the last, ~30 s) and 9197 is the first to stop when it's switched off; a press
+# before then was ignored (2026-11-03 18:48: pressed 1 s after its network answered, picture stayed dark; 18:40,
+# fully awake: worked). 9197 is open during dark wake-ups too, so it says "awake", not "picture on".
+READY_PORT = 9197
+READY_SECONDS = 45  # a TV without that service (another model) gets the press anyway after this
 ICONS_DIRNAME = ".tv_icons"
 # Apps a TV may have, by the ids Samsung's store uses (the TV's own list is used once it has allowed us).
 COMMON_APPS = {
@@ -241,9 +246,28 @@ class SamsungTVDriver:
         finally:
             sock.close()
 
+    def _ready(self, host: str) -> bool:
+        """Fully awake (READY_PORT answers)."""
+        try:
+            socket.create_connection((host, READY_PORT), timeout=1.0).close()
+            return True
+        except OSError:
+            return False
+
+    def _wait_ready(self, mac: str, host: str) -> bool:
+        for _ in range(READY_SECONDS // 3):
+            if self._ready(host):
+                return True
+            self._wake(mac, host)  # (no harm when its network is up; wakes it if it went to sleep meanwhile)
+            time.sleep(2)
+        return False
+
     def _power_on(self, mac: str, host: str) -> None:
-        """The power button for a TV whose network is awake and picture dark, pressed again if the first press
-        is lost (the TV was still shutting down, PRESS_CHECK_SECONDS)."""
+        """The power button for a TV whose network is awake and picture dark: once it's fully awake, and again
+        if the press is lost (it was still shutting down, PRESS_CHECK_SECONDS)."""
+        if not self._wait_ready(mac, host):
+            app_logger.log("warning", "tv_not_ready", component="switches", action="tv",
+                           error_message=f"port {READY_PORT} never answered: pressing power anyway")
         self.press(host, "KEY_POWER")
         for _ in range(PRESS_CHECK_SECONDS):
             time.sleep(1)
@@ -252,12 +276,7 @@ class SamsungTVDriver:
         else:
             return  # stayed up: the picture is coming on
         self._drop(host)
-        for _ in range(COME_BACK_SECONDS // 2):
-            self._wake(mac, host)
-            if self.answering(host, timeout=1.5) is not None:
-                break
-            time.sleep(1)
-        else:
+        if not self._wait_ready(mac, host) and self.answering(host, timeout=1.5) is None:
             raise OSError("the TV was still switching off and didn't come back")
         app_logger.log("info", "tv_power_again", component="switches", action="tv",
                        error_message="the first power press was lost (the TV was still switching off)")

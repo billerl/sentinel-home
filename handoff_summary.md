@@ -261,6 +261,10 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   (the packet only wakes its network). `tv_parse`/`tv_command` in switches.py: open/put on <app>, volume,
   mute, "what's on"; `understands()` routes Telegram/Claude suggestions. Can't pick channels inside apps.
   Power state is tracked by Sentinel (dark network wake-ups every few minutes look like "on"; SCREEN_AFTER).
+  KEY_POWER only works once the TV is fully awake (port 9197 answers; ~30 s after a wake, and closed in the
+  shutdown minutes after "off"), so `_power_on` waits for it, then presses again if the TV drops away.
+  KEY_POWERON/KEY_POWEROFF are ignored by a 2018 model. "Off" presses power whenever the TV answers unless
+  Sentinel itself switched it off <4 min ago (a TV on via its own remote showing cable looks "off" at first).
   Web remote (grid.html `#tvr`, "Open remote" on the TV tile): `/api/tv/<id>` (+ `/key` from the TV_KEYS
   list, `/open`, `/type` = SendInputString, `/icon/<app>` = the TV's own icon via `ed.apps.icon`, cached in
   `recorded_videos/.tv_icons/`). Keys go over a kept-open connection (`_send`, closed after 60 s idle).
