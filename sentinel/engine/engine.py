@@ -1057,7 +1057,9 @@ class Engine:
             return
         self.voice = VoiceAssistant(self.settings, self.answer_voice, self.audio, names=self._voice_names,
                                     switches=lambda: [s.name for s in self.switches.switches()],
-                                    apps=self.switches.tv_apps, artists=self.spotify.artists)
+                                    apps=self.switches.tv_apps, artists=self.spotify.artists,
+                                    # Samsung TVs only: the Fire TV is the silent camera view
+                                    tv_on=lambda: any(s.on for s in self.switches.switches() if s.id.startswith("samsung-")))
         self.voice.start()
 
     def _voice_names(self) -> List[str]:

@@ -244,6 +244,23 @@ class TestConversation(unittest.TestCase):
             self.assertEqual(asked, [not asked_claude], first)
             self.assertEqual(speaker.said[-1], "<cancel>")
 
+    def test_with_the_tv_on_doubtful_wake_words_are_ignored_entirely(self):
+        """2026-11-03 19:51: "Pause." (0.42) after a weak wake while the TV was on."""
+        for tv, first, doubt_score, answered in ((True, "Pause.", 0.42, False), (False, "Pause.", 0.42, True),
+                                                 (True, "turn off the TV", 0.03, True)):
+            speaker, asked = FakeSpeaker(), []
+            va = VoiceAssistant({}, lambda text, say, doubtful=False: asked.append(text) or VoiceReply("ok"), speaker,
+                                tv_on=lambda: tv)
+            heard = iter([(first, doubt_score), (None, 0.0)])
+
+            def hear(**kwargs):
+                text, va.last_doubt = next(heard)
+                return text
+            with mock.patch.object(va, "_hear", side_effect=hear):
+                va._conversation()
+            self.assertEqual(asked, [first] if answered else [], (tv, first))
+            self.assertEqual(speaker.said[-1], "<cancel>")
+
     def test_doubt_is_the_worst_kept_segment(self):
         self.assertEqual(v.doubt([seg("hi", 0.1), seg("there", 0.42), seg("noise", 0.9)]), 0.42)
         self.assertEqual(v.doubt([]), 0.0)

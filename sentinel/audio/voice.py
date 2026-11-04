@@ -49,6 +49,9 @@ FOLLOW_UP_DOUBT = 0.3
 # too (0.76-1.0, overlapping real commands at 0.70-1.0), but every real command since 2026-11-01 had a no-speech
 # score <= 0.06 and every false wake >= 0.11 ("I'm not sure", Jarvis 0.91, 2026-11-03 19:39).
 WAKE_DOUBT = 0.15
+# While a TV is on (its talk is what wakes Jarvis by mistake), doubtful words right after the wake word are ignored
+# altogether, Sentinel's own commands too ("Pause." from the room at 0.42, 2026-11-03 19:51). Follow-ups keep the
+# milder rule, so "pause"/"stop" right after an answer still work. A trial the user agreed to, 2026-11-03.
 # Whisper's favourite inventions on silence and noise.
 HALLUCINATIONS = {"you", "thank you", "thanks", "thank you very much", "thanks for watching", "bye", "okay", "so",
                   "thank you for watching", "the end", "hmm", "uh", "um"}
@@ -215,12 +218,14 @@ class VoiceAssistant:
                  popen: Callable = subprocess.Popen, names: Optional[Callable[[], List[str]]] = None,
                  switches: Optional[Callable[[], List[str]]] = None,
                  apps: Optional[Callable[[], List[str]]] = None,
-                 artists: Optional[Callable[[], List[str]]] = None) -> None:
+                 artists: Optional[Callable[[], List[str]]] = None,
+                 tv_on: Optional[Callable[[], bool]] = None) -> None:
         self.settings = settings
         self.names = names  # the family's names and nicknames, for Whisper's hint
         self.switches = switches  # smart plug names, likewise
         self.apps = apps  # TV app names, likewise
         self.artists = artists  # the family's Spotify artists, likewise
+        self.tv_on = tv_on  # a TV (with sound) is on: stricter right after the wake word
         self.answer = answer
         self.last_doubt = 0.0  # Whisper's noise score for the last words heard (doubt())
         self.speaker = speaker  # AudioAlertSystem: speak(text), tone(kind)
@@ -453,6 +458,12 @@ class VoiceAssistant:
         elif text:
             self.speaker.speak(text)
 
+    def _tv_on(self) -> bool:
+        try:
+            return bool(self.tv_on and self.tv_on())
+        except Exception:
+            return False
+
     def _respond(self, text: str, doubtful: bool = False) -> bool:
         """Answer it; False when a doubtful follow-up wasn't one of Sentinel's own commands (ignored)."""
         reply = self.answer(text, self._say, doubtful=True) if doubtful else self.answer(text, self._say)
@@ -494,7 +505,13 @@ class VoiceAssistant:
                     else:
                         self.speaker.tone("cancel")
                     return
-                if not self._respond(text, doubtful=self.last_doubt > (FOLLOW_UP_DOUBT if turn else WAKE_DOUBT)):
+                doubtful = self.last_doubt > (FOLLOW_UP_DOUBT if turn else WAKE_DOUBT)
+                if doubtful and not turn and self._tv_on():
+                    app_logger.log("info", "voice_ignored", text=text[:200], doubt=round(self.last_doubt, 2), tv=True,
+                                   component="voice", action="respond")
+                    self.speaker.tone("cancel")
+                    return
+                if not self._respond(text, doubtful=doubtful):
                     self.speaker.tone("cancel")
                     return
                 if turn == MAX_TURNS - 1 or not self.settings.get("voice_follow_up", True):
