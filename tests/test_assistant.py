@@ -27,7 +27,8 @@ class TestVoiceName(unittest.TestCase):
             a.ask("hi", "DATA", voice=True)
             system = calls[0][calls[0].index("--system-prompt") + 1]
             self.assertIn("You are Jezebel,", system)
-            self.assertIn('exactly "Come again?" and nothing else', system)  # not a long "you can ask me about..."
+            self.assertIn('"Huh?", "Come again?" or "What?" and nothing else', system)  # not a long "you can ask me about..."
+            self.assertIn("sarcasm and sass is welcome", system)
             a.ask("hi", "DATA")
             self.assertNotIn("Jezebel", calls[1][calls[1].index("--system-prompt") + 1])
             a.ask("hi", "DATA", voice=True, name="Jarvis")  # woken with "Hey Jarvis"

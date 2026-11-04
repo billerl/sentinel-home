@@ -88,7 +88,10 @@ VOICE_SYSTEM_PROMPT = (SYSTEM_PROMPT
              "transcribed by speech recognition, so allow for misheard words (e.g. \"Jon\" = John).\n"
              # The family found the long "I didn't catch a question there, you can ask me about..." tedious (2026-11-03).
              "- If it isn't a clear question or request (a fragment, half a sentence, talk not meant for you), reply "
-             "with exactly \"Come again?\" and nothing else."))
+             "with just two or three words like \"Huh?\", \"Come again?\" or \"What?\" and nothing else.\n"
+             # The family's choice (2026-11-03): "being formal isn't necessary and sarcasm and sassy is ok".
+             "- Talk like a laid-back friend, not a butler: casual, a bit of sarcasm and sass is welcome. Never at the "
+             "cost of the facts, and still short."))
 
 
 def find_claude(configured: str = "") -> Optional[str]:
