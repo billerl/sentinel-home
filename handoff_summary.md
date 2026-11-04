@@ -133,7 +133,7 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     weather, command list (~9k chars; ~5 s with Sonnet). Every miss is logged as `telegram_not_understood`
     so common phrasings can be taught to the rule-based parser later.
   - Voice assistant (2026-10-27, `sentinel/audio/voice.py`, settings `voice_enabled`, `voice_follow_up`,
-    `voice_wake_threshold` 0.5, `voice_gain` 4, `voice_wake_model`, `audio_output`): one `arecord` on
+    `voice_wake_threshold` 0.5 (Settings > Audio field since 2026-11-04), `voice_gain` 4, `voice_wake_model`, `audio_output`): one `arecord` on
     plughw:0,0 (front "Headphone Mic"; mixer set by Sentinel at start since it isn't persisted) -> 150-4000 Hz
     band-pass -> openWakeWord hey_jarvis (gain 4; ~0.35 core) -> after the wake word, recording until 1 s of
     quiet (thresholds follow the room's noise) -> normalised -> faster-whisper base.en int8, hinted with the
