@@ -683,6 +683,7 @@ class TestFireTV(unittest.TestCase):
     def test_cameras_on_the_tv(self):
         self.assertEqual(self.sw.command("put the cameras on the TV", "voice"), "Okay, showing the cameras on the Sentinel TV.")
         self.assertIn("monkey -p de.ozerov.fully", self.shell.commands[-1])
+        self.assertEqual(self.shell.commands[-2], "am force-stop de.ozerov.fully")  # not left on another page
         self.assertEqual(self.sw.command("reload the cameras", "telegram"), "Okay, reloading the cameras on the Sentinel TV.")
         self.assertTrue(any(c == "am force-stop de.ozerov.fully" for c in self.shell.commands))
         self.assertTrue(self.sw.understands("show the live view on the sentinel tv"))
@@ -695,6 +696,8 @@ class TestFireTV(unittest.TestCase):
                                                   "sendevent /dev/input/event3 1 103 0; sendevent /dev/input/event3 0 0 0")
         self.fire.press("192.168.1.70", "KEY_ENTER")  # select: Android's own key (353 written directly selected nothing)
         self.assertEqual(self.shell.commands[-1], "input keyevent KEYCODE_DPAD_CENTER")
+        self.fire.press("192.168.1.70", "KEY_RETURN")  # Back (and Home) written directly did nothing in Fully
+        self.assertEqual(self.shell.commands[-1], "input keyevent KEYCODE_BACK")
         self.fire.press("192.168.1.70", "KEY_CHUP")  # a key that device can't send: the slow way still works
         self.assertEqual(self.shell.commands[-1], "input keyevent KEYCODE_CHANNEL_UP")
         self.assertEqual(sum(c.startswith("getevent") for c in self.shell.commands), 1)  # looked up once
