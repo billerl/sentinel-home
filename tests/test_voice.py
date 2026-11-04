@@ -212,11 +212,12 @@ class TestConversation(unittest.TestCase):
             asked.append((text, doubtful))
             return None if doubtful and text != "pause" else VoiceReply("ok")
         for follow_up, doubt_score, want in (("I don't want to get in the candy box", 0.42, ["ok", "<listen>", "<cancel>"]),
+                                             ("I don't know", 0.2, ["ok", "<listen>", "ok", "<listen>", "<cancel>"]),
                                              ("pause", 0.58, ["ok", "<listen>", "ok", "<listen>", "<cancel>"]),
                                              ("and the weather", 0.05, ["ok", "<listen>", "ok", "<listen>", "<cancel>"])):
             speaker = FakeSpeaker()
             va = VoiceAssistant({}, answer, speaker)
-            heard = iter([("who's home", 0.5), (follow_up, doubt_score), (None, 0.0)])  # the first had the wake word
+            heard = iter([("who's home", 0.1), (follow_up, doubt_score), (None, 0.0)])
 
             def hear(**kwargs):
                 text, va.last_doubt = next(heard)
@@ -225,7 +226,23 @@ class TestConversation(unittest.TestCase):
                 va._conversation()
             self.assertEqual(speaker.said[1:], want, follow_up)
         self.assertEqual(asked, [("who's home", False), ("I don't want to get in the candy box", True),
+                                 ("who's home", False), ("I don't know", False),  # 0.2: fine for a follow-up
                                  ("who's home", False), ("pause", True), ("who's home", False), ("and the weather", False)])
+
+    def test_doubtful_words_right_after_a_wake_word(self):
+        """2026-11-03 19:39: a false wake (Jarvis 0.91) heard "I'm not sure" (0.27) and Claude answered it."""
+        for first, doubt_score, asked_claude in (("I'm not sure", 0.27, False), ("turn on the TV", 0.04, True)):
+            speaker, asked = FakeSpeaker(), []
+            va = VoiceAssistant({}, lambda text, say, doubtful=False: asked.append(doubtful) or (None if doubtful else VoiceReply("ok")), speaker)
+            heard = iter([(first, doubt_score), (None, 0.0)])
+
+            def hear(**kwargs):
+                text, va.last_doubt = next(heard)
+                return text
+            with mock.patch.object(va, "_hear", side_effect=hear):
+                va._conversation()
+            self.assertEqual(asked, [not asked_claude], first)
+            self.assertEqual(speaker.said[-1], "<cancel>")
 
     def test_doubt_is_the_worst_kept_segment(self):
         self.assertEqual(v.doubt([seg("hi", 0.1), seg("there", 0.42), seg("noise", 0.9)]), 0.42)

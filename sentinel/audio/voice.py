@@ -45,6 +45,10 @@ NO_SPEECH_MAX = 0.6  # Whisper's own "this was noise" score; above it the words 
 # never sent to Claude. Room talk got answered ("I don't want to get in the candy box", 0.42, 2026-11-03), while
 # real short follow-ups score high too ("Pause" 0.58, "Stop" 0.53-0.58), so they can't simply be dropped.
 FOLLOW_UP_DOUBT = 0.3
+# The same for the first words after a wake word, stricter: false wakes from room talk score high on the wake word
+# too (0.76-1.0, overlapping real commands at 0.70-1.0), but every real command since 2026-11-01 had a no-speech
+# score <= 0.06 and every false wake >= 0.11 ("I'm not sure", Jarvis 0.91, 2026-11-03 19:39).
+WAKE_DOUBT = 0.15
 # Whisper's favourite inventions on silence and noise.
 HALLUCINATIONS = {"you", "thank you", "thanks", "thank you very much", "thanks for watching", "bye", "okay", "so",
                   "thank you for watching", "the end", "hmm", "uh", "um"}
@@ -490,7 +494,7 @@ class VoiceAssistant:
                     else:
                         self.speaker.tone("cancel")
                     return
-                if not self._respond(text, doubtful=turn > 0 and self.last_doubt > FOLLOW_UP_DOUBT):
+                if not self._respond(text, doubtful=self.last_doubt > (FOLLOW_UP_DOUBT if turn else WAKE_DOUBT)):
                     self.speaker.tone("cancel")
                     return
                 if turn == MAX_TURNS - 1 or not self.settings.get("voice_follow_up", True):
