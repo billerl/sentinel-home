@@ -64,10 +64,11 @@ RATIO = 1.4                  # motion when the score is this many times the quie
 MIN_DELTA = 3.0              # ...and at least this much above it (tiny quiet levels make ratios jumpy)
 TRIGGER_SAMPLES = 2          # consecutive smoothed scores over the line (0.5 s)
 HOLD_SECONDS = 15.0          # motion "ends" after this long with nothing
-RATIO_MIN, RATIO_MAX = 1.1, 3.0  # the movement line the user may pick per path on the Sensors page
+RATIO_MIN, RATIO_MAX = 1.1, 8.0  # the movement line the user may pick per path (real walks reach 5-12x)
 EVENTS_DB = "wifi_motion.db"  # movement history: one row per stretch of movement on a path
 MERGE_GAP = 120.0             # movement on a path less than this apart is one stretch ("10:02-10:05 pm")
 EVENT_KEEP_DAYS = 30
+MOMENT_KEEP_DAYS = 7  # each single burst of movement (start, end, peak), for replaying a routine's rule
 INDOOR_WORDS = re.compile(r"\b(inside|indoors|in the house|in the home|wi-?fi sensors?|sensors?|movement|moving)\b")
 OUTDOOR_WORDS = re.compile(r"\b(cameras?|outside|outdoors|yard|driveway|porch|street)\b")
 
@@ -226,6 +227,7 @@ class WifiMotion:
         self.on_motion: Optional[Callable[[str], None]] = None  # path id, on each moving reading (routines)
         self._moving: Set[str] = set()  # paths that moved in the poll being taken
         self._open: Dict[str, List[float]] = {}  # path -> [start, last movement, peak x quiet level] still going
+        self._bursts: List[Tuple[str, float, float, float]] = []  # ended bursts waiting to be written (path, start, end, peak)
         self._db_path = os.path.join(store_dir, EVENTS_DB)
         self._db_ready = False
         self._csv_day = ""
@@ -372,6 +374,9 @@ class WifiMotion:
                                score=round(line.judge.smoothed, 2), baseline=round(line.judge.baseline or 0, 2),
                                component="wifi_motion", action="judge")
             elif change == "ended":
+                base = line.judge.baseline or 0.0
+                self._bursts.append((path_id(line), line.judge.started, line.judge.last_motion,
+                                     round(line.judge.peak / base, 2) if base else 0.0))
                 app_logger.log("info", "wifi_motion_ended", sensor=line.id, path=path_id(line),
                                name=self._path_name(path_id(line), [line]),
                                seconds=round(line.judge.last_motion - line.judge.started, 1),
@@ -385,6 +390,10 @@ class WifiMotion:
                        "start REAL NOT NULL, end REAL NOT NULL, peak REAL NOT NULL)")
             db.execute("CREATE INDEX IF NOT EXISTS events_start ON events (start)")
             db.execute("DELETE FROM events WHERE end < ?", (time.time() - EVENT_KEEP_DAYS * 86400,))
+            db.execute("CREATE TABLE IF NOT EXISTS moments (path TEXT NOT NULL, start REAL NOT NULL, "
+                       "end REAL NOT NULL, peak REAL NOT NULL)")
+            db.execute("CREATE INDEX IF NOT EXISTS moments_start ON moments (start)")
+            db.execute("DELETE FROM moments WHERE end < ?", (time.time() - MOMENT_KEEP_DAYS * 86400,))
             db.commit()
             self._db_ready = True
         return db
@@ -416,6 +425,46 @@ class WifiMotion:
             for pid, ep in list(self._open.items()):
                 if everything or now - ep[1] > MERGE_GAP:
                     self._close_episode(pid)
+            bursts, self._bursts = self._bursts, []
+        if bursts:
+            try:
+                with self._db() as db:
+                    db.executemany("INSERT INTO moments VALUES (?, ?, ?, ?)", bursts)
+                db.close()
+            except sqlite3.Error as e:
+                app_logger.log("warning", "wifi_motion_history_failed", error=str(e), component="wifi_motion",
+                               action="moments")
+
+    def moments(self, start: float, end: float) -> List[Tuple[str, float, float, float]]:
+        """Single bursts of movement (path, start, end, peak x quiet level) overlapping [start, end), oldest
+        first: finer than events(), which merges bursts into stretches. Replays a routine's rule."""
+        try:
+            db = self._db()
+            rows = db.execute("SELECT path, start, end, peak FROM moments WHERE end >= ? AND start < ? ORDER BY start",
+                              (start, end)).fetchall()
+            db.close()
+        except sqlite3.Error:
+            rows = []
+        with self._lock:
+            rows += [b for b in self._bursts if b[2] >= start and b[1] < end]
+        return sorted(rows, key=lambda b: b[1])
+
+    def first_moment(self) -> Optional[float]:
+        """When the oldest recorded burst began (a replay can't see further back)."""
+        try:
+            db = self._db()
+            row = db.execute("SELECT MIN(start) FROM moments").fetchone()
+            db.close()
+        except sqlite3.Error:
+            row = None
+        with self._lock:
+            pending = min((b[1] for b in self._bursts), default=None)
+        found = [t for t in ((row or [None])[0], pending) if t is not None]
+        return min(found) if found else None
+
+    def ratio_of(self, pid: str) -> float:
+        """The path's movement line now (the user's, else the normal one)."""
+        return self._ratios.get(pid, RATIO)
 
     def events(self, start: float, end: float, now: Optional[float] = None) -> List[Dict[str, Any]]:
         """Stretches of movement overlapping [start, end), oldest first; one still going has "ongoing"."""
@@ -704,6 +753,7 @@ class WifiMotion:
                     "last_motion": max(last) if last else None,
                     "learning": all(s.judge.baseline is None for s in lines),
                     "ratio": self._ratios.get(pid, RATIO), "default_ratio": RATIO,
+                    "ratio_range": [RATIO_MIN, RATIO_MAX],
                     "rssi": min((e["rssi"] for e in live if e["rssi"] is not None), default=None),
                     "rate": min((e["rate"] for e in live if e["rate"] is not None), default=None),
                     "battery": batteries[0] if batteries else None,
@@ -713,4 +763,4 @@ class WifiMotion:
             boards = [{"id": b.id, "name": self._board_name(b.id), "named": bool(b.name), "ip": b.ip, "fw": b.fw,
                        "online": now - b.last_seen < OFFLINE_AFTER, "battery": b.battery}
                       for b in sorted(self._boards.values(), key=lambda b: (b.name or b.id).lower())]
-        return {"sensors": out, "boards": boards}
+        return {"sensors": out, "boards": boards, "now": now}

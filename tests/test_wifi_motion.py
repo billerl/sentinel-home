@@ -160,6 +160,8 @@ class SensorsTest(unittest.TestCase):
         self.assertFalse(self.wm.set_ratio("8d24-beb4", 0.5)[0])
         self.assertFalse(self.wm.set_ratio("8d24-beb4", "2")[0])
         self.assertFalse(self.wm.set_ratio("ffff-0000", 2.0)[0])
+        self.assertTrue(self.wm.set_ratio("8d24-beb4", 6.5)[0])  # real walks reach 5-12x
+        self.assertFalse(self.wm.set_ratio("8d24-beb4", 9.0)[0])
         self.assertTrue(self.wm.set_ratio("8d24-beb4", 1.8)[0])
         self.assertEqual(line.judge.ratio, 1.8)
         self.assertEqual(self.wm.view(now=NOW)["sensors"][0]["ratio"], 1.8)
@@ -207,6 +209,24 @@ class SensorsTest(unittest.TestCase):
         self.assertEqual(moved, ["8d24-beb4"])
         self.assertAlmostEqual(self.wm.last_motion("8d24-beb4"), NOW + 2, delta=1)
         self.assertEqual(self.wm.last_motion("ffff-0000"), 0.0)
+
+    def test_each_burst_is_kept_for_replaying_rules(self):
+        b = self._board()
+        self.replies["192.168.1.77"] = status(("beb4", "beacon", [[i, 40.0 + (i % 3), 48.0] for i in range(600)]))
+        self.wm.poll(b, now=NOW)
+        self.replies["192.168.1.77"] = status(("beb4", "beacon", [[600 + i, 120.0, 48.0] for i in range(8)]))
+        self.wm.poll(b, now=NOW + 2)
+        for k in range(12):  # then still for half a minute: the burst ends
+            self.replies["192.168.1.77"] = status(("beb4", "beacon", [[608 + k * 12 + i, 40.0 + (i % 3), 48.0] for i in range(12)]))
+            self.wm.poll(b, now=NOW + 5 + k * 3)
+        self.assertEqual(self.wm.first_moment() is not None, True)
+        self.wm.close_quiet_episodes(now=NOW + 300)
+        [(path, start, end, peak)] = self.wm.moments(NOW - 60, NOW + 60)
+        self.assertEqual(path, "8d24-beb4")
+        self.assertAlmostEqual(start, NOW, delta=3)
+        self.assertGreater(peak, 2.0)  # x its quiet level
+        self.assertEqual(self.wm.moments(NOW + 600, NOW + 900), [])
+        self.assertEqual(self.wm.ratio_of("8d24-beb4"), wifi_motion.RATIO)
 
     def test_movement_history_and_questions(self):
         b = self._board()

@@ -1548,6 +1548,26 @@ class Engine:
             "sunrise": sun[0] if sun else None, "sunset": sun[1] if sun else None,
         }
 
+    def routine_check(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        """The editor, as you change it: the routine in words (or what's still missing) and, for a Wi-Fi
+        sensor routine, when it would have gone off over the last day."""
+        from sentinel.engine.routines import REPLAY_HOURS, describe, normalize
+
+        cat = self.routine_catalog()
+        try:
+            spec = normalize(body.get("spec"), cat)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        out: Dict[str, Any] = {"ok": True, "text": describe(spec, cat)}
+        if spec["when"]["type"] == "sensor":
+            now = time.time()
+            start = now - REPLAY_HOURS * 3600
+            times = self.routines.replay(spec, self.wifi_motion.moments(start - 60, now), self.wifi_motion.ratio_of,
+                                         start, now)
+            out["replay"] = {"hours": REPLAY_HOURS, "start": start, "end": now, "times": times,
+                             "recorded_from": self.wifi_motion.first_moment()}
+        return out
+
     def routine_save(self, body: Dict[str, Any]) -> Tuple[bool, str]:
         from sentinel.engine.routines import normalize
 

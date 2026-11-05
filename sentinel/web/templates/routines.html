@@ -77,13 +77,52 @@
     .chips { display: flex; flex-wrap: wrap; gap: 6px; }
     .chip { border-radius: 999px; padding: 6px 12px; font-size: 0.82rem; background: #111a20; border: 1px solid #1f4a55; color: #9cc; }
     .chip.on { background: rgba(0,255,255,0.18); border-color: #00ffff; color: #fff; }
-    .chips .note { font-size: 0.78rem; color: #5f8796; align-self: center; }
+    .chips .note, .line .note, #rule > .note { font-size: 0.78rem; color: #5f8796; align-self: center; }
     .step { display: flex; flex-direction: column; gap: 8px; background: #0e1a20; border: 1px solid #16303a; border-radius: 10px; padding: 10px; }
     .step > .line:first-child { justify-content: space-between; }
     .step .x { background: none; border: 0; color: #6f97a5; font-size: 1rem; padding: 2px 6px; }
     label.check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
     .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #13262e; }
     .foot .msg { flex: 1; font-size: 0.85rem; color: #ff8080; min-width: 10rem; }
+    /* ---- Wi-Fi sensor rule: any of these / and all of these / but not these ---- */
+    .groups { display: flex; flex-direction: column; gap: 8px; }
+    .group { border: 1px solid #16303a; border-left: 3px solid #00a8a8; border-radius: 10px; padding: 9px 10px; background: #0e1a20; }
+    .group.and { border-left-color: #4fae74; }
+    .group.not { border-left-color: #c05454; }
+    .group .gh { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-bottom: 7px;
+                 font-size: 0.74rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #00d8d8; }
+    .group.and .gh { color: #7fe0a0; }
+    .group.not .gh { color: #ff8a8a; }
+    .group .gh small { font-weight: 400; letter-spacing: 0; text-transform: none; font-size: 0.78rem; color: #5f8796; }
+    .joiner { font-size: 0.75rem; color: #5f8796; text-align: center; letter-spacing: 0.08em; margin: -2px 0; }
+    .schip { display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 4px 4px 4px 10px; font-size: 0.82rem;
+             background: rgba(0,255,255,0.13); border: 1px solid #00a8a8; color: #fff; }
+    .group.and .schip { background: rgba(127,224,160,0.12); border-color: #4fae74; }
+    .group.not .schip { background: rgba(255,90,90,0.10); border-color: #b04a4a; }
+    .schip .x { background: none; border: 0; color: #9cc; padding: 0 6px; font-size: 0.95rem; line-height: 1; }
+    .ldot { width: 8px; height: 8px; border-radius: 50%; background: #34444c; flex: none; transition: background 0.2s, box-shadow 0.2s; }
+    .ldot.on { background: #ffc94d; box-shadow: 0 0 9px #ffc94d; animation: glow 0.9s ease-in-out infinite alternate; }
+    @keyframes glow { from { opacity: 0.55; } to { opacity: 1; } }
+    select.add { background: none; border: 1px dashed #2b5a66; color: #9cc; border-radius: 999px; padding: 5px 12px;
+                 font-size: 0.82rem; cursor: pointer; max-width: 100%; }
+    select.add:hover { border-color: #00a8a8; color: #fff; }
+    .livecheck { font-size: 0.86rem; line-height: 1.45; padding: 8px 11px; border-radius: 10px; background: #0b1216;
+                 border: 1px solid #16303a; color: #9cc; transition: border-color 0.2s, color 0.2s; }
+    .livecheck.go { border-color: #4ade80; color: #c4f7d6; }
+    .livecheck.held { border-color: #c05454; color: #ffc0c0; }
+    .livecheck.wait { border-color: #ffc94d; color: #ffe3a3; }
+    .replay { font-size: 0.85rem; color: #9cc; line-height: 1.5; }
+    .replay b { color: #fff; }
+    .strip { position: relative; height: 30px; background: #0b1216; border: 1px solid #16303a; border-radius: 7px; margin: 7px 0 3px; overflow: hidden; }
+    .strip .hr { position: absolute; top: 0; bottom: 0; width: 1px; background: #15303a; }
+    .strip .off { position: absolute; top: 0; bottom: 0; left: 0; background: repeating-linear-gradient(45deg, #0d171c 0 4px, #0b1216 4px 8px); }
+    .strip i { position: absolute; top: 4px; bottom: 4px; min-width: 3px; background: #ffc94d; border-radius: 2px; box-shadow: 0 0 6px -1px #ffc94d; }
+    .strip-labels { display: flex; justify-content: space-between; font-size: 0.7rem; color: #5f8796; }
+    .replay .times { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 0.8rem; color: #ffe3a3; }
+    .replay .fine { font-size: 0.75rem; color: #5f8796; margin-top: 4px; }
+    .preview { font-size: 0.92rem; line-height: 1.55; color: #e8f9ff; background: #0e1a20; border-left: 3px solid #00ffff;
+               padding: 9px 12px; border-radius: 0 10px 10px 0; }
+    .preview.bad { border-left-color: #3d6270; color: #8fb6c4; }
     @media (max-width: 560px) {
       .part { grid-template-columns: 1fr; gap: 6px; }
       .part > .label { padding-top: 0; }
@@ -103,9 +142,9 @@
   <main>
     <p class="intro">A routine does something for you when something happens: <i>when the back yard camera sees a
       person after dark, turn on the patio lights until there's been no motion for 2 minutes.</i> Make them here, or
-      just say it: <i>“Hey Jarvis, new routine: …”</i> Wi-Fi sensors (the Sensors page) can start routines too, e.g.
-      a message when there's movement inside while nobody's home. or send it on Telegram. Sentinel reads it back and saves it
-      when you say yes.</p>
+      just say it to Jarvis or on Telegram (<i>“new routine: …”</i>); Sentinel reads it back and saves it when you say
+      yes. The Wi-Fi sensors (the <a href="/sensors">Sensors</a> page) can start routines too, and can be combined:
+      <i>the living room sensor, but not the kitchen one = someone is in the living room.</i></p>
     <div class="sky" id="sky"></div>
     <div class="toolbar">
       <button type="button" class="primary" id="new-btn" onclick="openEditor(null)">＋ New routine</button>
@@ -156,6 +195,10 @@
         </div>
       </div>
       <div class="part">
+        <div class="label">READS</div>
+        <div class="body"><div class="preview bad" id="preview" aria-live="polite">…</div></div>
+      </div>
+      <div class="part">
         <div class="label">NAME</div>
         <div class="body"><div class="line"><input type="text" id="name" maxlength="60" placeholder="optional, e.g. Patio lights at night"></div></div>
       </div>
@@ -176,6 +219,11 @@
     var data = { routines: [], catalog: {} };
     var editing = null;  // routine id being edited, or null for a new one
     var chips = {};      // chip group name -> Set of selected ids
+    var rule = { sensors: [], all: [], none: [], within: 5 };  // the Wi-Fi sensor rule being edited
+    var RULE_GROUPS = [["sensors", "", "Any of these", "start it · none added = any sensor"],
+                       ["all", "and", "And all of these too", "must also see movement"],
+                       ["none", "not", "But not if any of these", "must stay still"]];
+    var live = { sensors: {}, now: 0 };  // the sensors right now, while the editor shows a sensor rule
     var DAYS = [["mon", "Mon"], ["tue", "Tue"], ["wed", "Wed"], ["thu", "Thu"], ["fri", "Fri"], ["sat", "Sat"], ["sun", "Sun"]];
     var SEEN = [["person", "🧍 Person"], ["vehicle", "🚗 Vehicle"], ["animal", "🐾 Animal"], ["delivery", "📦 Delivery"]];
 
@@ -299,7 +347,12 @@
         body.appendChild(l);
         body.appendChild(chipGroup("cameras", pairs(cat.cameras), w.cameras, "none picked = any camera"));
       } else if (type === "sensor") {
-        body.appendChild(chipGroup("sensors", pairs(cat.sensors), w.sensors, "none picked = any Wi-Fi sensor"));
+        rule = { sensors: (w.sensors || []).slice(), all: (w.all || []).slice(), none: (w.none || []).slice(), within: w.within || 5 };
+        var box = document.createElement("div");
+        box.id = "rule";
+        body.appendChild(box);
+        drawRule();
+        pollLive();
       } else if (type === "time") {
         var at = w.at || "sunset";
         var line = document.createElement("div");
@@ -324,6 +377,162 @@
         body.appendChild(chipGroup("cars", pairs(cat.cars), w.cars, "none picked = any family car"));
       }
       document.querySelectorAll(".step").forEach(drawStepFields);  // "until no motion" / photo depend on this
+    }
+
+    // ---- the Wi-Fi sensor rule ----
+    function sensorName(id) {
+      var s = (data.catalog.sensors || []).find(function(x) { return x.id === id; });
+      return s ? s.name : "a removed sensor";
+    }
+    function nameList(ids, word) {
+      var n = ids.map(sensorName);
+      return n.length < 2 ? (n[0] || "") : n.slice(0, -1).join(", ") + " " + (word || "or") + " " + n[n.length - 1];
+    }
+    function drawRule() {
+      var box = document.getElementById("rule");
+      if (!box) return;
+      var used = rule.sensors.concat(rule.all, rule.none);
+      var free = (data.catalog.sensors || []).filter(function(s) { return used.indexOf(s.id) < 0; });
+      box.innerHTML = "";
+      if (!(data.catalog.sensors || []).length) {
+        box.innerHTML = '<span class="note">No Wi-Fi sensors found yet: see the <a href="/sensors">Sensors</a> page.</span>';
+        return;
+      }
+      var groups = document.createElement("div");
+      groups.className = "groups";
+      RULE_GROUPS.forEach(function(g, i) {
+        if (i) { var j = document.createElement("div"); j.className = "joiner"; j.textContent = i === 1 ? "AND" : "BUT NOT"; groups.appendChild(j); }
+        var el = document.createElement("div");
+        el.className = "group " + g[1];
+        el.innerHTML = '<div class="gh">' + esc(g[2]) + ' <small>' + esc(g[3]) + '</small></div><div class="chips"></div>';
+        var row = el.querySelector(".chips");
+        rule[g[0]].forEach(function(id, k) {
+          var c = document.createElement("span");
+          c.className = "schip";
+          c.innerHTML = '<span class="ldot" data-live="' + esc(id) + '"></span>' + esc(sensorName(id)) +
+            '<button type="button" class="x" title="Take it out" aria-label="Take ' + esc(sensorName(id)) + ' out">✕</button>';
+          c.querySelector(".x").onclick = function() { rule[g[0]].splice(k, 1); drawRule(); checkSoon(); };
+          row.appendChild(c);
+        });
+        if (free.length) {
+          var add = document.createElement("select");
+          add.className = "add";
+          add.setAttribute("aria-label", "Add a sensor to “" + g[2] + "”");
+          add.innerHTML = '<option value="">＋ Add sensor</option>' +
+            free.map(function(s) { return '<option value="' + esc(s.id) + '">' + esc(s.name) + '</option>'; }).join("");
+          add.onchange = function() { if (add.value) { rule[g[0]].push(add.value); drawRule(); checkSoon(); } };
+          row.appendChild(add);
+        } else if (!rule[g[0]].length) {
+          var n = document.createElement("span"); n.className = "note"; n.textContent = "(every sensor is in another group)"; row.appendChild(n);
+        }
+        groups.appendChild(el);
+      });
+      box.appendChild(groups);
+      if (rule.all.length || rule.none.length) {
+        var w = document.createElement("div");
+        w.className = "line";
+        w.innerHTML = '…all within <input type="number" id="r-within" min="2" max="60" value="' + rule.within + '"> seconds of each other' +
+          '<span class="note">(sensors react a few seconds apart as someone walks through)</span>';
+        w.querySelector("input").oninput = function(e) { rule.within = Number(e.target.value) || 5; liveCheck(); };
+        box.appendChild(w);
+      }
+      var lc = document.createElement("div"); lc.id = "livecheck"; lc.className = "livecheck"; lc.textContent = "Live: checking the sensors…";
+      box.appendChild(lc);
+      var rp = document.createElement("div"); rp.id = "replay"; rp.className = "replay";
+      box.appendChild(rp);
+      paintLive();
+    }
+
+    var liveTimer = null;
+    function ruleShown() { return !document.getElementById("editor").hidden && document.getElementById("rule"); }
+    async function pollLive() {
+      clearTimeout(liveTimer);
+      if (!ruleShown()) return;
+      try {
+        var r = await fetch("/api/wifi_motion");
+        if (r.ok) {
+          var d = await r.json(), m = {};
+          (d.sensors || []).forEach(function(s) { m[s.id] = s; });
+          live = { sensors: m, now: d.now || Date.now() / 1000 };
+          paintLive();
+        }
+      } catch (e) {}
+      if (ruleShown()) liveTimer = setTimeout(pollLive, document.hidden ? 5000 : 1200);
+    }
+    function paintLive() {
+      document.querySelectorAll(".ldot[data-live]").forEach(function(d) {
+        var s = live.sensors[d.dataset.live];
+        d.classList.toggle("on", !!(s && s.online && s.motion));
+        d.title = !s ? "" : !s.online ? "not connected" : s.motion ? "movement now" : "still";
+      });
+      liveCheck();
+    }
+    function liveCheck() {
+      var box = document.getElementById("livecheck");
+      if (!box || !live.now) return;
+      var last = function(id) { var s = live.sensors[id]; return s && s.last_motion ? s.last_motion : -1e12; };
+      var first = rule.sensors.length ? rule.sensors : rule.all.length ? rule.all
+        : Object.keys(live.sensors).filter(function(id) { return rule.none.indexOf(id) < 0; });
+      var within = rule.within || 5, combined = rule.all.length || rule.none.length;
+      var moving = first.filter(function(id) { return live.now - last(id) <= Math.max(within, 3) + 1.5; });
+      var cls = "", text;
+      if (!moving.length) {
+        text = "Live: waiting for movement on " + (rule.sensors.length || rule.all.length ? nameList(first) : "any sensor") + ".";
+      } else if (!combined) {
+        cls = "go"; text = "✅ Live: " + nameList(moving, "and") + " " + (moving.length > 1 ? "see" : "sees") + " movement, so this would go off now.";
+      } else {
+        var since = Math.max.apply(null, moving.map(last)) - within;
+        var blocking = rule.none.filter(function(id) { return last(id) >= since; });
+        var missing = rule.all.filter(function(id) { return last(id) < since; });
+        if (blocking.length) { cls = "held"; text = "🚫 Live: held back, " + nameList(blocking, "and") + " moved too."; }
+        else if (missing.length) { cls = "wait"; text = "⏳ Live: " + nameList(moving, "and") + " moved; waiting for " + nameList(missing, "and") + " too."; }
+        else { cls = "go"; text = "✅ Live: the rule is met, so this would go off now."; }
+      }
+      box.className = "livecheck " + cls;
+      box.textContent = text;
+    }
+
+    function drawReplay(rp) {
+      var box = document.getElementById("replay");
+      if (!box) return;
+      if (!rp) { box.innerHTML = ""; return; }
+      var span = rp.end - rp.start, n = rp.times.length;
+      var pct = function(t) { return Math.max(0, Math.min(100, (t - rp.start) / span * 100)); };
+      var blind = rp.recorded_from == null ? 100 : rp.recorded_from > rp.start ? pct(rp.recorded_from) : 0;
+      var html = n ? 'In the last ' + rp.hours + ' hours this would have gone off <b>' + n + ' time' + (n === 1 ? "" : "s") + '</b>:'
+                   : 'In the last ' + rp.hours + ' hours this wouldn\'t have gone off at all.';
+      html += '<div class="strip" role="img" aria-label="When it would have gone off over the last ' + rp.hours + ' hours">' +
+        (blind ? '<div class="off" style="width:' + blind + '%" title="not recorded yet"></div>' : "");
+      for (var h = 1; h < 4; h++) html += '<div class="hr" style="left:' + (h * 25) + '%"></div>';
+      rp.times.forEach(function(t) {
+        html += '<i style="left:' + pct(t[0]) + '%;width:' + Math.max(0.3, pct(t[1]) - pct(t[0])) + '%" title="' + clock(t[0]) + '"></i>';
+      });
+      html += '</div><div class="strip-labels">';
+      for (var q = 0; q <= 4; q++) html += '<span>' + (q === 4 ? "now" : clock(rp.start + span * q / 4)) + '</span>';
+      html += '</div>';
+      if (n) {
+        html += '<div class="times">' + rp.times.slice(-16).map(function(t) {
+          return '<span>' + clock(t[0]) + (t[1] - t[0] >= 60 ? "–" + clock(t[1]) : "") + '</span>';
+        }).join("") + (n > 16 ? '<span>(the latest 16)</span>' : "") + '</div>';
+      }
+      html += '<div class="fine">Replayed from the sensors\' own record, with each movement line as it is now. ' +
+        (blind >= 100 ? "Nothing is recorded yet: give it a while. " : blind > 0 ? "The striped part is from before the record began. " : "") +
+        'Pets count as movement too.</div>';
+      box.innerHTML = html;
+    }
+
+    // ---- "reads": the routine in Sentinel's own words, checked as you go ----
+    var checkTimer = null, checkSeq = 0;
+    function checkSoon() { clearTimeout(checkTimer); checkTimer = setTimeout(checkNow, 350); }
+    async function checkNow() {
+      if (document.getElementById("editor").hidden) return;
+      var seq = ++checkSeq;
+      var res = await post("/api/routines/check", { spec: readSpec() });
+      if (seq !== checkSeq) return;  // an older answer arriving late
+      var p = document.getElementById("preview"), d = res.data || {};
+      if (d.ok) { p.className = "preview"; p.textContent = d.text; }
+      else { p.className = "preview bad"; p.textContent = "Not finished yet: " + (d.error || "something's missing") + "."; }
+      drawReplay(d.ok ? d.replay : null);
     }
 
     function drawOnly() {
@@ -403,6 +612,8 @@
       ed.hidden = false;
       document.getElementById("new-btn").hidden = true;
       ed.scrollIntoView({ behavior: "smooth", block: "start" });
+      pollLive();
+      checkNow();
     }
     function closeEditor() {
       document.getElementById("editor").hidden = true;
@@ -413,7 +624,12 @@
       var type = document.getElementById("when-type").value, w = { type: type };
       if (type === "seen") w.what = Array.from(chips.what);
       if (type === "seen" || type === "motion") w.cameras = Array.from(chips.cameras);
-      if (type === "sensor") w.sensors = Array.from(chips.sensors);
+      if (type === "sensor") {
+        w.sensors = rule.sensors.slice();
+        if (rule.all.length) w.all = rule.all.slice();
+        if (rule.none.length) w.none = rule.none.slice();
+        if (rule.all.length || rule.none.length) w.within = rule.within;
+      }
       if (type === "time") {
         var at = document.getElementById("t-at").value;
         if (at === "clock") w.at = document.getElementById("t-clock").value;
@@ -458,6 +674,8 @@
       load();
     }
 
+    var editorEl = document.getElementById("editor");
+    ["input", "change", "click"].forEach(function(ev) { editorEl.addEventListener(ev, checkSoon); });  // after the controls' own handlers
     load();
     setInterval(function() { if (!document.hidden && document.getElementById("editor").hidden) load(); }, 15000);
   </script>

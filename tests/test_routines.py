@@ -23,7 +23,7 @@ from test_switches import FakeKasa
 CAT = Catalog(cameras={"192.168.0.9": "Back Yard", "192.168.0.10": "Front Door"},
               switches={"kasa-9c53220000aa-1": "patio lights", "kasa-50c7bf000001": "Porch lamp"},
               people={1: "Alex", 2: "Kate"}, cars={7: "Sierra"},
-              sensors={"beb4-df1c": "Living room", "2350-beb4": "Kitchen"})
+              sensors={"beb4-df1c": "Living room", "2350-beb4": "Kitchen", "8d24-df1c": "Dining room"})
 PATIO = {"name": "Patio at night", "when": {"type": "seen", "what": ["person"], "cameras": ["back yard"]},
          "only": {"dark": True}, "then": [{"do": "switch", "switch": "Patio lights", "on": True, "until_quiet": 2}]}
 EVENING = time.mktime(time.strptime("2026-11-02 21:00", "%Y-%m-%d %H:%M"))
@@ -96,6 +96,39 @@ class TestCheck(unittest.TestCase):
         # Open-Meteo for Springfield, IL on 2026-11-02: 06:28 and 16:55 Central = 12:28 and 22:55 UTC.
         self.assertEqual(time.strftime("%m-%d %H:%M", time.gmtime(rise)), "11-02 12:28")
         self.assertEqual(time.strftime("%m-%d %H:%M", time.gmtime(set_)), "11-02 22:55")
+
+
+class TestSensorRules(unittest.TestCase):
+    """“This sensor and that one, but not that one”: a room from sensors that each hear more than one."""
+    ROOM = {"when": {"type": "sensor", "sensors": ["Living room"], "none": ["Kitchen", "Dining room"]},
+            "then": [{"do": "say", "text": "Someone is in the living room"}]}
+
+    def test_groups_read_back(self):
+        spec = normalize(self.ROOM, CAT)
+        self.assertEqual(spec["when"], {"type": "sensor", "sensors": ["beb4-df1c"], "none": ["2350-beb4", "8d24-df1c"],
+                                        "within": 5})
+        self.assertEqual(describe(spec, CAT), "When the Living room Wi-Fi sensor notices movement, but not if the "
+                                              "Kitchen or Dining room does too (within 5 seconds): say “Someone is in "
+                                              "the living room” out loud.")
+        both = normalize({"when": {"type": "sensor", "all": ["Living room", "Kitchen"], "within": 10},
+                          "then": [{"do": "say", "text": "walking through"}]}, CAT)
+        self.assertTrue(describe(both, CAT).startswith("When the Living room and Kitchen Wi-Fi sensors all notice "
+                                                       "movement (within 10 seconds)"))
+        self.assertEqual(both["name"], "Announcement — Living room, Kitchen")
+        mixed = normalize({"when": {"type": "sensor", "sensors": ["Living room"], "all": ["Kitchen"], "none": ["Dining room"]},
+                           "then": [{"do": "say", "text": "x"}]}, CAT)
+        self.assertIn("When the Living room Wi-Fi sensor notices movement, and so does the Kitchen, but not if the "
+                      "Dining room does too (within 5 seconds)", describe(mixed, CAT))
+        plain = normalize({"when": {"type": "sensor", "sensors": ["Kitchen"]}, "then": [{"do": "say", "text": "x"}]}, CAT)
+        self.assertNotIn("within", plain["when"])  # a plain one still goes off at once
+
+    def test_rule_mistakes(self):
+        for when, words in (({"sensors": ["Kitchen"], "none": ["Kitchen"]}, "only be in one group"),
+                            ({"sensors": ["Kitchen"], "none": ["Living room"], "within": 90}, "between 2 and 60"),
+                            ({"none": ["Kitchen", "Living room", "Dining room"]}, "nothing could start it")):
+            with self.assertRaises(ValueError) as e:
+                normalize({"when": {"type": "sensor", **when}, "then": [{"do": "say", "text": "x"}]}, CAT)
+            self.assertIn(words, str(e.exception))
 
 
 class FakeHooks:
@@ -185,16 +218,104 @@ class TestRunner(unittest.TestCase):
         self.runner.seen("192.168.0.9", "person")
         self.assertEqual(self.fake.calls, [])
 
-    def test_messages_not_more_than_every_5_minutes(self):
+    def test_messages_every_5_minutes_speaking_every_2(self):
         self.add({"when": {"type": "seen", "what": ["delivery"]},
                   "then": [{"do": "telegram", "text": "Package!", "photo": True}, {"do": "say", "text": "Package"}]})
         self.runner.seen("192.168.0.10", "delivery", b"jpeg")
         self.runner.seen("192.168.0.10", "delivery", b"jpeg")
         self.assertEqual(self.fake.messages, [("Package!", b"jpeg")])
         self.assertEqual(self.fake.said, ["Package"])
-        self.now += 301
+        self.now += 121
+        self.runner.seen("192.168.0.10", "delivery", b"jpeg")
+        self.assertEqual((len(self.fake.messages), len(self.fake.said)), (1, 2))
+        self.now += 180
         self.runner.seen("192.168.0.10", "delivery", b"jpeg")
         self.assertEqual(len(self.fake.messages), 2)
+
+    def test_each_room_speaks_in_turn(self):
+        """Walking kitchen -> living room -> kitchen: each room's routine says its own line."""
+        for path, room in (("2350-beb4", "kitchen"), ("beb4-df1c", "living room")):
+            self.add({"when": {"type": "sensor", "sensors": [path]}, "then": [{"do": "say", "text": room}]})
+        for path in ("2350-beb4", "beb4-df1c", "2350-beb4"):
+            self.runner.sensor(path)
+            self.now += 10
+        self.assertEqual(self.fake.said, ["kitchen", "living room"])  # the kitchen again waits 2 min
+        self.now += 120
+        self.runner.sensor("2350-beb4")
+        self.assertEqual(self.fake.said[-1], "kitchen")
+
+    def run_due(self):
+        """Run the decisions whose time has come (the runner's own timers, faked)."""
+        due = [(t, fn) for t, fn in self.timers if t <= self.now]
+        self.timers = [x for x in self.timers if x[0] > self.now]
+        for _t, fn in due:
+            fn()
+
+    def rule_runner(self):
+        self.timers = []
+        self.runner = RoutineRunner(self.store, self.fake.hooks(), holds_path=os.path.join(self.dir, "holds.json"),
+                                    clock=lambda: self.now, spawn=lambda fn, *a: fn(*a),
+                                    later=lambda delay, fn: self.timers.append((self.now + delay, fn)))
+
+    def test_but_not_waits_for_the_other_sensors(self):
+        self.rule_runner()
+        self.add(TestSensorRules.ROOM)
+        self.runner.sensor("beb4-df1c")  # living room...
+        self.assertEqual(self.fake.said, [])  # ...decided a few seconds later, not at once
+        self.now += 2
+        self.runner.sensor("2350-beb4")  # ...and the kitchen 2 s later: walking through
+        self.now += 3
+        self.run_due()
+        self.assertEqual(self.fake.said, [])
+        self.now += 60
+        self.runner.sensor("beb4-df1c")  # the living room alone
+        self.runner.sensor("beb4-df1c")  # (one decision at a time)
+        self.now += 5
+        self.run_due()
+        self.assertEqual(self.fake.said, ["Someone is in the living room"])
+        self.assertEqual(self.timers, [])
+
+    def test_kitchen_just_before_counts_too(self):
+        self.rule_runner()
+        self.add(TestSensorRules.ROOM)
+        self.runner.sensor("8d24-df1c")  # the dining room first...
+        self.now += 3
+        self.runner.sensor("beb4-df1c")  # ...then the living room: coming in, not staying
+        self.now += 5
+        self.run_due()
+        self.assertEqual(self.fake.said, [])
+
+    def test_and_needs_both(self):
+        self.rule_runner()
+        self.add({"when": {"type": "sensor", "sensors": ["Living room"], "all": ["Kitchen"], "within": 8},
+                  "then": [{"do": "say", "text": "walking through"}]})
+        self.runner.sensor("2350-beb4")  # the kitchen alone doesn't start it...
+        self.assertEqual(self.timers, [])
+        self.runner.sensor("beb4-df1c")  # ...but counts for the living room just after
+        self.now += 8
+        self.run_due()
+        self.assertEqual(self.fake.said, ["walking through"])
+        self.now += 300
+        self.runner.sensor("beb4-df1c")  # the living room alone
+        self.now += 8
+        self.run_due()
+        self.assertEqual(self.fake.said, ["walking through"])
+
+    def test_replay_the_last_day(self):
+        spec = normalize(TestSensorRules.ROOM, CAT)
+        t = EVENING
+        moments = [("beb4-df1c", t, t + 20, 6.0),  # living room alone: goes off
+                   ("beb4-df1c", t + 600, t + 610, 6.0), ("2350-beb4", t + 603, t + 606, 5.0),  # walking through: no
+                   ("beb4-df1c", t + 1200, t + 1210, 6.0), ("2350-beb4", t + 1203, t + 1206, 2.0),  # kitchen too weak now
+                   ("beb4-df1c", t + 1250, t + 1260, 6.0),  # 50 s later: the same time
+                   ("beb4-df1c", t + 2400, t + 2410, 2.5)]  # below the living room's line now
+        lines = {"beb4-df1c": 3.0, "2350-beb4": 3.0}.get
+        times = self.runner.replay(spec, moments, lines, t - 3600, t + 3600)
+        self.assertEqual(times, [(t, t + 20), (t + 1200, t + 1260)])
+        late = normalize({**TestSensorRules.ROOM, "only": {"from": "06:00", "to": "20:00"}}, CAT)
+        self.assertEqual(self.runner.replay(late, moments, lines, t - 3600, t + 3600), [])  # 9 pm: outside its hours
+        plain = normalize({"when": {"type": "sensor", "sensors": ["Living room"]}, "then": [{"do": "say", "text": "x"}]}, CAT)
+        self.assertEqual(len(self.runner.replay(plain, moments, lines, t - 3600, t + 3600)), 3)
 
     def test_motion_trigger_ignores_the_light_it_switched(self):
         self.add({"when": {"type": "motion", "cameras": ["Back Yard"]}, "only": {"dark": True},

@@ -51,6 +51,8 @@ Rules:
   {"type": "seen", "what": ["person"|"vehicle"|"animal"|"delivery", ...], "cameras": [camera names]}  ("something" = all four; [] = any camera)
   {"type": "motion", "cameras": [...]}  (any movement, even a shadow; prefer "seen" for people/cars/animals)
   {"type": "sensor", "sensors": [Wi-Fi motion sensor names]}  (movement indoors, e.g. "the living room sensor"; [] = any)
+    optional: "all": [sensors that must move too], "none": [sensors that must stay still], "within": seconds (default 5)
+    ("someone in the living room but not the kitchen" = sensors [living room], none [kitchen])
   {"type": "time", "at": "sunset"|"sunrise"|"HH:MM", "offset": minutes before (-) or after (+) sunset/sunrise}
   {"type": "arrive"|"leave", "people": [names]}  (their phone gets home / leaves home; [] = anyone)
   {"type": "car_arrive"|"car_leave", "cars": [family car names]}  ([] = any family car)

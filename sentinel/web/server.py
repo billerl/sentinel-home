@@ -907,6 +907,13 @@ class WebServer:
                 return err
             return _result(*engine.routine_save(request.get_json(silent=True) or {}))
 
+        @app.route("/api/routines/check", methods=["POST"])
+        def api_routines_check():
+            err = _config_guard()
+            if err:
+                return err
+            return jsonify(engine.routine_check(request.get_json(silent=True) or {}))
+
         @app.route("/api/routines/<int:routine_id>/<action>", methods=["POST"])
         def api_routines_action(routine_id, action):
             err = _config_guard()

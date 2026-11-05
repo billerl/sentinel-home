@@ -15,6 +15,8 @@ was what turned them on: a light someone switched on by hand is left alone. If S
 holding a light on, it's turned off at the next start (HOLDS_FILE).
 """
 
+import bisect
+import itertools
 import json
 import math
 import os
@@ -36,8 +38,13 @@ DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 MAX_MINUTES = 12 * 60
 MAX_TEXT = 200
 MAX_ACTIONS = 5
-MESSAGE_COOLDOWN = 5 * 60  # a routine sends Telegram messages / speaks at most this often
+MESSAGE_COOLDOWN = 5 * 60  # a routine sends Telegram messages at most this often...
+SAY_COOLDOWN = 2 * 60  # ...and speaks at most this often (each routine on its own: one per room says its room in turn)
 MOTION_REPEAT = 30.0  # a motion routine fires at most this often per camera
+# Wi-Fi sensor rules ("this one and that one, but not that one"): how far apart the sensors' movement may be.
+# They never react at the same instant: walking through, the next room's line fires a few seconds later.
+WITHIN_DEFAULT, WITHIN_MIN, WITHIN_MAX = 5, 2, 60
+REPLAY_HOURS = 24  # the editor shows when a sensor rule would have gone off over this long
 SETTLE_SECONDS = 20.0  # after a routine switches a light, the picture changes: that isn't motion
 COMMAND = re.compile(r"^routine\s+(\{.*\})\s*$", re.IGNORECASE | re.DOTALL)
 LIST = re.compile(r"^(?:what are |list |show )?(?:my |the )?routines\??$", re.IGNORECASE)
@@ -141,6 +148,38 @@ def _minutes(value: Any, what: str) -> Optional[int]:
     return n
 
 
+def _seconds(value: Any) -> int:
+    if value in (None, ""):
+        return WITHIN_DEFAULT
+    try:
+        n = int(round(float(value)))
+    except (TypeError, ValueError):
+        raise ValueError("“within” should be a number of seconds")
+    if not WITHIN_MIN <= n <= WITHIN_MAX:
+        raise ValueError(f"“within” should be between {WITHIN_MIN} and {WITHIN_MAX} seconds")
+    return n
+
+
+def starts_it(w: Dict[str, Any], path: str) -> bool:
+    """Does movement on this Wi-Fi sensor start the rule? The first group ("any of these"), else the
+    "all of these" group, else any sensor but the "but not" ones."""
+    first = w.get("sensors") or w.get("all") or []
+    return path in first if first else path not in w.get("none", [])
+
+
+def is_rule(w: Dict[str, Any]) -> bool:
+    """A sensor trigger with "and" / "but not" groups: decided a few seconds after the first movement."""
+    return w.get("type") == "sensor" and bool(w.get("all") or w.get("none"))
+
+
+def rule_met(w: Dict[str, Any], first: float, last_moved: Callable[[str], float]) -> bool:
+    """Decided ``within`` seconds after ``first`` (the movement that started it): every "and" sensor has
+    moved since ``within`` before it, and no "but not" sensor has."""
+    since = first - w.get("within", WITHIN_DEFAULT)
+    return all(last_moved(p) >= since for p in w.get("all", [])) and \
+        not any(last_moved(p) >= since for p in w.get("none", []))
+
+
 def _text(value: Any, what: str) -> str:
     t = re.sub(r"\s+", " ", str(value or "")).strip()
     if not t:
@@ -171,6 +210,18 @@ def normalize(spec: Any, cat: Catalog) -> Dict[str, Any]:
         w["cameras"] = _pick(when.get("cameras"), cat.cameras, "camera")
     elif kind == "sensor":
         w["sensors"] = _pick(when.get("sensors"), cat.sensors, "sensor")
+        also = _pick(when.get("all"), cat.sensors, "sensor")
+        unless = _pick(when.get("none"), cat.sensors, "sensor")
+        if len(set(w["sensors"]) | set(also) | set(unless)) < len(w["sensors"]) + len(also) + len(unless):
+            raise ValueError("a sensor can only be in one group (any of these / all of these / but not these)")
+        if unless and not w["sensors"] and not also and cat.sensors and set(unless) >= set(cat.sensors):
+            raise ValueError("every sensor is under “but not”, so nothing could start it")
+        if also:
+            w["all"] = also
+        if unless:
+            w["none"] = unless
+        if also or unless:
+            w["within"] = _seconds(when.get("within"))
     elif kind == "time":
         at = str(when.get("at") or "").strip().lower()
         if at not in ("sunset", "sunrise") and not _CLOCK.match(at):
@@ -259,7 +310,8 @@ def default_name(spec: Dict[str, Any], cat: Catalog) -> str:
     head = cat.switches.get(sw["switch"], "Switch") if sw else ("Message" if spec["then"][0]["do"] == "telegram" else "Announcement")
     where = {"seen": lambda: ", ".join(cat.cameras.get(c, "?") for c in w["cameras"]) or "any camera",
              "motion": lambda: ", ".join(cat.cameras.get(c, "?") for c in w["cameras"]) or "any camera",
-             "sensor": lambda: ", ".join(cat.sensors.get(c, "?") for c in w["sensors"]) or "any Wi-Fi sensor",
+             "sensor": lambda: ", ".join(cat.sensors.get(c, "?") for c in w["sensors"] or w.get("all", []))
+             or "any Wi-Fi sensor",
              "time": lambda: w["at"], "arrive": lambda: "arrivals", "leave": lambda: "departures",
              "car_arrive": lambda: "car home", "car_leave": lambda: "car leaves"}[w["type"]]()
     return f"{head[:1].upper()}{head[1:]} — {where}"[:60]
@@ -277,8 +329,22 @@ def describe(spec: Dict[str, Any], cat: Catalog) -> str:
     elif w["type"] == "motion":
         when = f"When there's motion on {'any camera' if not cams else 'the ' + cams + ' camera'}"
     elif w["type"] == "sensor":
-        where = _join([cat.sensors.get(c, "a removed sensor") for c in w["sensors"]]) if w["sensors"] else ""
-        when = f"When {'any Wi-Fi sensor' if not where else 'the ' + where + ' Wi-Fi sensor'} notices movement"
+        def names(ids: List[str], word: str = "or") -> str:
+            return _join([cat.sensors.get(c, "a removed sensor") for c in ids], word)
+        also, unless = w.get("all", []), w.get("none", [])
+        if w["sensors"]:
+            when = f"When the {names(w['sensors'])} Wi-Fi sensor notices movement"
+            if also:
+                when += f", and so {'does' if len(also) == 1 else 'do'} the {names(also, 'and')}"
+        elif also:
+            when = (f"When the {names(also)} Wi-Fi sensor notices movement" if len(also) == 1
+                    else f"When the {names(also, 'and')} Wi-Fi sensors all notice movement")
+        else:
+            when = "When any Wi-Fi sensor notices movement"
+        if unless:
+            when += f", but not if the {names(unless)} does too"
+        if also or unless:
+            when += f" (within {w['within']} seconds)"
     elif w["type"] == "time":
         if w["at"] in ("sunset", "sunrise"):
             off = w.get("offset", 0)
@@ -385,6 +451,12 @@ class RoutineStore:
 
 
 # ------------------------------------------------------------------ running them
+def _later(delay: float, fn: Callable[[], None]) -> None:
+    t = threading.Timer(delay, fn)
+    t.daemon = True
+    t.start()
+
+
 @dataclass
 class _Hold:
     """A switch a routine turned on and will turn off again."""
@@ -404,17 +476,21 @@ class RoutineRunner:
     last_motion(camera key|None) -> ts, last_sensor_motion(Wi-Fi sensor path id|None) -> ts."""
 
     def __init__(self, store: RoutineStore, hooks: Dict[str, Callable], holds_path: str = HOLDS_FILE,
-                 clock: Callable[[], float] = time.time, spawn: Optional[Callable] = None) -> None:
+                 clock: Callable[[], float] = time.time, spawn: Optional[Callable] = None,
+                 later: Optional[Callable[[float, Callable[[], None]], None]] = None) -> None:
         self.store = store
         # Steps run off the caller's thread (camera/detection threads must never wait on a slow plug).
         self._spawn = spawn or (lambda fn, *args: threading.Thread(target=fn, args=args, name="routine", daemon=True).start())
+        self._later = later or _later
         self.hooks = hooks
         self.holds_path = holds_path
         self._clock = clock
         self._lock = threading.Lock()
         self._holds: Dict[Tuple[int, str], _Hold] = {}
-        self._said: Dict[int, float] = {}  # routine -> last message / announcement
+        self._said: Dict[Tuple[int, str], float] = {}  # (routine, "telegram" / "say") -> when it last did it
         self._motion_fired: Dict[Tuple[int, str], float] = {}
+        self._sensor_moved: Dict[str, float] = {}  # Wi-Fi sensor path -> its latest moving reading
+        self._deciding: Dict[int, float] = {}  # sensor rule -> when the movement that started it was
         self._settle_until = 0.0
         self._time_checked = clock()
         self._routines: List[Routine] = []
@@ -432,7 +508,8 @@ class RoutineRunner:
             return not 7 <= time.localtime(now).tm_hour < 18
         return not times[0] <= now < times[1]
 
-    def _allowed(self, r: Routine, now: float) -> bool:
+    def _allowed(self, r: Routine, now: float, past: bool = False) -> bool:
+        """``past``: replaying history, where "nobody's home" can't be known any more (it's left out)."""
         o = r.spec.get("only", {})
         if o.get("dark") and not self.is_dark(now):
             return False
@@ -447,7 +524,7 @@ class RoutineRunner:
             inside = start <= here < end if start < end else (here >= start or here < end)  # 22:00-06:00 crosses midnight
             if not inside:
                 return False
-        if o.get("nobody_home") and not self.hooks["nobody_home"]():
+        if o.get("nobody_home") and not past and not self.hooks["nobody_home"]():
             return False
         return True
 
@@ -479,16 +556,82 @@ class RoutineRunner:
 
     def sensor(self, path: str) -> None:
         """A Wi-Fi motion sensor sees movement (called on each moving reading). No settling time: a light
-        switching on changes the camera picture, not the radio signal."""
+        switching on changes the camera picture, not the radio signal. A rule with "and" / "but not" groups
+        is decided ``within`` seconds later, once the other sensors have had their chance to react."""
         now = self._clock()
-        due = [r for r in self._routines if r.enabled and r.spec["when"]["type"] == "sensor"
-               and (not r.spec["when"]["sensors"] or path in r.spec["when"]["sensors"])
-               and now - self._motion_fired.get((r.id, "wifi:" + path), 0) >= MOTION_REPEAT]
-        if not due:
-            return
+        self._sensor_moved[path] = now
+        due, rules = [], []
+        for r in self._routines:
+            w = r.spec["when"]
+            if not r.enabled or w["type"] != "sensor" or not starts_it(w, path):
+                continue
+            if is_rule(w):
+                if now - self._motion_fired.get((r.id, "rule"), 0) >= MOTION_REPEAT:
+                    rules.append(r)
+            elif now - self._motion_fired.get((r.id, "wifi:" + path), 0) >= MOTION_REPEAT:
+                due.append(r)
         for r in due:
             self._motion_fired[(r.id, "wifi:" + path)] = now
-        self._fire(lambda w: False, None, None, only={r.id for r in due})
+        if due:
+            self._fire(lambda w: False, None, None, only={r.id for r in due})
+        for r in rules:
+            with self._lock:
+                if r.id in self._deciding:
+                    continue
+                self._deciding[r.id] = now
+            self._later(r.spec["when"]["within"], lambda rid=r.id: self._decide(rid))
+
+    def _decide(self, rid: int) -> None:
+        with self._lock:
+            first = self._deciding.pop(rid, None)
+        r = next((x for x in self._routines if x.id == rid), None)
+        if first is None or r is None or not r.enabled:
+            return
+        if rule_met(r.spec["when"], first, lambda p: self._sensor_moved.get(p, -math.inf)):
+            self._motion_fired[(rid, "rule")] = self._clock()
+            self._fire(lambda w: False, None, None, only={rid})
+
+    def replay(self, spec: Dict[str, Any], moments: List[Tuple[str, float, float, float]],
+               line_of: Callable[[str], float], start: float, end: float) -> List[Tuple[float, float]]:
+        """When a sensor routine would have gone off between start and end: (first, last) of each time,
+        from the sensors' recorded bursts of movement. A burst counts only if it reached the path's
+        movement line as it is now (``line_of``), so raising a line is replayed right. Times closer than
+        SAY_COOLDOWN are one time (it would speak once)."""
+        w = spec["when"]
+        r = Routine(0, "", True, spec, None)
+        bursts: Dict[str, List[Tuple[float, float]]] = {}
+        for path, b0, b1, peak in moments:
+            if peak >= line_of(path):
+                bursts.setdefault(path, []).append((b0, b1))
+        within = w.get("within", 0) if is_rule(w) else 0
+        step = within or MOTION_REPEAT  # while movement goes on, it's checked again this often
+
+        starts: Dict[str, List[float]] = {}
+        reach: Dict[str, List[float]] = {}  # per path, the latest end of any burst so far (sorted by start)
+        for path, spans in bursts.items():
+            spans.sort()
+            starts[path] = [b0 for b0, _ in spans]
+            reach[path] = list(itertools.accumulate((b1 for _, b1 in spans), max))
+
+        def moved(path: str, a: float, b: float) -> bool:
+            i = bisect.bisect_right(starts.get(path, []), b)  # bursts that began by b...
+            return i > 0 and reach[path][i - 1] >= a  # ...one of them still going at a
+
+        def met(t: float) -> bool:
+            return all(moved(p, t - within, t + within) for p in w.get("all", [])) and \
+                not any(moved(p, t - within, t + within) for p in w.get("none", []))
+
+        checks = sorted({b0 + i * step for path, spans in bursts.items() if starts_it(w, path)
+                         for b0, b1 in spans for i in range(int((b1 - b0) // step) + 1)})
+        out: List[List[float]] = []
+        for t in checks:
+            if not start <= t < end or (within and not met(t)) or not self._allowed(r, t, past=True):
+                continue
+            if out and t - out[-1][1] < SAY_COOLDOWN:
+                out[-1][1] = t
+            else:
+                out.append([t, t])
+        return [(a, b) for a, b in out]
 
     def person(self, kind: str, person_id: int) -> None:
         self._fire(lambda w: w["type"] == kind and (not w["people"] or person_id in w["people"]), None, None)
@@ -534,19 +677,20 @@ class RoutineRunner:
 
     def run(self, r: Routine, camera: Optional[str] = None, jpeg: Optional[bytes] = None) -> None:
         now = self._clock()
-        speak = now - self._said.get(r.id, 0) >= MESSAGE_COOLDOWN
+        due = {kind for kind, wait in (("telegram", MESSAGE_COOLDOWN), ("say", SAY_COOLDOWN))
+               if now - self._said.get((r.id, kind), 0) >= wait}
         did = []
         for a in r.spec["then"]:
             if a["do"] == "switch":
                 did.append(self._switch(r, a, camera, now))
-            elif speak and a["do"] == "telegram":
+            elif a["do"] == "telegram" and "telegram" in due:
                 self.hooks["telegram"](a["text"], jpeg if a.get("photo") else None)
                 did.append("telegram")
-            elif speak and a["do"] == "say":
+            elif a["do"] == "say" and "say" in due:
                 self.hooks["say"](a["text"])
                 did.append("say")
-        if speak and any(d in ("telegram", "say") for d in did):
-            self._said[r.id] = now
+        for kind in due & set(did):
+            self._said[(r.id, kind)] = now
         if any(did):
             self.store.ran(r.id, now)
             r.last_run = now
@@ -569,8 +713,9 @@ class RoutineRunner:
             return ""
         self._settle_until = now + SETTLE_SECONDS
         if a["on"] and timed:
-            wifi = r.spec["when"]["type"] == "sensor"
-            cams = r.spec["when"].get("sensors" if wifi else "cameras", [])
+            w = r.spec["when"]
+            wifi = w["type"] == "sensor"
+            cams = (w.get("sensors") or w.get("all", [])) if wifi else w.get("cameras", [])
             with self._lock:
                 self._holds[key] = _Hold(r.id, a["switch"], now + timed * 60,
                                          a["until_quiet"] * 60 if a.get("until_quiet") else None, cams, wifi)

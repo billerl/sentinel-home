@@ -318,7 +318,7 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   or a switch between beacon and router. Tuned on one evening's recording (`MotionJudge` is pure: replay the CSVs).
   A board on the far side of a stone wall barely sees anything: same floor, open line. Setup: a new board makes an
   open AP "Sentinel-Sensor-<id>" with a page at 192.168.4.1 (Wi-Fi password stays on the board); OTA via espota
-  (password in the git-ignored `firmware/wifi_motion/secrets.h`). Routines can start on them (see Routines); the Sensors page sets a movement line per path (1.1-3x,
+  (password in the git-ignored `firmware/wifi_motion/secrets.h`). Routines can start on them (see Routines); the Sensors page sets a movement line per path (1.1-8x; real walks reach 5-12x,
   `ratios` in wifi_sensors.json), relearns a path's quiet level, names boards and flashes a board's LED.
 - **Routines** (`sentinel/engine/routines.py`, `recorded_videos/routines.db`, page `/routines`, `/api/routines*`):
   "when X, only if Y, then Z". Triggers: camera sees person/vehicle/animal/delivery (`_on_object`, deliveries also
@@ -327,11 +327,20 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   command loop), phone arrives/leaves Home (OwnTracks changes), family car arrives/leaves (`_on_household_change`).
   Wi-Fi motion sensor (`sensor`, path ids from `WifiMotion.paths()`; `WifiMotion.on_motion` -> `RoutineRunner.sensor`
   on each moving reading, at most every 30 s per routine and path; "until quiet" uses `WifiMotion.last_motion`;
-  no 20 s settling after a light switches, which only fools cameras).
+  no 20 s settling after a light switches, which only fools cameras). Sensor *rules* add groups to that trigger:
+  `sensors` (any of these start it), `all` (must also move), `none` (must stay still), `within` seconds (default 5).
+  A rule is decided `within` s after the movement that started it (`_decide`, a timer: the sensors react a few
+  seconds apart as someone walks through), from each sensor's latest moving reading; one decision at a time per
+  routine, at most every 30 s once it fired. The editor posts to `/api/routines/check` as you edit: the routine in
+  words (or what's missing) and `RoutineRunner.replay()` over the last 24 h from `WifiMotion.moments()` (each
+  single burst: path, start, end, peak x quiet level; table `moments` in wifi_motion.db, 7 days), counting a burst
+  only if it reaches the path's movement line as it is now. It also polls `/api/wifi_motion` for live dots and a
+  "would it go off now" line.
   Limits: dark/light (own sunrise-equation maths from Home place or the weather town; no location = 18:00-07:00),
   from/to hours (may cross midnight), days, nobody home (all location-sharing phones away). Steps: switch on/off
   (on "for N min" or "until_quiet N min" = until no motion on the routine's cameras; re-triggers extend it), Telegram
-  text (+ the sighting's photo), say aloud; messages/speech at most every 5 min per routine. A light is only turned
+  text (+ the sighting's photo), say aloud; per routine, Telegram at most every 5 min and speech every 2 min
+  (each routine on its own, so one routine per room names each room in turn). A light is only turned
   off by the routine that turned it on, never one switched on by hand; held lights are listed in
   `recorded_videos/routine_holds.json` and switched off at the next start. Stored by ids (cameras = host, switches,
   people, cars); `normalize()` accepts names. By voice/Telegram Claude emits `COMMAND: Routine {json}`; Sentinel
