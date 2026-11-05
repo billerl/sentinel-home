@@ -65,8 +65,10 @@ sentinel-home/                         # repository root
     │   ├── bind_util.py               # Refuse binding on camera-only subnets
     │   ├── set_password.py            # CLI: `python -m sentinel.web.set_password`
     │   ├── static/                    # Icons + web app manifest; leaflet/ = Leaflet 1.9.4 (BSD-2, map on the Timeline)
-    │   └── templates/                 # login (+ QR), pair (phone approves a TV), grid (live + weather/clock +
+    │   └── templates/                 # login (+ QR), pair (phone approves a TV), home (`/`: weather, who's home,
+    │                                  #   page tiles, switches), grid (`/live`: cameras + weather/clock +
     │                                  #   family lights + switches + timeline + player), zones, settings, vehicles,
+    │                                  #   sensors (Wi-Fi motion lines) + sensors_history (movement by day),
     │                                  #   routines (when X then Y editor),
     │                                  #   people (Family page), join (setup link opened on a family phone),
     │                                  #   timeline (Family timeline), account (a person picks their own password)

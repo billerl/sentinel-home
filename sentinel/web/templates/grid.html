@@ -243,6 +243,7 @@
     }
     .logout { border-color: #ff5555; color: #ff5555; font-size: 0.7rem; padding: 2px 8px; }
     .header-btn { font-size: 0.7rem; padding: 2px 8px; margin-right: 8px; }
+    .home-link { text-decoration: none; border: 1px solid #00ffff; border-radius: 4px; color: #00ffff; }
     button.active { background: #00ffff; color: #000; }
     button:disabled { opacity: 0.35; cursor: default; }
 
@@ -563,21 +564,13 @@
 </head>
 <body>
   <header>
+    <a class="header-btn home-link" href="{{ url_for('index') }}" title="Home: family, switches, sensors, routines, settings">⌂ Home</a>
     <h1>Sentinel Live</h1>
     <button class="header-btn" id="tl-toggle" type="button" onclick="toggleTimeline()" title="Show or hide the timeline (T). Hidden = bigger cameras.">Timeline: on</button>
     <button class="header-btn" id="saver-toggle" type="button" onclick="toggleDataSaver()" title="Smaller, less frequent pictures for phone hotspots and mobile data (remembered on this device)">Data saver: off</button>
     <button class="header-btn" id="zones-toggle" type="button" onclick="toggleZones()" title="Show or hide the zone outlines on the live view (detection is unaffected)" hidden>Zones: on</button>
     <button class="header-btn" id="sw-open" type="button" onclick="toggleSwitches()" title="Smart plugs and switches">💡 Switches<span class="sw-count"></span></button>
-    <button class="header-btn" type="button" onclick="location.reload()" title="Reload the page (for TVs and browsers without F5)">⟳ Reload</button>
-    <a class="header-btn" href="{{ url_for('people_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Family</a>
-    <a class="header-btn" href="{{ url_for('timeline_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;" title="Where the family has been, day by day">Family timeline</a>
-    <a class="header-btn" href="{{ url_for('routines_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;" title="When this happens, do that">Routines</a>
-    <a class="header-btn" href="{{ url_for('sensors_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;" title="Wi-Fi motion sensors">Sensors</a>
-    <a class="header-btn" href="{{ url_for('zones_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Zones</a>
-    <a class="header-btn" href="{{ url_for('settings_page') }}" style="text-decoration:none; border:1px solid #00ffff; border-radius:4px; color:#00ffff; margin-right:8px;">Settings</a>
-    <form method="post" action="{{ url_for('logout') }}" style="margin: 0;">
-      <button class="logout" type="submit">Log out</button>
-    </form>
+    <button class="header-btn" type="button" onclick="location.reload()" title="Reload the page (for TVs and browsers without F5)">⟳</button>
   </header>
 
   <div id="grid"></div>

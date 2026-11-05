@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <meta name="theme-color" content="#001525">
+  <title>Sentinel</title>
+  <style>
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; }
+    a { color: #00ffff; }
+    header { position: sticky; top: 0; z-index: 10; background: #1a1a1a; border-bottom: 1px solid #033; }
+    .bar { display: flex; align-items: center; gap: 12px; padding: 0 1rem; height: 48px; max-width: 1000px; margin: 0 auto; }
+    h1 { font-size: 1.05rem; margin: 0; flex: 1; color: #00ffff; letter-spacing: 0.04em; }
+    .clock { color: #9cc; font-size: 0.9rem; }
+    button { font: inherit; cursor: pointer; }
+    .logout { background: none; border: 1px solid #1d3a44; color: #9cc; border-radius: 8px; padding: 5px 10px; font-size: 0.8rem; }
+    main { max-width: 1000px; margin: 0 auto; padding: 14px 16px 60px; }
+    h2 { font-size: 0.8rem; color: #6f97a5; text-transform: uppercase; letter-spacing: 0.08em; margin: 22px 0 8px; }
+
+    .top { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .card { background: linear-gradient(180deg, #0c151c, #091015); border: 1px solid #16303a; border-radius: 14px; padding: 14px 16px; }
+    .wx { display: flex; align-items: center; gap: 14px; }
+    .wx .icon { font-size: 2.4rem; line-height: 1; }
+    .wx .temp { font-size: 2rem; font-weight: 700; color: #fff; }
+    .wx .words { font-size: 0.9rem; color: #cfe; }
+    .wx .words span { display: block; color: #6f97a5; font-size: 0.8rem; margin-top: 2px; }
+    .people { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+    .people a, .people span.p { text-decoration: none; color: #fff; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 6px; }
+    .people small { color: #6f97a5; font-size: 0.75rem; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #445; flex: none; }
+    .dot.home { background: #4ade80; box-shadow: 0 0 8px #4ade80; }
+    .dot.out { background: #f59e0b; }
+    .muted { color: #6f97a5; font-size: 0.85rem; }
+
+    .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .tile { display: flex; flex-direction: column; gap: 6px; text-decoration: none; color: #fff; min-height: 104px;
+            background: linear-gradient(180deg, #0c151c, #091015); border: 1px solid #16303a; border-radius: 14px; padding: 14px; }
+    .tile:hover, .tile:focus-visible { border-color: #00a8a8; outline: none; box-shadow: 0 0 18px -8px #00ffff; }
+    .tile .ic { font-size: 1.6rem; line-height: 1; }
+    .tile .t { font-weight: 600; font-size: 0.98rem; }
+    .tile .s { font-size: 0.78rem; color: #6f97a5; line-height: 1.35; }
+    .tile .s.alert { color: #ffc94d; }
+    .tile.big { grid-column: span 2; background: linear-gradient(135deg, #062330, #091015); border-color: #0b4a5a; }
+    .tile.big .ic { font-size: 2rem; }
+
+    .switches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .sw { text-align: left; background: #0b1419; border: 1px solid #16303a; border-radius: 12px; padding: 12px; color: #9cc; }
+    .sw b { display: block; color: #fff; font-weight: 600; font-size: 0.92rem; margin-bottom: 3px; }
+    .sw.on { background: rgba(255, 201, 77, 0.12); border-color: #ffc94d; color: #ffc94d; }
+    .sw[disabled] { opacity: 0.5; cursor: default; }
+
+    @media (max-width: 760px) {
+      .top { grid-template-columns: 1fr; }
+      .tiles, .switches { grid-template-columns: repeat(2, 1fr); }
+      .clock { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <h1>SENTINEL</h1>
+      <span class="clock" id="clock"></span>
+      <form method="post" action="{{ url_for('logout') }}" style="margin: 0;">
+        <button class="logout" type="submit">Log out</button>
+      </form>
+    </div>
+  </header>
+
+  <main>
+    <div class="top">
+      <div class="card wx" id="weather"><span class="muted">Loading the weather…</span></div>
+      <div class="card"><div class="people" id="people"><span class="muted">Loading who's home…</span></div></div>
+    </div>
+
+    <h2>Go to</h2>
+    <div class="tiles">
+      <a class="tile big" href="{{ url_for('live_page') }}">
+        <span class="ic">📹</span><span class="t">Cameras</span><span class="s" id="s-cams">Live view, timeline and clips</span></a>
+      <a class="tile big" href="{{ url_for('sensors_page') }}">
+        <span class="ic">📶</span><span class="t">Movement inside</span><span class="s" id="s-sensors">Wi-Fi motion sensors</span></a>
+      <a class="tile" href="{{ url_for('sensors_history_page') }}">
+        <span class="ic">🕒</span><span class="t">Movement history</span><span class="s">When each room saw movement</span></a>
+      <a class="tile" href="{{ url_for('timeline_page') }}">
+        <span class="ic">🗺️</span><span class="t">Family timeline</span><span class="s">Where everyone has been</span></a>
+      <a class="tile" href="{{ url_for('people_page') }}">
+        <span class="ic">👪</span><span class="t">Family</span><span class="s">Phones, places, home</span></a>
+      <a class="tile" href="{{ url_for('vehicles_page') }}">
+        <span class="ic">🚗</span><span class="t">Vehicles</span><span class="s">Family cars the cameras know</span></a>
+      <a class="tile" href="{{ url_for('routines_page') }}">
+        <span class="ic">⚙️</span><span class="t">Routines</span><span class="s" id="s-routines">When this happens, do that</span></a>
+      <a class="tile" href="{{ url_for('zones_page') }}">
+        <span class="ic">🔲</span><span class="t">Zones</span><span class="s">Where the cameras watch</span></a>
+      <a class="tile" href="{{ url_for('settings_page') }}">
+        <span class="ic">🛠️</span><span class="t">Settings</span><span class="s">Cameras, alerts, Telegram, voice</span></a>
+      <a class="tile" href="{{ url_for('settings_page') }}#help">
+        <span class="ic">❓</span><span class="t">Help</span><span class="s">How everything works</span></a>
+    </div>
+
+    <h2>Switches</h2>
+    <div class="switches" id="switches"><span class="muted">Loading…</span></div>
+  </main>
+
+  <script>
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+      });
+    }
+    async function getJson(url) {
+      var r = await fetch(url);
+      if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
+      return r.json();
+    }
+    function setText(id, text, alert) {
+      var el = document.getElementById(id);
+      el.textContent = text;
+      el.classList.toggle("alert", !!alert);
+    }
+
+    function clock() {
+      var d = new Date();
+      document.getElementById("clock").textContent = d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" }) +
+        " · " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    }
+
+    async function loadWeather() {
+      var box = document.getElementById("weather");
+      try { var w = await getJson("/api/weather"); } catch (e) { return; }
+      if (w.configured === false) {
+        box.innerHTML = '<span class="muted">Add your town under <a href="/settings#weather">Settings → Weather</a> to see the weather here.</span>';
+        return;
+      }
+      if (w.temp == null) { box.innerHTML = '<span class="muted">' + esc(w.error || "Loading the weather…") + '</span>'; return; }
+      box.innerHTML = '<span class="icon">' + esc(w.icon) + '</span><span class="temp">' + esc(w.temp) + '°</span>' +
+        '<span class="words">' + esc(w.words) + '<span>High ' + esc(w.high) + '° · low ' + esc(w.low) + '° · wind ' + esc(w.wind) + ' mph' +
+        (w.place ? ' · ' + esc(w.place) : '') + '</span></span>';
+    }
+
+    async function loadPeople() {
+      try { var d = await getJson("/api/family"); } catch (e) { return; }
+      var box = document.getElementById("people");
+      if (!d.people.length) { box.innerHTML = '<span class="muted">Nobody shares their location yet: see <a href="/people">Family</a>.</span>'; return; }
+      box.innerHTML = d.people.map(function (p) {
+        var inner = '<span class="dot ' + esc(p.state) + '"></span>' + esc(p.name) + ' <small>' + esc(p.label) + '</small>';
+        return p.lat == null || p.id == null ? '<span class="p">' + inner + '</span>'
+          : '<a href="/timeline?person=' + encodeURIComponent(p.id) + '">' + inner + '</a>';
+      }).join("");
+    }
+
+    async function loadStatus() {
+      try {
+        var cams = await getJson("/api/cameras");
+        setText("s-cams", cams.length + " camera" + (cams.length === 1 ? "" : "s") + " · live view, timeline and clips");
+      } catch (e) { /* keep the default words */ }
+      try {
+        var wm = await getJson("/api/wifi_motion");
+        var moving = wm.sensors.filter(function (s) { return s.online && s.motion; }).map(function (s) { return s.name; });
+        if (!wm.sensors.length) setText("s-sensors", "No sensors set up");
+        else if (moving.length) setText("s-sensors", "Movement now: " + moving.join(", "), true);
+        else setText("s-sensors", "All still · " + wm.sensors.length + " line" + (wm.sensors.length === 1 ? "" : "s"));
+      } catch (e) { }
+    }
+
+    var switchBusy = false;
+    async function loadSwitches() {
+      if (switchBusy) return;
+      try { var d = await getJson("/api/switches"); } catch (e) { return; }
+      var box = document.getElementById("switches");
+      if (!d.switches.length) { box.innerHTML = '<span class="muted">No smart plugs or switches found.</span>'; return; }
+      box.innerHTML = d.switches.map(function (s) {
+        var state = !s.online ? "not answering" : s.on ? "On" : "Off";
+        return '<button type="button" class="sw' + (s.on && s.online ? " on" : "") + '"' + (s.online ? "" : " disabled") +
+          ' data-id="' + esc(s.id) + '" data-on="' + (s.on ? 1 : 0) + '"><b>' + esc(s.name) + '</b>' + esc(state) + '</button>';
+      }).join("");
+      box.querySelectorAll(".sw").forEach(function (b) {
+        b.onclick = function () { flip(b.dataset.id, b.dataset.on !== "1", b); };
+      });
+    }
+    async function flip(id, on, button) {
+      switchBusy = true;
+      button.disabled = true;
+      try {
+        var r = await fetch("/api/switches/set", { method: "POST",
+          headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+          body: JSON.stringify({ id: id, on: on }) });
+        if (!r.ok) { var j = await r.json().catch(function () { return {}; }); alert(j.error || "Couldn't switch it."); }
+      } finally {
+        switchBusy = false;
+        loadSwitches();
+      }
+    }
+
+    function refresh() { loadPeople(); loadStatus(); loadSwitches(); }
+    clock(); setInterval(clock, 15000);
+    loadWeather(); setInterval(loadWeather, 10 * 60 * 1000);
+    refresh(); setInterval(refresh, 10000);
+  </script>
+</body>
+</html>

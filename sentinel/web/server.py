@@ -36,6 +36,10 @@ if TYPE_CHECKING:
     from sentinel.settings import SettingsManager
 
 
+
+# TV browsers show the live cameras full-time (Fire TV "AFT..." models in Fully Kiosk, Samsung/LG TV browsers).
+TV_BROWSER = re.compile(r"\bAFT[A-Z0-9]+\b|SMART-TV|Tizen|Web0S|webOS|BRAVIA")
+
 class _StreamLimiter:
     def __init__(self, global_max: int, per_ip_max: int) -> None:
         self._lock = threading.Lock()
@@ -375,6 +379,16 @@ class WebServer:
 
         @app.route("/")
         def index():
+            """The home page; TVs (the kiosk live view) get the cameras straight away."""
+            redir = _require_session()
+            if redir:
+                return redir
+            if TV_BROWSER.search(request.headers.get("User-Agent", "")):
+                return live_page()
+            return render_template("home.html")
+
+        @app.route("/live")
+        def live_page():
             redir = _require_session()
             if redir:
                 return redir

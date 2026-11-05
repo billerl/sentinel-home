@@ -48,9 +48,21 @@ class TestIcons(unittest.TestCase):
         login = self.client.get("/login").get_data(as_text=True)
         self.assertIn('rel="apple-touch-icon"', login)
         templates = os.path.join(os.path.dirname(__file__), "..", "sentinel", "web", "templates")
-        for name in ("grid.html", "zones.html", "settings.html", "login.html"):
+        for name in ("home.html", "grid.html", "zones.html", "settings.html", "login.html"):
             with open(os.path.join(templates, name)) as handle:
                 self.assertIn('href="/favicon.ico"', handle.read(), name)
+
+    def test_tvs_go_straight_to_the_cameras(self):
+        from sentinel.web.server import TV_BROWSER
+
+        tvs = ["Mozilla/5.0 (Linux; Android 7.1.2; AFTEAMR311 Build/NS6711; wv) AppleWebKit/537.36 Chrome/118.0.0.0",
+               "Mozilla/5.0 (SMART-TV; Linux; Tizen 4.0) AppleWebKit/537.36 SamsungBrowser/2.1 TV Safari/537.36"]
+        others = ["Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 Chrome/155.0.0.0 Mobile Safari/537.36",
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/155.0.0.0 Safari/537.36",
+                  "Mozilla/5.0 (X11; Linux x86_64; Quest 3) AppleWebKit/537.36 OculusBrowser/154.0 VR Safari/537.36",
+                  "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1"]
+        self.assertTrue(all(TV_BROWSER.search(ua) for ua in tvs))
+        self.assertFalse(any(TV_BROWSER.search(ua) for ua in others))
 
 
 if __name__ == "__main__":

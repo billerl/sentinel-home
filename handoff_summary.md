@@ -344,6 +344,14 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   on the lens that also fooled the alert path, patio chairs at dusk once). Also: the weather card has a clock.
 - **Telegram commands added:** `access` (remote-access guide) and `videos <when> [people|vehicles|animals] [camera]` (`sentinel/engine/queries.py`).
 - **Web:** `/settings` covers status, cameras, detection, Telegram, recording, audio, remote access, password and help.
+- **Home page** (`/`, `home.html`, 2026-11-04): weather, who's home, navigation tiles with live status (cameras, indoor
+  movement, ...) and the switches. The camera grid moved to `/live` (`grid.html`; its header keeps only camera controls:
+  Home, Timeline, Data saver, Zones, Switches, Reload). TV browsers (`TV_BROWSER` in server.py: Fire TV "AFT..." in
+  Fully Kiosk, Samsung Tizen) still get the grid at `/`, so kiosk start URLs didn't change. Other pages' back link = Home.
+- **Movement history** (`/sensors/history`, `/api/wifi_motion/events?day=`): stretches of indoor movement per path
+  (gaps < 2 min merged) in `recorded_videos/wifi_motion.db`, 30 days. `WifiMotion.answer()` answers "any movement
+  inside today?" / "anyone in the living room?" (a path named in the text) on Telegram and by voice; camera names or
+  outdoor words keep a question with the cameras. The last day's movement goes into Claude's DATA.
 - **Replay tool idea:** run the detector and tracker over a sample of a day's clips to check accuracy before changing thresholds.
 - **Known issues for the user:**
   - The Rear Door camera (.11) looks at carport rafters, with an orange object against the lens.
