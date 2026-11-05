@@ -176,6 +176,29 @@ class TestConversation(unittest.TestCase):
                      "nothing on the front door?", "cancelled flights"):
             self.assertFalse(is_cancel(text), text)
 
+    def test_a_confused_answer_ends_the_conversation(self):
+        """2026-11-05 08:53: a false wake, then room talk answered "Huh?", "Huh?", "Come again?" in turn."""
+        said, _ = self.run_talk(["If you say go to my mind", "Get into the front", None], VoiceReply("Huh?"))
+        self.assertEqual(said, ["<listen>", "Huh?", "<cancel>"])  # asked once, then stopped listening
+        replies = iter([VoiceReply("Kate is home."), VoiceReply("Come again?")])
+        speaker = FakeSpeaker()
+        va = VoiceAssistant({}, lambda text, say: next(replies), speaker)
+        with mock.patch.object(va, "_hear", side_effect=["who's home", "put it back towards the TV", "more talk"]):
+            va._conversation()
+        self.assertEqual(speaker.said, ["<listen>", "Kate is home.", "<listen>", "<cancel>"])  # silent on a follow-up
+
+    def test_stop_inside_room_talk_ends_a_follow_up(self):
+        asked = []
+        speaker = FakeSpeaker()
+        va = VoiceAssistant({}, lambda text, say: asked.append(text) or VoiceReply("ok"), speaker)
+        with mock.patch.object(va, "_hear", side_effect=["who's home", "How did the save all this stuff? Stop. But.", None]):
+            va._conversation()
+        self.assertEqual(asked, ["who's home"])
+        self.assertEqual(speaker.said[-1], "<cancel>")
+        self.assertTrue(v.says_stop("Okay. Stop talking!"))
+        for text in ("Stop.", "stop the music", "Don't stop. Keep going.", "", None):
+            self.assertFalse(v.says_stop(text), text)
+
     def test_cancel_drops_a_note(self):
         saved = []
         speaker = FakeSpeaker()
@@ -213,6 +236,7 @@ class TestConversation(unittest.TestCase):
             return None if doubtful and text != "pause" else VoiceReply("ok")
         for follow_up, doubt_score, want in (("I don't want to get in the candy box", 0.42, ["ok", "<listen>", "<cancel>"]),
                                              ("I don't know", 0.2, ["ok", "<listen>", "ok", "<listen>", "<cancel>"]),
+                                             ("Get into the front. Put it back towards the TV.", 0.29, ["ok", "<listen>", "<cancel>"]),
                                              ("pause", 0.58, ["ok", "<listen>", "ok", "<listen>", "<cancel>"]),
                                              ("and the weather", 0.05, ["ok", "<listen>", "ok", "<listen>", "<cancel>"])):
             speaker = FakeSpeaker()
@@ -227,6 +251,7 @@ class TestConversation(unittest.TestCase):
             self.assertEqual(speaker.said[1:], want, follow_up)
         self.assertEqual(asked, [("who's home", False), ("I don't want to get in the candy box", True),
                                  ("who's home", False), ("I don't know", False),  # 0.2: fine for a follow-up
+                                 ("who's home", False), ("Get into the front. Put it back towards the TV.", True),
                                  ("who's home", False), ("pause", True), ("who's home", False), ("and the weather", False)])
 
     def test_doubtful_words_right_after_a_wake_word(self):

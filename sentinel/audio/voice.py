@@ -44,7 +44,9 @@ NO_SPEECH_MAX = 0.6  # Whisper's own "this was noise" score; above it the words 
 # A follow-up (no wake word) scoring above this is doubtful: acted on only if Sentinel understands it itself,
 # never sent to Claude. Room talk got answered ("I don't want to get in the candy box", 0.42, 2026-11-03), while
 # real short follow-ups score high too ("Pause" 0.58, "Stop" 0.53-0.58), so they can't simply be dropped.
-FOLLOW_UP_DOUBT = 0.3
+# Lowered from 0.3 on 2026-11-05: "Get into the front. Put it back towards the TV." (0.29) went to Claude;
+# every real follow-up between 0.12 and 0.3 in the logs was one of Sentinel's own commands.
+FOLLOW_UP_DOUBT = 0.2
 # The same for the first words after a wake word, stricter: false wakes from room talk score high on the wake word
 # too (0.76-1.0, overlapping real commands at 0.70-1.0), but every real command since 2026-11-01 had a no-speech
 # score <= 0.06 and every false wake >= 0.11 ("I'm not sure", Jarvis 0.91, 2026-11-03 19:39).
@@ -173,6 +175,22 @@ _CANCEL_ALONE = r"nothing|that'?s all|no thanks?( you)?|not you|ignore (that|me)
 def is_cancel(text: str) -> bool:
     low = re.sub(r"\s+", " ", re.sub(r"[^a-z' ]", " ", (text or "").lower())).strip()
     return bool(re.search(rf"(^|\s)({_CANCEL_AT_END})$", low) or re.fullmatch(_CANCEL_ALONE, low))
+
+
+def says_stop(text: str) -> bool:
+    """"Stop." as its own sentence inside longer talk: the user is telling her to stop, not the music
+    ("How did the save all this stuff? Stop. But.", yelled during a false wake, 2026-11-05)."""
+    sentences = [re.sub(r"[^a-z' ]", "", p.lower()).strip() for p in re.split(r"[.!?]+", text or "")]
+    sentences = [p for p in sentences if p]
+    return len(sentences) > 1 and any(re.fullmatch(r"(please )?stop( it| talking)?( please)?", p) for p in sentences)
+
+
+# Claude's whole answer when the words made no sense (see assistant.py): she wasn't being talked to.
+_CONFUSED = r"huh|what|come again|sorry|pardon|say again|sorry what"
+
+
+def is_confused(text: str) -> bool:
+    return bool(re.fullmatch(_CONFUSED, re.sub(r"[^a-z ]", "", (text or "").lower()).strip()))
 
 
 def is_yes(text: str) -> bool:
@@ -464,8 +482,9 @@ class VoiceAssistant:
         except Exception:
             return False
 
-    def _respond(self, text: str, doubtful: bool = False) -> bool:
-        """Answer it; False when a doubtful follow-up wasn't one of Sentinel's own commands (ignored)."""
+    def _respond(self, text: str, doubtful: bool = False, follow_up: bool = False) -> bool:
+        """Answer it; False when the conversation should end: a doubtful follow-up that wasn't one of
+        Sentinel's own commands (ignored), or words that made no sense ("Huh?")."""
         reply = self.answer(text, self._say, doubtful=True) if doubtful else self.answer(text, self._say)
         if reply is None:
             app_logger.log("info", "voice_ignored", text=text[:200], doubt=round(self.last_doubt, 2),
@@ -473,6 +492,12 @@ class VoiceAssistant:
             return False
         app_logger.log("info", "voice_replied", text=(reply.text or "")[:300], confirm=reply.confirm is not None,
                        component="voice", action="respond")
+        if is_confused(reply.text) and reply.confirm is None and reply.dictate is None:
+            # Room talk, after a false wake or as a "follow-up": listening on only invites more of it
+            # (four "Let me think"s in a row, 2026-11-05). Ask once after the wake word, then stop.
+            if not follow_up:
+                self._say(reply.text)
+            return False
         self._say(reply.text)
         if reply.dictate is not None:
             self.speaker.tone("listen")
@@ -495,7 +520,7 @@ class VoiceAssistant:
             self._ignore_until = time.time() + 0.15  # the chime's echo
             text = self._hear(fresh=False)
             for turn in range(MAX_TURNS):
-                if text and is_cancel(text):
+                if text and (is_cancel(text) or (turn and says_stop(text))):
                     app_logger.log("info", "voice_cancelled", component="voice", action="conversation")
                     self.speaker.tone("cancel")
                     return
@@ -511,7 +536,7 @@ class VoiceAssistant:
                                    component="voice", action="respond")
                     self.speaker.tone("cancel")
                     return
-                if not self._respond(text, doubtful=doubtful):
+                if not self._respond(text, doubtful=doubtful, follow_up=bool(turn)):
                     self.speaker.tone("cancel")
                     return
                 if turn == MAX_TURNS - 1 or not self.settings.get("voice_follow_up", True):
