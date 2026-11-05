@@ -30,7 +30,8 @@ from sentinel.logging_utils import app_logger
 DB_NAME = "routines.db"
 HOLDS_FILE = "routine_holds.json"
 SEEN = ("person", "vehicle", "animal", "delivery")
-TRIGGERS = ("seen", "motion", "time", "arrive", "leave", "car_arrive", "car_leave")
+TRIGGERS = ("seen", "motion", "sensor", "time", "arrive", "leave", "car_arrive", "car_leave")
+WATCHERS = ("seen", "motion", "sensor")  # triggers that can hold a light on "until quiet"
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 MAX_MINUTES = 12 * 60
 MAX_TEXT = 200
@@ -101,6 +102,7 @@ class Catalog:
     switches: Dict[str, str] = field(default_factory=dict)
     people: Dict[int, str] = field(default_factory=dict)
     cars: Dict[int, str] = field(default_factory=dict)
+    sensors: Dict[str, str] = field(default_factory=dict)  # Wi-Fi motion lines (path id -> name)
 
 
 def _pick(values: Any, table: Dict[Any, str], what: str) -> List[Any]:
@@ -154,7 +156,8 @@ def normalize(spec: Any, cat: Catalog) -> Dict[str, Any]:
     when = spec.get("when") if isinstance(spec.get("when"), dict) else {}
     kind = str(when.get("type") or "")
     if kind not in TRIGGERS:
-        raise ValueError("say what starts it (a camera sees something, motion, a time, someone arriving or leaving)")
+        raise ValueError("say what starts it (a camera sees something, motion, a Wi-Fi sensor, a time, "
+                         "someone arriving or leaving)")
     w: Dict[str, Any] = {"type": kind}
     if kind == "seen":
         what = when.get("what") or list(SEEN)
@@ -166,6 +169,8 @@ def normalize(spec: Any, cat: Catalog) -> Dict[str, Any]:
         w["what"] = [x for x in SEEN if x in what]
     if kind in ("seen", "motion"):
         w["cameras"] = _pick(when.get("cameras"), cat.cameras, "camera")
+    elif kind == "sensor":
+        w["sensors"] = _pick(when.get("sensors"), cat.sensors, "sensor")
     elif kind == "time":
         at = str(when.get("at") or "").strip().lower()
         if at not in ("sunset", "sunrise") and not _CLOCK.match(at):
@@ -229,8 +234,8 @@ def normalize(spec: Any, cat: Catalog) -> Dict[str, Any]:
                 quiet = _minutes(a.get("until_quiet"), "the quiet time")
                 if minutes and quiet:
                     raise ValueError("pick one: on for a set time, or until things are quiet")
-                if quiet and kind not in ("seen", "motion"):
-                    raise ValueError("“until there's no motion” needs a routine started by a camera")
+                if quiet and kind not in WATCHERS:
+                    raise ValueError("“until there's no motion” needs a routine started by a camera or a Wi-Fi sensor")
                 if minutes:
                     step["for"] = minutes
                 if quiet:
@@ -254,6 +259,7 @@ def default_name(spec: Dict[str, Any], cat: Catalog) -> str:
     head = cat.switches.get(sw["switch"], "Switch") if sw else ("Message" if spec["then"][0]["do"] == "telegram" else "Announcement")
     where = {"seen": lambda: ", ".join(cat.cameras.get(c, "?") for c in w["cameras"]) or "any camera",
              "motion": lambda: ", ".join(cat.cameras.get(c, "?") for c in w["cameras"]) or "any camera",
+             "sensor": lambda: ", ".join(cat.sensors.get(c, "?") for c in w["sensors"]) or "any Wi-Fi sensor",
              "time": lambda: w["at"], "arrive": lambda: "arrivals", "leave": lambda: "departures",
              "car_arrive": lambda: "car home", "car_leave": lambda: "car leaves"}[w["type"]]()
     return f"{head[:1].upper()}{head[1:]} — {where}"[:60]
@@ -270,6 +276,9 @@ def describe(spec: Dict[str, Any], cat: Catalog) -> str:
         when = f"When {'any camera' if not cams else 'the ' + cams + ' camera'} sees {what_words}"
     elif w["type"] == "motion":
         when = f"When there's motion on {'any camera' if not cams else 'the ' + cams + ' camera'}"
+    elif w["type"] == "sensor":
+        where = _join([cat.sensors.get(c, "a removed sensor") for c in w["sensors"]]) if w["sensors"] else ""
+        when = f"When {'any Wi-Fi sensor' if not where else 'the ' + where + ' Wi-Fi sensor'} notices movement"
     elif w["type"] == "time":
         if w["at"] in ("sunset", "sunrise"):
             off = w.get("offset", 0)
@@ -383,7 +392,8 @@ class _Hold:
     switch: str
     until: float  # for "for N minutes": the end; for "until quiet": recomputed from the last motion
     quiet: Optional[float]  # seconds without motion, or None
-    cameras: List[str]  # whose motion keeps it on ([] = any camera)
+    cameras: List[str]  # whose motion keeps it on ([] = any camera / any Wi-Fi sensor)
+    wifi: bool = False  # cameras are Wi-Fi motion sensors (path ids)
 
 
 class RoutineRunner:
@@ -391,7 +401,7 @@ class RoutineRunner:
 
     ``hooks`` come from the engine: set_switch(id, on, source) -> (ok, msg), switch_on(id) -> bool|None,
     telegram(text, jpeg|None), say(text), coords() -> (lat, lon)|None, nobody_home() -> bool,
-    last_motion(camera key|None) -> ts."""
+    last_motion(camera key|None) -> ts, last_sensor_motion(Wi-Fi sensor path id|None) -> ts."""
 
     def __init__(self, store: RoutineStore, hooks: Dict[str, Callable], holds_path: str = HOLDS_FILE,
                  clock: Callable[[], float] = time.time, spawn: Optional[Callable] = None) -> None:
@@ -466,6 +476,19 @@ class RoutineRunner:
             self._motion_fired[(r.id, camera)] = now
         ids = {r.id for r in due}
         self._fire(lambda w, _ids=ids: False, camera, None, only=ids)
+
+    def sensor(self, path: str) -> None:
+        """A Wi-Fi motion sensor sees movement (called on each moving reading). No settling time: a light
+        switching on changes the camera picture, not the radio signal."""
+        now = self._clock()
+        due = [r for r in self._routines if r.enabled and r.spec["when"]["type"] == "sensor"
+               and (not r.spec["when"]["sensors"] or path in r.spec["when"]["sensors"])
+               and now - self._motion_fired.get((r.id, "wifi:" + path), 0) >= MOTION_REPEAT]
+        if not due:
+            return
+        for r in due:
+            self._motion_fired[(r.id, "wifi:" + path)] = now
+        self._fire(lambda w: False, None, None, only={r.id for r in due})
 
     def person(self, kind: str, person_id: int) -> None:
         self._fire(lambda w: w["type"] == kind and (not w["people"] or person_id in w["people"]), None, None)
@@ -546,10 +569,11 @@ class RoutineRunner:
             return ""
         self._settle_until = now + SETTLE_SECONDS
         if a["on"] and timed:
-            cams = r.spec["when"].get("cameras", [])
+            wifi = r.spec["when"]["type"] == "sensor"
+            cams = r.spec["when"].get("sensors" if wifi else "cameras", [])
             with self._lock:
                 self._holds[key] = _Hold(r.id, a["switch"], now + timed * 60,
-                                         a["until_quiet"] * 60 if a.get("until_quiet") else None, cams)
+                                         a["until_quiet"] * 60 if a.get("until_quiet") else None, cams, wifi)
             self._save_holds()
         return "switch"
 
@@ -560,7 +584,8 @@ class RoutineRunner:
             end = hold.until
             if hold.quiet is not None:
                 cams = hold.cameras or [None]
-                last = max(self.hooks["last_motion"](c) for c in cams)
+                last_of = self.hooks.get("last_sensor_motion", lambda p: 0.0) if hold.wifi else self.hooks["last_motion"]
+                last = max(last_of(c) for c in cams)
                 end = max(end, last + hold.quiet)
             if now < end:
                 continue

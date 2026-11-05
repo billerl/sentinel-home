@@ -22,7 +22,8 @@ from test_switches import FakeKasa
 
 CAT = Catalog(cameras={"192.168.0.9": "Back Yard", "192.168.0.10": "Front Door"},
               switches={"kasa-9c53220000aa-1": "patio lights", "kasa-50c7bf000001": "Porch lamp"},
-              people={1: "Alex", 2: "Kate"}, cars={7: "Sierra"})
+              people={1: "Alex", 2: "Kate"}, cars={7: "Sierra"},
+              sensors={"beb4-df1c": "Living room", "2350-beb4": "Kitchen"})
 PATIO = {"name": "Patio at night", "when": {"type": "seen", "what": ["person"], "cameras": ["back yard"]},
          "only": {"dark": True}, "then": [{"do": "switch", "switch": "Patio lights", "on": True, "until_quiet": 2}]}
 EVENING = time.mktime(time.strptime("2026-11-02 21:00", "%Y-%m-%d %H:%M"))
@@ -52,6 +53,19 @@ class TestCheck(unittest.TestCase):
         self.assertEqual(describe(spec, CAT), "When Sierra pulls in, only between 10 pm and 6 am: send “Sierra's home” on Telegram.")
         spec = normalize({"when": {"type": "seen", "what": "something"}, "then": {"do": "say", "text": "hi"}}, CAT)
         self.assertTrue(describe(spec, CAT).startswith("When any camera sees anything"))
+
+    def test_wifi_sensor_trigger(self):
+        spec = normalize({"when": {"type": "sensor", "sensors": ["living room"]},
+                          "then": [{"do": "switch", "switch": "porch lamp", "on": True, "until_quiet": 10}]}, CAT)
+        self.assertEqual(spec["when"], {"type": "sensor", "sensors": ["beb4-df1c"]})
+        self.assertEqual(describe(spec, CAT), "When the Living room Wi-Fi sensor notices movement: turn on the Porch lamp "
+                                              "until there's been no motion for 10 minutes.")
+        spec = normalize({"when": {"type": "sensor"}, "only": {"nobody_home": True},
+                          "then": [{"do": "telegram", "text": "Movement inside"}]}, CAT)
+        self.assertEqual(spec["name"], "Message — any Wi-Fi sensor")
+        self.assertTrue(describe(spec, CAT).startswith("When any Wi-Fi sensor notices movement, only when nobody's home"))
+        with self.assertRaises(ValueError):
+            normalize({"when": {"type": "sensor", "sensors": ["attic"]}, "then": {"do": "say", "text": "hi"}}, CAT)
 
     def test_mistakes_say_what_is_wrong(self):
         cases = [
@@ -88,7 +102,8 @@ class FakeHooks:
     def __init__(self):
         self.switch = {"kasa-9c53220000aa-1": False, "kasa-50c7bf000001": False}
         self.calls, self.messages, self.said = [], [], []
-        self.motion = {}
+        self.motion, self.wifi = {}, {}
+        self.away = False
         self.home = SPRINGFIELD
 
     def hooks(self):
@@ -98,7 +113,8 @@ class FakeHooks:
             return True, "ok"
         return {"set_switch": set_switch, "switch_on": lambda sid: self.switch.get(sid),
                 "telegram": lambda text, jpeg: self.messages.append((text, jpeg)), "say": self.said.append,
-                "coords": lambda: self.home, "nobody_home": lambda: False,
+                "coords": lambda: self.home, "nobody_home": lambda: self.away,
+                "last_sensor_motion": lambda p: max(self.wifi.values(), default=0) if p is None else self.wifi.get(p, 0),
                 "last_motion": lambda cam: max(self.motion.values(), default=0) if cam is None else self.motion.get(cam, 0)}
 
 
@@ -194,6 +210,27 @@ class TestRunner(unittest.TestCase):
         self.now += 30
         self.runner.motion("192.168.0.9")  # real motion later
         self.assertEqual(len(self.fake.calls), 3)
+
+    def test_wifi_sensor_lights_until_quiet_and_away_alert(self):
+        self.add({"when": {"type": "sensor", "sensors": ["Living room"]},
+                  "then": [{"do": "switch", "switch": "porch lamp", "on": True, "until_quiet": 2}]})
+        self.add({"when": {"type": "sensor"}, "only": {"nobody_home": True},
+                  "then": [{"do": "telegram", "text": "Movement inside while nobody's home"}]})
+        self.runner.sensor("2350-beb4")  # the kitchen: not the lamp's sensor; and people are home
+        self.assertEqual((self.fake.calls, self.fake.messages), ([], []))
+        self.runner.sensor("beb4-df1c")
+        self.assertEqual(self.fake.calls, [("kasa-50c7bf000001", True)])
+        self.fake.wifi["beb4-df1c"] = self.now + 100  # still moving in there
+        self.fake.motion["192.168.0.9"] = self.now + 200  # camera motion doesn't keep an indoor light on
+        self.now += 200
+        self.runner.tick()
+        self.assertEqual(len(self.fake.calls), 1)
+        self.now += 21
+        self.runner.tick()
+        self.assertEqual(self.fake.calls[-1], ("kasa-50c7bf000001", False))
+        self.fake.away = True
+        self.runner.sensor("2350-beb4")
+        self.assertEqual(self.fake.messages, [("Movement inside while nobody's home", None)])
 
     def test_sunset_routine_fires_once(self):
         self.add({"when": {"type": "time", "at": "sunset"}, "then": [{"do": "switch", "switch": "porch lamp", "on": True}]})

@@ -103,7 +103,8 @@
   <main>
     <p class="intro">A routine does something for you when something happens: <i>when the back yard camera sees a
       person after dark, turn on the patio lights until there's been no motion for 2 minutes.</i> Make them here, or
-      just say it: <i>“Hey Jarvis, new routine: …”</i> or send it on Telegram. Sentinel reads it back and saves it
+      just say it: <i>“Hey Jarvis, new routine: …”</i> Wi-Fi sensors (the Sensors page) can start routines too, e.g.
+      a message when there's movement inside while nobody's home. or send it on Telegram. Sentinel reads it back and saves it
       when you say yes.</p>
     <div class="sky" id="sky"></div>
     <div class="toolbar">
@@ -120,6 +121,7 @@
             <select id="when-type" onchange="drawWhen()">
               <option value="seen">a camera sees…</option>
               <option value="motion">there's any motion on…</option>
+              <option value="sensor">a Wi-Fi sensor notices movement…</option>
               <option value="time">it's a time of day…</option>
               <option value="arrive">someone gets home (phone)</option>
               <option value="leave">someone leaves home (phone)</option>
@@ -296,6 +298,8 @@
         var l = document.createElement("div"); l.className = "line"; l.textContent = "on";
         body.appendChild(l);
         body.appendChild(chipGroup("cameras", pairs(cat.cameras), w.cameras, "none picked = any camera"));
+      } else if (type === "sensor") {
+        body.appendChild(chipGroup("sensors", pairs(cat.sensors), w.sensors, "none picked = any Wi-Fi sensor"));
       } else if (type === "time") {
         var at = w.at || "sunset";
         var line = document.createElement("div");
@@ -344,7 +348,7 @@
 
     function drawStepFields(step) {
       var kind = step.querySelector(".s-do").value, a = step._a || {}, f = step.querySelector(".s-fields");
-      var camera = ["seen", "motion"].indexOf(document.getElementById("when-type").value) >= 0;
+      var camera = ["seen", "motion", "sensor"].indexOf(document.getElementById("when-type").value) >= 0;
       var keep = f.querySelector(".s-sw") ? f.querySelector(".s-sw").value : null;
       if (kind === "on" || kind === "off") {
         var opts = (data.catalog.switches || []).map(function(s) { return '<option value="' + esc(s.id) + '">' + esc(s.name) + '</option>'; }).join("");
@@ -409,6 +413,7 @@
       var type = document.getElementById("when-type").value, w = { type: type };
       if (type === "seen") w.what = Array.from(chips.what);
       if (type === "seen" || type === "motion") w.cameras = Array.from(chips.cameras);
+      if (type === "sensor") w.sensors = Array.from(chips.sensors);
       if (type === "time") {
         var at = document.getElementById("t-at").value;
         if (at === "clock") w.at = document.getElementById("t-clock").value;

@@ -193,6 +193,21 @@ class SensorsTest(unittest.TestCase):
         self.assertEqual(self.wm.view(now=NOW)["sensors"][0]["name"], "Living room")
         self.assertFalse(self.wm.identify("ffff")[0])
 
+    def test_moving_paths_are_passed_on_for_routines(self):
+        b = self._board()
+        moved = []
+        self.wm.on_motion = moved.append
+        line_rows = [[i, 40.0 + (i % 3), 48.0] for i in range(600)]  # 2.5 quiet minutes: learns the quiet level
+        self.replies["192.168.1.77"] = status(("beb4", "beacon", line_rows))
+        self.wm.poll(b, now=NOW)
+        self.assertEqual(moved, [])
+        self.assertEqual(self.wm.paths(), {"8d24-beb4": "8d24 to beb4"})
+        self.replies["192.168.1.77"] = status(("beb4", "beacon", [[600 + i, 120.0, 48.0] for i in range(8)]))
+        self.wm.poll(b, now=NOW + 2)
+        self.assertEqual(moved, ["8d24-beb4"])
+        self.assertAlmostEqual(self.wm.last_motion("8d24-beb4"), NOW + 2, delta=1)
+        self.assertEqual(self.wm.last_motion("ffff-0000"), 0.0)
+
     def test_poll_takes_each_score_once_and_survives_a_restart(self):
         b = self._board()
         self.replies["192.168.1.77"] = status(("df1c", "beacon", [[10, 2.5, 49.0], [11, 2.6, 50.0]]),

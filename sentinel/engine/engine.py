@@ -174,7 +174,9 @@ class Engine:
             "nobody_home": self._nobody_home,
             "last_motion": lambda cam: (max(self._last_motion.values(), default=0.0) if cam is None
                                         else self._last_motion.get(cam, 0.0)),
+            "last_sensor_motion": self.wifi_motion.last_motion,
         }, holds_path=os.path.join(VIDEO_DIR, HOLDS_FILE))
+        self.wifi_motion.on_motion = self.routines.sensor
         self._routines_ticked = 0.0
         self._place_pins: Dict[str, Tuple[float, float, float]] = {}  # chat -> pin waiting for a name (lat, lon, until)
         self._location_alerted: Dict[Tuple[int, int], float] = {}  # (person, place) -> last alert
@@ -1440,7 +1442,8 @@ class Engine:
         return Catalog(cameras={p.host: p.display_name for p in self.cameras.values()},
                        switches={s.id: s.name for s in self.switches.switches()},
                        people={p.id: p.name for p in self.locations.people()},
-                       cars={v.id: v.name for v in self.household.vehicles()})
+                       cars={v.id: v.name for v in self.household.vehicles()},
+                       sensors=self.wifi_motion.paths())
 
     @staticmethod
     def _routine_error(e: ValueError) -> str:
@@ -1514,7 +1517,8 @@ class Engine:
         lines = [f"{r.id}. {r.name}{'' if r.enabled else ' (off)'}: {describe(r.spec, cat)}" for r in self.routines.store.all()]
         names = (f"Camera names: {', '.join(cat.cameras.values()) or 'none'}. Switch names: "
                  f"{', '.join(cat.switches.values()) or 'none'}. People with phones: "
-                 f"{', '.join(cat.people.values()) or 'none'}. Family cars: {', '.join(cat.cars.values()) or 'none'}.")
+                 f"{', '.join(cat.people.values()) or 'none'}. Family cars: {', '.join(cat.cars.values()) or 'none'}. "
+                 f"Wi-Fi motion sensors: {', '.join(cat.sensors.values()) or 'none'}.")
         return names + "\n" + ("\n".join(lines) if lines else "(no routines yet)")
 
     def routines_view(self) -> Dict[str, Any]:
@@ -1528,7 +1532,7 @@ class Engine:
             "routines": [{"id": r.id, "name": r.name, "enabled": r.enabled, "spec": r.spec, "text": describe(r.spec, cat),
                           "last_run": r.last_run, "holding_until": holding.get(r.id)} for r in self.routines.store.all()],
             "catalog": {k: [{"id": i, "name": n} for i, n in getattr(cat, k).items()]
-                        for k in ("cameras", "switches", "people", "cars")},
+                        for k in ("cameras", "switches", "people", "cars", "sensors")},
             "dark": self.routines.is_dark(), "located": coords is not None,
             "sunrise": sun[0] if sun else None, "sunset": sun[1] if sun else None,
         }

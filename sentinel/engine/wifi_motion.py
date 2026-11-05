@@ -31,7 +31,7 @@ import time
 import urllib.request
 from collections import deque
 from datetime import datetime
-from typing import Any, Deque, Dict, List, Optional, Tuple
+from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple
 
 from sentinel.logging_utils import app_logger
 
@@ -217,6 +217,8 @@ class WifiMotion:
         self._lines: Dict[str, Line] = {}
         self._names: Dict[str, str] = {}  # line id -> name the user gave it (kept while a line is away)
         self._ratios: Dict[str, float] = {}  # path id -> movement line the user picked (else RATIO)
+        self.on_motion: Optional[Callable[[str], None]] = None  # path id, on each moving reading (routines)
+        self._moving: Set[str] = set()  # paths that moved in the poll being taken
         self._csv_day = ""
         self._csv_file = None
         self._csv = None
@@ -325,6 +327,10 @@ class WifiMotion:
                     self._csv_file.flush()
                 except OSError:
                     pass
+            moving, self._moving = self._moving, set()
+        if self.on_motion:  # outside the lock: routines may ask us when things went quiet
+            for pid in sorted(moving):
+                self.on_motion(pid)
 
     def _take(self, line: Line, rows: List[list], now: float) -> None:
         if rows and line.last_seq is not None and rows[-1][0] < line.last_seq:
@@ -346,6 +352,8 @@ class WifiMotion:
             if score >= 0:
                 line.series.append((ts, float(score)))
             change = line.judge.feed(ts, float(score))
+            if line.judge.motion and line.judge.last_motion == ts:
+                self._moving.add(path_id(line))
             if change == "started":
                 app_logger.log("info", "wifi_motion_started", sensor=line.id, path=path_id(line),
                                name=self._path_name(path_id(line), [line]),
@@ -439,6 +447,23 @@ class WifiMotion:
             return f"{self._board_name(lines[0].board.id)} to the router"
         a, b = pid.split("-", 1)
         return f"{self._board_name(a)} to {self._board_name(b)}"
+
+    def paths(self) -> Dict[str, str]:
+        """Every path known since the start (and every named one), id -> name: what routines can pick from."""
+        with self._lock:
+            groups: Dict[str, List[Line]] = {}
+            for line in self._lines.values():
+                groups.setdefault(path_id(line), []).append(line)
+            out = {pid: self._path_name(pid, lines) for pid, lines in groups.items()}
+            for pid, name in self._names.items():
+                out.setdefault(pid, name)
+        return dict(sorted(out.items(), key=lambda kv: kv[1].lower()))
+
+    def last_motion(self, pid: Optional[str] = None) -> float:
+        """When a path (None = any) last saw movement, for routines' "until there's been no movement"."""
+        with self._lock:
+            return max((line.judge.last_motion for line in self._lines.values()
+                        if pid is None or path_id(line) == pid), default=0.0)
 
     def _board_name(self, bid: str) -> str:
         board = self._boards.get(bid)

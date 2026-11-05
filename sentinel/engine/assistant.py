@@ -50,15 +50,16 @@ Rules:
   (JSON on one line). "when" is one of:
   {"type": "seen", "what": ["person"|"vehicle"|"animal"|"delivery", ...], "cameras": [camera names]}  ("something" = all four; [] = any camera)
   {"type": "motion", "cameras": [...]}  (any movement, even a shadow; prefer "seen" for people/cars/animals)
+  {"type": "sensor", "sensors": [Wi-Fi motion sensor names]}  (movement indoors, e.g. "the living room sensor"; [] = any)
   {"type": "time", "at": "sunset"|"sunrise"|"HH:MM", "offset": minutes before (-) or after (+) sunset/sunrise}
   {"type": "arrive"|"leave", "people": [names]}  (their phone gets home / leaves home; [] = anyone)
   {"type": "car_arrive"|"car_leave", "cars": [family car names]}  ([] = any family car)
   "only" (optional): "dark": true (after dark / at night), "light": true (daytime), "from"/"to": "HH:MM",
   "days": ["mon", ...], "nobody_home": true.
   "then", up to 5 steps: {"do": "switch", "switch": name, "on": true|false, "for": minutes} or with
-  "until_quiet": minutes instead of "for" (stays on until there's been no motion on the routine's cameras that long;
-  camera routines only); {"do": "telegram", "text": "...", "photo": true (camera routines)}; {"do": "say", "text": "..."}.
-  Use only camera, switch, people and car names from DATA. If the switch or what should happen is unclear, ask
+  "until_quiet": minutes instead of "for" (stays on until there's been no motion on the routine's cameras or Wi-Fi
+  sensors that long; camera and sensor routines only); {"do": "telegram", "text": "...", "photo": true (camera routines)}; {"do": "say", "text": "..."}.
+  Use only camera, switch, people, car and Wi-Fi sensor names from DATA. If the switch or what should happen is unclear, ask
   instead (no command). For "until there's no motion" without a time, use 2 minutes. Keep your sentence short:
   Sentinel reads the routine back in its own words before saving. To pause or delete one use
   "Routine N off" / "Routine N on" / "Delete routine N".
