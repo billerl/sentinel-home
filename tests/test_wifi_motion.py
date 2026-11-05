@@ -75,6 +75,12 @@ class JudgeTest(unittest.TestCase):
         self.assertIsNone(j.smoothed)
 
 
+def status(*links, battery=None):
+    """A board's /status: links = (id, source, [[seq, score, rate], ...])."""
+    return {"wifi_rssi": -60, "battery": battery,
+            "links": [{"id": lid, "source": src, "rssi": -55, "samples": rows} for lid, src, rows in links]}
+
+
 class SensorsTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()
@@ -91,66 +97,87 @@ class SensorsTest(unittest.TestCase):
             raise OSError("no answer")
         return self.replies[ip]
 
+    def _board(self):
+        self.wm.hello(HELLO, "192.168.1.77")
+        return self.wm._boards["8d24"]
+
     def test_hello_uses_the_senders_address_and_is_remembered(self):
         self.assertTrue(self.wm.hello(HELLO, "192.168.1.77"))
-        self.assertEqual(self.wm._sensors["8d24"].ip, "192.168.1.77")
+        self.assertEqual(self.wm._boards["8d24"].ip, "192.168.1.77")
         again = WifiMotion(self.dir)
-        self.assertEqual(again._sensors["8d24"].ip, "192.168.1.77")
-        self.assertEqual(again._sensors["8d24"].name, "Wi-Fi sensor 8d24")
+        self.assertEqual(again._boards["8d24"].ip, "192.168.1.77")
+
+    def test_reads_the_first_file_format(self):
+        with open(os.path.join(self.dir, wifi_motion.KNOWN_FILE), "w") as f:
+            json.dump({"8d24": {"ip": "192.168.1.77", "name": "Wi-Fi sensor 8d24", "host": "h", "fw": "1.0.0"}}, f)
+        self.assertEqual(WifiMotion(self.dir)._boards["8d24"].ip, "192.168.1.77")
 
     def test_bad_hellos_are_ignored(self):
         self.assertFalse(self.wm.hello(b"not json", "192.168.1.77"))
         self.assertFalse(self.wm.hello(json.dumps({"sentinel_sensor": "other", "id": "8d24"}).encode(), "192.168.1.77"))
         self.assertFalse(self.wm.hello(json.dumps({"sentinel_sensor": "wifi_motion", "id": "../x"}).encode(), "192.168.1.77"))
         self.assertFalse(self.wm.hello(HELLO, "8.8.8.8"))  # only boards on the home network
-        self.assertEqual(self.wm._sensors, {})
+        self.assertEqual(self.wm._boards, {})
+
+    def test_each_beacon_is_its_own_sensor(self):
+        b = self._board()
+        self.replies["192.168.1.77"] = status(("df1c", "beacon", [[10, 50.0, 49.0]]),
+                                              ("a0b1", "beacon", [[10, 80.0, 47.0]]))
+        self.wm.poll(b, now=NOW)
+        view = {s["id"]: s for s in self.wm.view(now=NOW)["sensors"]}
+        self.assertEqual(set(view), {"8d24-df1c", "8d24-a0b1"})
+        self.assertEqual(view["8d24-a0b1"]["source"], "beacon")
+        self.assertEqual(self.wm._lines["8d24-df1c"].series[-1][1], 50.0)
+        self.assertEqual(self.wm._lines["8d24-a0b1"].series[-1][1], 80.0)
 
     def test_poll_takes_each_score_once_and_survives_a_restart(self):
-        self.wm.hello(HELLO, "192.168.1.77")
-        s = self.wm._sensors["8d24"]
-        self.replies["192.168.1.77"] = {"wifi_rssi": -60, "battery": {"v": 4.1, "pct": 88.0},
-                                        "samples": [[10, 2.5, 49.0], [11, 2.6, 50.0]]}
-        self.wm.poll(s, now=NOW)
-        self.wm.poll(s, now=NOW + 1)  # same samples again: nothing new
-        self.assertEqual(len(s.series), 2)
-        self.replies["192.168.1.77"]["samples"] = [[0, 3.0, 48.0]]  # the board rebooted
-        s.judge._baseline = 57.0  # pretend it had learned the old spot
-        self.wm.poll(s, now=NOW + 2)
-        self.assertEqual(len(s.series), 1)  # a restart (usually a move) starts the chart and the learning over
-        self.assertIsNone(s.judge.baseline)
+        b = self._board()
+        self.replies["192.168.1.77"] = status(("df1c", "beacon", [[10, 2.5, 49.0], [11, 2.6, 50.0]]),
+                                              battery={"v": 4.1, "pct": 88.0})
+        self.wm.poll(b, now=NOW)
+        self.wm.poll(b, now=NOW + 1)  # same samples again: nothing new
+        line = self.wm._lines["8d24-df1c"]
+        self.assertEqual(len(line.series), 2)
+        line.judge._baseline = 57.0  # pretend it had learned the old spot
+        self.replies["192.168.1.77"] = status(("df1c", "beacon", [[0, 3.0, 48.0]]))  # the board rebooted
+        self.wm.poll(b, now=NOW + 2)
+        self.assertEqual(len(line.series), 1)  # a restart (usually a move) starts the chart and the learning over
+        self.assertIsNone(line.judge.baseline)
         view = self.wm.view(now=NOW + 2)["sensors"][0]
         self.assertTrue(view["online"])
-        self.assertEqual(view["battery"]["pct"], 88.0)
         self.assertTrue(view["learning"])
         self.assertFalse(self.wm.view(now=NOW + 60)["sensors"][0]["online"])
+        self.assertEqual(self.wm.view(now=NOW + 3600)["sensors"], [])  # long gone: off the page
         with open(os.path.join(self.dir, wifi_motion.LOG_DIR, os.listdir(os.path.join(self.dir, wifi_motion.LOG_DIR))[0])) as f:
             self.assertEqual(len(f.read().strip().splitlines()), 4)  # header + three scores
 
-    def test_switching_to_the_beacon_relearns_the_room(self):
-        self.wm.hello(HELLO, "192.168.1.77")
-        s = self.wm._sensors["8d24"]
+    def test_older_firmware_reports_one_router_line(self):
+        b = self._board()
         self.replies["192.168.1.77"] = {"source": "router", "samples": [[10, 2.5, 49.0]]}
-        self.wm.poll(s, now=NOW)
-        s.judge._baseline = 57.0
-        self.replies["192.168.1.77"] = {"source": "beacon", "samples": [[11, 9.0, 49.0]]}
-        self.wm.poll(s, now=NOW + 1)
-        self.assertIsNone(s.judge.baseline)
-        self.assertEqual(self.wm.view(now=NOW + 1)["sensors"][0]["source"], "beacon")
+        self.wm.poll(b, now=NOW)
+        self.assertEqual([s["id"] for s in self.wm.view(now=NOW)["sensors"]], ["8d24-rtr"])
 
     def test_unreachable_or_junk_replies_change_nothing(self):
-        self.wm.hello(HELLO, "192.168.1.77")
-        s = self.wm._sensors["8d24"]
-        self.wm.poll(s, now=NOW)
-        self.replies["192.168.1.77"] = {"samples": [["x", None], "junk"]}
-        self.wm.poll(s, now=NOW)
-        self.assertEqual(len(s.series), 0)
+        b = self._board()
+        self.wm.poll(b, now=NOW)
+        self.replies["192.168.1.77"] = {"links": [{"id": "../x", "source": "beacon", "samples": [[1, 2, 3]]},
+                                                  {"id": "df1c", "source": "beacon", "samples": [["x", None], "junk"]},
+                                                  "junk"]}
+        self.wm.poll(b, now=NOW)
+        self.assertEqual(sum(len(line.series) for line in self.wm._lines.values()), 0)
 
-    def test_rename(self):
-        self.wm.hello(HELLO, "192.168.1.77")
-        self.assertTrue(self.wm.rename("8d24", "  Family   room ")[0])
-        self.assertEqual(WifiMotion(self.dir)._sensors["8d24"].name, "Family room")
-        self.assertFalse(self.wm.rename("8d24", "<script>")[0])
-        self.assertFalse(self.wm.rename("ffff", "Kitchen")[0])
+    def test_rename_survives_restarts(self):
+        b = self._board()
+        self.replies["192.168.1.77"] = status(("df1c", "beacon", [[10, 2.5, 49.0]]))
+        self.wm.poll(b, now=NOW)
+        self.assertTrue(self.wm.rename("8d24-df1c", "  Living   room ")[0])
+        again = WifiMotion(self.dir, fetch=self._fetch)
+        again.poll(again._boards["8d24"], now=NOW)
+        self.assertEqual(again.view(now=NOW)["sensors"][0]["name"], "Living room")
+        if again._csv_file:
+            again._csv_file.close()
+        self.assertFalse(self.wm.rename("8d24-df1c", "<script>")[0])
+        self.assertFalse(self.wm.rename("ffff-0000", "Kitchen")[0])
 
 
 if __name__ == "__main__":

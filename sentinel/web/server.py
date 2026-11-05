@@ -780,7 +780,7 @@ class WebServer:
             if err:
                 return err
             body = request.get_json(silent=True) or {}
-            return _result(*engine.wifi_motion.rename(str(body.get("id") or "")[:12], str(body.get("name") or "")[:60]))
+            return _result(*engine.wifi_motion.rename(str(body.get("id") or "")[:24], str(body.get("name") or "")[:60]))
 
         # ---- the TV remote (a Samsung TV among the switches; sentinel/engine/samsung_tv.py) ----
         @app.route("/api/tv/<tv_id>")

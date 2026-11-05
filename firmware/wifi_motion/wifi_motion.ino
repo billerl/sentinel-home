@@ -20,12 +20,11 @@
 #include <Wire.h>
 #include <esp_wifi.h>
 #include <esp_mac.h>
-#include <esp_now.h>
 #include "ping/ping_sock.h"
 #include "lwip/ip_addr.h"
 #include "secrets.h"  // #define OTA_PASSWORD "..." (copy secrets.example.h)
 
-#define FW_VERSION "1.1.2"
+#define FW_VERSION "1.2.0"
 #define HELLO_PORT 47301          // UDP broadcast so Sentinel can find the board
 #define PING_INTERVAL_MS 20       // 50 pings/s: each reply carries one CSI reading
 #define WINDOW 50                 // readings per score (~1 s)
@@ -41,69 +40,88 @@ static WiFiUDP udp;
 static String devId, hostName;
 static bool setupMode = false;
 static bool no11b = false;  // connected without 802.11b (see setup())
-static uint8_t routerBssid[6];
 
-// ---- CSI ring buffer (filled in the Wi-Fi task, read in loop) ----
+// ---- links: one per transmitter we measure (filled in the Wi-Fi task, read in loop) ----
+// Link 0 is the router (its replies to our pings); the others are beacon boards
+// (firmware/wifi_motion_beacon), each broadcasting 50 fixed-rate 802.11n frames a second. Each link is a
+// separate line through the house, so each gets its own score. The router link is used only while no beacon
+// is heard: routers fall back to 802.11b on a weak link, which carries no CSI.
+#define MAX_LINKS 4
+#define BEACON_GONE_MS 3000      // a beacon not heard for this long is "not active"
+#define BEACON_FORGET_MS 60000   // ...and after this long it's left out of /status
+
+struct Sample { uint32_t seq; float score; float rate; };
+
+struct Link {
+  uint8_t mac[6];
+  volatile bool used;
+  volatile uint32_t seenMs;   // beacons: last frame with our marker
+  float amp[WINDOW][NSUB];    // per-frame amplitudes, normalised (ring)
+  volatile uint32_t count;    // readings ever
+  volatile int8_t rssi;
+  uint32_t lastCount;
+  Sample history[HISTORY];
+};
+
 static portMUX_TYPE csiMux = portMUX_INITIALIZER_UNLOCKED;
-static float csiAmp[WINDOW][NSUB];
-static volatile uint32_t csiCount = 0;   // total readings ever
-static volatile int8_t lastRssi = 0;
-// Diagnostics for /status: CSI frames from anyone vs from the router, and the router's last frame type.
-static volatile uint32_t csiAll = 0, csiRouter = 0;
-static volatile uint8_t routerSigMode = 0, routerMcs = 0, routerRate = 0;
+static Link links[MAX_LINKS];
+static uint32_t sampleSeq = 0, lastScoreMs = 0;
+// Diagnostics for /status.
+static volatile uint32_t csiAll = 0, csiShort = 0, beaconRaw = 0, linksFull = 0;
+static volatile uint32_t rxB = 0, rxG = 0, rxN = 0;  // what the router sends us: 11b / 11g / 11n frames
 
-// What the router actually sends us (promiscuous counters): 11b / 11g / 11n frames, and how many use STBC.
-static volatile uint32_t rxB = 0, rxG = 0, rxN = 0, rxStbc = 0, csiShort = 0;
+static bool beaconActive(const Link &l) { return l.seenMs && millis() - l.seenMs < BEACON_GONE_MS; }
 
-// A beacon board (firmware/wifi_motion_beacon) broadcasts 50 fixed-rate 802.11n frames a second. While it's
-// heard, readings come from its frames; otherwise from the router's ping replies (fine until the router
-// falls back to 802.11b on a weak link, which carries no CSI).
-static uint8_t beaconMac[6];
-static volatile uint32_t beaconSeenMs = 0, beaconFrames = 0, beaconRaw = 0;
+static bool anyBeaconActive() {
+  for (int i = 1; i < MAX_LINKS; i++) if (links[i].used && beaconActive(links[i])) return true;
+  return false;
+}
 
-static bool beaconActive() { return beaconSeenMs && millis() - beaconSeenMs < 3000; }
+static String linkId(int i) {
+  if (i == 0) return "rtr";
+  char b[8];
+  snprintf(b, sizeof(b), "%02x%02x", links[i].mac[4], links[i].mac[5]);
+  return b;
+}
+
+static void noteBeacon(const uint8_t *mac) {
+  for (int i = 1; i < MAX_LINKS; i++) {
+    if (links[i].used && memcmp(links[i].mac, mac, 6) == 0) { links[i].seenMs = millis(); return; }
+  }
+  for (int i = 1; i < MAX_LINKS; i++) {
+    if (!links[i].used) {
+      memcpy(links[i].mac, mac, 6);
+      links[i].count = links[i].lastCount = 0;
+      links[i].seenMs = millis();
+      links[i].used = true;  // last: the CSI callback only looks at used links
+      return;
+    }
+  }
+  linksFull++;
+}
 
 static void promiscCallback(void *buf, wifi_promiscuous_pkt_type_t type) {
   const wifi_promiscuous_pkt_t *pkt = (const wifi_promiscuous_pkt_t *)buf;
-  // The beacon's ESP-NOW frames are management (action) frames with our marker in the body.
+  // The beacons' ESP-NOW frames are management (action) frames with our marker in the body.
   if (type == WIFI_PKT_MGMT && pkt->rx_ctrl.sig_len > 30 &&
       memmem(pkt->payload + 24, pkt->rx_ctrl.sig_len - 24, "SNTLB1", 6)) {
-    memcpy(beaconMac, pkt->payload + 10, 6);
-    beaconSeenMs = millis();
+    noteBeacon(pkt->payload + 10);
     beaconRaw++;
     return;
   }
-  if (pkt->rx_ctrl.sig_len < 16 || memcmp(pkt->payload + 10, routerBssid, 6) != 0) return;
-  if (pkt->rx_ctrl.sig_mode) {
-    rxN++;
-    if (pkt->rx_ctrl.stbc) rxStbc++;
-  } else if (pkt->rx_ctrl.rate < 8) {
-    rxB++;
-  } else {
-    rxG++;
-  }
-}
-
-static void espnowRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
-  if (len < 6 || memcmp(data, "SNTLB1", 6) != 0) return;
-  memcpy(beaconMac, info->src_addr, 6);
-  beaconSeenMs = millis();
-  beaconFrames++;
+  if (pkt->rx_ctrl.sig_len < 16 || memcmp(pkt->payload + 10, links[0].mac, 6) != 0) return;
+  if (pkt->rx_ctrl.sig_mode) rxN++; else if (pkt->rx_ctrl.rate < 8) rxB++; else rxG++;
 }
 
 static void csiCallback(void *ctx, wifi_csi_info_t *info) {
   if (!info || !info->buf) return;
   if (info->len < 128) { csiShort++; return; }
   csiAll++;
-  if (beaconActive()) {
-    if (memcmp(info->mac, beaconMac, 6) != 0) return;  // only the beacon's frames
-  } else if (memcmp(info->mac, routerBssid, 6) != 0) {
-    return;  // only the router's frames
+  int which = -1;
+  for (int i = 0; i < MAX_LINKS; i++) {
+    if (links[i].used && memcmp(info->mac, links[i].mac, 6) == 0) { which = i; break; }
   }
-  csiRouter++;
-  routerSigMode = info->rx_ctrl.sig_mode;  // 0 = legacy 11a/g, 1 = 11n (HT)
-  routerMcs = info->rx_ctrl.mcs;
-  routerRate = info->rx_ctrl.rate;
+  if (which < 0) return;
   float amp[NSUB];
   int k = 0;
   float sum = 0;
@@ -116,44 +134,45 @@ static void csiCallback(void *ctx, wifi_csi_info_t *info) {
   if (sum <= 0) return;
   // Divide out overall loudness: the radio's automatic gain jumps would otherwise look like motion.
   float mean = sum / NSUB;
+  Link &l = links[which];
   portENTER_CRITICAL(&csiMux);
-  float *slot = csiAmp[csiCount % WINDOW];
+  float *slot = l.amp[l.count % WINDOW];
   for (int i = 0; i < NSUB; i++) slot[i] = amp[i] / mean;
-  csiCount++;
-  lastRssi = info->rx_ctrl.rssi;
+  l.count++;
+  l.rssi = info->rx_ctrl.rssi;
   portEXIT_CRITICAL(&csiMux);
 }
 
 // ---- scores ----
-struct Sample { uint32_t seq; float score; float rate; };
-static Sample history[HISTORY];
-static uint32_t sampleSeq = 0;
-static uint32_t lastCount = 0, lastScoreMs = 0;
-
-static void computeScore() {
+static void computeScores() {
   static float snap[WINDOW][NSUB];
-  uint32_t n;
-  portENTER_CRITICAL(&csiMux);
-  n = csiCount;
-  memcpy(snap, csiAmp, sizeof(snap));
-  portEXIT_CRITICAL(&csiMux);
   uint32_t now = millis();
-  float rate = (n - lastCount) * 1000.0f / max<uint32_t>(1, now - lastScoreMs);
-  lastCount = n;
+  uint32_t elapsed = max<uint32_t>(1, now - lastScoreMs);
   lastScoreMs = now;
-  float score = -1;  // -1 = not enough readings (router not answering?)
-  if (n >= WINDOW && rate > 10) {
-    // Mean over sub-carriers of how much each one wobbled over the window (std dev), x1000.
-    float total = 0;
-    for (int i = 0; i < NSUB; i++) {
-      float s = 0, s2 = 0;
-      for (int w = 0; w < WINDOW; w++) { s += snap[w][i]; s2 += snap[w][i] * snap[w][i]; }
-      float m = s / WINDOW;
-      total += sqrtf(max(0.0f, s2 / WINDOW - m * m));
+  for (int li = 0; li < MAX_LINKS; li++) {
+    Link &l = links[li];
+    if (!l.used) continue;
+    uint32_t n;
+    portENTER_CRITICAL(&csiMux);
+    n = l.count;
+    memcpy(snap, l.amp, sizeof(snap));
+    portEXIT_CRITICAL(&csiMux);
+    float rate = (n - l.lastCount) * 1000.0f / elapsed;
+    l.lastCount = n;
+    float score = -1;  // -1 = not enough readings (transmitter quiet or out of reach)
+    if (n >= WINDOW && rate > 10) {
+      // Mean over sub-carriers of how much each one wobbled over the window (std dev), x1000.
+      float total = 0;
+      for (int i = 0; i < NSUB; i++) {
+        float s = 0, s2 = 0;
+        for (int w = 0; w < WINDOW; w++) { s += snap[w][i]; s2 += snap[w][i] * snap[w][i]; }
+        float m = s / WINDOW;
+        total += sqrtf(max(0.0f, s2 / WINDOW - m * m));
+      }
+      score = total / NSUB * 1000.0f;
     }
-    score = total / NSUB * 1000.0f;
+    l.history[sampleSeq % HISTORY] = {sampleSeq, score, rate};
   }
-  history[sampleSeq % HISTORY] = {sampleSeq, score, rate};
   sampleSeq++;
 }
 
@@ -187,7 +206,8 @@ static void stopPing() {
 }
 
 static void startCsi() {
-  memcpy(routerBssid, WiFi.BSSID(), 6);
+  memcpy(links[0].mac, WiFi.BSSID(), 6);
+  links[0].used = true;
   wifi_csi_config_t cfg = {};
   cfg.lltf_en = true;
   cfg.htltf_en = true;        // the first 128 bytes stay the legacy LTF we score on; these only add more after it
@@ -202,11 +222,6 @@ static void startCsi() {
   esp_wifi_set_promiscuous_filter(&filter);
   esp_wifi_set_promiscuous_rx_cb(promiscCallback);
   esp_wifi_set_promiscuous(true);
-  static bool espnowStarted = false;
-  if (!espnowStarted && esp_now_init() == ESP_OK) {
-    esp_now_register_recv_cb(espnowRecv);
-    espnowStarted = true;
-  }
 }
 
 // ---- battery (MAX17048 fuel gauge on the Feather) ----
@@ -231,10 +246,21 @@ static String batteryJson() {
 static void led(uint8_t r, uint8_t g, uint8_t b) { rgbLedWrite(PIN_NEOPIXEL, r, g, b); }
 
 // ---- normal mode HTTP ----
+static String samplesJson(const Link &l) {
+  String js = "[";
+  uint32_t first = sampleSeq > HISTORY ? sampleSeq - HISTORY : 0;
+  for (uint32_t s = first; s < sampleSeq; s++) {
+    const Sample &x = l.history[s % HISTORY];
+    if (x.seq != s) continue;  // a link that appeared after this tick
+    if (js.length() > 1) js += ",";
+    js += "[" + String(x.seq) + "," + String(x.score, 2) + "," + String(x.rate, 1) + "]";
+  }
+  return js + "]";
+}
+
 static void handleStatus() {
   String js = "{\"id\":\"" + devId + "\",\"host\":\"" + hostName + "\",\"fw\":\"" FW_VERSION "\"";
   js += ",\"uptime_s\":" + String(millis() / 1000);
-  js += ",\"rssi\":" + String((int)lastRssi);
   js += ",\"wifi_rssi\":" + String(WiFi.RSSI());
   js += ",\"channel\":" + String(WiFi.channel());
   uint32_t pingSent = 0, pingReplies = 0;
@@ -242,21 +268,25 @@ static void handleStatus() {
     esp_ping_get_profile(pingHandle, ESP_PING_PROF_REQUEST, &pingSent, sizeof(pingSent));
     esp_ping_get_profile(pingHandle, ESP_PING_PROF_REPLY, &pingReplies, sizeof(pingReplies));
   }
-  js += ",\"diag\":{\"csi_all\":" + String(csiAll) + ",\"csi_router\":" + String(csiRouter) +
-        ",\"sig_mode\":" + String(routerSigMode) + ",\"mcs\":" + String(routerMcs) +
-        ",\"rate\":" + String(routerRate) + ",\"ping_sent\":" + String(pingSent) +
-        ",\"ping_replies\":" + String(pingReplies) + ",\"no11b\":" + String(no11b ? "true" : "false") +
-        ",\"rx_b\":" + String(rxB) + ",\"rx_g\":" + String(rxG) + ",\"rx_n\":" + String(rxN) +
-        ",\"rx_stbc\":" + String(rxStbc) + ",\"csi_short\":" + String(csiShort) +
-        ",\"beacon_frames\":" + String(beaconFrames) + ",\"beacon_raw\":" + String(beaconRaw) + ",\"reset_reason\":" + String((int)esp_reset_reason()) + "}";
-  js += ",\"source\":\"" + String(beaconActive() ? "beacon" : "router") + "\"";
+  js += ",\"diag\":{\"csi_all\":" + String(csiAll) + ",\"csi_short\":" + String(csiShort) +
+        ",\"beacon_raw\":" + String(beaconRaw) + ",\"links_full\":" + String(linksFull) +
+        ",\"ping_sent\":" + String(pingSent) + ",\"ping_replies\":" + String(pingReplies) +
+        ",\"no11b\":" + String(no11b ? "true" : "false") + ",\"rx_b\":" + String(rxB) +
+        ",\"rx_g\":" + String(rxG) + ",\"rx_n\":" + String(rxN) +
+        ",\"reset_reason\":" + String((int)esp_reset_reason()) + "}";
   js += ",\"battery\":" + batteryJson();
-  js += ",\"samples\":[";
-  uint32_t first = sampleSeq > HISTORY ? sampleSeq - HISTORY : 0;
-  for (uint32_t s = first; s < sampleSeq; s++) {
-    const Sample &x = history[s % HISTORY];
-    if (s > first) js += ",";
-    js += "[" + String(x.seq) + "," + String(x.score, 2) + "," + String(x.rate, 1) + "]";
+  // One entry per line being measured: the beacons heard in the last minute, or the router when there are none.
+  bool beacons = anyBeaconActive();
+  js += ",\"links\":[";
+  bool firstLink = true;
+  for (int i = 0; i < MAX_LINKS; i++) {
+    const Link &l = links[i];
+    if (!l.used) continue;
+    if (i == 0 ? beacons : millis() - l.seenMs > BEACON_FORGET_MS) continue;
+    if (!firstLink) js += ",";
+    firstLink = false;
+    js += "{\"id\":\"" + linkId(i) + "\",\"source\":\"" + String(i ? "beacon" : "router") + "\",\"rssi\":" +
+          String((int)l.rssi) + ",\"samples\":" + samplesJson(l) + "}";
   }
   js += "]}";
   server.send(200, "application/json", js);
@@ -424,7 +454,7 @@ void loop() {
   server.handleClient();
   checkBootButton();
   uint32_t now = millis();
-  if (now - lastScoreMs >= 250) computeScore();
+  if (now - lastScoreMs >= 250) computeScores();
   if (now - lastLink > 2000) {
     lastLink = now;
     if (WiFi.status() != WL_CONNECTED) {
@@ -432,9 +462,9 @@ void loop() {
     } else if (!pingHandle) {
       startCsi();  // reconnected, maybe to a different access point
       startPing();
-    } else if (beaconActive() != pingPaused) {
+    } else if (anyBeaconActive() != pingPaused) {
       // The beacon's frames are all we need: stop pinging the router while it's heard (less Wi-Fi traffic).
-      pingPaused = beaconActive();
+      pingPaused = anyBeaconActive();
       if (pingPaused) esp_ping_stop(pingHandle); else esp_ping_start(pingHandle);
     }
   }

@@ -41,6 +41,9 @@ SERIES_SECONDS = 120  # what the web page's live chart shows
 NAME_MAX = 30
 NAME_OK = re.compile(r"^[\w '&().\-]{1,%d}$" % NAME_MAX)
 ID_OK = re.compile(r"^[0-9a-f]{4,12}$")
+LINK_OK = re.compile(r"^[0-9a-z]{2,6}$")
+LINE_ID_OK = re.compile(r"^[0-9a-f]{4,12}-[0-9a-z]{2,6}$")
+SHOW_AWAY_SECONDS = 10 * 60  # a line not heard from for this long leaves the page (its name is kept)
 
 # First tuning (one sensor + beacon across a living room, 2026-11): still room ~0.92-1.05x its quiet level
 # (single spikes to 1.2x, which the 1 s median removes); someone pacing ~1.2-1.5x, peaks 2-2.5x. Replaying
@@ -124,17 +127,33 @@ class MotionJudge:
         return None
 
 
-class Sensor:
-    def __init__(self, sensor_id: str, ip: str = "", name: str = "", host: str = "", fw: str = "") -> None:
-        self.id, self.ip, self.host, self.fw = sensor_id, ip, host, fw
-        self.name = name or f"Wi-Fi sensor {sensor_id}"
-        self.judge = MotionJudge()
-        self.last_seq: Optional[int] = None
+class Board:
+    """One sensor board on the network."""
+
+    def __init__(self, board_id: str, ip: str = "", host: str = "", fw: str = "") -> None:
+        self.id, self.ip, self.host, self.fw = board_id, ip, host, fw
         self.last_seen = 0.0
         self.rssi: Optional[int] = None
-        self.rate: Optional[float] = None
         self.battery: Optional[Dict[str, float]] = None
-        self.source = ""  # what the board measures: "beacon" (a second board) or "router" (ping replies)
+
+
+class Line:
+    """One radio path a board measures (to a beacon board, or to the router): what the page calls a sensor.
+
+    Each line watches the space along its own straight path, so each has its own quiet level and motion."""
+
+    def __init__(self, board: Board, link: str, source: str, name: str = "") -> None:
+        self.board, self.link, self.source = board, link, source
+        self.id = f"{board.id}-{link}"
+        if not name:
+            name = (f"Wi-Fi sensor {board.id} (router)" if source == "router"
+                    else f"Wi-Fi sensor {board.id} to {link}")
+        self.name = name
+        self.judge = MotionJudge()
+        self.last_seq: Optional[int] = None
+        self.last_data = 0.0
+        self.rssi: Optional[int] = None
+        self.rate: Optional[float] = None
         self.series: Deque[Tuple[float, float]] = deque(maxlen=SERIES_SECONDS * 4)
 
 
@@ -150,6 +169,26 @@ def _clean_name(name: Any) -> str:
     return re.sub(r"\s+", " ", name).strip() if isinstance(name, str) else ""
 
 
+def _status_links(status: Dict[str, Any]) -> List[Tuple[str, str, Any, List[list]]]:
+    """[(link id, source, rssi, sample rows)] from a board's /status; older firmware had one top-level list."""
+    raw = status.get("links")
+    if not isinstance(raw, list):
+        raw = [{"id": "rtr", "source": status.get("source") or "router", "rssi": status.get("rssi"),
+                "samples": status.get("samples")}]
+    out = []
+    for link in raw:
+        if not isinstance(link, dict) or not isinstance(link.get("samples"), list):
+            continue
+        lid = str(link.get("id") or "").lower()
+        source = link.get("source") if link.get("source") in ("router", "beacon") else ""
+        if not LINK_OK.match(lid) or not source:
+            continue
+        rows = [r for r in link["samples"] if isinstance(r, list) and len(r) >= 3
+                and all(isinstance(v, (int, float)) for v in r[:3])]
+        out.append((lid, source, link.get("rssi"), rows))
+    return out
+
+
 class WifiMotion:
     """Finds the boards, polls them, judges motion, logs it, and serves the Sensors page."""
 
@@ -161,27 +200,36 @@ class WifiMotion:
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._threads: List[threading.Thread] = []
-        self._sensors: Dict[str, Sensor] = {}
+        self._boards: Dict[str, Board] = {}
+        self._lines: Dict[str, Line] = {}
+        self._names: Dict[str, str] = {}  # line id -> name the user gave it (kept while a line is away)
         self._csv_day = ""
         self._csv_file = None
         self._csv = None
         self._load()
 
-    # ---- known boards (id -> last address and name) ----
+    # ---- known boards (id -> last address) and line names ----
     def _load(self) -> None:
         try:
             with open(self.path) as f:
                 data = json.load(f)
         except (OSError, ValueError):
             return
-        for sid, info in (data if isinstance(data, dict) else {}).items():
-            if isinstance(sid, str) and ID_OK.match(sid) and isinstance(info, dict):
+        if not isinstance(data, dict):
+            return
+        boards = data.get("boards") if isinstance(data.get("boards"), dict) else data  # first format: boards only
+        for bid, info in boards.items():
+            if isinstance(bid, str) and ID_OK.match(bid) and isinstance(info, dict):
                 ip = info.get("ip") if _private_ipv4(str(info.get("ip"))) else ""
-                self._sensors[sid] = Sensor(sid, ip, _clean_name(info.get("name")), _clean_name(info.get("host")),
-                                            _clean_name(info.get("fw")))
+                self._boards[bid] = Board(bid, ip, _clean_name(info.get("host")), _clean_name(info.get("fw")))
+        names = data.get("names") if isinstance(data.get("names"), dict) else {}
+        for lid, name in names.items():
+            if isinstance(lid, str) and LINE_ID_OK.match(lid) and NAME_OK.match(_clean_name(name)):
+                self._names[lid] = _clean_name(name)
 
     def _save(self) -> None:
-        data = {s.id: {"ip": s.ip, "name": s.name, "host": s.host, "fw": s.fw} for s in self._sensors.values()}
+        data = {"boards": {b.id: {"ip": b.ip, "host": b.host, "fw": b.fw} for b in self._boards.values()},
+                "names": self._names}
         tmp = self.path + ".tmp"
         with open(tmp, "w") as f:
             json.dump(data, f, indent=1)
@@ -195,20 +243,21 @@ class WifiMotion:
             return False
         if not isinstance(msg, dict) or msg.get("sentinel_sensor") != "wifi_motion":
             return False
-        sid = str(msg.get("id") or "").lower()
-        if not ID_OK.match(sid) or not _private_ipv4(source_ip):
+        bid = str(msg.get("id") or "").lower()
+        if not ID_OK.match(bid) or not _private_ipv4(source_ip):
             return False
         with self._lock:
-            sensor = self._sensors.get(sid)
-            new = sensor is None
+            board = self._boards.get(bid)
+            new = board is None
             if new:
-                sensor = self._sensors[sid] = Sensor(sid)
-            changed = new or sensor.ip != source_ip or sensor.fw != _clean_name(msg.get("fw"))
-            sensor.ip, sensor.host, sensor.fw = source_ip, _clean_name(msg.get("host"))[:40], _clean_name(msg.get("fw"))[:16]
+                board = self._boards[bid] = Board(bid)
+            fw = _clean_name(msg.get("fw"))[:16]
+            changed = new or board.ip != source_ip or board.fw != fw
+            board.ip, board.host, board.fw = source_ip, _clean_name(msg.get("host"))[:40], fw
             if changed:
                 self._save()
         if new:
-            app_logger.log("info", "wifi_sensor_found", sensor=sid, ip=source_ip, fw=sensor.fw,
+            app_logger.log("info", "wifi_sensor_found", sensor=bid, ip=source_ip, fw=fw,
                            component="wifi_motion", action="hello")
         return True
 
@@ -218,72 +267,73 @@ class WifiMotion:
         with urllib.request.urlopen(f"http://{ip}/status", timeout=2.0) as r:
             return json.loads(r.read(64 * 1024).decode("utf-8"))
 
-    def poll(self, sensor: Sensor, now: Optional[float] = None) -> None:
-        if not sensor.ip:
+    def poll(self, board: Board, now: Optional[float] = None) -> None:
+        if not board.ip:
             return
         try:
-            status = self._fetch(sensor.ip)
+            status = self._fetch(board.ip)
         except (OSError, ValueError):
             return
-        now = time.time() if now is None else now
-        samples = status.get("samples") if isinstance(status, dict) else None
-        if not isinstance(samples, list):
+        if not isinstance(status, dict):
             return
+        now = time.time() if now is None else now
         with self._lock:
-            was_online = now - sensor.last_seen < OFFLINE_AFTER
-            sensor.last_seen = now
-            if not was_online:
-                app_logger.log("info", "wifi_sensor_online", sensor=sensor.id, ip=sensor.ip,
+            if now - board.last_seen >= OFFLINE_AFTER:
+                app_logger.log("info", "wifi_sensor_online", sensor=board.id, ip=board.ip,
                                component="wifi_motion", action="poll")
+            board.last_seen = now
             rssi = status.get("wifi_rssi")
-            sensor.rssi = int(rssi) if isinstance(rssi, (int, float)) else None
+            board.rssi = int(rssi) if isinstance(rssi, (int, float)) else None
             batt = status.get("battery")
-            sensor.battery = ({"v": float(batt["v"]), "pct": float(batt["pct"])}
-                              if isinstance(batt, dict) and isinstance(batt.get("v"), (int, float))
-                              and isinstance(batt.get("pct"), (int, float)) else None)
-            source = status.get("source") if isinstance(status.get("source"), str) else ""
-            if source != sensor.source:
-                if sensor.source:  # a different signal path has a different quiet level: learn it afresh
-                    sensor.judge = MotionJudge()
-                    sensor.series.clear()
-                sensor.source = source[:10]
-            rows = [s for s in samples if isinstance(s, list) and len(s) >= 3
-                    and all(isinstance(v, (int, float)) for v in s[:3])]
-            if rows and sensor.last_seq is not None and rows[-1][0] < sensor.last_seq:
-                # The board restarted: its counter began again. Restarts mostly mean it was unplugged and moved
-                # (or updated), so learn the room afresh rather than judging a new spot by the old one's quiet level.
-                sensor.last_seq = None
-                sensor.judge = MotionJudge()
-                sensor.series.clear()
-            fresh = [r for r in rows if sensor.last_seq is None or r[0] > sensor.last_seq]
-            if not fresh:
-                return
-            sensor.last_seq = int(fresh[-1][0])
-            # The board reports 4 per second, newest last; spread them back over the time they cover.
-            for i, (seq, score, rate) in enumerate(fresh):
-                ts = now - (len(fresh) - 1 - i) * 0.25
-                sensor.rate = float(rate)
-                self._record(ts, sensor, float(score), float(rate))
-                if score >= 0:
-                    sensor.series.append((ts, float(score)))
-                change = sensor.judge.feed(ts, float(score))
-                if change == "started":
-                    app_logger.log("info", "wifi_motion_started", sensor=sensor.id, name=sensor.name,
-                                   score=round(sensor.judge.smoothed, 2),
-                                   baseline=round(sensor.judge.baseline or 0, 2),
-                                   component="wifi_motion", action="judge")
-                elif change == "ended":
-                    app_logger.log("info", "wifi_motion_ended", sensor=sensor.id, name=sensor.name,
-                                   seconds=round(sensor.judge.last_motion - sensor.judge.started, 1),
-                                   peak=round(sensor.judge.peak, 2), component="wifi_motion", action="judge")
+            board.battery = ({"v": float(batt["v"]), "pct": float(batt["pct"])}
+                             if isinstance(batt, dict) and isinstance(batt.get("v"), (int, float))
+                             and isinstance(batt.get("pct"), (int, float)) else None)
+            for lid, source, link_rssi, rows in _status_links(status):
+                line_id = f"{board.id}-{lid}"
+                line = self._lines.get(line_id)
+                if line is None:
+                    line = self._lines[line_id] = Line(board, lid, source, self._names.get(line_id, ""))
+                    app_logger.log("info", "wifi_line_found", sensor=line_id, source=source,
+                                   component="wifi_motion", action="poll")
+                line.rssi = int(link_rssi) if isinstance(link_rssi, (int, float)) else None
+                self._take(line, rows, now)
             if self._csv_file:
                 try:
                     self._csv_file.flush()
                 except OSError:
                     pass
 
+    def _take(self, line: Line, rows: List[list], now: float) -> None:
+        if rows and line.last_seq is not None and rows[-1][0] < line.last_seq:
+            # The board restarted: its counter began again. Restarts mostly mean it was unplugged and moved
+            # (or updated), so learn the room afresh rather than judging a new spot by the old one's quiet level.
+            line.last_seq = None
+            line.judge = MotionJudge()
+            line.series.clear()
+        fresh = [r for r in rows if line.last_seq is None or r[0] > line.last_seq]
+        if not fresh:
+            return
+        line.last_seq = int(fresh[-1][0])
+        line.last_data = now
+        # The board reports 4 per second, newest last; spread them back over the time they cover.
+        for i, (seq, score, rate) in enumerate(r[:3] for r in fresh):
+            ts = now - (len(fresh) - 1 - i) * 0.25
+            line.rate = float(rate)
+            self._record(ts, line, float(score), float(rate))
+            if score >= 0:
+                line.series.append((ts, float(score)))
+            change = line.judge.feed(ts, float(score))
+            if change == "started":
+                app_logger.log("info", "wifi_motion_started", sensor=line.id, name=line.name,
+                               score=round(line.judge.smoothed, 2), baseline=round(line.judge.baseline or 0, 2),
+                               component="wifi_motion", action="judge")
+            elif change == "ended":
+                app_logger.log("info", "wifi_motion_ended", sensor=line.id, name=line.name,
+                               seconds=round(line.judge.last_motion - line.judge.started, 1),
+                               peak=round(line.judge.peak, 2), component="wifi_motion", action="judge")
+
     # ---- daily CSV of every score (for tuning) ----
-    def _record(self, ts: float, sensor: Sensor, score: float, rate: float) -> None:
+    def _record(self, ts: float, line: Line, score: float, rate: float) -> None:
         day = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
         try:
             if day != self._csv_day:
@@ -298,8 +348,8 @@ class WifiMotion:
                     self._csv.writerow(["time", "sensor", "score", "rate", "rssi"])
                 self._csv_day = day
                 self._prune_logs()
-            self._csv.writerow([f"{ts:.2f}", sensor.id, f"{score:.2f}", f"{rate:.1f}",
-                                sensor.rssi if sensor.rssi is not None else ""])
+            self._csv.writerow([f"{ts:.2f}", line.id, f"{score:.2f}", f"{rate:.1f}",
+                                line.rssi if line.rssi is not None else ""])
         except OSError:
             pass
 
@@ -349,38 +399,41 @@ class WifiMotion:
     def _poll_loop(self) -> None:
         while not self._stop.wait(POLL_SECONDS):
             with self._lock:
-                sensors = list(self._sensors.values())
-            for sensor in sensors:
-                self.poll(sensor)
+                boards = list(self._boards.values())
+            for board in boards:
+                self.poll(board)
 
     # ---- the web page and questions ----
-    def rename(self, sensor_id: str, name: str) -> Tuple[bool, str]:
+    def rename(self, line_id: str, name: str) -> Tuple[bool, str]:
         name = _clean_name(name)
         if not NAME_OK.match(name):
             return False, "Use up to 30 letters, numbers and spaces."
         with self._lock:
-            sensor = self._sensors.get(sensor_id)
-            if sensor is None:
+            line = self._lines.get(line_id)
+            if line is None:
                 return False, "That sensor isn't known."
-            sensor.name = name
+            line.name = self._names[line_id] = name
             self._save()
         return True, "renamed"
 
     def view(self, now: Optional[float] = None) -> Dict[str, Any]:
+        """Lines heard from in the last SHOW_AWAY_SECONDS (a router line goes quiet while beacons are heard)."""
         now = time.time() if now is None else now
         out = []
         with self._lock:
-            for s in self._sensors.values():
-                j = s.judge
+            for s in sorted(self._lines.values(), key=lambda line: line.id):
+                if now - s.last_data > SHOW_AWAY_SECONDS:
+                    continue
+                j, b = s.judge, s.board
                 out.append({
-                    "id": s.id, "name": s.name, "ip": s.ip, "fw": s.fw,
-                    "online": now - s.last_seen < OFFLINE_AFTER,
+                    "id": s.id, "name": s.name, "ip": b.ip, "fw": b.fw,
+                    "online": now - s.last_data < OFFLINE_AFTER,
                     "motion": j.motion, "last_motion": j.last_motion or None,
                     "score": None if j.smoothed is None else round(j.smoothed, 2),
                     "baseline": None if j.baseline is None else round(j.baseline, 2),
                     "threshold": None if j.threshold() is None else round(j.threshold(), 2),
                     "learning": j.baseline is None,
-                    "rssi": s.rssi, "rate": s.rate, "battery": s.battery, "source": s.source,
+                    "rssi": b.rssi, "rate": s.rate, "battery": b.battery, "source": s.source,
                     "series": [[round(t - now, 2), v] for t, v in s.series],
                 })
         return {"sensors": out}
