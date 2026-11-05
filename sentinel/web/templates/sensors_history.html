@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <meta name="theme-color" content="#001525">
+  <title>Sentinel — Movement history</title>
+  <style>
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; }
+    a { color: #00ffff; }
+    [hidden] { display: none !important; }
+    header { position: sticky; top: 0; z-index: 10; background: #1a1a1a; border-bottom: 1px solid #033; }
+    .bar { display: flex; align-items: center; gap: 12px; padding: 0 1rem; height: 44px; }
+    .bar a { text-decoration: none; font-size: 0.85rem; }
+    h1 { font-size: 0.95rem; margin: 0; flex: 1; color: #00ffff; }
+    main { max-width: 860px; margin: 0 auto; padding: 14px 16px 60px; }
+    .intro { font-size: 0.88rem; line-height: 1.6; color: #9cc; margin: 4px 0 14px; }
+    button {
+      background: rgba(0,255,255,0.12); color: #00ffff; border: 1px solid #00a8a8; padding: 7px 12px;
+      border-radius: 8px; cursor: pointer; font: inherit; font-size: 0.85rem;
+    }
+    button.ghost { background: none; border-color: #1d3a44; color: #9cc; }
+    button:focus-visible, input:focus-visible { outline: 3px solid #fff; outline-offset: 1px; }
+    .card { background: linear-gradient(180deg, #0c151c, #091015); border: 1px solid #16303a; border-radius: 14px;
+            padding: 14px 16px; margin-bottom: 12px; transition: border-color 0.2s; }
+    .card.moving { border-color: #ffc94d; box-shadow: 0 0 18px -8px #ffc94d; }
+    .card.offline { opacity: 0.6; }
+    .top { display: flex; align-items: center; gap: 12px; }
+    .name { flex: 1; min-width: 0; font-weight: 600; color: #fff; font-size: 1rem; }
+    .state { font-size: 1.5rem; font-weight: 700; margin: 10px 0 2px; }
+    .state.moving { color: #ffc94d; }
+    .state.still { color: #7fe0a0; }
+    .state.dim { color: #8fb6c4; font-size: 1.05rem; font-weight: 600; }
+    .meta { font-size: 0.78rem; color: #6f97a5; display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; }
+    canvas { width: 100%; height: 150px; display: block; margin-top: 10px; background: #050b0f; border-radius: 8px; }
+    .legend { font-size: 0.75rem; color: #6f97a5; margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+    .legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 5px; }
+    .empty { text-align: center; padding: 34px 16px; border: 1px dashed #1d3a44; border-radius: 14px; color: #8fb6c4; line-height: 1.6; }
+    .rename { display: flex; gap: 8px; margin-top: 10px; }
+    h2 { font-size: 0.95rem; color: #00ffff; margin: 26px 0 6px; }
+    .board { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 0; border-top: 1px solid #16303a; }
+    .board .bname { flex: 1; min-width: 140px; color: #fff; font-weight: 600; }
+    .board .bname small { display: block; font-weight: 400; color: #6f97a5; font-size: 0.75rem; margin-top: 2px; }
+    .board .rename { flex-basis: 100%; margin-top: 0; }
+    .adjust { margin-top: 10px; padding: 12px; border: 1px solid #1d3a44; border-radius: 10px; background: #050b0f; }
+    .adjust label { display: block; font-size: 0.9rem; color: #fff; }
+    .adjust input[type=range] { width: 100%; margin: 10px 0 2px; accent-color: #ffc94d; }
+    .adjust .ends { display: flex; justify-content: space-between; font-size: 0.75rem; color: #6f97a5; }
+    .adjust p { font-size: 0.8rem; color: #9cc; line-height: 1.5; margin: 10px 0; }
+    .adjust .buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+    .rename input { flex: 1; min-width: 0; font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid #1d3a44;
+                    background: #050b0f; color: #fff; }
+      .daynav { display: flex; align-items: center; gap: 10px; margin: 6px 0 14px; }
+    .daynav .day { flex: 1; text-align: center; color: #fff; font-weight: 600; }
+    .row { margin-bottom: 12px; }
+    .row .rname { font-size: 0.85rem; color: #cfe; margin-bottom: 4px; }
+    .track { position: relative; height: 22px; background: #050b0f; border: 1px solid #16303a; border-radius: 6px; overflow: hidden; }
+    .track i { position: absolute; top: 2px; bottom: 2px; min-width: 3px; background: #ffc94d; border-radius: 2px; }
+    .track i.now { background: #ff7ad9; }
+    .track .grid { position: absolute; top: 0; bottom: 0; width: 1px; background: #16303a; }
+    .track .nowline { position: absolute; top: 0; bottom: 0; width: 2px; background: #00ffff; }
+    .hours { position: relative; height: 16px; font-size: 0.7rem; color: #6f97a5; margin-bottom: 18px; }
+    .hours span { position: absolute; transform: translateX(-50%); }
+    .hours span:first-child { transform: none; }
+    .hours span:last-child { transform: translateX(-100%); }
+    .list { border-top: 1px solid #16303a; }
+    .ev { display: flex; gap: 12px; padding: 9px 2px; border-bottom: 1px solid #0f222a; font-size: 0.9rem; }
+    .ev .t { width: 74px; flex: none; color: #fff; }
+    .ev .n { flex: 1; min-width: 0; }
+    .ev .d { color: #6f97a5; flex: none; }
+    .empty { text-align: center; padding: 28px 16px; border: 1px dashed #1d3a44; border-radius: 14px; color: #8fb6c4; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <a href="{{ url_for('sensors_page') }}">← Sensors</a>
+      <h1>Movement history</h1>
+      <a href="{{ url_for('routines_page') }}">Routines</a>
+    </div>
+  </header>
+
+  <main>
+    <p class="intro">When the Wi-Fi sensors noticed movement inside the house. Each bar is one stretch of movement on
+      that line; movement less than 2 minutes apart counts as one. Pets set the sensors off too.</p>
+    <div class="daynav">
+      <button class="ghost" type="button" onclick="step(-1)" aria-label="Day before">‹</button>
+      <div class="day" id="day"></div>
+      <button class="ghost" type="button" id="next" onclick="step(1)" aria-label="Day after">›</button>
+    </div>
+    <div id="rows"></div>
+    <div class="list" id="list"></div>
+  </main>
+
+  <script>
+    var day = null;  // "YYYY-MM-DD"; null = today
+
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+      });
+    }
+    function clock(ts) {
+      var d = new Date(ts * 1000), h = d.getHours();
+      return (h % 12 || 12) + ":" + String(d.getMinutes()).padStart(2, "0") + (h < 12 ? " am" : " pm");
+    }
+    function ymd(d) { return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+    function step(n) {
+      var d = day ? new Date(day + "T12:00:00") : new Date();
+      d.setDate(d.getDate() + n);
+      day = ymd(d) === ymd(new Date()) ? null : ymd(d);
+      load();
+    }
+    function strength(peak) { return peak < 1.8 ? "small" : peak < 3 ? "clear" : "big"; }
+
+    async function load() {
+      try {
+        var r = await fetch("/api/wifi_motion/events" + (day ? "?day=" + day : ""));
+        if (r.status === 401) { location.href = "/login"; return; }
+        var data = await r.json();
+      } catch (e) { return; }
+      var today = !day;
+      var label = new Date(data.start * 1000).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+      document.getElementById("day").textContent = today ? "Today" : label;
+      document.getElementById("next").disabled = today;
+      var span = data.end - data.start;
+      function pct(ts) { return Math.max(0, Math.min(100, (ts - data.start) / span * 100)); }
+      var names = {};
+      data.paths.forEach(function (p) { names[p.id] = p.name; });
+      data.events.forEach(function (e) { if (!names[e.path]) names[e.path] = e.name; });
+      var ids = Object.keys(names).sort(function (a, b) { return names[a].localeCompare(names[b]); });
+      var grid = [6, 12, 18].map(function (h) { return '<span class="grid" style="left:' + (h / 24 * 100) + '%"></span>'; }).join("");
+      var nowline = today ? '<span class="nowline" style="left:' + pct(data.now) + '%"></span>' : "";
+      var rows = ids.map(function (id) {
+        var bars = data.events.filter(function (e) { return e.path === id; }).map(function (e) {
+          var a = pct(e.start), b = pct(e.end);
+          return '<i class="' + (e.ongoing ? "now" : "") + '" style="left:' + a + '%;width:' + (b - a) + '%" title="' +
+            esc(clock(e.start) + " – " + clock(e.end)) + '"></i>';
+        }).join("");
+        return '<div class="row"><div class="rname">' + esc(names[id]) + '</div><div class="track">' + grid + bars + nowline + '</div></div>';
+      }).join("");
+      document.getElementById("rows").innerHTML = ids.length ? rows +
+        '<div class="hours"><span style="left:0">12 am</span><span style="left:25%">6 am</span><span style="left:50%">noon</span>' +
+        '<span style="left:75%">6 pm</span><span style="left:100%">12 am</span></div>' : "";
+      var evs = data.events.slice().reverse();
+      document.getElementById("list").innerHTML = evs.length ? evs.map(function (e) {
+        var mins = Math.round((e.end - e.start) / 60);
+        var how = e.ongoing ? "moving now" : (mins < 1 ? "a moment" : mins + " min") + ", " + strength(e.peak);
+        return '<div class="ev"><span class="t">' + clock(e.start) + '</span><span class="n">' + esc(e.name) +
+          '</span><span class="d">' + esc(how) + '</span></div>';
+      }).join("") : '<div class="empty">No movement recorded ' + (today ? "today yet" : "that day") + '.</div>';
+    }
+
+    load();
+    setInterval(function () { if (!day) load(); }, 30000);
+  </script>
+</body>
+</html>

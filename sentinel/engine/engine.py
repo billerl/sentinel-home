@@ -376,7 +376,8 @@ class Engine:
             from sentinel.engine.questions import household_question
 
             return (household_question(text, self.household.vehicles()) is not None
-                    or self.location_question(text) is not None)
+                    or self.location_question(text) is not None
+                    or self._indoor_question(text) is not None)
 
         self.telegram.question_filter = _household_filter
         self.telegram.location_handler = self._on_telegram_pin
@@ -685,6 +686,10 @@ class Engine:
                     component="engine", action="command_loop",
                 )
 
+    def _indoor_question(self, text: str):
+        """Movement inside the house (the Wi-Fi sensors), unless a camera is named."""
+        return self.wifi_motion.indoor_question(text, [p.display_name for p in self.cameras.values()])
+
     def answer_question(self, chat_id: str, text: str) -> None:
         """Reply to 'did anyone come by?'-style questions from the event history."""
         from sentinel.engine.questions import _fmt_clock, household_question
@@ -703,6 +708,10 @@ class Engine:
             self.telegram.reply_to_chat(chat_id, self.answer_household_question(hq))
             app_logger.log("info", "question_answered", kind="household_" + hq.kind, component="engine",
                            action="answer_question")
+            return
+        if self._indoor_question(text) is not None:
+            self.telegram.reply_to_chat(chat_id, self.wifi_motion.answer(text))
+            app_logger.log("info", "question_answered", kind="indoor", component="engine", action="answer_question")
             return
         reply, photos = self.event_question_reply(text)
         self.telegram.reply_to_chat(chat_id, reply)
@@ -997,7 +1006,7 @@ class Engine:
         reminders = "\n".join(f"{r.id}. {when_words(r.due, now)}: {r.text}" for r in self.reminders.pending()[:20])
         return build_context(now, events, cameras, home, self.household.vehicles(), weather,
                              self.telegram._commands_help_text(), reminders, self.switches.summary(),
-                             self._routines_context())
+                             self._routines_context(), self.wifi_motion.context(now))
 
     def _switch_reply(self, chat_id: str, text: str) -> None:
         said = self.switches.command(text, source="telegram")
@@ -1204,6 +1213,8 @@ class Engine:
         hq = None if ROUTINE_REQUEST.search(low) else household_question(low, self.household.vehicles())
         if hq is not None:
             return VoiceReply(to_speech(self.answer_household_question(hq)))
+        if not ROUTINE_REQUEST.search(low) and self._indoor_question(low) is not None:
+            return VoiceReply(to_speech(self.wifi_motion.answer(low)))
         if is_question(low) and not ROUTINE_REQUEST.search(low):
             return VoiceReply(to_speech(self.event_question_reply(low)[0]))
         if doubtful:

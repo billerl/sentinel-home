@@ -70,6 +70,7 @@ class TelegramNotifier:
             "- Access — how to reach Sentinel remotely (web link, Tailscale, Remote Desktop)\n"
             "- Videos <when> — send recorded clips, e.g. Videos last 2 hours, Videos 2pm-4pm people\n"
             "- Ask in plain words — Did anyone come by? Any deliveries today? What happened last night?\n"
+            "- Movement inside (Wi-Fi sensors) — Any movement inside today? Anyone in the living room this morning?\n"
             "- Family (phones with OwnTracks) — Where is Elizabeth? Who's home? Is Mom at work? When did Ben get to school?\n"
             "- Send a 📍 location pin, then a name, to add a place (home, school, the salon)\n"
             "- Help — this message\n\n"

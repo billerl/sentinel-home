@@ -208,6 +208,43 @@ class SensorsTest(unittest.TestCase):
         self.assertAlmostEqual(self.wm.last_motion("8d24-beb4"), NOW + 2, delta=1)
         self.assertEqual(self.wm.last_motion("ffff-0000"), 0.0)
 
+    def test_movement_history_and_questions(self):
+        b = self._board()
+        self.replies["192.168.1.77"] = status(("beb4", "beacon", [[i, 40.0 + (i % 3), 48.0] for i in range(600)]))
+        self.wm.poll(b, now=NOW)
+        self.wm.rename("8d24-beb4", "Living room")
+
+        def walk(seq, t):  # 2 s of walking
+            self.replies["192.168.1.77"] = status(("beb4", "beacon", [[seq + i, 120.0, 48.0] for i in range(8)]))
+            self.wm.poll(b, now=t)
+
+        walk(600, NOW + 10)
+        walk(608, NOW + 70)  # a minute later: the same stretch
+        ongoing = self.wm.events(NOW - 3600, NOW + 3600, now=NOW + 71)
+        self.assertEqual(len(ongoing), 1)
+        self.assertTrue(ongoing[0]["ongoing"])
+        self.wm.close_quiet_episodes(now=NOW + 300)
+        walk(616, NOW + 400)  # later on: a new stretch
+        self.wm.close_quiet_episodes(now=NOW + 600)
+        evs = self.wm.events(NOW - 3600, NOW + 3600, now=NOW + 600)
+        self.assertEqual([round(e["end"] - e["start"]) for e in evs], [61, 2])
+        self.assertEqual(evs[0]["name"], "Living room")
+        self.assertGreater(evs[0]["peak"], 2.5)
+        self.assertEqual(self.wm.events(NOW + 3600, NOW + 7200), [])
+        # questions
+        self.assertEqual(self.wm.indoor_question("any movement inside today?"), [])
+        self.assertEqual(self.wm.indoor_question("was anyone in the living room?"), ["8d24-beb4"])
+        self.assertIsNone(self.wm.indoor_question("any movement on the back yard camera?"))
+        self.assertIsNone(self.wm.indoor_question("any movement at the Garage?", ["Garage"]))
+        self.assertIsNone(self.wm.indoor_question("did anyone come by?"))
+        reply = self.wm.answer("any movement in the living room in the last 2 hours?", now=NOW + 600)
+        self.assertIn("Movement in Living room in the last 2 hours", reply)
+        self.assertEqual(reply.count("\n- "), 2)
+        self.assertIn("No movement in the house in the last 2 minutes", self.wm.answer("any movement in the last 2 minutes?", now=NOW + 3600))
+        self.assertIn("Living room", self.wm.context(now=NOW + 600))
+        again = WifiMotion(self.dir)  # kept on disk
+        self.assertEqual(len(again.events(NOW - 3600, NOW + 3600, now=NOW + 600)), 2)
+
     def test_poll_takes_each_score_once_and_survives_a_restart(self):
         b = self._board()
         self.replies["192.168.1.77"] = status(("df1c", "beacon", [[10, 2.5, 49.0], [11, 2.6, 50.0]]),

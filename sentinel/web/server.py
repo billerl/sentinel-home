@@ -765,6 +765,31 @@ class WebServer:
                 return redir
             return render_template("sensors.html")
 
+        @app.route("/sensors/history")
+        def sensors_history_page():
+            redir = _require_session()
+            if redir:
+                return redir
+            return render_template("sensors_history.html")
+
+        @app.route("/api/wifi_motion/events")
+        def api_wifi_motion_events():
+            """One day's stretches of movement (?day=YYYY-MM-DD, default today) for the History page."""
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            if engine is None:
+                return jsonify({"events": [], "paths": []})
+            try:
+                day = time.mktime(time.strptime(request.args.get("day") or time.strftime("%Y-%m-%d"), "%Y-%m-%d"))
+            except (ValueError, OverflowError):
+                return jsonify({"error": "bad day"}), 400
+            end = time.mktime(time.localtime(day + 26 * 3600)[:3] + (0, 0, 0, 0, 0, -1))  # next midnight (DST-safe)
+            wm = engine.wifi_motion
+            return jsonify({"day": time.strftime("%Y-%m-%d", time.localtime(day)), "start": day, "end": end,
+                            "now": time.time(), "events": wm.events(day, end),
+                            "paths": [{"id": k, "name": v} for k, v in wm.paths().items()]})
+
         @app.route("/api/wifi_motion")
         def api_wifi_motion():
             redir = _require_session()

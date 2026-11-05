@@ -25,13 +25,14 @@ import json
 import os
 import re
 import socket
+import sqlite3
 import statistics
 import threading
 import time
 import urllib.request
 from collections import deque
 from datetime import datetime
-from typing import Any, Callable, Deque, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Deque, Dict, Iterable, List, Optional, Set, Tuple
 
 from sentinel.logging_utils import app_logger
 
@@ -64,6 +65,11 @@ MIN_DELTA = 3.0              # ...and at least this much above it (tiny quiet le
 TRIGGER_SAMPLES = 2          # consecutive smoothed scores over the line (0.5 s)
 HOLD_SECONDS = 15.0          # motion "ends" after this long with nothing
 RATIO_MIN, RATIO_MAX = 1.1, 3.0  # the movement line the user may pick per path on the Sensors page
+EVENTS_DB = "wifi_motion.db"  # movement history: one row per stretch of movement on a path
+MERGE_GAP = 120.0             # movement on a path less than this apart is one stretch ("10:02-10:05 pm")
+EVENT_KEEP_DAYS = 30
+INDOOR_WORDS = re.compile(r"\b(inside|indoors|in the house|in the home|wi-?fi sensors?|sensors?|movement|moving)\b")
+OUTDOOR_WORDS = re.compile(r"\b(cameras?|outside|outdoors|yard|driveway|porch|street)\b")
 
 
 class MotionJudge:
@@ -219,6 +225,9 @@ class WifiMotion:
         self._ratios: Dict[str, float] = {}  # path id -> movement line the user picked (else RATIO)
         self.on_motion: Optional[Callable[[str], None]] = None  # path id, on each moving reading (routines)
         self._moving: Set[str] = set()  # paths that moved in the poll being taken
+        self._open: Dict[str, List[float]] = {}  # path -> [start, last movement, peak x quiet level] still going
+        self._db_path = os.path.join(store_dir, EVENTS_DB)
+        self._db_ready = False
         self._csv_day = ""
         self._csv_file = None
         self._csv = None
@@ -353,7 +362,10 @@ class WifiMotion:
                 line.series.append((ts, float(score)))
             change = line.judge.feed(ts, float(score))
             if line.judge.motion and line.judge.last_motion == ts:
-                self._moving.add(path_id(line))
+                pid = path_id(line)
+                self._moving.add(pid)
+                base = line.judge.baseline or 0.0
+                self._note_movement(pid, ts, line.judge.smoothed / base if base else 0.0)
             if change == "started":
                 app_logger.log("info", "wifi_motion_started", sensor=line.id, path=path_id(line),
                                name=self._path_name(path_id(line), [line]),
@@ -364,6 +376,117 @@ class WifiMotion:
                                name=self._path_name(path_id(line), [line]),
                                seconds=round(line.judge.last_motion - line.judge.started, 1),
                                peak=round(line.judge.peak, 2), component="wifi_motion", action="judge")
+
+    # ---- movement history (the History page, "any movement inside today?") ----
+    def _db(self) -> sqlite3.Connection:
+        db = sqlite3.connect(self._db_path, timeout=5)
+        if not self._db_ready:
+            db.execute("CREATE TABLE IF NOT EXISTS events (path TEXT NOT NULL, name TEXT NOT NULL, "
+                       "start REAL NOT NULL, end REAL NOT NULL, peak REAL NOT NULL)")
+            db.execute("CREATE INDEX IF NOT EXISTS events_start ON events (start)")
+            db.execute("DELETE FROM events WHERE end < ?", (time.time() - EVENT_KEEP_DAYS * 86400,))
+            db.commit()
+            self._db_ready = True
+        return db
+
+    def _note_movement(self, pid: str, ts: float, ratio: float) -> None:
+        ep = self._open.get(pid)
+        if ep is not None and ts - ep[1] > MERGE_GAP:
+            self._close_episode(pid)
+            ep = None
+        if ep is None:
+            self._open[pid] = [ts, ts, ratio]
+        else:
+            ep[1], ep[2] = max(ep[1], ts), max(ep[2], ratio)
+
+    def _close_episode(self, pid: str) -> None:
+        start, end, peak = self._open.pop(pid)
+        name = self.paths_locked().get(pid, pid)
+        try:
+            with self._db() as db:
+                db.execute("INSERT INTO events VALUES (?, ?, ?, ?, ?)", (pid, name, start, end, round(peak, 2)))
+            db.close()
+        except sqlite3.Error as e:
+            app_logger.log("warning", "wifi_motion_history_failed", error=str(e), component="wifi_motion",
+                           action="history")
+
+    def close_quiet_episodes(self, now: Optional[float] = None, everything: bool = False) -> None:
+        now = time.time() if now is None else now
+        with self._lock:
+            for pid, ep in list(self._open.items()):
+                if everything or now - ep[1] > MERGE_GAP:
+                    self._close_episode(pid)
+
+    def events(self, start: float, end: float, now: Optional[float] = None) -> List[Dict[str, Any]]:
+        """Stretches of movement overlapping [start, end), oldest first; one still going has "ongoing"."""
+        now = time.time() if now is None else now
+        try:
+            db = self._db()
+            rows = db.execute("SELECT path, name, start, end, peak FROM events WHERE end >= ? AND start < ? "
+                              "ORDER BY start", (start, end)).fetchall()
+            db.close()
+        except sqlite3.Error:
+            rows = []
+        with self._lock:
+            names = self.paths_locked()
+            out = [{"path": p, "name": names.get(p, n), "start": s0, "end": e0, "peak": pk, "ongoing": False}
+                   for p, n, s0, e0, pk in rows]
+            out += [{"path": p, "name": names.get(p, p), "start": ep[0], "end": ep[1], "peak": round(ep[2], 2),
+                     "ongoing": now - ep[1] <= HOLD_SECONDS}
+                    for p, ep in self._open.items() if ep[1] >= start and ep[0] < end]
+        return sorted(out, key=lambda e: e["start"])
+
+    def indoor_question(self, text: str, camera_names: Iterable[str] = ()) -> Optional[List[str]]:
+        """Is this about movement indoors? -> the paths it names ([] = all), else None. "Any movement on the
+        back yard camera?" stays a camera question."""
+        t = text.lower()
+        named = [pid for pid, name in self.paths().items() if len(name) >= 3 and name.lower() in t]
+        if named:
+            return named
+        if OUTDOOR_WORDS.search(t) or any(n and n.lower() in t for n in camera_names):
+            return None
+        return [] if INDOOR_WORDS.search(t) and self.paths() else None
+
+    def answer(self, text: str, now: Optional[float] = None) -> str:
+        """Plain-words answer about movement indoors, for Telegram and Jarvis."""
+        from sentinel.engine.questions import _fmt_clock, _period
+
+        now = time.time() if now is None else now
+        paths = self.indoor_question(text) or []
+        start, end, label, _day = _period(text.lower(), now)
+        events = [e for e in self.events(start, end, now) if not paths or e["path"] in paths]
+        names = self.paths()
+        where = " and ".join(names.get(p, p) for p in paths) if paths else "the house"
+        if not events:
+            last = [e for e in self.events(now - EVENT_KEEP_DAYS * 86400, start, now) if not paths or e["path"] in paths]
+            tail = f" The last was {time.strftime('%a', time.localtime(last[-1]['end']))} at {_fmt_clock(last[-1]['end'])}." if last else ""
+            return f"No movement in {where} {label}.{tail}"
+        lines = [f"Movement in {where} {label} (the Wi-Fi sensors; pets count too):"]
+        if paths and len(paths) == 1 or len(events) <= 6:
+            for e in events[-8:]:
+                mins = round((e["end"] - e["start"]) / 60)
+                how = "still going" if e["ongoing"] else ("a moment" if mins < 1 else f"{mins} min")
+                lines.append(f"- {_fmt_clock(e['start'])} {'' if paths and len(paths) == 1 else e['name'] + ', '}{how}")
+            if len(events) > 8:
+                lines.insert(1, f"({len(events)} times; the latest 8:)")
+        else:
+            by: Dict[str, List[Dict[str, Any]]] = {}
+            for e in events:
+                by.setdefault(e["name"], []).append(e)
+            for name, evs in sorted(by.items(), key=lambda kv: -kv[1][-1]["end"]):
+                last = evs[-1]
+                when = "moving now" if last["ongoing"] else f"last at {_fmt_clock(last['end'])}"
+                lines.append(f"- {name}: {len(evs)} time{'s' if len(evs) != 1 else ''}, {when}")
+        return "\n".join(lines)
+
+    def context(self, now: Optional[float] = None) -> str:
+        """The last day's indoor movement for Claude's DATA (it can't see the sensors otherwise)."""
+        from sentinel.engine.questions import _fmt_clock
+
+        now = time.time() if now is None else now
+        events = self.events(now - 24 * 3600, now + 1, now)[-30:]
+        return "\n".join(f"{_fmt_clock(e['start'])}-{_fmt_clock(e['end'])} {e['name']}"
+                         + (" (still moving)" if e["ongoing"] else "") for e in events)
 
     # ---- daily CSV of every score (for tuning) ----
     def _record(self, ts: float, line: Line, score: float, rate: float) -> None:
@@ -404,6 +527,7 @@ class WifiMotion:
         self._stop.set()
         for t in self._threads:
             t.join(timeout=3)
+        self.close_quiet_episodes(everything=True)  # keep what was still going in the history
         if self._csv_file:
             self._csv_file.close()
 
@@ -435,6 +559,7 @@ class WifiMotion:
                 boards = list(self._boards.values())
             for board in boards:
                 self.poll(board)
+            self.close_quiet_episodes()
 
     # ---- the web page and questions ----
     def _path_name(self, pid: str, lines: List[Line]) -> str:
@@ -451,11 +576,15 @@ class WifiMotion:
     def paths(self) -> Dict[str, str]:
         """Every path known since the start (and every named one), id -> name: what routines can pick from."""
         with self._lock:
-            groups: Dict[str, List[Line]] = {}
-            for line in self._lines.values():
-                groups.setdefault(path_id(line), []).append(line)
-            out = {pid: self._path_name(pid, lines) for pid, lines in groups.items()}
-            for pid, name in self._names.items():
+            return self.paths_locked()
+
+    def paths_locked(self) -> Dict[str, str]:
+        groups: Dict[str, List[Line]] = {}
+        for line in self._lines.values():
+            groups.setdefault(path_id(line), []).append(line)
+        out = {pid: self._path_name(pid, lines) for pid, lines in groups.items()}
+        for pid, name in self._names.items():
+            if LINE_ID_OK.match(pid) and "-" in pid:
                 out.setdefault(pid, name)
         return dict(sorted(out.items(), key=lambda kv: kv[1].lower()))
 
