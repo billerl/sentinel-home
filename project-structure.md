@@ -14,6 +14,8 @@ sentinel-home/                         # repository root
 ├── tools/replay_detections.py        # Replays recorded clips through detection (tune thresholds)
 ├── tools/dev_harness.py              # Login-free test copy of the web UI on :18091 (dev only)
 ├── CLAUDE.md                          # Working notes for Claude Code sessions
+├── firmware/wifi_motion/              # ESP32-S3 sensor (Arduino): CSI -> motion score, GET /status, setup portal, OTA
+├── firmware/wifi_motion_beacon/       # ESP32-S3 beacon: fixed-rate 802.11n ESP-NOW frames for the sensor to measure
 ├── models/                            # Piper `.onnx` + `.onnx.json` voice models (local, not all in git)
 ├── tests/                             # Unit tests (`venv/bin/python -m unittest discover -s tests`)
 ├── captured_images/                   # Saved snapshots (gitignored)
@@ -40,6 +42,7 @@ sentinel-home/                         # repository root
     │   ├── switches.py                # Smart plugs/switches (Kasa, local protocol): Live page panel, voice, Telegram
     │   ├── samsung_tv.py              # Samsung TVs as a switch (Wake-on-LAN + power key), apps, volume, mute
     │   ├── fire_tv.py                 # Fire TVs over ADB: switch, remote, apps, "put the cameras on the TV"
+    │   ├── wifi_motion.py             # Wi-Fi motion sensors (ESP32 CSI boards): find, poll, judge motion, daily CSVs
     │   ├── routines.py                # "When X, only if Y, then Z": check/describe, sunrise/sunset maths, runner (routines.db)
     │   ├── questions.py               # Telegram questions ("did anyone come by?", "is Kate home?")
     │   ├── queries.py                 # "videos <when>" parsing

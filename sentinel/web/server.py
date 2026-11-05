@@ -757,6 +757,31 @@ class WebServer:
             engine.switches.request_scan()
             return _result(True, "looking")
 
+        # ---- Wi-Fi motion sensors (sentinel/engine/wifi_motion.py, firmware/wifi_motion) ----
+        @app.route("/sensors")
+        def sensors_page():
+            redir = _require_session()
+            if redir:
+                return redir
+            return render_template("sensors.html")
+
+        @app.route("/api/wifi_motion")
+        def api_wifi_motion():
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            if engine is None:
+                return jsonify({"sensors": []})
+            return jsonify(engine.wifi_motion.view())
+
+        @app.route("/api/wifi_motion/rename", methods=["POST"])
+        def api_wifi_motion_rename():
+            err = _config_guard()
+            if err:
+                return err
+            body = request.get_json(silent=True) or {}
+            return _result(*engine.wifi_motion.rename(str(body.get("id") or "")[:12], str(body.get("name") or "")[:60]))
+
         # ---- the TV remote (a Samsung TV among the switches; sentinel/engine/samsung_tv.py) ----
         @app.route("/api/tv/<tv_id>")
         def api_tv(tv_id):

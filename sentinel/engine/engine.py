@@ -159,6 +159,9 @@ class Engine:
         from sentinel.engine.switches import SmartSwitches
 
         self.switches = SmartSwitches(VIDEO_DIR)  # Kasa smart plugs/switches on the home network
+        from sentinel.engine.wifi_motion import WifiMotion
+
+        self.wifi_motion = WifiMotion(VIDEO_DIR)  # ESP32 boards that sense movement through the Wi-Fi signal
         from sentinel.engine.routines import HOLDS_FILE, RoutineRunner, RoutineStore
 
         self._last_motion: Dict[str, float] = {}  # camera -> last frame with motion (routines' "until quiet")
@@ -365,6 +368,7 @@ class Engine:
             self.presence.start()
         self.camera_lights.start()
         self.switches.start()
+        self.wifi_motion.start()
 
         def _household_filter(text: str) -> bool:
             from sentinel.engine.questions import household_question
@@ -406,6 +410,7 @@ class Engine:
             self.presence.stop()
         self.camera_lights.stop()
         self.switches.stop()
+        self.wifi_motion.stop()
         self._stop_voice()
         self.spotify_player.stop()
         self.telegram.cleanup()

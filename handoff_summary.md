@@ -296,6 +296,21 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   immediately; Claude's suggestions ask yes first / show a ✅ button). New makes = another driver class
   with `discover/status/set/rename` (Shelly and Tasmota have local HTTP APIs). Newer KLAP-only Kasa/Tapo
   devices don't answer on 9999 and aren't supported. No automations yet (e.g. lights on for a person at night).
+- **Wi-Fi motion sensors** (`sentinel/engine/wifi_motion.py`, firmware in `firmware/`, page `/sensors`,
+  `/api/wifi_motion*`, known boards in `recorded_videos/wifi_sensors.json`, every score in
+  `recorded_videos/wifi_motion/YYYY-MM-DD.csv` for 14 days). An ESP32-S3 measures CSI (52 sub-carrier amplitudes,
+  normalised per frame against AGC jumps) and serves a "score" (mean per-sub-carrier std over 1 s, x1000) 4x/s at
+  `GET /status`; Sentinel finds boards by their UDP hello (port 47301, the packet's source address is used) and
+  polls once a second. Frames to measure: a beacon board's fixed-rate HT20 MCS0 ESP-NOW broadcasts (50/s on the
+  router's channel) when heard, else the router's replies to 50/s pings. The router alone is not enough: on a
+  weak link it falls back to 802.11b (no CSI), even when the board leaves 11b out of its rates. Motion: the 1 s
+  median above 1.4x the quiet level for 0.5 s, held 15 s. The quiet level = the median of the last 30 s whenever
+  those were steady (p90/p10 <= 1.25; still 1.08-1.13, walking 1.49-1.68), so a steady jump (someone settled
+  next to a board, a door) is learned within ~1 min instead of reading as motion; re-learned after a board restart
+  or a switch between beacon and router. Tuned on one evening's recording (`MotionJudge` is pure: replay the CSVs).
+  A board on the far side of a stone wall barely sees anything: same floor, open line. Setup: a new board makes an
+  open AP "Sentinel-Sensor-<id>" with a page at 192.168.4.1 (Wi-Fi password stays on the board); OTA via espota
+  (password in the git-ignored `firmware/wifi_motion/secrets.h`). Not yet used by routines or alerts.
 - **Routines** (`sentinel/engine/routines.py`, `recorded_videos/routines.db`, page `/routines`, `/api/routines*`):
   "when X, only if Y, then Z". Triggers: camera sees person/vehicle/animal/delivery (`_on_object`, deliveries also
   count as vehicles), motion (`_on_motion`, every frame; a motion routine fires at most every 30 s per camera and

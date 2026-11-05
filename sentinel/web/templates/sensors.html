@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <meta name="theme-color" content="#001525">
+  <title>Sentinel — Sensors</title>
+  <style>
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; }
+    a { color: #00ffff; }
+    [hidden] { display: none !important; }
+    header { position: sticky; top: 0; z-index: 10; background: #1a1a1a; border-bottom: 1px solid #033; }
+    .bar { display: flex; align-items: center; gap: 12px; padding: 0 1rem; height: 44px; }
+    .bar a { text-decoration: none; font-size: 0.85rem; }
+    h1 { font-size: 0.95rem; margin: 0; flex: 1; color: #00ffff; }
+    main { max-width: 860px; margin: 0 auto; padding: 14px 16px 60px; }
+    .intro { font-size: 0.88rem; line-height: 1.6; color: #9cc; margin: 4px 0 14px; }
+    button {
+      background: rgba(0,255,255,0.12); color: #00ffff; border: 1px solid #00a8a8; padding: 7px 12px;
+      border-radius: 8px; cursor: pointer; font: inherit; font-size: 0.85rem;
+    }
+    button.ghost { background: none; border-color: #1d3a44; color: #9cc; }
+    button:focus-visible, input:focus-visible { outline: 3px solid #fff; outline-offset: 1px; }
+    .card { background: linear-gradient(180deg, #0c151c, #091015); border: 1px solid #16303a; border-radius: 14px;
+            padding: 14px 16px; margin-bottom: 12px; transition: border-color 0.2s; }
+    .card.moving { border-color: #ffc94d; box-shadow: 0 0 18px -8px #ffc94d; }
+    .card.offline { opacity: 0.6; }
+    .top { display: flex; align-items: center; gap: 12px; }
+    .name { flex: 1; min-width: 0; font-weight: 600; color: #fff; font-size: 1rem; }
+    .state { font-size: 1.5rem; font-weight: 700; margin: 10px 0 2px; }
+    .state.moving { color: #ffc94d; }
+    .state.still { color: #7fe0a0; }
+    .state.dim { color: #8fb6c4; font-size: 1.05rem; font-weight: 600; }
+    .meta { font-size: 0.78rem; color: #6f97a5; display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; }
+    canvas { width: 100%; height: 150px; display: block; margin-top: 10px; background: #050b0f; border-radius: 8px; }
+    .legend { font-size: 0.75rem; color: #6f97a5; margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+    .legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 5px; }
+    .empty { text-align: center; padding: 34px 16px; border: 1px dashed #1d3a44; border-radius: 14px; color: #8fb6c4; line-height: 1.6; }
+    .rename { display: flex; gap: 8px; margin-top: 10px; }
+    .rename input { flex: 1; min-width: 0; font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid #1d3a44;
+                    background: #050b0f; color: #fff; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <a href="{{ url_for('index') }}">← Live</a>
+      <h1>Sensors</h1>
+      <a href="{{ url_for('routines_page') }}">Routines</a>
+      <a href="{{ url_for('settings_page') }}">Settings</a>
+    </div>
+  </header>
+
+  <main>
+    <p class="intro">Wi-Fi motion sensors notice people moving between the sensor and your Wi-Fi router: bodies
+      disturb the radio signal. Each one learns what its quiet room looks like on its own (give it a couple of
+      minutes after it starts), then shows <b>Movement</b> when the wobble rises well above that.</p>
+    <div id="list"></div>
+  </main>
+
+  <script>
+    var renaming = null;
+
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+      });
+    }
+
+    function ago(ts) {
+      if (!ts) return "never";
+      var s = Math.max(0, Date.now() / 1000 - ts);
+      if (s < 60) return "just now";
+      if (s < 3600) return Math.round(s / 60) + " min ago";
+      if (s < 86400) return Math.round(s / 3600) + " h ago";
+      return new Date(ts * 1000).toLocaleString();
+    }
+
+    function signal(rssi) {
+      if (rssi == null) return "";
+      var word = rssi > -55 ? "strong" : rssi > -67 ? "good" : rssi > -75 ? "weak" : "very weak";
+      return "Wi-Fi " + word + " (" + rssi + " dBm)";
+    }
+
+    function card(s) {
+      var state, cls;
+      if (!s.online) { state = "Not connected"; cls = "dim"; }
+      else if (s.learning) { state = "Learning the quiet room…"; cls = "dim"; }
+      else if (s.motion) { state = "Movement"; cls = "moving"; }
+      else { state = "Still"; cls = "still"; }
+      var meta = [];
+      if (s.online) {
+        meta.push(signal(s.rssi));
+        if (s.rate != null) meta.push(Math.round(s.rate) + " readings/s");
+      } else {
+        meta.push(s.ip ? "last address " + s.ip : "waiting for it to say hello");
+      }
+      if (s.battery) meta.push("battery " + Math.round(s.battery.pct) + "% (" + s.battery.v.toFixed(2) + " V)");
+      meta.push("last movement " + ago(s.last_motion));
+      var editing = renaming === s.id;
+      return '<div class="card ' + (s.motion ? "moving" : "") + (s.online ? "" : " offline") + '" data-id="' + esc(s.id) + '">' +
+        '<div class="top"><div class="name">' + esc(s.name) + '</div>' +
+        '<button class="ghost" type="button" onclick="startRename(\'' + esc(s.id) + '\')">Rename</button></div>' +
+        (editing ? '<div class="rename"><input id="rn" maxlength="30" value="' + esc(s.name) + '">' +
+          '<button type="button" onclick="saveRename(\'' + esc(s.id) + '\')">Save</button>' +
+          '<button class="ghost" type="button" onclick="renaming=null;load()">Cancel</button></div>' : '') +
+        '<div class="state ' + cls + '">' + state + '</div>' +
+        '<div class="meta">' + meta.filter(Boolean).map(esc).map(function (m) { return "<span>" + m + "</span>"; }).join("") + '</div>' +
+        '<canvas width="800" height="150"></canvas>' +
+        '<div class="legend"><span><i style="background:#00ffff"></i>signal wobble, last 2 minutes</span>' +
+        '<span><i style="background:#7fe0a0"></i>quiet level</span><span><i style="background:#ffc94d"></i>movement line</span></div>' +
+        '</div>';
+    }
+
+    function draw(canvas, s) {
+      var ctx = canvas.getContext("2d"), w = canvas.width, h = canvas.height, pts = s.series;
+      ctx.clearRect(0, 0, w, h);
+      if (!pts.length) return;
+      var top = Math.max.apply(null, pts.map(function (p) { return p[1]; }).concat([s.threshold || 0])) * 1.15 || 1;
+      function y(v) { return h - 6 - (v / top) * (h - 12); }
+      function x(t) { return w + (t / 120) * w; }
+      [[s.baseline, "#7fe0a0"], [s.threshold, "#ffc94d"]].forEach(function (line) {
+        if (line[0] == null) return;
+        ctx.strokeStyle = line[1]; ctx.setLineDash([6, 5]); ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(0, y(line[0])); ctx.lineTo(w, y(line[0])); ctx.stroke();
+      });
+      ctx.setLineDash([]); ctx.strokeStyle = "#00ffff"; ctx.lineWidth = 2; ctx.beginPath();
+      pts.forEach(function (p, i) { if (i) ctx.lineTo(x(p[0]), y(p[1])); else ctx.moveTo(x(p[0]), y(p[1])); });
+      ctx.stroke();
+    }
+
+    async function load() {
+      var list = document.getElementById("list");
+      try {
+        var r = await fetch("/api/wifi_motion");
+        if (r.status === 401) { location.href = "/login"; return; }
+        var data = await r.json();
+      } catch (e) { return; }
+      if (!data.sensors.length) {
+        list.innerHTML = '<div class="empty">No sensors yet. Plug one in near the room to watch; it appears here by ' +
+          'itself within half a minute of joining your Wi-Fi.</div>';
+        return;
+      }
+      if (renaming && document.getElementById("rn")) {  // don't redraw over someone typing; just refresh the charts
+        data.sensors.forEach(function (s) {
+          var c = list.querySelector('.card[data-id="' + s.id + '"] canvas');
+          if (c) draw(c, s);
+        });
+        return;
+      }
+      list.innerHTML = data.sensors.map(card).join("");
+      data.sensors.forEach(function (s) { draw(list.querySelector('.card[data-id="' + s.id + '"] canvas'), s); });
+    }
+
+    function startRename(id) { renaming = id; load().then(function () { var i = document.getElementById("rn"); if (i) i.focus(); }); }
+
+    async function saveRename(id) {
+      var name = document.getElementById("rn").value;
+      var r = await fetch("/api/wifi_motion/rename", { method: "POST",
+        headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+        body: JSON.stringify({ id: id, name: name }) });
+      var j = await r.json();
+      if (!r.ok) { alert(j.error || "Couldn't rename it."); return; }
+      renaming = null;
+      load();
+    }
+
+    load();
+    setInterval(load, 1000);
+  </script>
+</body>
+</html>
