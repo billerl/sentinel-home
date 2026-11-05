@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <meta name="theme-color" content="#001525">
+  <title>Sentinel — House</title>
+  <style>
+    /* A control-room screen: the 3D house fills the stage, a narrow live panel beside it (below it on phones). */
+    :root {
+      --panel-2: #0e1a20; --line: #16303a; --line-2: #1f4a55;
+      --fg: #cfe; --bright: #fff; --muted: #6f97a5; --dim: #3d6270;
+      --accent: #00ffff; --accent-soft: rgba(0,255,255,0.13); --live: #ffc94d;
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { font-family: system-ui, sans-serif; background: #000; color: var(--fg); margin: 0; font-size: 14px; }
+    a { color: var(--accent); }
+    header { position: sticky; top: 0; z-index: 20; background: #1a1a1a; border-bottom: 1px solid #033; }
+    .bar { display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 max(16px, env(safe-area-inset-left, 0px)); }
+    .bar a { text-decoration: none; font-size: 0.85rem; }
+    h1 { font-size: 0.95rem; margin: 0; flex: 1; color: var(--accent); }
+
+    main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 14px; max-width: 1280px; margin: 0 auto;
+           padding: 14px max(16px, env(safe-area-inset-right, 0px)) 40px max(16px, env(safe-area-inset-left, 0px)); }
+    .stage { position: relative; height: min(74vh, 680px); min-height: 380px; border: 1px solid var(--line); border-radius: 14px;
+             overflow: hidden; background: radial-gradient(ellipse at 50% 40%, #06202a 0%, #020a0e 55%, #000 100%); }
+    .stage canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
+    .labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+    .lbl { position: absolute; transform: translate(-50%, -130%); white-space: nowrap; font-size: 0.72rem; padding: 2px 7px;
+           border-radius: 999px; background: rgba(5,16,21,0.82); border: 1px solid var(--line-2); color: var(--fg);
+           display: flex; align-items: center; gap: 5px; }
+    .lbl i { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }
+    .lbl.on i { background: var(--live); box-shadow: 0 0 7px var(--live); }
+    .lbl.on { border-color: #6b5a2a; color: var(--bright); }
+    .lbl.off-line { opacity: 0.55; }
+    .lbl.sel { border-color: var(--accent); box-shadow: 0 0 12px -3px var(--accent); }
+    .lbl.room { background: none; border: 0; color: var(--muted); font-size: 0.7rem; letter-spacing: 0.08em;
+                text-transform: uppercase; transform: translate(-50%, -50%); }
+    .lbl.room.busy { color: var(--live); }
+    .lbl.room.guess::after { content: " ?"; color: var(--dim); }
+    .lbl.mark { background: none; border: 0; color: #5f8796; font-size: 0.66rem; letter-spacing: 0.06em; transform: translate(-50%, -50%); }
+
+    .tools { position: absolute; left: 10px; right: 10px; top: 10px; display: flex; flex-wrap: wrap; gap: 6px; pointer-events: none; }
+    .tools > * { pointer-events: auto; }
+    .seg { display: inline-flex; background: rgba(5,16,21,0.88); border: 1px solid var(--line-2); border-radius: 9px; overflow: hidden; }
+    .seg button, .btn { font: inherit; font-size: 0.8rem; color: var(--fg); background: none; border: 0; padding: 7px 11px; cursor: pointer; }
+    .seg button + button { border-left: 1px solid var(--line); }
+    .seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--bright); }
+    .btn { background: rgba(5,16,21,0.88); border: 1px solid var(--line-2); border-radius: 9px; }
+    .btn.primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+    .btn.on { background: rgba(255,201,77,0.16); border-color: var(--live); color: var(--live); }
+    button:focus-visible { outline: 2px solid var(--bright); outline-offset: 1px; }
+    .hint { position: absolute; left: 10px; bottom: 10px; right: 10px; font-size: 0.75rem; color: var(--muted); pointer-events: none; }
+    .placing { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; flex-wrap: wrap;
+               justify-content: center; align-items: center; gap: 6px; background: rgba(5,16,21,0.95); border: 1px solid var(--accent);
+               border-radius: 12px; padding: 8px 10px; width: max-content; max-width: calc(100% - 20px); max-height: 60%; overflow-y: auto; }
+    .placing b { color: var(--bright); font-size: 0.82rem; margin-right: 4px; flex-basis: 100%; text-align: center; font-weight: 600; }
+    .placing small { color: var(--muted); font-size: 0.72rem; flex-basis: 100%; text-align: center; margin-top: 2px; }
+    .chip { font: inherit; font-size: 0.78rem; border-radius: 999px; padding: 5px 11px; background: var(--panel-2);
+            border: 1px solid var(--line-2); color: var(--fg); cursor: pointer; }
+    .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+             padding: 30px; color: #8fb6c4; line-height: 1.6; }
+
+    aside { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+    .card { background: linear-gradient(180deg, #0c151c, #091015); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; min-width: 0; }
+    .card h2 { margin: 0 0 8px; font-size: 0.72rem; font-weight: 700; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+    .rows { display: flex; flex-direction: column; gap: 2px; }
+    .row { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 8px;
+           cursor: pointer; font-size: 0.86rem; background: none; border: 0; color: inherit; font: inherit; text-align: left; width: 100%; }
+    .row:hover { background: var(--panel-2); }
+    .row .d { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+    .row.on .d { background: var(--live); box-shadow: 0 0 7px var(--live); }
+    .row .s { font-size: 0.76rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .row.on .s { color: var(--live); }
+    .sel-card .name { color: var(--bright); font-size: 1rem; font-weight: 600; }
+    .sel-card .meta { color: var(--muted); font-size: 0.8rem; margin: 3px 0 10px; line-height: 1.5; }
+    .sel-card .acts { display: flex; flex-wrap: wrap; gap: 6px; }
+    .sel-card img { width: 100%; border-radius: 8px; margin-bottom: 8px; background: #050b0f; aspect-ratio: 16 / 9; object-fit: cover; }
+    .log { font-family: var(--mono); font-size: 0.74rem; line-height: 1.6; color: var(--muted); max-height: 170px; overflow-y: auto; }
+    .log div b { color: var(--live); font-weight: 400; }
+    .log time { color: var(--dim); margin-right: 6px; }
+    .note { font-size: 0.78rem; color: var(--muted); line-height: 1.5; margin: 0; }
+
+    @media (max-width: 860px) {
+      main { grid-template-columns: 1fr; }
+      .stage { height: 62vh; min-height: 340px; }
+    }
+    @media (prefers-reduced-motion: reduce) { .lbl.on i { box-shadow: none; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <a href="{{ url_for('index') }}">← Home</a>
+      <h1>House</h1>
+    </div>
+  </header>
+
+  <main>
+    <section class="stage" id="stage" aria-label="The house in 3D: drag to turn it, pinch or scroll to zoom">
+      <div class="labels" id="labels"></div>
+      <div class="tools" id="tools" hidden>
+        <div class="seg" role="group" aria-label="View">
+          <button type="button" id="v-3d" aria-pressed="true">3D</button>
+          <button type="button" id="v-top" aria-pressed="false">Top</button>
+        </div>
+        <div class="seg" role="group" aria-label="Floors" id="floors">
+          <button type="button" data-floor="main" aria-pressed="true">Main floor</button>
+          <button type="button" data-floor="up" aria-pressed="false">Upstairs</button>
+          <button type="button" data-floor="all" aria-pressed="false">Both</button>
+        </div>
+        <button type="button" class="btn primary" id="add">＋ Add device</button>
+      </div>
+      <div class="hint" id="hint" hidden>Drag to turn · pinch or scroll to zoom · tap a device</div>
+      <div class="placing" id="placing" hidden></div>
+      <div class="empty" id="empty" hidden>There's no house drawing yet.<br>It's made from a floor plan of your home: see Help → House.</div>
+    </section>
+
+    <aside>
+      <div class="card sel-card" id="sel">
+        <h2>Selected</h2>
+        <p class="note">Tap a device in the house or in the list below.</p>
+      </div>
+      <div class="card">
+        <h2>Rooms</h2>
+        <div class="rows" id="rooms"></div>
+      </div>
+      <div class="card">
+        <h2>Devices</h2>
+        <div class="rows" id="devices"></div>
+      </div>
+      <div class="card">
+        <h2>What happened</h2>
+        <div class="log" id="log" aria-live="polite"></div>
+      </div>
+      <p class="note">A room lights up when a sensor path through the middle of it notices movement.
+        Use ＋ Add device to put your switches, cameras and Wi-Fi sensors where they really are.</p>
+    </aside>
+  </main>
+
+  <script src="/static/three/three.min.js"></script>
+  <script src="/static/three/OrbitControls.js"></script>
+  <script>
+  (function () {
+    var TV = {{ 'true' if tv else 'false' }};  // Fire TV / smart-TV browsers: start flat and draw lighter
+    var REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var C = { cyan: 0x00ffff, live: 0xffc94d, garage: 0xfff3a0, outside: 0x4ade80, off: 0x5a6b73, wood: 0xc8955a, glass: 0xbfefff };
+    var H = 3.0, OPEN_TOP = 2.1;  // ceiling height and the top of a doorway, in drawing heights (1 ≈ 2.7 ft)
+
+    function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
+    function clock(t) { return new Date(t || Date.now()).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+    async function getJson(url) {
+      var r = await fetch(url, { cache: "no-store" });
+      if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
+      return r.json();
+    }
+    async function postJson(url, body) {
+      var r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+                                 body: JSON.stringify(body) });
+      if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
+      var j = await r.json().catch(function () { return {}; });
+      if (!r.ok) throw new Error(j.error || "That didn't work.");
+      return j;
+    }
+    function log(html) {
+      var box = document.getElementById("log"), row = document.createElement("div");
+      row.innerHTML = "<time>" + clock() + "</time>" + html;
+      box.prepend(row);
+      while (box.children.length > 40) box.lastChild.remove();
+    }
+
+    var stage = document.getElementById("stage"), labels = document.getElementById("labels");
+    var drawing = null, placed = [], live = { paths: [], boards: [], switches: [], cameras: [] };
+    var S = 1 / 40, CX = 0, CY = 0;  // plan units -> scene: set from the drawing's size
+    function at(x, y, h) { return new THREE.Vector3((x - CX) * S, h || 0, (y - CY) * S); }
+    function toPlan(v) { return [v.x / S + CX, v.z / S + CY]; }
+
+    // ---------- scene ----------
+    var renderer = new THREE.WebGLRenderer({ antialias: !TV, alpha: true });
+    renderer.setPixelRatio(TV ? 1 : Math.min(window.devicePixelRatio || 1, 2));
+    stage.insertBefore(renderer.domElement, labels);
+    var scene = new THREE.Scene();
+    var camera = new THREE.PerspectiveCamera(42, 1, 0.1, 400);
+    var controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true; controls.dampingFactor = 0.08;
+    controls.maxPolarAngle = Math.PI * 0.49; controls.minDistance = 4; controls.maxDistance = 90;
+    var levels = { 0: new THREE.Group(), 1: new THREE.Group() }, grid = null;
+    scene.add(levels[0]); scene.add(levels[1]);
+    var floors = [], roomObjs = {}, markObjs = [], devObjs = {}, pathObjs = {}, pickables = [];
+    var hasUpstairs = false, home = { target: new THREE.Vector3(), off: new THREE.Vector3(-14, 16, 20) };
+
+    function partsOf(room) { return room.parts || []; }
+    function inRoom(room, x, y) { return partsOf(room).some(function (r) { return x >= r[0] && x < r[2] && y >= r[1] && y < r[3]; }); }
+    function floorOf(room) { return room.y != null ? room.y : room.level ? H + 0.4 : 0; }
+    function roomAt(x, y, lvl) {
+      return drawing.rooms.find(function (rm) { return (rm.level || 0) === (lvl || 0) && inRoom(rm, x, y); }) || null;
+    }
+    function floorAt(x, y, lvl) {
+      var r = roomAt(x, y, lvl);
+      if (r) return floorOf(r);
+      var any = drawing.rooms.find(function (rm) { return (rm.level || 0) === (lvl || 0); });
+      return any ? floorOf(any) : 0;
+    }
+    function plane(a, b, height, mat) {   // a wall-like panel standing on the line a-b
+      var m = new THREE.Mesh(new THREE.PlaneGeometry(a.distanceTo(b), height), mat);
+      m.position.copy(a).add(b).multiplyScalar(0.5);
+      m.rotation.y = Math.atan2(-(b.z - a.z), b.x - a.x);
+      return m;
+    }
+    function hex(c, fallback) { return c ? parseInt(c.slice(1), 16) : fallback; }
+
+    function build() {
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, low = 0;
+      drawing.rooms.forEach(function (rm) {
+        partsOf(rm).forEach(function (r) { minX = Math.min(minX, r[0]); minY = Math.min(minY, r[1]); maxX = Math.max(maxX, r[2]); maxY = Math.max(maxY, r[3]); });
+        if (!rm.level) low = Math.min(low, floorOf(rm));
+        if (rm.level) hasUpstairs = true;
+      });
+      S = 32 / Math.max(maxX - minX, maxY - minY, 1); CX = (minX + maxX) / 2; CY = (minY + maxY) / 2;
+      grid = new THREE.GridHelper(80, 80, 0x0c2b33, 0x071a20);
+      grid.position.y = low - 0.02; scene.add(grid);
+      document.getElementById("floors").hidden = !hasUpstairs;
+
+      var doorPts = [];
+      drawing.rooms.forEach(function (room) {
+        var lvl = room.level || 0, r = partsOf(room)[0];
+        var poly = room.poly || [[r[0], r[1]], [r[2], r[1]], [r[2], r[3]], [r[0], r[3]]];
+        var base = floorOf(room), h = room.kind === "outside" ? 0.12 : (room.top != null ? room.top : base + H) - base;
+        var tint = room.kind === "garage" ? C.garage : room.kind === "outside" ? C.outside : C.cyan;
+        var floorMat = new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: room.kind ? 0.05 : 0.07, side: THREE.DoubleSide, depthWrite: false });
+        var shape = new THREE.Shape(poly.map(function (p) { return new THREE.Vector2((p[0] - CX) * S, -(p[1] - CY) * S); }));
+        var floor = new THREE.Mesh(new THREE.ShapeGeometry(shape), floorMat);
+        floor.rotation.x = -Math.PI / 2; floor.position.y = base + 0.01;
+        floor.userData = { room: room.id, level: lvl };
+        var wallMat = new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: room.kind ? 0.025 : 0.07, side: THREE.DoubleSide, depthWrite: false });
+        var edgeMat = new THREE.LineBasicMaterial({ color: tint, transparent: true, opacity: room.kind === "outside" ? 0.3 : 0.55 });
+        var pts = [];
+        poly.forEach(function (p, i) {
+          var q = poly[(i + 1) % poly.length], a = at(p[0], p[1], base), b = at(q[0], q[1], base);
+          var gap = (room.gaps || []).find(function (g) { return g[0] === p[0] && g[1] === p[1] && g[2] === q[0] && g[3] === q[1]; });
+          if (gap) {   // an opening: wall only above it, the opening's frame drawn (bright for a walk-through)
+            var top = base + OPEN_TOP;
+            if (base + h > top) {
+              var head = plane(a, b, base + h - top, wallMat);
+              head.position.y = (top + base + h) / 2;
+              levels[lvl].add(head);
+            }
+            if (gap[4] === "door") doorPts.push(a, a.clone().setY(top), a.clone().setY(top), b.clone().setY(top), b.clone().setY(top), b, a, b);
+            pts.push(a, a.clone().setY(base + h), a.clone().setY(base + h), b.clone().setY(base + h));
+            return;
+          }
+          var wall = plane(a, b, h, wallMat);
+          wall.position.y = base + h / 2;
+          levels[lvl].add(wall);
+          pts.push(a, b, a.clone().setY(base + h), b.clone().setY(base + h), a, a.clone().setY(base + h));
+        });
+        levels[lvl].add(floor, new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), edgeMat));
+        floors.push(floor);
+        var c = room.label ? at(room.label[0], room.label[1], base) : at((r[0] + r[2]) / 2, (r[1] + r[3]) / 2, base);
+        var el = document.createElement("div");
+        el.className = "lbl room" + (room.guess ? " guess" : "");
+        el.textContent = room.name;
+        labels.appendChild(el);
+        roomObjs[room.id] = { room: room, floor: floor, base: floorMat.opacity, tint: tint, center: c, lvl: lvl, el: el, busy: false };
+      });
+      levels[0].add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(doorPts),
+        new THREE.LineBasicMaterial({ color: C.live, transparent: true, opacity: 0.9 })));
+
+      drawing.features.forEach(function (f) {
+        var lvl = f.level || 0, g = levels[lvl];
+        if (f.type === "steps") {   // treads from `from` (height y0) to `to` (y1)
+          var mat = new THREE.MeshBasicMaterial({ color: hex(f.color, C.cyan), transparent: true, opacity: 0.14 });
+          var a = at(f.from[0], f.from[1]), b = at(f.to[0], f.to[1]), run = a.distanceTo(b) / f.count;
+          for (var i = 0; i < f.count; i++) {
+            var t = (i + 0.5) / f.count, hTop = f.y0 + (f.y1 - f.y0) * (i + 1) / f.count;
+            var base = Math.min(f.y0, f.y1), tall = f.solid ? Math.max(0.06, hTop - base) : 0.06;
+            var step = new THREE.Mesh(new THREE.BoxGeometry(run * 0.95, tall, f.width * S), mat);
+            step.position.copy(a.clone().lerp(b, t)); step.position.y = f.solid ? base + tall / 2 : hTop;
+            step.rotation.y = Math.atan2(-(b.z - a.z), b.x - a.x);
+            g.add(step);
+          }
+        } else if (f.type === "box") {
+          var box = new THREE.Mesh(new THREE.BoxGeometry(f.size[0] * S, f.h, f.size[1] * S),
+            new THREE.MeshBasicMaterial({ color: hex(f.color, C.wood), transparent: true, opacity: 0.3 }));
+          var by = f.y != null ? f.y : floorAt(f.at[0], f.at[1], lvl);
+          box.position.copy(at(f.at[0], f.at[1], by + f.h / 2));
+          g.add(box);
+        } else {
+          var pa = at(f.a[0], f.a[1]), pb = at(f.b[0], f.b[1]);
+          var fl = f.y != null ? f.y : floorAt((f.a[0] + f.b[0]) / 2, (f.a[1] + f.b[1]) / 2, lvl);
+          if (f.type === "rail") {   // a half wall with a railing
+            var hh = f.h != null ? f.h : 1.0, rail = plane(pa, pb, hh - fl, new THREE.MeshBasicMaterial({ color: C.cyan, transparent: true, opacity: 0.1, side: THREE.DoubleSide }));
+            rail.position.y = (fl + hh) / 2;
+            g.add(rail, new THREE.Line(new THREE.BufferGeometry().setFromPoints([pa.clone().setY(hh), pb.clone().setY(hh)]),
+              new THREE.LineBasicMaterial({ color: C.cyan, transparent: true, opacity: 0.6 })));
+          } else {   // window (a sliding door when door: true) or a door
+            var door = f.type === "door" || f.door, tall2 = f.h || (door ? 2.1 : 1.5);
+            var pane = plane(pa, pb, tall2, new THREE.MeshBasicMaterial({ color: hex(f.color, f.type === "door" ? C.wood : C.glass),
+              transparent: true, opacity: f.type === "door" ? 0.4 : 0.22, side: THREE.DoubleSide, depthWrite: false }));
+            pane.position.y = fl + (door ? tall2 / 2 : 1.7);
+            g.add(pane);
+          }
+        }
+      });
+
+      drawing.marks.forEach(function (m) {
+        var el = document.createElement("div");
+        el.className = "lbl mark";
+        el.textContent = m.name;
+        labels.appendChild(el);
+        markObjs.push({ p: at(m.at[0], m.at[1], m.h), lvl: m.level || 0, el: el });
+      });
+
+    }
+
+    // ---------- devices ----------
+    function liveOf(dv) {
+      if (dv.kind === "switch") return live.switches.find(function (s) { return s.id === dv.ref; }) || null;
+      if (dv.kind === "camera") return live.cameras.find(function (c) { return c.id === dv.ref; }) || null;
+      return live.boards.find(function (b) { return b.id === dv.ref; }) || null;
+    }
+    function nameOf(dv) { var l = liveOf(dv); return (l && l.name) || dv.name || dv.ref; }
+    function isTv(dv) { var l = liveOf(dv); return dv.kind === "switch" && !!l && l.icon === "tv"; }
+    function sensorMoving(dv) {
+      return live.paths.some(function (p) { return p.motion && p.online && p.id.split("-").indexOf(dv.ref) >= 0; });
+    }
+    function isOn(dv) {
+      var l = liveOf(dv);
+      if (dv.kind === "sensor") return sensorMoving(dv);
+      if (dv.kind === "switch") return !!(l && l.on && l.online);
+      return false;
+    }
+    function online(dv) { var l = liveOf(dv); return dv.kind === "camera" ? !!l : !!(l && l.online); }
+    function stateWords(dv) {
+      var l = liveOf(dv);
+      if (!l) return dv.kind === "camera" ? "not connected" : "not found";
+      if (dv.kind === "camera") return "live";
+      if (!l.online) return "offline";
+      if (dv.kind === "sensor") return sensorMoving(dv) ? "movement" : "still";
+      return l.on ? "on" : "off";
+    }
+
+    function makeDevice(dv) {
+      var lvl = dv.level || 0, g = new THREE.Group(), mesh, mat = new THREE.MeshBasicMaterial({ color: C.cyan });
+      if (dv.kind === "sensor") { mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.16, 20), mat); mesh.position.y = 1.0; }
+      else if (dv.kind === "camera") { mesh = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.6, 16), mat); mesh.rotation.x = Math.PI / 2; mesh.position.y = 2.2; }
+      else if (isTv(dv)) { mesh = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.9, 1.5), mat); mesh.position.y = 1.3; }
+      else { mesh = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), mat); mesh.position.y = 0.3; }
+      var halo = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.62, 32),
+        new THREE.MeshBasicMaterial({ color: C.live, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
+      halo.rotation.x = -Math.PI / 2; halo.position.y = 0.03;
+      g.add(mesh, halo);
+      g.position.copy(at(dv.at[0], dv.at[1], floorAt(dv.at[0], dv.at[1], lvl)));
+      g.rotation.y = (dv.turn || 0) * Math.PI / 180;
+      levels[lvl].add(g);
+      mesh.userData.dev = dv.id; pickables.push(mesh);
+      var el = document.createElement("div");
+      el.className = "lbl";
+      labels.appendChild(el);
+      devObjs[dv.id] = { dv: dv, group: g, mesh: mesh, halo: halo, mat: mat, el: el, top: mesh.position.y + 0.5, tv: isTv(dv) };
+    }
+    function dropDevice(id) {
+      var o = devObjs[id];
+      if (!o) return;
+      o.group.parent.remove(o.group); o.el.remove();
+      pickables = pickables.filter(function (m) { return m !== o.mesh; });
+      delete devObjs[id];
+    }
+    function syncDevices() {   // add new ones, rebuild moved ones (or a TV that only now turned out to be a TV)
+      var keep = {};
+      placed.forEach(function (dv) {
+        keep[dv.id] = true;
+        var o = devObjs[dv.id];
+        if (o && o.dv.at[0] === dv.at[0] && o.dv.at[1] === dv.at[1] && (o.dv.level || 0) === (dv.level || 0) &&
+            (o.dv.turn || 0) === (dv.turn || 0) && o.tv === isTv(dv)) { o.dv = dv; return; }
+        dropDevice(dv.id); makeDevice(dv);
+      });
+      Object.keys(devObjs).forEach(function (id) { if (!keep[id]) dropDevice(id); });
+      syncPaths();
+    }
+    function sensorObj(boardId) { var o = devObjs["sensor:" + boardId]; return o || null; }
+    function syncPaths() {   // a line for every board-to-board path whose two boards are both on the map
+      var want = {};
+      live.paths.forEach(function (p) {
+        var ends = p.id.split("-"), a = sensorObj(ends[0]), b = sensorObj(ends[1]);
+        if (ends.length !== 2 || !a || !b) return;
+        var key = p.id + "@" + a.group.position.toArray().join() + b.group.position.toArray().join();
+        want[p.id] = true;
+        if (pathObjs[p.id] && pathObjs[p.id].key === key) return;
+        if (pathObjs[p.id]) pathObjs[p.id].line.parent.remove(pathObjs[p.id].line);
+        var pa = a.group.position.clone(), pb = b.group.position.clone();
+        pa.y += 1.0; pb.y += 1.0;
+        var mat = new THREE.LineBasicMaterial({ color: C.cyan, transparent: true, opacity: 0.18 });
+        var line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([pa, pb]), mat);
+        levels[(a.dv.level || 0) && (b.dv.level || 0) ? 1 : 0].add(line);
+        var midPlan = toPlan(pa.clone().lerp(pb, 0.5));
+        var room = roomAt(midPlan[0], midPlan[1], a.dv.level || 0);
+        pathObjs[p.id] = { key: key, line: line, mat: mat, room: room ? room.id : null };
+      });
+      Object.keys(pathObjs).forEach(function (id) {
+        if (!want[id]) { pathObjs[id].line.parent.remove(pathObjs[id].line); delete pathObjs[id]; }
+      });
+    }
+
+    // ---------- panel ----------
+    var selected = null, floorMode = "main", placing = null, snapTimer = null;
+    function drawLists() {
+      var rooms = drawing.rooms.filter(function (r) { return !r.kind; });
+      document.getElementById("rooms").innerHTML = rooms.map(function (r) {
+        var o = roomObjs[r.id];
+        return '<button type="button" class="row' + (o.busy ? " on" : "") + '" data-room="' + esc(r.id) + '"><span class="d"></span><span>' +
+          esc(r.name) + (r.guess ? " ?" : "") + '</span><span class="s">' + (o.busy ? "movement" : "") + '</span></button>';
+      }).join("");
+      var ids = Object.keys(devObjs);
+      document.getElementById("devices").innerHTML = ids.length ? ids.map(function (id) {
+        var dv = devObjs[id].dv;
+        return '<button type="button" class="row' + (isOn(dv) ? " on" : "") + '" data-dev="' + esc(id) + '"><span class="d"></span><span>' +
+          esc(nameOf(dv)) + '</span><span class="s">' + esc(stateWords(dv)) + '</span></button>';
+      }).join("") : '<p class="note">Nothing on the map yet: use ＋ Add device.</p>';
+      Object.keys(devObjs).forEach(function (id) {
+        var o = devObjs[id], dv = o.dv;
+        o.el.className = "lbl" + (isOn(dv) ? " on" : "") + (online(dv) ? "" : " off-line") + (id === selected ? " sel" : "");
+        o.el.innerHTML = "<i></i>" + esc(nameOf(dv));
+      });
+    }
+    var selSig = "";
+    function selState() {   // what the Selected card shows; it's redrawn only when this changes (keeps the camera picture steady)
+      var o = selected && devObjs[selected];
+      if (!o) return "";
+      return selected + "|" + stateWords(o.dv) + "|" + live.paths.map(function (p) { return p.id + p.online + p.motion; }).join();
+    }
+    function drawSelected() {
+      var box = document.getElementById("sel");
+      selSig = selState();
+      clearInterval(snapTimer); snapTimer = null;
+      var o = selected && devObjs[selected];
+      if (!o) { box.innerHTML = '<h2>Selected</h2><p class="note">Tap a device in the house or in the list below.</p>'; return; }
+      var dv = o.dv, l = liveOf(dv), html = '<h2>Selected</h2><div class="name">' + esc(nameOf(dv)) + "</div>", meta = [];
+      if (dv.kind === "sensor") {
+        meta.push("Wi-Fi motion sensor · " + esc(stateWords(dv)));
+        live.paths.filter(function (p) { return p.id.split("-").indexOf(dv.ref) >= 0; }).forEach(function (p) {
+          meta.push(esc(p.name) + ": " + (!p.online ? "offline" : p.motion ? "<b style=\"color:var(--live)\">movement</b>" : "still"));
+        });
+      } else if (dv.kind === "camera") {
+        meta.push("Camera");
+        if (l) html += '<img id="snap" alt="' + esc(nameOf(dv)) + ' camera" src="/snapshot.jpg?w=480&id=' + encodeURIComponent(l.web) + "&t=" + Date.now() + '">';
+      } else {
+        meta.push((isTv(dv) ? "TV" : "Switch") + " · " + esc(stateWords(dv)));
+      }
+      html += '<div class="meta">' + meta.join("<br>") + '</div><div class="acts">';
+      if (dv.kind === "switch" && l && l.online) html += '<button type="button" class="btn' + (l.on ? " on" : "") + '" id="a-toggle">' + (l.on ? "Turn off" : "Turn on") + "</button>";
+      if (dv.kind === "camera") html += '<a class="btn" href="/live" style="text-decoration:none">Live view</a>';
+      if (dv.kind === "sensor") html += '<a class="btn" href="/sensors" style="text-decoration:none">Sensors page</a>';
+      html += '<button type="button" class="btn" id="a-move">Move</button>';
+      if (o.tv) html += '<button type="button" class="btn" id="a-turn">Turn ↻</button>';
+      html += '<button type="button" class="btn" id="a-remove">Take off the map</button></div>';
+      box.innerHTML = html;
+      var bt = document.getElementById("a-toggle");
+      if (bt) bt.onclick = async function () {
+        bt.disabled = true;
+        try { var j = await postJson("/api/switches/set", { id: dv.ref, on: !l.on }); live.switches = j.switches || live.switches; refresh(); }
+        catch (e) { alert(e.message); bt.disabled = false; }
+      };
+      document.getElementById("a-move").onclick = function () { startPlacing({ kind: dv.kind, ref: dv.ref, name: nameOf(dv), turn: dv.turn }); };
+      var tb = document.getElementById("a-turn");
+      if (tb) tb.onclick = function () { save({ kind: dv.kind, ref: dv.ref, at: dv.at, level: dv.level, turn: ((dv.turn || 0) + 45) % 360 }); };
+      document.getElementById("a-remove").onclick = async function () {
+        try { var j = await postJson("/api/house/device", { id: dv.id, remove: true }); placed = j.devices; selected = null; syncDevices(); refresh(); }
+        catch (e) { alert(e.message); }
+      };
+      if (dv.kind === "camera" && l) snapTimer = setInterval(function () {
+        var img = document.getElementById("snap");
+        var cam = liveOf(dv);
+        if (img && cam && !document.hidden) img.src = "/snapshot.jpg?w=480&id=" + encodeURIComponent(cam.web) + "&t=" + Date.now();
+      }, 2000);
+    }
+    function refresh() { drawLists(); if (!placing) drawSelected(); }
+    function select(id) {
+      selected = id && devObjs[id] ? id : null;
+      refresh();
+      if (selected) flyTo(devObjs[selected].group.position, true);
+    }
+    document.getElementById("devices").addEventListener("click", function (e) {
+      var row = e.target.closest("[data-dev]");
+      if (row) select(row.dataset.dev);
+    });
+    document.getElementById("rooms").addEventListener("click", function (e) {
+      var row = e.target.closest("[data-room]");
+      if (!row) return;
+      var o = roomObjs[row.dataset.room];
+      if (o.lvl && floorMode === "main") setFloor("up");
+      if (!o.lvl && floorMode === "up") setFloor("main");
+      flyTo(o.center, true);
+    });
+
+    // ---------- adding and moving devices ----------
+    function unplaced() {
+      var on = {};
+      placed.forEach(function (d) { on[d.id] = true; });
+      var out = [];
+      live.boards.forEach(function (b) { if (!on["sensor:" + b.id]) out.push({ kind: "sensor", ref: b.id, name: b.name, group: "Wi-Fi sensors" }); });
+      live.switches.forEach(function (s) { if (!on["switch:" + s.id]) out.push({ kind: "switch", ref: s.id, name: s.name, group: s.icon === "tv" ? "TVs" : "Switches" }); });
+      live.cameras.forEach(function (c) { if (!on["camera:" + c.id]) out.push({ kind: "camera", ref: c.id, name: c.name, group: "Cameras" }); });
+      return out;
+    }
+    var bar = document.getElementById("placing");
+    document.getElementById("add").onclick = function () {
+      var list = unplaced();
+      bar.innerHTML = "<b>Which device?</b>" + (list.length ? list.map(function (d, i) {
+        return '<button type="button" class="chip" data-i="' + i + '">' + esc(d.name) + ' <span style="color:var(--muted)">· ' + esc(d.group) + "</span></button>";
+      }).join("") : '<small>Every device Sentinel knows is already on the map.</small>') + '<button type="button" class="chip" id="p-cancel">Cancel</button>';
+      bar.hidden = false;
+      document.getElementById("hint").hidden = true;
+      bar.querySelectorAll("[data-i]").forEach(function (b) { b.onclick = function () { startPlacing(list[+b.dataset.i]); }; });
+      document.getElementById("p-cancel").onclick = stopPlacing;
+    };
+    function startPlacing(dev) {
+      placing = dev;
+      bar.innerHTML = "<b>Tap the floor where the " + esc(dev.name) + " is</b>" +
+        (hasUpstairs ? "<small>Upstairs? Switch to Upstairs first.</small>" : "") + '<button type="button" class="chip" id="p-cancel">Cancel</button>';
+      bar.hidden = false;
+      document.getElementById("hint").hidden = true;
+      document.getElementById("p-cancel").onclick = stopPlacing;
+    }
+    function stopPlacing() { placing = null; bar.hidden = true; document.getElementById("hint").hidden = false; drawSelected(); }
+    async function save(body) {
+      try {
+        var j = await postJson("/api/house/device", body);
+        placed = j.devices; syncDevices();
+        selected = body.kind + ":" + body.ref; refresh();
+      } catch (e) { alert(e.message); }
+    }
+
+    // ---------- tapping ----------
+    var ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), down = null;
+    renderer.domElement.addEventListener("pointerdown", function (e) { down = [e.clientX, e.clientY]; });
+    renderer.domElement.addEventListener("pointerup", function (e) {
+      if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 6) return;  // a drag, not a tap
+      var rect = renderer.domElement.getBoundingClientRect();
+      ndc.set((e.clientX - rect.left) / rect.width * 2 - 1, -(e.clientY - rect.top) / rect.height * 2 + 1);
+      ray.setFromCamera(ndc, camera);
+      if (placing) {
+        var want = floorMode === "up" ? 1 : floorMode === "main" ? 0 : null;
+        var hits = ray.intersectObjects(floors.filter(function (f) { return f.parent.visible && (want === null || f.userData.level === want); }));
+        if (!hits.length) return;
+        var p = toPlan(hits[0].point), dev = placing;
+        placing = null; bar.hidden = true; document.getElementById("hint").hidden = false;
+        save({ kind: dev.kind, ref: dev.ref, name: dev.name, at: [Math.round(p[0]), Math.round(p[1])], level: hits[0].object.userData.level, turn: dev.turn || 0 });
+        return;
+      }
+      var hit = ray.intersectObjects(pickables.filter(function (m) { return m.parent.parent.visible; }))[0];
+      select(hit ? hit.object.userData.dev : null);
+    });
+
+    // ---------- views ----------
+    var fly = null;
+    function flyTo(target, close) {
+      var off = camera.position.clone().sub(controls.target);
+      if (close) off.setLength(Math.max(10, Math.min(off.length(), 20)));
+      fly = { t: 0, from: controls.target.clone(), to: target.clone().setY(0), camFrom: camera.position.clone(), camTo: target.clone().setY(0).add(off) };
+    }
+    function setView(top) {
+      document.getElementById("v-3d").setAttribute("aria-pressed", !top);
+      document.getElementById("v-top").setAttribute("aria-pressed", top);
+      var tgt = controls.target.clone();
+      fly = { t: 0, from: tgt, to: tgt, camFrom: camera.position.clone(),
+              camTo: top ? tgt.clone().add(new THREE.Vector3(0, home.off.length() * 1.2, 0.01)) : tgt.clone().add(home.off) };
+    }
+    document.getElementById("v-3d").onclick = function () { setView(false); };
+    document.getElementById("v-top").onclick = function () { setView(true); };
+    function setFloor(mode) {
+      floorMode = mode;
+      document.querySelectorAll("[data-floor]").forEach(function (x) { x.setAttribute("aria-pressed", x.dataset.floor === mode); });
+      levels[1].visible = mode !== "main";
+      levels[0].traverse(function (o) {
+        if (!o.material) return;
+        if (o.material.userData.full == null) o.material.userData.full = o.material.opacity;
+        o.material.transparent = true;
+        o.material.opacity = mode === "up" ? o.material.userData.full * 0.25 : o.material.userData.full;
+      });
+    }
+    document.querySelectorAll("[data-floor]").forEach(function (b) { b.onclick = function () { setFloor(b.dataset.floor); }; });
+
+    // ---------- live updates ----------
+    var seenPaths = {}, seenSwitches = {}, firstPoll = true;
+    async function poll() {
+      if (document.hidden) return;
+      try { live = await getJson("/api/house/live"); } catch (e) { return; }
+      live.paths.forEach(function (p) {
+        var was = seenPaths[p.id], now = p.online && p.motion;
+        if (!firstPoll && now && !was) log("<b>" + esc(p.name) + "</b>: movement");
+        seenPaths[p.id] = now;
+      });
+      live.switches.forEach(function (s) {
+        var was = seenSwitches[s.id];
+        if (!firstPoll && was != null && was !== s.on) log(esc(s.name) + " turned <b>" + (s.on ? "on" : "off") + "</b>");
+        seenSwitches[s.id] = s.on;
+      });
+      firstPoll = false;
+      syncDevices();
+      Object.keys(roomObjs).forEach(function (id) { roomObjs[id].busy = false; });
+      live.paths.forEach(function (p) {
+        var o = pathObjs[p.id];
+        if (o && o.room && p.online && p.motion) roomObjs[o.room].busy = true;
+      });
+      drawLists();
+      if (!placing && selState() !== selSig) drawSelected();
+    }
+
+    // ---------- frame loop ----------
+    function resize() {
+      var w = stage.clientWidth, h = stage.clientHeight;
+      renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+    }
+    var v = new THREE.Vector3(), last = performance.now();
+    function place(el, p, show) {
+      el.style.display = show ? "" : "none";
+      if (!show) return;
+      v.copy(p).project(camera);
+      if (v.z >= 1) { el.style.display = "none"; return; }
+      el.style.left = ((v.x + 1) / 2 * stage.clientWidth) + "px";
+      el.style.top = ((1 - v.y) / 2 * stage.clientHeight) + "px";
+    }
+    function shown(lvl) { return floorMode === "all" || (floorMode === "up") === !!lvl; }
+    function frame(now) {
+      var dt = Math.min(0.05, (now - last) / 1000); last = now;
+      if (fly) {
+        fly.t = Math.min(1, fly.t + dt * 1.6);
+        var e = 1 - Math.pow(1 - fly.t, 3);
+        controls.target.lerpVectors(fly.from, fly.to, e);
+        camera.position.lerpVectors(fly.camFrom, fly.camTo, e);
+        if (fly.t >= 1) fly = null;
+      }
+      controls.update();
+      var pulse = REDUCED ? 1 : 0.55 + 0.45 * Math.sin(now / 160);
+      live.paths.forEach(function (p) {
+        var o = pathObjs[p.id];
+        if (!o) return;
+        var on = p.online && p.motion;
+        o.mat.color.setHex(on ? C.live : C.cyan);
+        o.mat.opacity = on ? 0.55 + 0.4 * pulse : p.online ? 0.18 : 0.05;
+      });
+      Object.keys(roomObjs).forEach(function (id) {
+        var o = roomObjs[id], dimmed = floorMode === "up" && !o.lvl;
+        o.floor.material.color.setHex(o.busy ? C.live : o.tint);
+        o.floor.material.opacity = o.busy ? 0.12 + 0.06 * pulse : dimmed ? o.base * 0.25 : o.base;
+      });
+      Object.keys(devObjs).forEach(function (id) {
+        var o = devObjs[id], on = isOn(o.dv);
+        o.mat.color.setHex(!online(o.dv) ? C.off : on && o.dv.kind === "switch" ? C.live : C.cyan);
+        o.halo.material.opacity = on ? 0.25 + 0.5 * pulse : id === selected ? 0.4 : 0;
+        o.halo.material.color.setHex(on ? C.live : C.cyan);
+      });
+      renderer.render(scene, camera);
+      Object.keys(devObjs).forEach(function (id) {
+        var o = devObjs[id];
+        place(o.el, o.group.position.clone().setY(o.group.position.y + o.top), shown(o.dv.level || 0));
+      });
+      Object.keys(roomObjs).forEach(function (id) {
+        var o = roomObjs[id];
+        o.el.classList.toggle("busy", o.busy);
+        place(o.el, o.center, shown(o.lvl));
+      });
+      markObjs.forEach(function (m) { place(m.el, m.p, shown(m.lvl)); });
+      requestAnimationFrame(frame);
+    }
+
+    async function start() {
+      var d;
+      try { d = await getJson("/api/house"); } catch (e) { return; }
+      if (!d.drawing) { document.getElementById("empty").hidden = false; return; }
+      drawing = d.drawing; placed = d.devices;
+      build();
+      document.getElementById("tools").hidden = false;
+      document.getElementById("hint").hidden = false;
+      var tall = stage.clientWidth < stage.clientHeight;   // a phone held upright needs to stand further back
+      home.off.multiplyScalar(tall ? 1.75 : 1.15);
+      camera.position.copy(home.target.clone().add(TV ? new THREE.Vector3(0, tall ? 60 : 36, 0.01) : home.off));
+      controls.target.copy(home.target);
+      if (TV) { document.getElementById("v-3d").setAttribute("aria-pressed", false); document.getElementById("v-top").setAttribute("aria-pressed", true); }
+      setFloor("main");
+      new ResizeObserver(resize).observe(stage); resize();
+      await poll();
+      setInterval(poll, 1500);
+      requestAnimationFrame(frame);
+    }
+    start();
+  })();
+  </script>
+</body>
+</html>

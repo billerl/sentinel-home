@@ -351,6 +351,20 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   logged as `maybe_person`. Alerts are unchanged. Why: a person walking through the back yard in IR scored 0.38
   (alert bar 0.45). Replayed 1,042 Back Yard night clips (Oct 27-Nov 2): 3 extra triggers (the real walk, a bug
   on the lens that also fooled the alert path, patio chairs at dusk once). Also: the weather card has a clock.
+- **House page** (`sentinel/engine/house.py`, `templates/house.html`, `/house`, `/api/house*`, saved in
+  `recorded_videos/house.json`: a floor plan is personal, so it never goes into git). A 3D drawing of the home in
+  three.js r128 (MIT, served from `static/three/` so it stays local) with the real devices placed on it. The drawing =
+  rooms (rectangles `parts` for hit-testing + an optional outline `poly`, a floor height `y` and ceiling `top` so a
+  split-level can sit half a floor up or down, `level` 0/1, wall `gaps` = openings, `"door"` ones framed in yellow),
+  features (steps, windows/sliding doors, doors, boxes for furniture/fireplace, rails) and text marks, all in the
+  floor plan's own units (the page scales it to fit). It's replaced whole (`POST /api/house/drawing`); there is no
+  wall editor yet: it's made from a floor plan or photos with Claude Code. Devices are placed by what they are
+  (`switch:<id>`, `sensor:<board id>`, `camera:<camera address>`, never the web id, which changes every start, or
+  the RTSP URL) with `POST /api/house/device`; ＋ Add device on the page lists every known device not yet on the map.
+  `GET /api/house/live` (polled every 1.5 s) = paths (motion only, no score graphs), boards, switches and cameras
+  (address + current web id for snapshots). A path's line lights up while it sees movement, and the room its
+  midpoint is in lights up with it (a simple first rule; the routines' any/all/but-not rules could drive rooms
+  later). Fire TV / smart-TV browsers start in the flat Top view with antialiasing off.
 - **Telegram commands added:** `access` (remote-access guide) and `videos <when> [people|vehicles|animals] [camera]` (`sentinel/engine/queries.py`).
 - **Web:** `/settings` covers status, cameras, detection, Telegram, recording, audio, remote access, password and help.
 - **Home page** (`/`, `home.html`, 2026-11-04): weather, who's home, navigation tiles with live status (cameras, indoor

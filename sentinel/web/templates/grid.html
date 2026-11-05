@@ -1603,7 +1603,6 @@
       document.body.classList.toggle("tab-events", tab === "events");
       document.body.classList.toggle("tab-switches", tab === "switches");
       document.querySelectorAll("#tabs button").forEach(function(b) { b.classList.toggle("active", b.dataset.tab === tab); });
-      store("sentinel.tab", tab);
       if (isPhone()) {
         document.getElementById("timeline").hidden = false;  // the tab decides on phones
         window.scrollTo(0, 0);
@@ -1897,8 +1896,7 @@
       var z = Number(recall("sentinel.timelineZoom"));
       if (z === 1 || z === 4 || z === 24) tlZoom = z;
       toggleTimeline(recall("sentinel.timeline") !== "0");
-      var savedTab = recall("sentinel.tab");
-      setTab(savedTab === "events" || savedTab === "switches" ? savedTab : "live");
+      setTab("live");  // the Home page's Cameras tile opens the cameras, not whichever tab was used last
       PHONE_QUERY.addEventListener("change", function() {
         if (isPhone()) setTab(currentTab);
         else toggleTimeline(recall("sentinel.timeline") !== "0");  // back to the desktop preference

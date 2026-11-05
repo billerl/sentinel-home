@@ -134,6 +134,13 @@ class FrameBroker:
                 key=lambda item: item[1],
             )
 
+    def list_camera_addresses(self) -> List[Tuple[str, str, str]]:
+        """(web_id, host, display_name) per live camera, ordered by display name: the host is what stays the
+        same across restarts (the House page places cameras by it)."""
+        with self._lock:
+            return sorted(((cid, self._hosts.get(cid, ""), self._names.get(cid, cid)) for cid in self._frames),
+                          key=lambda item: item[2])
+
     def list_camera_hosts(self) -> List[Tuple[str, str]]:
         """(host, display_name) per live camera, matching list_cameras order."""
         with self._lock:

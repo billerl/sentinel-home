@@ -162,6 +162,9 @@ class Engine:
         from sentinel.engine.wifi_motion import WifiMotion
 
         self.wifi_motion = WifiMotion(VIDEO_DIR)  # ESP32 boards that sense movement through the Wi-Fi signal
+        from sentinel.engine.house import HouseLayout
+
+        self.house = HouseLayout(VIDEO_DIR)  # the House page's 3D drawing and where each device sits on it
         from sentinel.engine.routines import HOLDS_FILE, RoutineRunner, RoutineStore
 
         self._last_motion: Dict[str, float] = {}  # camera -> last frame with motion (routines' "until quiet")
@@ -1446,6 +1449,16 @@ class Engine:
                 self.telegram.send_photo(chat_id, jpeg, text)
             else:
                 self.telegram.reply_to_chat(chat_id, text)
+
+    def house_live(self) -> Dict[str, Any]:
+        """What the House page shows moving or switched on, in one small poll (no score graphs)."""
+        wm = self.wifi_motion.view()
+        return {
+            "now": wm["now"],
+            "paths": [{k: p[k] for k in ("id", "name", "online", "motion", "last_motion")} for p in wm["sensors"]],
+            "boards": [{k: b[k] for k in ("id", "name", "online")} for b in wm["boards"]],
+            "switches": self.switches.view()["switches"],
+        }
 
     def routine_catalog(self):
         from sentinel.engine.routines import Catalog

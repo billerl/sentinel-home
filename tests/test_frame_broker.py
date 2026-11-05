@@ -28,6 +28,7 @@ class TestFrameBroker(unittest.TestCase):
         cams = b.list_cameras()
         self.assertEqual(cams, [(wid, "Front")])
         self.assertEqual(b.list_camera_hosts(), [("10.0.0.5", "Front")])
+        self.assertEqual(b.list_camera_addresses(), [(wid, "10.0.0.5", "Front")])
         b.unpublish("rtsp://u:secret@10.0.0.5/s")
         got2, _ = b.get_latest(wid)
         self.assertIsNone(got2)

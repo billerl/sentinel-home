@@ -43,6 +43,7 @@ sentinel-home/                         # repository root
     │   ├── samsung_tv.py              # Samsung TVs as a switch (Wake-on-LAN + power key), apps, volume, mute
     │   ├── fire_tv.py                 # Fire TVs over ADB: switch, remote, apps, "put the cameras on the TV"
     │   ├── wifi_motion.py             # Wi-Fi motion sensors (ESP32 CSI boards): find, poll, judge motion, daily CSVs
+    │   ├── house.py                   # House page: the 3D drawing of the home (house.json) + where each device sits
     │   ├── routines.py                # "When X, only if Y, then Z": check/describe, sunrise/sunset maths, runner (routines.db), Wi-Fi sensor rules + 24 h replay
     │   ├── questions.py               # Telegram questions ("did anyone come by?", "is Kate home?")
     │   ├── queries.py                 # "videos <when>" parsing
@@ -64,12 +65,13 @@ sentinel-home/                         # repository root
     │   ├── frame_broker.py            # Latest frame per camera; opaque ids; lazy JPEG encoding
     │   ├── bind_util.py               # Refuse binding on camera-only subnets
     │   ├── set_password.py            # CLI: `python -m sentinel.web.set_password`
-    │   ├── static/                    # Icons + web app manifest; leaflet/ = Leaflet 1.9.4 (BSD-2, map on the Timeline)
+    │   ├── static/                    # Icons + web app manifest; leaflet/ = Leaflet 1.9.4 (BSD-2, map on the Timeline),
+    │   │                              #   three/ = three.js r128 + OrbitControls (MIT, the House page)
     │   └── templates/                 # login (+ QR), pair (phone approves a TV), home (`/`: weather, who's home,
     │                                  #   page tiles, switches), grid (`/live`: cameras + weather/clock +
     │                                  #   family lights + switches + timeline + player), zones, settings, vehicles,
     │                                  #   sensors (Wi-Fi motion lines) + sensors_history (movement by day),
-    │                                  #   routines (when X then Y editor),
+    │                                  #   routines (when X then Y editor), house (3D map of the home, live),
     │                                  #   people (Family page), join (setup link opened on a family phone),
     │                                  #   timeline (Family timeline), account (a person picks their own password)
     ├── notifications/
