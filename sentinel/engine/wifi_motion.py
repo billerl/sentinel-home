@@ -63,6 +63,7 @@ RATIO = 1.4                  # motion when the score is this many times the quie
 MIN_DELTA = 3.0              # ...and at least this much above it (tiny quiet levels make ratios jumpy)
 TRIGGER_SAMPLES = 2          # consecutive smoothed scores over the line (0.5 s)
 HOLD_SECONDS = 15.0          # motion "ends" after this long with nothing
+RATIO_MIN, RATIO_MAX = 1.1, 3.0  # the movement line the user may pick per path on the Sensors page
 
 
 class MotionJudge:
@@ -134,8 +135,9 @@ class MotionJudge:
 class Board:
     """One sensor board on the network."""
 
-    def __init__(self, board_id: str, ip: str = "", host: str = "", fw: str = "") -> None:
+    def __init__(self, board_id: str, ip: str = "", host: str = "", fw: str = "", name: str = "") -> None:
         self.id, self.ip, self.host, self.fw = board_id, ip, host, fw
+        self.name = name  # what the user calls the board ("Feather", "Kitchen board"); else its id
         self.last_seen = 0.0
         self.rssi: Optional[int] = None
         self.battery: Optional[Dict[str, float]] = None
@@ -214,6 +216,7 @@ class WifiMotion:
         self._boards: Dict[str, Board] = {}
         self._lines: Dict[str, Line] = {}
         self._names: Dict[str, str] = {}  # line id -> name the user gave it (kept while a line is away)
+        self._ratios: Dict[str, float] = {}  # path id -> movement line the user picked (else RATIO)
         self._csv_day = ""
         self._csv_file = None
         self._csv = None
@@ -232,15 +235,23 @@ class WifiMotion:
         for bid, info in boards.items():
             if isinstance(bid, str) and ID_OK.match(bid) and isinstance(info, dict):
                 ip = info.get("ip") if _private_ipv4(str(info.get("ip"))) else ""
-                self._boards[bid] = Board(bid, ip, _clean_name(info.get("host")), _clean_name(info.get("fw")))
+                name = _clean_name(info.get("name"))
+                self._boards[bid] = Board(bid, ip, _clean_name(info.get("host")), _clean_name(info.get("fw")),
+                                          name if NAME_OK.match(name) and bid != name else "")
         names = data.get("names") if isinstance(data.get("names"), dict) else {}
         for lid, name in names.items():
             if isinstance(lid, str) and LINE_ID_OK.match(lid) and NAME_OK.match(_clean_name(name)):
                 self._names[lid] = _clean_name(name)
+        ratios = data.get("ratios") if isinstance(data.get("ratios"), dict) else {}
+        for pid, ratio in ratios.items():
+            if (isinstance(pid, str) and LINE_ID_OK.match(pid) and isinstance(ratio, (int, float))
+                    and RATIO_MIN <= ratio <= RATIO_MAX):
+                self._ratios[pid] = float(ratio)
 
     def _save(self) -> None:
-        data = {"boards": {b.id: {"ip": b.ip, "host": b.host, "fw": b.fw} for b in self._boards.values()},
-                "names": self._names}
+        data = {"boards": {b.id: {"ip": b.ip, "host": b.host, "fw": b.fw, **({"name": b.name} if b.name else {})}
+                           for b in self._boards.values()},
+                "names": self._names, "ratios": self._ratios}
         tmp = self.path + ".tmp"
         with open(tmp, "w") as f:
             json.dump(data, f, indent=1)
@@ -304,6 +315,7 @@ class WifiMotion:
                 line = self._lines.get(line_id)
                 if line is None:
                     line = self._lines[line_id] = Line(board, lid, source, self._names.get(line_id, ""))
+                    line.judge = self._judge_for(line)
                     app_logger.log("info", "wifi_line_found", sensor=line_id, source=source,
                                    component="wifi_motion", action="poll")
                 line.rssi = int(link_rssi) if isinstance(link_rssi, (int, float)) else None
@@ -319,7 +331,7 @@ class WifiMotion:
             # The board restarted: its counter began again. Restarts mostly mean it was unplugged and moved
             # (or updated), so learn the room afresh rather than judging a new spot by the old one's quiet level.
             line.last_seq = None
-            line.judge = MotionJudge()
+            line.judge = self._judge_for(line)
             line.series.clear()
         fresh = [r for r in rows if line.last_seq is None or r[0] > line.last_seq]
         if not fresh:
@@ -424,15 +436,82 @@ class WifiMotion:
             if line.id in self._names:
                 return self._names[line.id]
         if len(lines) == 1 and lines[0].source == "router":
-            return lines[0].name
-        return "Wi-Fi sensor %s to %s" % tuple(pid.split("-", 1))
+            return f"{self._board_name(lines[0].board.id)} to the router"
+        a, b = pid.split("-", 1)
+        return f"{self._board_name(a)} to {self._board_name(b)}"
+
+    def _board_name(self, bid: str) -> str:
+        board = self._boards.get(bid)
+        return board.name if board and board.name else bid
+
+    def rename_board(self, bid: str, name: str) -> Tuple[bool, str]:
+        name = _clean_name(name)
+        if not NAME_OK.match(name):
+            return False, "Use up to 30 letters, numbers and spaces."
+        with self._lock:
+            board = self._boards.get(bid)
+            if board is None:
+                return False, "That board isn't known."
+            board.name = name
+            self._save()
+        return True, "renamed"
+
+    def identify(self, bid: str) -> Tuple[bool, str]:
+        """Ask a board to flash its light for 20 s (which one is which?)."""
+        with self._lock:
+            board = self._boards.get(bid)
+            ip = board.ip if board else ""
+        if not ip:
+            return False, "That board isn't known."
+        try:
+            with urllib.request.urlopen(f"http://{ip}/identify", timeout=3.0) as r:
+                r.read(256)
+        except OSError:
+            return False, "That board didn't answer. Is it plugged in?"
+        return True, "flashing"
+
+    def _judge_for(self, line: Line) -> MotionJudge:
+        return MotionJudge(ratio=self._ratios.get(path_id(line), RATIO))
+
+    def _path_lines(self, pid: str) -> List[Line]:
+        return [line for line in self._lines.values() if path_id(line) == pid]
+
+    def set_ratio(self, pid: str, ratio: Any) -> Tuple[bool, str]:
+        """The user moved a path's movement line (how many times its quiet level counts as movement)."""
+        if not isinstance(ratio, (int, float)) or isinstance(ratio, bool) or not RATIO_MIN <= ratio <= RATIO_MAX:
+            return False, f"Pick a movement line between {RATIO_MIN} and {RATIO_MAX} times the quiet level."
+        ratio = round(float(ratio), 2)
+        with self._lock:
+            lines = self._path_lines(pid)
+            if not lines:
+                return False, "That sensor isn't known."
+            if ratio == RATIO:
+                self._ratios.pop(pid, None)
+            else:
+                self._ratios[pid] = ratio
+            for line in lines:
+                line.judge.ratio = ratio
+            self._save()
+        app_logger.log("info", "wifi_motion_ratio", path=pid, ratio=ratio, component="wifi_motion", action="adjust")
+        return True, "saved"
+
+    def relearn(self, pid: str) -> Tuple[bool, str]:
+        """Forget a path's quiet level and learn it again from the next steady half minute."""
+        with self._lock:
+            lines = self._path_lines(pid)
+            if not lines:
+                return False, "That sensor isn't known."
+            for line in lines:
+                line.judge = self._judge_for(line)
+        app_logger.log("info", "wifi_motion_relearn", path=pid, component="wifi_motion", action="adjust")
+        return True, "relearning"
 
     def rename(self, pid: str, name: str) -> Tuple[bool, str]:
         name = _clean_name(name)
         if not NAME_OK.match(name):
             return False, "Use up to 30 letters, numbers and spaces."
         with self._lock:
-            if not any(path_id(line) == pid for line in self._lines.values()):
+            if not self._path_lines(pid):
                 return False, "That sensor isn't known."
             self._names[pid] = name
             self._save()
@@ -453,7 +532,8 @@ class WifiMotion:
                 for s in lines:
                     j = s.judge
                     ends.append({
-                        "id": s.id, "board": s.board.id, "hears": s.link,
+                        "id": s.id, "board": self._board_name(s.board.id),
+                        "hears": "the router" if s.source == "router" else self._board_name(s.link),
                         "online": now - s.last_data < OFFLINE_AFTER, "motion": j.motion,
                         "score": None if j.smoothed is None else round(j.smoothed, 2),
                         "baseline": None if j.baseline is None else round(j.baseline, 2),
@@ -469,10 +549,14 @@ class WifiMotion:
                     "online": bool(live), "motion": any(e["motion"] for e in live),
                     "last_motion": max(last) if last else None,
                     "learning": all(s.judge.baseline is None for s in lines),
+                    "ratio": self._ratios.get(pid, RATIO), "default_ratio": RATIO,
                     "rssi": min((e["rssi"] for e in live if e["rssi"] is not None), default=None),
                     "rate": min((e["rate"] for e in live if e["rate"] is not None), default=None),
                     "battery": batteries[0] if batteries else None,
                     "ips": sorted({s.board.ip for s in lines if s.board.ip}),
                     "directions": ends,
                 })
-        return {"sensors": out}
+            boards = [{"id": b.id, "name": self._board_name(b.id), "named": bool(b.name), "ip": b.ip, "fw": b.fw,
+                       "online": now - b.last_seen < OFFLINE_AFTER, "battery": b.battery}
+                      for b in sorted(self._boards.values(), key=lambda b: (b.name or b.id).lower())]
+        return {"sensors": out, "boards": boards}

@@ -152,6 +152,47 @@ class SensorsTest(unittest.TestCase):
         self.assertEqual(self.wm.view(now=NOW)["sensors"][0]["name"], "Living room")
         self.assertFalse(self.wm.rename("beb4-8d24", "Kitchen")[0])  # an end, not a path
 
+    def test_movement_line_per_path_and_relearn(self):
+        b = self._board()
+        self.replies["192.168.1.77"] = status(("beb4", "beacon", [[10, 50.0, 40.0]]))
+        self.wm.poll(b, now=NOW)
+        line = self.wm._lines["8d24-beb4"]
+        self.assertFalse(self.wm.set_ratio("8d24-beb4", 0.5)[0])
+        self.assertFalse(self.wm.set_ratio("8d24-beb4", "2")[0])
+        self.assertFalse(self.wm.set_ratio("ffff-0000", 2.0)[0])
+        self.assertTrue(self.wm.set_ratio("8d24-beb4", 1.8)[0])
+        self.assertEqual(line.judge.ratio, 1.8)
+        self.assertEqual(self.wm.view(now=NOW)["sensors"][0]["ratio"], 1.8)
+        line.judge._baseline = 40.0
+        self.assertEqual(line.judge.threshold(), 72.0)
+        self.assertTrue(self.wm.relearn("8d24-beb4")[0])
+        self.assertIsNone(self.wm._lines["8d24-beb4"].judge.baseline)
+        self.assertEqual(self.wm._lines["8d24-beb4"].judge.ratio, 1.8)  # relearning keeps the user's line
+        again = WifiMotion(self.dir, fetch=self._fetch)
+        again.poll(again._boards["8d24"], now=NOW)
+        self.assertEqual(again._lines["8d24-beb4"].judge.ratio, 1.8)
+        if again._csv_file:
+            again._csv_file.close()
+        self.assertTrue(self.wm.set_ratio("8d24-beb4", wifi_motion.RATIO)[0])  # back to normal: not stored
+        self.assertNotIn("8d24-beb4", self.wm._ratios)
+
+    def test_board_names_name_the_paths_until_a_path_is_renamed(self):
+        b = self._board()
+        self.replies["192.168.1.77"] = status(("beb4", "beacon", [[10, 50.0, 40.0]]))
+        self.wm.poll(b, now=NOW)
+        self.assertEqual(self.wm.view(now=NOW)["sensors"][0]["name"], "8d24 to beb4")
+        self.assertTrue(self.wm.rename_board("8d24", "Feather")[0])
+        self.assertFalse(self.wm.rename_board("8d24", "<b>")[0])
+        self.assertFalse(self.wm.rename_board("ffff", "Kitchen")[0])
+        view = self.wm.view(now=NOW)
+        self.assertEqual(view["sensors"][0]["name"], "Feather to beb4")
+        self.assertEqual(view["sensors"][0]["directions"][0]["board"], "Feather")
+        self.assertEqual([x["name"] for x in view["boards"]], ["Feather"])
+        self.assertEqual(WifiMotion(self.dir)._boards["8d24"].name, "Feather")
+        self.wm.rename("8d24-beb4", "Living room")
+        self.assertEqual(self.wm.view(now=NOW)["sensors"][0]["name"], "Living room")
+        self.assertFalse(self.wm.identify("ffff")[0])
+
     def test_poll_takes_each_score_once_and_survives_a_restart(self):
         b = self._board()
         self.replies["192.168.1.77"] = status(("df1c", "beacon", [[10, 2.5, 49.0], [11, 2.6, 50.0]]),

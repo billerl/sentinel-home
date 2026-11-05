@@ -43,6 +43,17 @@
     .legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 5px; }
     .empty { text-align: center; padding: 34px 16px; border: 1px dashed #1d3a44; border-radius: 14px; color: #8fb6c4; line-height: 1.6; }
     .rename { display: flex; gap: 8px; margin-top: 10px; }
+    h2 { font-size: 0.95rem; color: #00ffff; margin: 26px 0 6px; }
+    .board { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; padding: 10px 0; border-top: 1px solid #16303a; }
+    .board .bname { flex: 1; min-width: 140px; color: #fff; font-weight: 600; }
+    .board .bname small { display: block; font-weight: 400; color: #6f97a5; font-size: 0.75rem; margin-top: 2px; }
+    .board .rename { flex-basis: 100%; margin-top: 0; }
+    .adjust { margin-top: 10px; padding: 12px; border: 1px solid #1d3a44; border-radius: 10px; background: #050b0f; }
+    .adjust label { display: block; font-size: 0.9rem; color: #fff; }
+    .adjust input[type=range] { width: 100%; margin: 10px 0 2px; accent-color: #ffc94d; }
+    .adjust .ends { display: flex; justify-content: space-between; font-size: 0.75rem; color: #6f97a5; }
+    .adjust p { font-size: 0.8rem; color: #9cc; line-height: 1.5; margin: 10px 0; }
+    .adjust .buttons { display: flex; flex-wrap: wrap; gap: 8px; }
     .rename input { flex: 1; min-width: 0; font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid #1d3a44;
                     background: #050b0f; color: #fff; }
   </style>
@@ -64,10 +75,15 @@
       <b>Movement</b> when the wobble rises well above that. A board with no other board in reach measures the
       signal to your Wi-Fi router instead.</p>
     <div id="list"></div>
+    <h2>Boards</h2>
+    <p class="intro">Name each board after what it is or where it sits; the lines above are named after the two
+      boards at their ends until you rename them. <b>Flash light</b> makes a board blink white for 20 seconds.</p>
+    <div id="boards"></div>
   </main>
 
   <script>
     var renaming = null;
+    var adjusting = null, pendingRatio = null;  // the card whose movement line is being moved, and where to
     var COLORS = ["#00ffff", "#ff7ad9"];  // one per end of a line
 
     function esc(s) {
@@ -91,12 +107,31 @@
       return "Wi-Fi " + word + " (" + rssi + " dBm)";
     }
 
+    function stateOf(s) {
+      if (!s.online) return ["Not connected", "dim"];
+      if (s.learning) return ["Learning the quiet room…", "dim"];
+      if (s.motion) return ["Movement", "moving"];
+      return ["Still", "still"];
+    }
+
+    function adjustPanel(s) {
+      var r = pendingRatio;
+      return '<div class="adjust">' +
+        '<label for="ratio">Movement line: <b id="ratio-val">' + r.toFixed(2) + '×</b> the quiet level' +
+        (r === s.default_ratio ? ' (normal)' : '') + '</label>' +
+        '<input id="ratio" type="range" min="1.1" max="3" step="0.05" value="' + r + '" oninput="moveRatio(this.value)">' +
+        '<div class="ends"><span>more sensitive</span><span>less sensitive</span></div>' +
+        '<p>Lower catches smaller movements but may say Movement with nobody there; higher needs bigger ' +
+        'movement. The yellow line on the chart shows where it would be. The quiet level is learned by itself; ' +
+        'if it looks wrong, keep the room still and press Relearn (takes about half a minute).</p>' +
+        '<div class="buttons"><button type="button" onclick="saveRatio(\'' + esc(s.id) + '\')">Save</button>' +
+        '<button class="ghost" type="button" onclick="moveRatio(' + s.default_ratio + ', true)">Back to normal</button>' +
+        '<button class="ghost" type="button" onclick="relearn(\'' + esc(s.id) + '\')">Relearn quiet level</button>' +
+        '<button class="ghost" type="button" onclick="adjusting=null;load()">Close</button></div></div>';
+    }
+
     function card(s) {
-      var state, cls;
-      if (!s.online) { state = "Not connected"; cls = "dim"; }
-      else if (s.learning) { state = "Learning the quiet room…"; cls = "dim"; }
-      else if (s.motion) { state = "Movement"; cls = "moving"; }
-      else { state = "Still"; cls = "still"; }
+      var st = stateOf(s), state = st[0], cls = st[1];
       var meta = [];
       if (s.online) {
         meta.push(signal(s.rssi));
@@ -109,15 +144,17 @@
       var editing = renaming === s.id;
       return '<div class="card ' + (s.motion ? "moving" : "") + (s.online ? "" : " offline") + '" data-id="' + esc(s.id) + '">' +
         '<div class="top"><div class="name">' + esc(s.name) + '</div>' +
+        '<button class="ghost" type="button" onclick="startAdjust(\'' + esc(s.id) + '\', ' + s.ratio + ')">Adjust</button>' +
         '<button class="ghost" type="button" onclick="startRename(\'' + esc(s.id) + '\')">Rename</button></div>' +
         (editing ? '<div class="rename"><input id="rn" maxlength="30" value="' + esc(s.name) + '">' +
           '<button type="button" onclick="saveRename(\'' + esc(s.id) + '\')">Save</button>' +
           '<button class="ghost" type="button" onclick="renaming=null;load()">Cancel</button></div>' : '') +
+        (adjusting === s.id ? adjustPanel(s) : '') +
         '<div class="state ' + cls + '">' + state + '</div>' +
         '<div class="meta">' + meta.filter(Boolean).map(esc).map(function (m) { return "<span>" + m + "</span>"; }).join("") + '</div>' +
         '<canvas width="800" height="150"></canvas>' +
         '<div class="legend">' + s.directions.map(function (d, i) {
-          var what = d.hears === "rtr" ? "signal wobble" : "as " + d.board + " hears " + d.hears;
+          var what = "as " + d.board + " hears " + d.hears;
           return '<span><i style="background:' + COLORS[i % 2] + '"></i>' + esc(what) + '</span>';
         }).join("") +
         '<span><i style="background:#7fe0a0"></i>quiet level</span><span><i style="background:#ffc94d"></i>movement line</span>' +
@@ -137,7 +174,9 @@
       if (learned.length) {
         ends = learned;
         ends.forEach(function (e) { e.pts = e.d.series.map(function (p) { return [p[0], p[1] / e.d.baseline]; }); });
-        guides = [[1, "#7fe0a0"], [Math.max.apply(null, ends.map(function (e) { return e.d.threshold / e.d.baseline; })), "#ffc94d"]];
+        var move = adjusting === s.id ? pendingRatio  // preview while the slider moves
+          : Math.max.apply(null, ends.map(function (e) { return e.d.threshold / e.d.baseline; }));
+        guides = [[1, "#7fe0a0"], [move, "#ffc94d"]];
       } else {
         ends.forEach(function (e) { e.pts = e.d.series; });
       }
@@ -166,23 +205,105 @@
         if (r.status === 401) { location.href = "/login"; return; }
         var data = await r.json();
       } catch (e) { return; }
+      showBoards(data.boards || []);
       if (!data.sensors.length) {
         list.innerHTML = '<div class="empty">No sensors yet. Plug one in near the room to watch; it appears here by ' +
           'itself within half a minute of joining your Wi-Fi.</div>';
         return;
       }
-      if (renaming && document.getElementById("rn")) {  // don't redraw over someone typing; just refresh the charts
+      if ((renaming && document.getElementById("rn")) || (adjusting && document.getElementById("ratio"))) {
+        // don't redraw over someone typing or sliding; just refresh the charts and the Still/Movement words
         data.sensors.forEach(function (s) {
-          var c = list.querySelector('.card[data-id="' + s.id + '"] canvas');
-          if (c) draw(c, s);
+          var el = list.querySelector('.card[data-id="' + s.id + '"]');
+          if (!el) return;
+          var st = stateOf(s), word = el.querySelector(".state");
+          word.textContent = st[0]; word.className = "state " + st[1];
+          el.classList.toggle("moving", !!s.motion);
+          draw(el.querySelector("canvas"), s);
         });
+        lastData = data;
         return;
       }
+      lastData = data;
       list.innerHTML = data.sensors.map(card).join("");
       data.sensors.forEach(function (s) { draw(list.querySelector('.card[data-id="' + s.id + '"] canvas'), s); });
     }
 
-    function startRename(id) { renaming = id; load().then(function () { var i = document.getElementById("rn"); if (i) i.focus(); }); }
+    var lastData = null;
+    var renamingBoard = null;
+
+    function boardRow(b) {
+      var info = [b.online ? "connected" : "not connected", b.named ? "board " + b.id : "", b.ip,
+                  b.battery ? "battery " + Math.round(b.battery.pct) + "%" : ""].filter(Boolean).join(" · ");
+      return '<div class="board"><div class="bname">' + esc(b.name) + '<small>' + esc(info) + '</small></div>' +
+        '<button class="ghost" type="button" onclick="flashBoard(\'' + esc(b.id) + '\')">Flash light</button>' +
+        '<button class="ghost" type="button" onclick="startBoardRename(\'' + esc(b.id) + '\')">Rename</button>' +
+        (renamingBoard === b.id ? '<div class="rename"><input id="brn" maxlength="30" value="' + esc(b.named ? b.name : "") + '">' +
+          '<button type="button" onclick="saveBoardRename(\'' + esc(b.id) + '\')">Save</button>' +
+          '<button class="ghost" type="button" onclick="renamingBoard=null;load()">Cancel</button></div>' : '') +
+        '</div>';
+    }
+
+    function showBoards(boards) {
+      if (renamingBoard && document.getElementById("brn")) return;  // don't redraw over someone typing
+      document.getElementById("boards").innerHTML = boards.map(boardRow).join("");
+    }
+
+    async function postBoard(body) {
+      var r = await fetch("/api/wifi_motion/board", { method: "POST",
+        headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+        body: JSON.stringify(body) });
+      var j = await r.json();
+      if (!r.ok) { alert(j.error || "Couldn't do that."); return false; }
+      return true;
+    }
+
+    function flashBoard(id) { postBoard({ id: id, identify: true }); }
+
+    function startBoardRename(id) {
+      renamingBoard = id;
+      load().then(function () { var i = document.getElementById("brn"); if (i) i.focus(); });
+    }
+
+    async function saveBoardRename(id) {
+      if (await postBoard({ id: id, name: document.getElementById("brn").value })) { renamingBoard = null; load(); }
+    }
+
+    function startAdjust(id, ratio) {
+      renaming = null; adjusting = id; pendingRatio = ratio;
+      load();
+    }
+
+    function moveRatio(v, redraw) {
+      pendingRatio = Math.round(parseFloat(v) * 100) / 100;
+      var label = document.getElementById("ratio-val");
+      if (label) label.textContent = pendingRatio.toFixed(2) + "×";
+      if (redraw) { var r = document.getElementById("ratio"); if (r) r.value = pendingRatio; }
+      if (lastData) lastData.sensors.forEach(function (s) {  // move the yellow line now, not on the next refresh
+        if (s.id !== adjusting) return;
+        var c = document.querySelector('.card[data-id="' + s.id + '"] canvas');
+        if (c) draw(c, s);
+      });
+    }
+
+    async function postAdjust(body) {
+      var r = await fetch("/api/wifi_motion/adjust", { method: "POST",
+        headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+        body: JSON.stringify(body) });
+      var j = await r.json();
+      if (!r.ok) { alert(j.error || "Couldn't save that."); return false; }
+      return true;
+    }
+
+    async function saveRatio(id) {
+      if (await postAdjust({ id: id, ratio: pendingRatio })) { adjusting = null; load(); }
+    }
+
+    async function relearn(id) {
+      if (await postAdjust({ id: id, relearn: true })) { adjusting = null; load(); }
+    }
+
+    function startRename(id) { adjusting = null; renaming = id; load().then(function () { var i = document.getElementById("rn"); if (i) i.focus(); }); }
 
     async function saveRename(id) {
       var name = document.getElementById("rn").value;

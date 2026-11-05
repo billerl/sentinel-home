@@ -782,6 +782,30 @@ class WebServer:
             body = request.get_json(silent=True) or {}
             return _result(*engine.wifi_motion.rename(str(body.get("id") or "")[:24], str(body.get("name") or "")[:60]))
 
+        @app.route("/api/wifi_motion/board", methods=["POST"])
+        def api_wifi_motion_board():
+            """Rename a board ({"id", "name"}) or make its light flash ({"id", "identify": true})."""
+            err = _config_guard()
+            if err:
+                return err
+            body = request.get_json(silent=True) or {}
+            bid = str(body.get("id") or "")[:12]
+            if body.get("identify") is True:
+                return _result(*engine.wifi_motion.identify(bid))
+            return _result(*engine.wifi_motion.rename_board(bid, str(body.get("name") or "")[:60]))
+
+        @app.route("/api/wifi_motion/adjust", methods=["POST"])
+        def api_wifi_motion_adjust():
+            """Move a path's movement line ({"id", "ratio"}) or relearn its quiet level ({"id", "relearn": true})."""
+            err = _config_guard()
+            if err:
+                return err
+            body = request.get_json(silent=True) or {}
+            pid = str(body.get("id") or "")[:24]
+            if body.get("relearn") is True:
+                return _result(*engine.wifi_motion.relearn(pid))
+            return _result(*engine.wifi_motion.set_ratio(pid, body.get("ratio")))
+
         # ---- the TV remote (a Samsung TV among the switches; sentinel/engine/samsung_tv.py) ----
         @app.route("/api/tv/<tv_id>")
         def api_tv(tv_id):
