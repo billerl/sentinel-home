@@ -130,6 +130,28 @@ class SensorsTest(unittest.TestCase):
         self.assertEqual(self.wm._lines["8d24-df1c"].series[-1][1], 50.0)
         self.assertEqual(self.wm._lines["8d24-a0b1"].series[-1][1], 80.0)
 
+    def test_two_boards_hearing_each_other_are_one_path(self):
+        b = self._board()
+        self.wm.hello(json.dumps({"sentinel_sensor": "wifi_motion", "id": "beb4", "fw": "2.0.1"}).encode(),
+                      "192.168.1.78")
+        other = self.wm._boards["beb4"]
+        self.replies["192.168.1.77"] = status(("beb4", "beacon", [[10, 50.0, 40.0]]))
+        self.replies["192.168.1.78"] = status(("8d24", "beacon", [[10, 70.0, 35.0]]), ("df1c", "beacon", [[10, 9.0, 44.0]]))
+        self.wm.poll(b, now=NOW)
+        self.wm.poll(other, now=NOW)
+        view = {s["id"]: s for s in self.wm.view(now=NOW)["sensors"]}
+        self.assertEqual(set(view), {"8d24-beb4", "beb4-df1c"})
+        path = view["8d24-beb4"]
+        self.assertEqual([d["id"] for d in path["directions"]], ["8d24-beb4", "beb4-8d24"])
+        self.assertEqual(path["rate"], 35.0)
+        self.assertEqual(path["ips"], ["192.168.1.77", "192.168.1.78"])
+        self.assertFalse(path["motion"])
+        self.wm._lines["beb4-8d24"].judge.motion = True  # one end is enough
+        self.assertTrue(self.wm.view(now=NOW)["sensors"][0]["motion"])
+        self.assertTrue(self.wm.rename("8d24-beb4", "Living room")[0])
+        self.assertEqual(self.wm.view(now=NOW)["sensors"][0]["name"], "Living room")
+        self.assertFalse(self.wm.rename("beb4-8d24", "Kitchen")[0])  # an end, not a path
+
     def test_poll_takes_each_score_once_and_survives_a_restart(self):
         b = self._board()
         self.replies["192.168.1.77"] = status(("df1c", "beacon", [[10, 2.5, 49.0], [11, 2.6, 50.0]]),

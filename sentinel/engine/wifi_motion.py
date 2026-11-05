@@ -1,6 +1,10 @@
 """
 Wi-Fi motion sensors: small ESP32 boards (firmware/wifi_motion) that notice people moving by how
-their bodies disturb the Wi-Fi signal between the board and the router.
+their bodies disturb the Wi-Fi signal between two boards (or, for a lone board, the router).
+
+Every board sends 50 frames a second and measures the ones it hears from the others, so each pair of
+boards is one "path" through the house, measured from both ends. Each end ("line") keeps its own quiet
+level and motion; the page shows one card per path, moving when either end sees it.
 
 Each board turns the signal's wobble into a "score" four times a second and serves the last ten
 seconds of scores at GET /status. Sentinel finds boards by the UDP "hello" they broadcast every 30 s,
@@ -169,6 +173,13 @@ def _clean_name(name: Any) -> str:
     return re.sub(r"\s+", " ", name).strip() if isinstance(name, str) else ""
 
 
+def path_id(line: "Line") -> str:
+    """The path a line measures: board-to-board lines from both ends share one id, a router line is its own."""
+    if line.source == "beacon" and ID_OK.match(line.link):
+        return "-".join(sorted((line.board.id, line.link)))
+    return line.id
+
+
 def _status_links(status: Dict[str, Any]) -> List[Tuple[str, str, Any, List[list]]]:
     """[(link id, source, rssi, sample rows)] from a board's /status; older firmware had one top-level list."""
     raw = status.get("links")
@@ -324,11 +335,13 @@ class WifiMotion:
                 line.series.append((ts, float(score)))
             change = line.judge.feed(ts, float(score))
             if change == "started":
-                app_logger.log("info", "wifi_motion_started", sensor=line.id, name=line.name,
+                app_logger.log("info", "wifi_motion_started", sensor=line.id, path=path_id(line),
+                               name=self._path_name(path_id(line), [line]),
                                score=round(line.judge.smoothed, 2), baseline=round(line.judge.baseline or 0, 2),
                                component="wifi_motion", action="judge")
             elif change == "ended":
-                app_logger.log("info", "wifi_motion_ended", sensor=line.id, name=line.name,
+                app_logger.log("info", "wifi_motion_ended", sensor=line.id, path=path_id(line),
+                               name=self._path_name(path_id(line), [line]),
                                seconds=round(line.judge.last_motion - line.judge.started, 1),
                                peak=round(line.judge.peak, 2), component="wifi_motion", action="judge")
 
@@ -404,36 +417,62 @@ class WifiMotion:
                 self.poll(board)
 
     # ---- the web page and questions ----
-    def rename(self, line_id: str, name: str) -> Tuple[bool, str]:
+    def _path_name(self, pid: str, lines: List[Line]) -> str:
+        if pid in self._names:
+            return self._names[pid]
+        for line in lines:  # named before paths were joined up
+            if line.id in self._names:
+                return self._names[line.id]
+        if len(lines) == 1 and lines[0].source == "router":
+            return lines[0].name
+        return "Wi-Fi sensor %s to %s" % tuple(pid.split("-", 1))
+
+    def rename(self, pid: str, name: str) -> Tuple[bool, str]:
         name = _clean_name(name)
         if not NAME_OK.match(name):
             return False, "Use up to 30 letters, numbers and spaces."
         with self._lock:
-            line = self._lines.get(line_id)
-            if line is None:
+            if not any(path_id(line) == pid for line in self._lines.values()):
                 return False, "That sensor isn't known."
-            line.name = self._names[line_id] = name
+            self._names[pid] = name
             self._save()
         return True, "renamed"
 
     def view(self, now: Optional[float] = None) -> Dict[str, Any]:
-        """Lines heard from in the last SHOW_AWAY_SECONDS (a router line goes quiet while beacons are heard)."""
+        """Paths heard from in the last SHOW_AWAY_SECONDS (a router line goes quiet while other boards are heard),
+        each with its ends ("directions") as measured by the board at that end."""
         now = time.time() if now is None else now
+        paths: Dict[str, List[Line]] = {}
         out = []
         with self._lock:
-            for s in sorted(self._lines.values(), key=lambda line: line.id):
-                if now - s.last_data > SHOW_AWAY_SECONDS:
-                    continue
-                j, b = s.judge, s.board
+            for line in sorted(self._lines.values(), key=lambda line: line.id):
+                if now - line.last_data <= SHOW_AWAY_SECONDS:
+                    paths.setdefault(path_id(line), []).append(line)
+            for pid, lines in sorted(paths.items()):
+                ends = []
+                for s in lines:
+                    j = s.judge
+                    ends.append({
+                        "id": s.id, "board": s.board.id, "hears": s.link,
+                        "online": now - s.last_data < OFFLINE_AFTER, "motion": j.motion,
+                        "score": None if j.smoothed is None else round(j.smoothed, 2),
+                        "baseline": None if j.baseline is None else round(j.baseline, 2),
+                        "threshold": None if j.threshold() is None else round(j.threshold(), 2),
+                        "rssi": s.rssi, "rate": s.rate,
+                        "series": [[round(t - now, 2), v] for t, v in s.series],
+                    })
+                live = [e for e in ends if e["online"]]
+                last = [s.judge.last_motion for s in lines if s.judge.last_motion]
+                batteries = [s.board.battery for s in lines if s.board.battery]
                 out.append({
-                    "id": s.id, "name": s.name, "ip": b.ip, "fw": b.fw,
-                    "online": now - s.last_data < OFFLINE_AFTER,
-                    "motion": j.motion, "last_motion": j.last_motion or None,
-                    "score": None if j.smoothed is None else round(j.smoothed, 2),
-                    "baseline": None if j.baseline is None else round(j.baseline, 2),
-                    "threshold": None if j.threshold() is None else round(j.threshold(), 2),
-                    "learning": j.baseline is None,
-                    "rssi": b.rssi, "rate": s.rate, "battery": b.battery, "source": s.source,
-                    "series": [[round(t - now, 2), v] for t, v in s.series],
+                    "id": pid, "name": self._path_name(pid, lines), "source": lines[0].source,
+                    "online": bool(live), "motion": any(e["motion"] for e in live),
+                    "last_motion": max(last) if last else None,
+                    "learning": all(s.judge.baseline is None for s in lines),
+                    "rssi": min((e["rssi"] for e in live if e["rssi"] is not None), default=None),
+                    "rate": min((e["rate"] for e in live if e["rate"] is not None), default=None),
+                    "battery": batteries[0] if batteries else None,
+                    "ips": sorted({s.board.ip for s in lines if s.board.ip}),
+                    "directions": ends,
                 })
         return {"sensors": out}

@@ -1,15 +1,18 @@
-// Sentinel Wi-Fi motion sensor (ESP32-S3).
+// Sentinel Wi-Fi motion sensor (any ESP32-S3: Adafruit Feather, Seeed XIAO, generic S3 boards).
 //
-// People moving between this board and the Wi-Fi router disturb the radio signal. The board pings
-// the router ~50 times a second and reads the channel state information (CSI) of each reply: the
-// strength of 52 sub-carriers. A still room gives a steady pattern; movement makes it wobble.
-// Every 250 ms the board turns the last second of wobble into one "score". Sentinel polls
-// GET /status and decides what counts as motion (thresholds live there, so they can be tuned
-// without reflashing).
+// People moving between two boards disturb the radio signal between them. Every board broadcasts a
+// small ESP-NOW frame 50 times a second at a fixed 802.11n rate (HT20 MCS0) and reads the channel state
+// information (CSI) of the frames it hears from the others: the strength of 52 sub-carriers. A still
+// room gives a steady pattern; movement makes it wobble. So every pair of boards is a "line" through
+// the house, measured from both ends. With no other board in reach, the board pings the router ~50
+// times a second and measures its replies instead. Every 250 ms the board turns the last second of
+// wobble into one "score" per line. Sentinel polls GET /status and decides what counts as motion
+// (thresholds live there, so they can be tuned without reflashing).
 //
 // First start (or BOOT button held 3 s): the board opens an open Wi-Fi network
-// "Sentinel-Sensor-XXXX"; join it on a phone and pick the home Wi-Fi. The password is stored on
-// the board only. Updates go over Wi-Fi (ArduinoOTA, password in secrets.h, which is git-ignored).
+// "Sentinel-Sensor-XXXX"; join it on a phone and pick the home Wi-Fi. A board on USB can be given it
+// over serial instead: one line "wifi<TAB>ssid<TAB>password". The password is stored on the board only.
+// Updates go over Wi-Fi (ArduinoOTA, password in secrets.h, which is git-ignored).
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -19,14 +22,16 @@
 #include <Preferences.h>
 #include <Wire.h>
 #include <esp_wifi.h>
+#include <esp_now.h>
 #include <esp_mac.h>
 #include "ping/ping_sock.h"
 #include "lwip/ip_addr.h"
 #include "secrets.h"  // #define OTA_PASSWORD "..." (copy secrets.example.h)
 
-#define FW_VERSION "1.2.0"
+#define FW_VERSION "2.0.1"
 #define HELLO_PORT 47301          // UDP broadcast so Sentinel can find the board
 #define PING_INTERVAL_MS 20       // 50 pings/s: each reply carries one CSI reading
+#define SEND_INTERVAL_MS 20       // 50 frames/s for the other boards to measure
 #define WINDOW 50                 // readings per score (~1 s)
 #define HISTORY 40                // scores kept for /status (10 s at 4/s)
 #define NSUB 52                   // usable HT20 sub-carriers (1..26, 38..63)
@@ -42,11 +47,11 @@ static bool setupMode = false;
 static bool no11b = false;  // connected without 802.11b (see setup())
 
 // ---- links: one per transmitter we measure (filled in the Wi-Fi task, read in loop) ----
-// Link 0 is the router (its replies to our pings); the others are beacon boards
-// (firmware/wifi_motion_beacon), each broadcasting 50 fixed-rate 802.11n frames a second. Each link is a
-// separate line through the house, so each gets its own score. The router link is used only while no beacon
-// is heard: routers fall back to 802.11b on a weak link, which carries no CSI.
-#define MAX_LINKS 4
+// Link 0 is the router (its replies to our pings); the others are the other boards (this firmware, or the
+// send-only firmware/wifi_motion_beacon), each broadcasting 50 fixed-rate 802.11n frames a second. Each link
+// is a separate line through the house, so each gets its own score. The router link is used only while no
+// other board is heard: routers fall back to 802.11b on a weak link, which carries no CSI.
+#define MAX_LINKS 6
 #define BEACON_GONE_MS 3000      // a beacon not heard for this long is "not active"
 #define BEACON_FORGET_MS 60000   // ...and after this long it's left out of /status
 
@@ -67,7 +72,7 @@ static portMUX_TYPE csiMux = portMUX_INITIALIZER_UNLOCKED;
 static Link links[MAX_LINKS];
 static uint32_t sampleSeq = 0, lastScoreMs = 0;
 // Diagnostics for /status.
-static volatile uint32_t csiAll = 0, csiShort = 0, beaconRaw = 0, linksFull = 0;
+static volatile uint32_t csiAll = 0, csiShort = 0, csiOther = 0, beaconRaw = 0, linksFull = 0;
 static volatile uint32_t rxB = 0, rxG = 0, rxN = 0;  // what the router sends us: 11b / 11g / 11n frames
 
 static bool beaconActive(const Link &l) { return l.seenMs && millis() - l.seenMs < BEACON_GONE_MS; }
@@ -122,6 +127,12 @@ static void csiCallback(void *ctx, wifi_csi_info_t *info) {
     if (links[i].used && memcmp(info->mac, links[i].mac, 6) == 0) { which = i; break; }
   }
   if (which < 0) return;
+  // From another board, only its 50/s pulses (HT20 MCS0): its ordinary Wi-Fi traffic (replies to Sentinel,
+  // pings) comes at other rates and in bursts, and would add readings that aren't comparable.
+  if (which > 0 && !(info->rx_ctrl.sig_mode == 1 && info->rx_ctrl.mcs == 0 && info->rx_ctrl.cwb == 0)) {
+    csiOther++;
+    return;
+  }
   float amp[NSUB];
   int k = 0;
   float sum = 0;
@@ -235,6 +246,9 @@ static bool readReg16(uint8_t reg, uint16_t &out) {
 }
 
 static String batteryJson() {
+#ifndef PIN_I2C_POWER
+  return "null";  // only the Feather has a fuel gauge
+#endif
   uint16_t vcell, soc;
   if (!readReg16(0x02, vcell) || !readReg16(0x04, soc)) return "null";
   float volts = vcell * 78.125e-6f;
@@ -242,8 +256,89 @@ static String batteryJson() {
   return "{\"v\":" + String(volts, 3) + ",\"pct\":" + String(pct, 1) + "}";
 }
 
-// ---- status LED ----
-static void led(uint8_t r, uint8_t g, uint8_t b) { rgbLedWrite(PIN_NEOPIXEL, r, g, b); }
+// ---- status LED: colour on boards with an RGB LED (Feather, generic S3), plain on/off on the XIAO ----
+static void led(uint8_t r, uint8_t g, uint8_t b) {
+#if defined(RGB_BUILTIN)
+  rgbLedWrite(RGB_BUILTIN, r, g, b);
+#elif defined(LED_BUILTIN)
+  digitalWrite(LED_BUILTIN, (r | g | b) ? LOW : HIGH);  // the XIAO's LED is lit when its pin is low
+#endif
+}
+
+// "Which board is this?": GET /identify flashes the LED white for 20 s.
+static uint32_t identifyUntil = 0;
+
+static void handleIdentify() {
+  identifyUntil = millis() + 20000;
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+static void identifyBlink(uint32_t now) {
+  static bool lit = false;
+  bool on = (int32_t)(identifyUntil - now) > 0 && now % 500 < 250;
+  if (on == lit) return;
+  lit = on;
+  if (on) led(40, 40, 40); else led(0, 0, 0);
+}
+
+// ---- sending: the frames the other boards measure ----
+struct __attribute__((packed)) BeaconFrame {
+  char magic[6];  // "SNTLB1": boards only measure frames that start with this
+  uint32_t seq;
+};
+
+static const uint8_t BROADCAST[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+static volatile bool sending = false;
+static volatile uint32_t framesSent = 0, sendFailed = 0;
+
+static void startSending() {
+  if (sending) return;
+  if (esp_now_init() != ESP_OK) return;
+  esp_now_peer_info_t peer = {};
+  memcpy(peer.peer_addr, BROADCAST, 6);
+  peer.channel = 0;  // = the channel the home Wi-Fi is on
+  peer.ifidx = WIFI_IF_STA;
+  esp_now_add_peer(&peer);
+  esp_now_rate_config_t rate = {};
+  rate.phymode = WIFI_PHY_MODE_HT20;
+  rate.rate = WIFI_PHY_RATE_MCS0_LGI;  // 802.11n: carries the channel information the others need
+  esp_now_set_peer_rate_config(BROADCAST, &rate);
+  sending = true;
+}
+
+static void sendTask(void *) {
+  // Its own task so a slow web request in loop() doesn't leave gaps in the stream.
+  TickType_t last = xTaskGetTickCount();
+  while (true) {
+    vTaskDelayUntil(&last, pdMS_TO_TICKS(SEND_INTERVAL_MS));
+    if (!sending || WiFi.status() != WL_CONNECTED) continue;
+    BeaconFrame f = {{'S', 'N', 'T', 'L', 'B', '1'}, framesSent};
+    if (esp_now_send(BROADCAST, (const uint8_t *)&f, sizeof(f)) == ESP_OK) framesSent++; else sendFailed++;
+  }
+}
+
+// ---- Wi-Fi over USB serial: "wifi<TAB>ssid<TAB>password" ----
+static void checkSerialSetup() {
+  static String line;
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\r') continue;
+    if (c != '\n') {
+      if (line.length() < 200) line += c;
+      continue;
+    }
+    int a = line.indexOf('\t'), b = line.indexOf('\t', a + 1);
+    if (line.startsWith("wifi\t") && b > a + 1) {
+      prefs.putString("ssid", line.substring(a + 1, b));
+      prefs.putString("pass", line.substring(b + 1));
+      Serial.println("wifi saved, restarting");
+      Serial.flush();
+      delay(200);
+      ESP.restart();
+    }
+    line = "";
+  }
+}
 
 // ---- normal mode HTTP ----
 static String samplesJson(const Link &l) {
@@ -268,14 +363,15 @@ static void handleStatus() {
     esp_ping_get_profile(pingHandle, ESP_PING_PROF_REQUEST, &pingSent, sizeof(pingSent));
     esp_ping_get_profile(pingHandle, ESP_PING_PROF_REPLY, &pingReplies, sizeof(pingReplies));
   }
-  js += ",\"diag\":{\"csi_all\":" + String(csiAll) + ",\"csi_short\":" + String(csiShort) +
+  js += ",\"diag\":{\"csi_all\":" + String(csiAll) + ",\"csi_short\":" + String(csiShort) + ",\"csi_other\":" + String(csiOther) +
         ",\"beacon_raw\":" + String(beaconRaw) + ",\"links_full\":" + String(linksFull) +
         ",\"ping_sent\":" + String(pingSent) + ",\"ping_replies\":" + String(pingReplies) +
         ",\"no11b\":" + String(no11b ? "true" : "false") + ",\"rx_b\":" + String(rxB) +
         ",\"rx_g\":" + String(rxG) + ",\"rx_n\":" + String(rxN) +
+        ",\"sent\":" + String(framesSent) + ",\"send_failed\":" + String(sendFailed) +
         ",\"reset_reason\":" + String((int)esp_reset_reason()) + "}";
   js += ",\"battery\":" + batteryJson();
-  // One entry per line being measured: the beacons heard in the last minute, or the router when there are none.
+  // One entry per line being measured: the boards heard in the last minute, or the router when there are none.
   bool beacons = anyBeaconActive();
   js += ",\"links\":[";
   bool firstLink = true;
@@ -366,6 +462,7 @@ static void runSetupMode() {
     }
     dns.processNextRequest();
     server.handleClient();
+    checkSerialSetup();
     led(0, 0, (millis() / 500) % 2 ? 40 : 0);  // blinking blue
     // Nobody set it up in 10 min (e.g. the router was down after a power cut): try the saved Wi-Fi again.
     if (millis() - start > 600000 && WiFi.softAPgetStationNum() == 0 && prefs.isKey("ssid")) ESP.restart();
@@ -392,11 +489,18 @@ static void checkBootButton() {
 void setup() {
   Serial.begin(115200);
   pinMode(BOOT_PIN, INPUT_PULLUP);
+#ifdef NEOPIXEL_POWER
   pinMode(NEOPIXEL_POWER, OUTPUT);
   digitalWrite(NEOPIXEL_POWER, NEOPIXEL_POWER_ON);
+#endif
+#if !defined(RGB_BUILTIN) && defined(LED_BUILTIN)
+  pinMode(LED_BUILTIN, OUTPUT);
+#endif
+#ifdef PIN_I2C_POWER
   pinMode(PIN_I2C_POWER, OUTPUT);
   digitalWrite(PIN_I2C_POWER, HIGH);
   Wire.begin();
+#endif
   prefs.begin("sensor", false);
 
   uint8_t mac[6];
@@ -421,6 +525,7 @@ void setup() {
   uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED) {
     checkBootButton();
+    checkSerialSetup();  // e.g. the saved network is wrong or gone
     if (no11b && millis() - start > 20000) {
       no11b = false;
       WiFi.disconnect();
@@ -442,9 +547,12 @@ void setup() {
   ArduinoOTA.setMdnsEnabled(false);  // MDNS already started above
   ArduinoOTA.begin();
   server.on("/status", handleStatus);
+  server.on("/identify", handleIdentify);
   server.begin();
   startCsi();
   startPing();
+  startSending();
+  xTaskCreate(sendTask, "beacon", 3072, nullptr, 2, nullptr);
   lastScoreMs = millis();
 }
 
@@ -453,7 +561,9 @@ void loop() {
   ArduinoOTA.handle();
   server.handleClient();
   checkBootButton();
+  checkSerialSetup();
   uint32_t now = millis();
+  identifyBlink(now);
   if (now - lastScoreMs >= 250) computeScores();
   if (now - lastLink > 2000) {
     lastLink = now;
@@ -463,7 +573,7 @@ void loop() {
       startCsi();  // reconnected, maybe to a different access point
       startPing();
     } else if (anyBeaconActive() != pingPaused) {
-      // The beacon's frames are all we need: stop pinging the router while it's heard (less Wi-Fi traffic).
+      // The other boards' frames are all we need: stop pinging the router while one is heard (less traffic).
       pingPaused = anyBeaconActive();
       if (pingPaused) esp_ping_stop(pingHandle); else esp_ping_start(pingHandle);
     }

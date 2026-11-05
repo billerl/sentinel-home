@@ -301,11 +301,17 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   `recorded_videos/wifi_motion/YYYY-MM-DD.csv` for 14 days). An ESP32-S3 measures CSI (52 sub-carrier amplitudes,
   normalised per frame against AGC jumps) and serves a "score" (mean per-sub-carrier std over 1 s, x1000) 4x/s at
   `GET /status`; Sentinel finds boards by their UDP hello (port 47301, the packet's source address is used) and
-  polls once a second. Frames to measure: a beacon board's fixed-rate HT20 MCS0 ESP-NOW broadcasts (50/s on the
-  router's channel) when heard, else the router's replies to 50/s pings. The router alone is not enough: on a
-  weak link it falls back to 802.11b (no CSI), even when the board leaves 11b out of its rates. Each sender is
-  its own "line" (`links` in /status, ids `<board>-<link>`, e.g. `8d24-df1c`; the router line `rtr` only while no
-  beacon is heard) with its own quiet level and motion; the Sensors page shows one card per line. Motion: the 1 s
+  polls once a second. Frames to measure: every board (firmware 2.x, one firmware for the Feather, XIAO and
+  generic S3 boards) joins the home Wi-Fi and broadcasts fixed-rate HT20 MCS0 ESP-NOW frames 50/s on the router's
+  channel, and measures only those frames (HT MCS0 20 MHz) from the other boards; a board that hears no other board
+  pings the router 50/s and measures its replies. The router alone is not enough: on a weak link it falls back to
+  802.11b (no CSI), even when the board leaves 11b out of its rates. Each board heard is its own "line" (`links` in
+  /status, ids `<board>-<link>`, e.g. `8d24-df1c`; the router line `rtr` only while no other board is heard) with its
+  own quiet level and motion. Two boards hearing each other measure one path from both ends: the Sensors page and
+  `view()` group them by `path_id` (the two board ids sorted, e.g. `2350-8d24`), one card per path, moving when
+  either end is; names are stored per path. Each board hears ~32-45 of the 50/s (it can't listen while sending).
+  `GET /identify` flashes a board's LED for 20 s. A board on USB takes the Wi-Fi as one serial line
+  `wifi<TAB>ssid<TAB>password`. The send-only `firmware/wifi_motion_beacon` still works as a line source. Motion: the 1 s
   median above 1.4x the quiet level for 0.5 s, held 15 s. The quiet level = the median of the last 30 s whenever
   those were steady (p90/p10 <= 1.25; still 1.08-1.13, walking 1.49-1.68), so a steady jump (someone settled
   next to a board, a door) is learned within ~1 min instead of reading as motion; re-learned after a board restart
