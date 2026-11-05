@@ -15,7 +15,7 @@
 #include <esp_now.h>
 #include "secrets.h"  // #define HOME_SSID "..." (copy secrets.example.h)
 
-#define FW_VERSION "1.0.0"
+#define FW_VERSION "1.1.0"
 #define SEND_INTERVAL_MS 20
 #define RESCAN_MS (5 * 60 * 1000)
 
@@ -23,6 +23,38 @@ static const uint8_t BROADCAST[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 static uint8_t channel = 0;
 static int routerRssi = 0;  // how well the home Wi-Fi is heard: very weak right next to it = no antenna fitted
 static uint32_t sent = 0, failed = 0;
+
+// Which board is which: ID_BLINKS quick blinks every 4 s for the first 10 minutes after power-up (a build
+// flag, e.g. --build-property compiler.cpp.extra_flags=-DID_BLINKS=2; 0 = off). Boards with an RGB LED blink in
+// colour ID_RGB (0xRRGGBB); the XIAO has a single orange LED.
+#ifndef ID_BLINKS
+#define ID_BLINKS 0
+#endif
+#ifndef ID_RGB
+#define ID_RGB 0x202020
+#endif
+#define ID_BLINK_FOR_MS (10UL * 60 * 1000)
+
+static void idLed(bool on) {
+#if defined(RGB_BUILTIN)
+  uint32_t c = on ? ID_RGB : 0;
+  rgbLedWrite(RGB_BUILTIN, (c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff);
+#elif defined(LED_BUILTIN)
+  digitalWrite(LED_BUILTIN, on ? LOW : HIGH);  // the XIAO's LED is lit when its pin is low
+#endif
+}
+
+static void idBlink(uint32_t now) {
+  static bool done = false;
+  if (!ID_BLINKS || done) return;
+  if (now > ID_BLINK_FOR_MS) {
+    idLed(false);
+    done = true;
+    return;
+  }
+  uint32_t phase = now % 4000;
+  idLed(phase < ID_BLINKS * 400UL && phase % 400 < 150);
+}
 
 struct __attribute__((packed)) BeaconFrame {
   char magic[6];  // "SNTLB1": the sensor only listens to frames that start with this
@@ -49,6 +81,10 @@ static void useChannel(uint8_t ch) {
 
 void setup() {
   Serial.begin(115200);
+#if !defined(RGB_BUILTIN) && defined(LED_BUILTIN)
+  pinMode(LED_BUILTIN, OUTPUT);
+#endif
+  idLed(false);
   WiFi.mode(WIFI_STA);
   WiFi.disconnect();
   esp_wifi_set_ps(WIFI_PS_NONE);
@@ -73,6 +109,7 @@ void setup() {
 void loop() {
   static uint32_t lastSend = 0, lastScan = millis(), lastNote = 0;
   uint32_t now = millis();
+  idBlink(now);
   if (now - lastSend >= SEND_INTERVAL_MS) {
     lastSend = now;
     BeaconFrame f = {{'S', 'N', 'T', 'L', 'B', '1'}, sent};
