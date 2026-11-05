@@ -318,12 +318,16 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   or a switch between beacon and router. Tuned on one evening's recording (`MotionJudge` is pure: replay the CSVs).
   A board on the far side of a stone wall barely sees anything: same floor, open line. Setup: a new board makes an
   open AP "Sentinel-Sensor-<id>" with a page at 192.168.4.1 (Wi-Fi password stays on the board); OTA via espota
-  (password in the git-ignored `firmware/wifi_motion/secrets.h`). Not yet used by routines or alerts.
+  (password in the git-ignored `firmware/wifi_motion/secrets.h`). Routines can start on them (see Routines); the Sensors page sets a movement line per path (1.1-3x,
+  `ratios` in wifi_sensors.json), relearns a path's quiet level, names boards and flashes a board's LED.
 - **Routines** (`sentinel/engine/routines.py`, `recorded_videos/routines.db`, page `/routines`, `/api/routines*`):
   "when X, only if Y, then Z". Triggers: camera sees person/vehicle/animal/delivery (`_on_object`, deliveries also
   count as vehicles), motion (`_on_motion`, every frame; a motion routine fires at most every 30 s per camera and
   ignores motion for 20 s after a routine switched a light), sunset/sunrise/clock time (`tick` every 5 s in the
   command loop), phone arrives/leaves Home (OwnTracks changes), family car arrives/leaves (`_on_household_change`).
+  Wi-Fi motion sensor (`sensor`, path ids from `WifiMotion.paths()`; `WifiMotion.on_motion` -> `RoutineRunner.sensor`
+  on each moving reading, at most every 30 s per routine and path; "until quiet" uses `WifiMotion.last_motion`;
+  no 20 s settling after a light switches, which only fools cameras).
   Limits: dark/light (own sunrise-equation maths from Home place or the weather town; no location = 18:00-07:00),
   from/to hours (may cross midnight), days, nobody home (all location-sharing phones away). Steps: switch on/off
   (on "for N min" or "until_quiet N min" = until no motion on the routine's cameras; re-triggers extend it), Telegram
