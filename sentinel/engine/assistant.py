@@ -48,7 +48,7 @@ Rules:
   then do that" routines. Build one and put it alone on the LAST line as
   COMMAND: Routine {"name": "...", "when": {...}, "only": {...}, "then": [...]}
   (JSON on one line). "when" is one of:
-  {"type": "seen", "what": ["person"|"vehicle"|"animal"|"delivery", ...], "cameras": [camera names]}  ("something" = all four; [] = any camera)
+  {"type": "seen", "what": ["person"|"vehicle"|"animal"|"delivery"|"package", ...], "cameras": [camera names]}  ("something" = all of them; [] = any camera; "delivery" = a delivery van, "package" = a parcel left at the door)
   {"type": "motion", "cameras": [...]}  (any movement, even a shadow; prefer "seen" for people/cars/animals)
   {"type": "sensor", "sensors": [Wi-Fi motion sensor names]}  (movement indoors, e.g. "the living room sensor"; [] = any)
     optional: "all": [sensors that must move too], "none": [sensors that must stay still], "within": seconds (default 5)

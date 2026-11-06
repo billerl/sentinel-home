@@ -31,7 +31,7 @@ from sentinel.logging_utils import app_logger
 
 DB_NAME = "routines.db"
 HOLDS_FILE = "routine_holds.json"
-SEEN = ("person", "vehicle", "animal", "delivery")
+SEEN = ("person", "vehicle", "animal", "delivery", "package")  # package: left at a door (packages.py)
 TRIGGERS = ("seen", "motion", "sensor", "time", "arrive", "leave", "car_arrive", "car_leave")
 WATCHERS = ("seen", "motion", "sensor")  # triggers that can hold a light on "until quiet"
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -204,8 +204,18 @@ def normalize(spec: Any, cat: Catalog) -> Dict[str, Any]:
         what = [x.lower().rstrip("s") if isinstance(x, str) else x for x in what]
         what = list(SEEN) if any(x in ("anything", "something", "object") for x in what) else what
         if not what or any(x not in SEEN for x in what):
-            raise ValueError("a camera can see: a person, a vehicle, an animal or a delivery")
+            raise ValueError("a camera can see: a person, a vehicle, an animal, a delivery van or a package left at the door")
         w["what"] = [x for x in SEEN if x in what]
+    if kind == "seen" and when.get("repeat_hours"):
+        if "package" not in w["what"]:
+            raise ValueError("only a package left at the door can repeat (until it's taken in)")
+        try:
+            hours = float(when["repeat_hours"])
+        except (TypeError, ValueError):
+            raise ValueError("repeat every how many hours? (1 to 24)")
+        if not 0.5 <= hours <= 24:
+            raise ValueError("it can repeat every 1 to 24 hours")
+        w["repeat_hours"] = int(hours) if hours == int(hours) else round(hours, 1)
     if kind in ("seen", "motion"):
         w["cameras"] = _pick(when.get("cameras"), cat.cameras, "camera")
     elif kind == "sensor":
@@ -322,10 +332,14 @@ def describe(spec: Dict[str, Any], cat: Catalog) -> str:
     w, o = spec["when"], spec.get("only", {})
     cams = _join([cat.cameras.get(c, "a removed camera") for c in w.get("cameras", [])]) if w.get("cameras") else ""
     if w["type"] == "seen":
-        what = [{"person": "a person", "vehicle": "a vehicle", "animal": "an animal", "delivery": "a delivery"}[x]
+        what = [{"person": "a person", "vehicle": "a vehicle", "animal": "an animal", "delivery": "a delivery",
+                 "package": "a package left at the door"}[x]
                 for x in w["what"]]
         what_words = "anything" if len(what) == len(SEEN) else _join(what)
         when = f"When {'any camera' if not cams else 'the ' + cams + ' camera'} sees {what_words}"
+        if w.get("repeat_hours"):
+            n = w["repeat_hours"]
+            when += f" (and again every {n} {'hour' if n == 1 else 'hours'} while the package is still there)"
     elif w["type"] == "motion":
         when = f"When there's motion on {'any camera' if not cams else 'the ' + cams + ' camera'}"
     elif w["type"] == "sensor":
@@ -489,6 +503,7 @@ class RoutineRunner:
         self._holds: Dict[Tuple[int, str], _Hold] = {}
         self._said: Dict[Tuple[int, str], float] = {}  # (routine, "telegram" / "say") -> when it last did it
         self._motion_fired: Dict[Tuple[int, str], float] = {}
+        self._package_fired: Dict[Tuple[int, str], float] = {}  # (routine, camera) -> last time, while a parcel waits
         self._sensor_moved: Dict[str, float] = {}  # Wi-Fi sensor path -> its latest moving reading
         self._deciding: Dict[int, float] = {}  # sensor rule -> when the movement that started it was
         self._settle_until = 0.0
@@ -538,6 +553,28 @@ class RoutineRunner:
             only = {r.id for r in self._routines if all(a["do"] == "switch" for a in r.spec["then"])}
         self._fire(lambda w: w["type"] == "seen" and groups & set(w["what"]) and (not w["cameras"] or camera in w["cameras"]),
                    camera, jpeg, keep=only)
+
+    def _repeaters(self, camera: str) -> List[Routine]:
+        return [r for r in self._routines if r.enabled and r.spec["when"]["type"] == "seen"
+                and r.spec["when"].get("repeat_hours") and "package" in r.spec["when"]["what"]
+                and (not r.spec["when"]["cameras"] or camera in r.spec["when"]["cameras"])]
+
+    def package_waiting(self, camera: str) -> None:
+        """A parcel is still at the door (every package snapshot): routines set to repeat go again every N hours."""
+        now = self._clock()
+        due = set()
+        for r in self._repeaters(camera):
+            last = self._package_fired.setdefault((r.id, camera), now)  # the first time was its "seen"
+            if now - last >= r.spec["when"]["repeat_hours"] * 3600:
+                self._package_fired[(r.id, camera)] = now
+                due.add(r.id)
+        if due:
+            self._fire(lambda w: False, camera, None, only=due)
+
+    def package_gone(self, camera: str) -> None:
+        """Taken in (or "✅ Got it"): no more repeats until the next parcel."""
+        for key in [k for k in self._package_fired if k[1] == camera]:
+            del self._package_fired[key]
 
     def motion(self, camera: str) -> None:
         """Called on every frame with motion: cheap unless a motion routine is due."""

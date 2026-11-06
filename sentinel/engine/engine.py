@@ -185,11 +185,16 @@ class Engine:
         self._location_alerted: Dict[Tuple[int, int], float] = {}  # (person, place) -> last alert
         self._location_asked: Dict[int, float] = {}  # person -> last time we asked their phone for a fresh fix
         self.presence = None  # PresenceTracker, when object detection + CLIP are available
+        self.packages = None  # PackageWatch (parcels left at a door camera), likewise
         from sentinel.engine.camera_light import CameraLights
 
         self.camera_lights = CameraLights()  # white light for cars at night (cameras in camera_admin.json)
         self.telegram = TelegramNotifier(self.settings)
         self.weather = WeatherService(self.settings)
+        from sentinel.engine.recap import Recap
+
+        self.recap = Recap(self.settings, self.recording_store, self._recap_extra, self._recap_text, self._recap_video,
+                           os.path.join(VIDEO_DIR, "recap_sent.txt"))
         from sentinel.engine.weather_alerts import WeatherAlerts
 
         self.weather_alerts = WeatherAlerts(
@@ -338,6 +343,16 @@ class Engine:
             )
             self.detection_worker.presence = self.presence
             self.presence.lights = self.camera_lights
+        if classifier is not None:
+            from sentinel.detection.package_check import PackageChecker
+            from sentinel.engine.packages import PackageWatch
+
+            self.packages = PackageWatch(
+                self.settings, cameras=lambda: [p for p in self.cameras.values() if p.connected],
+                detector=detector, checker=PackageChecker(classifier), notify=self._package_message,
+                sunset=self._sunset_today, nobody_home=self._nobody_home, on_left=self._on_package,
+                on_waiting=self.routines.package_waiting, on_gone=self.routines.package_gone)
+            self.detection_worker.packages = self.packages
         app_logger.log("info", "object_detector_ready", model=os.path.basename(model), device=detector.device,
                        vehicle_types=classifier is not None,
                        classifier_device=classifier.device if classifier is not None else None,
@@ -376,6 +391,8 @@ class Engine:
                 pipeline.start()
         if self.presence is not None:
             self.presence.start()
+        if self.packages is not None:
+            self.packages.start()
         self.camera_lights.start()
         self.switches.start()
         self.wifi_motion.start()
@@ -383,7 +400,14 @@ class Engine:
         def _household_filter(text: str) -> bool:
             from sentinel.engine.questions import household_question
 
+            from sentinel.engine.recap import RECAP
+
+            from sentinel.engine.packages import TAKEN_IN
+
             return (household_question(text, self.household.vehicles()) is not None
+                    or RECAP.match(text.strip()) is not None
+                    or (TAKEN_IN.match(text.strip()) is not None and self.packages is not None
+                        and bool(self.packages.packages()))
                     or self.location_question(text) is not None
                     or self._indoor_question(text) is not None)
 
@@ -677,6 +701,8 @@ class Engine:
                     self._routines_ticked = time.time()
                     self.routines.tick()
                     self.weather_alerts.tick()  # checks the NWS itself every 2 minutes, on its own thread
+                    if self.recap.due(time.time()):
+                        threading.Thread(target=self.recap.run, name="recap", daemon=True).start()
                 for chat_id, text in self.telegram.consume_switch_commands():
                     threading.Thread(target=self._switch_reply, args=(chat_id, text), name="switch",
                                      daemon=True).start()  # a plug that doesn't answer takes seconds
@@ -703,6 +729,16 @@ class Engine:
         """Reply to 'did anyone come by?'-style questions from the event history."""
         from sentinel.engine.questions import _fmt_clock, household_question
 
+        from sentinel.engine.recap import RECAP
+
+        if RECAP.match(text.strip()):
+            self.recap.run(chat_id)  # last night until now, to this chat
+            return
+        from sentinel.engine.packages import TAKEN_IN
+
+        if TAKEN_IN.match(text.strip()):
+            self.telegram.reply_to_chat(chat_id, self.packages_taken_in())
+            return
         lq = self.location_question(text)
         if lq is not None:
             reply, pins = self.answer_location_question(lq)
@@ -742,13 +778,14 @@ class Engine:
         names = {p.display_name: key for key, p in self.cameras.items()}
         q = parse_question(text, names.keys())
         keys = [names[n] for n in q.cameras] or None
-        groups = sorted(q.groups) or None
+        # A parcel left at the door answers "any deliveries?" and "did anyone come by?" too (it headlines its visit).
+        groups = sorted(q.groups | ({"package"} if "delivery" in q.groups else set())) or None
         store = self.recording_store
         events = store.events(q.start, q.end, groups, keys)
         others: Dict[str, int] = {}
         if groups:
             for e in store.events(q.start, q.end, None, keys):
-                if e["grp"] not in q.groups:
+                if e["grp"] not in groups:
                     others[e["grp"]] = others.get(e["grp"], 0) + 1
         last = store.last_event(q.start, groups, keys) if not events else None
         reply, photos = answer_question(q, events, last, others=others)
@@ -911,6 +948,10 @@ class Engine:
             app_logger.log("info", "assistant_command_run", command=command, component="engine", action="button")
             self.telegram.route_text(chat_id, command, from_button=True)  # exactly as if typed
             return
+        if data == "pkg:got":
+            self.telegram.answer_button(callback_id, "Got it")
+            self.telegram.reply_to_chat(chat_id, self.packages_taken_in())
+            return
         f = re.fullmatch(r"fx:(\d+)(?::(\d+|x|c))?", data or "")
         if f:
             self._fix_car(chat_id, message_id, int(f.group(1)), f.group(2), callback_id)
@@ -978,6 +1019,33 @@ class Engine:
                        voice=chat_id is None, component="engine", action="reminder")
         where = "" if self.telegram.is_configured() else " (Telegram isn't set up yet, so it can't be sent)"
         return f"Okay, I'll remind you {when_words(due, now)}: {what}{where}."
+
+    # ---------------------------------------------------------- morning recap
+    def _recap_extra(self) -> List[str]:
+        """The recap's last lines: parcels still waiting, warnings in effect, today's weather."""
+        lines = []
+        if self.packages is not None:
+            lines += [f"📦 {n} {'package' if n == 1 else 'packages'} still at the {cam}"
+                      for cam, n in self.packages.packages().items()]
+        lines += [f"⚠️ {a['event']}" + (f" until {a['until']}" if a["until"] else "") for a in self.weather_alerts.active()]
+        if self.settings.get("weather_location"):
+            w = self.weather.current()
+            if w.get("temp") is not None:
+                lines.append(f"{w.get('icon', '')} Now {w['temp']}{w.get('unit', '°')}, {w.get('words', '').lower()}; "
+                             f"high {w.get('high')}°, {w.get('rain_today')}% chance of rain")
+        return lines
+
+    def _recap_chats(self, chat: Optional[str]) -> List[str]:
+        now = time.time()
+        return [chat] if chat else [c for c in self.telegram.chat_ids if not self.telegram._is_paused(c, now)]
+
+    def _recap_text(self, chat: Optional[str], text: str) -> None:
+        for c in self._recap_chats(chat):
+            self.telegram.reply_to_chat(c, text)
+
+    def _recap_video(self, chat: Optional[str], path: str, caption: str) -> None:
+        for c in self._recap_chats(chat):
+            self.telegram.send_video(c, path, caption)
 
     def _tell_everyone(self, text: str) -> None:
         """A message to every Sentinel chat (weather warnings)."""
@@ -1201,6 +1269,14 @@ class Engine:
             return VoiceReply("Spotify isn't connected yet. Connect it on the Settings page, under Spotify.")
         if re.search(r"\bwhat time is it\b|\bwhat'?s the time\b|\bwhat is the time\b", low):
             return VoiceReply(f"It's {_fmt_clock(time.time())}.")
+        from sentinel.engine.packages import TAKEN_IN
+
+        if TAKEN_IN.match(low.strip()) and not low.strip().startswith(("got it", "ok")):
+            return VoiceReply(self.packages_taken_in().replace("✅ ", ""))
+        if re.search(r"\b(any|a) (packages?|parcels?|deliver(y|ies))\b|\bpackages? (here|outside|at the door)\b", low):
+            waiting = self.packages.packages() if self.packages is not None else {}
+            return VoiceReply("Yes: " + ", ".join(f"{n} at the {cam}" for cam, n in waiting.items()) + "." if waiting
+                              else "I don't see any packages waiting at the door.")
         if re.search(r"\b(weather|storm) (alerts?|warnings?|watch(es)?)\b|\bany (weather )?(alerts|warnings)\b", low):
             return VoiceReply(self.weather_alerts.summary())
         if re.search(r"\b(weather|temperature|how (hot|cold|warm)|rain\w*|snow\w*)\b", low) \
@@ -1447,6 +1523,37 @@ class Engine:
         if place and place.get("lat") is not None:
             return float(place["lat"]), float(place["lon"])
         return None
+
+    def _on_package(self, camera_key: str, camera_name: str, text: str, jpeg: Optional[bytes]) -> None:
+        """A parcel left at a door: into the history (questions, timeline, the morning recap) and to routines."""
+        try:
+            self.recording_store.add_event(time.time(), camera_key, camera_name, "package", text, label="package",
+                                           snapshot_jpeg=jpeg)
+        except Exception as e:
+            app_logger.log("error", "event_store_failed", error_message=str(e), component="engine", action="package")
+        self.routines.seen(camera_key, "package", jpeg)
+
+    def _package_message(self, text: str, jpeg: Optional[bytes], ask_done: bool = False) -> None:
+        """Package news to every unpaused chat; "left" and the sunset reminder get a "✅ Got it" button."""
+        if not (ask_done and jpeg):
+            self._routine_message(text, jpeg)
+            return
+        now = time.time()
+        for chat_id in self.telegram.chat_ids:
+            if not self.telegram._is_paused(chat_id, now):
+                self.telegram.send_photo_with_buttons(chat_id, jpeg, text, [[("✅ Got it", "pkg:got")]])
+
+    def packages_taken_in(self) -> str:
+        n = self.packages.clear() if self.packages is not None else 0
+        return ("✅ Okay, the package is marked as taken in: no more reminders." if n
+                else "There wasn't a package waiting, as far as I could see.")
+
+    def _sunset_today(self, now: float) -> Optional[float]:
+        from sentinel.engine.routines import sun_times
+
+        spot = self.home_coords()
+        times = sun_times(spot[0], spot[1], now) if spot else None
+        return times[1] if times else None
 
     def _nobody_home(self) -> bool:
         """Every phone that shares its location is away (False when no phone shares one: we don't know)."""

@@ -225,7 +225,7 @@
                        ["none", "not", "But not if any of these", "must stay still"]];
     var live = { sensors: {}, now: 0 };  // the sensors right now, while the editor shows a sensor rule
     var DAYS = [["mon", "Mon"], ["tue", "Tue"], ["wed", "Wed"], ["thu", "Thu"], ["fri", "Fri"], ["sat", "Sat"], ["sun", "Sun"]];
-    var SEEN = [["person", "🧍 Person"], ["vehicle", "🚗 Vehicle"], ["animal", "🐾 Animal"], ["delivery", "📦 Delivery"]];
+    var SEEN = [["person", "🧍 Person"], ["vehicle", "🚗 Vehicle"], ["animal", "🐾 Animal"], ["delivery", "🚚 Delivery van"], ["package", "📦 Package left"]];
 
     function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
     function clock(ts) { return new Date(ts * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
@@ -341,6 +341,12 @@
       var cat = data.catalog;
       if (type === "seen") {
         body.appendChild(chipGroup("what", SEEN, w.what || ["person"]));
+        var rep = document.createElement("div");
+        rep.className = "line";
+        rep.innerHTML = '📦 Package left: repeat every <input type="number" id="w-repeat" min="0" max="24" step="1" style="width:4.5em"> ' +
+          'hours while it\'s still there <span class="note">(empty = just once; stops when it\'s taken in or someone taps ✅ Got it)</span>';
+        body.appendChild(rep);
+        document.getElementById("w-repeat").value = w.repeat_hours || "";
       }
       if (type === "seen" || type === "motion") {
         var l = document.createElement("div"); l.className = "line"; l.textContent = "on";
@@ -622,7 +628,11 @@
 
     function readSpec() {
       var type = document.getElementById("when-type").value, w = { type: type };
-      if (type === "seen") w.what = Array.from(chips.what);
+      if (type === "seen") {
+        w.what = Array.from(chips.what);
+        var rep = Number(document.getElementById("w-repeat").value) || 0;
+        if (rep > 0 && chips.what.has("package")) w.repeat_hours = rep;
+      }
       if (type === "seen" || type === "motion") w.cameras = Array.from(chips.cameras);
       if (type === "sensor") {
         w.sensors = rule.sensors.slice();

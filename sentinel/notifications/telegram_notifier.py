@@ -78,6 +78,8 @@ class TelegramNotifier:
             "- Remind me Wednesday at 9am about my PT appointment — in plain words (Claude works out the time; tap ✅ to save)\n"
             "- Remind 2026-11-04 09:00 PT appointment — the exact form, saved straight away\n"
             "- Reminders — what's coming up; Cancel reminder <number>\n\n"
+            "Every morning (Settings > Telegram): 🌅 a recap of the night with a highlight video. Recap — one now.\n"
+            "📦 A photo when a package is left at the door. ⚠️ Severe weather warnings as they're issued.\n\n"
             "Smart plugs and switches (names from the Kasa app):\n"
             "- Patio lights on / Turn off the patio lights — switch one\n"
             "- Are the patio lights on? — check one\n"
