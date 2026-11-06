@@ -9,8 +9,8 @@ outlet. Names are the ones set in the Kasa app; renaming here writes the new nam
 the app, the web page and voice all use the same one.
 
 Other makes are other drivers with the same methods (discover, status, set, rename): Samsung TVs
-(samsung_tv.py) are one, with apps, volume and mute on top ("put on Netflix", "mute the TV"). Shelly and
-Tasmota have simple local HTTP APIs. Newer Kasa/Tapo devices that only speak the encrypted
+(samsung_tv.py) are one, with apps, volume and mute on top ("put on Netflix", "mute the TV"); plugs running
+the open Tasmota firmware (tasmota.py) are another. Shelly has a similar simple local HTTP API. Newer Kasa/Tapo devices that only speak the encrypted
 KLAP protocol don't answer on 9999 and aren't supported yet.
 
 Known devices (MAC -> last address) are kept in switches.json next to the other stores, so a restart
@@ -218,8 +218,9 @@ class SmartSwitches:
         self.path = os.path.join(os.path.abspath(root), KNOWN_FILE)
         if drivers is None:
             from sentinel.engine.samsung_tv import SamsungTVDriver
+            from sentinel.engine.tasmota import TasmotaDriver
 
-            drivers = [KasaDriver(), SamsungTVDriver(root)]
+            drivers = [KasaDriver(), TasmotaDriver(), SamsungTVDriver(root)]
             try:
                 from sentinel.engine.fire_tv import FireTVDriver
 

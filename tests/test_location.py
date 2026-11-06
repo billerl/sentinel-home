@@ -257,7 +257,7 @@ class TestQuestions(unittest.TestCase):
         self.assertIn("Katherine's Edge isn't home", text)
 
     def test_arrived_and_left(self):
-        now = time.time()
+        now = time.mktime(time.localtime()[:3] + (12, 0, 0, 0, 0, -1))  # midday: "2 hours ago" is still today
         visits = [{"kind": "left", "place_id": self.school.id, "ts": now - 600},
                   {"kind": "arrived", "place_id": self.school.id, "ts": now - 7200}]
         views = {self.liz.id: self.view(self.liz, None, HOME, now, visits=visits)}

@@ -725,5 +725,89 @@ class TestFireTV(unittest.TestCase):
             self.fire.launch("192.168.1.70", "x; reboot")
 
 
+class FakeTasmota:
+    """Tasmota's /cm?cmnd=... answers for a one-relay plug and a two-relay strip."""
+
+    def __init__(self):
+        self.devices = {
+            "192.168.1.76": {"mac": "DC:4F:22:00:00:01", "names": ["Tasmota"], "device": "Smart plug", "power": ["OFF"]},
+            "192.168.1.77": {"mac": "DC:4F:22:00:00:02", "names": ["lamp", "fan"], "device": "Strip", "power": ["ON", "OFF"]}}
+        self.commands = []
+        self.dead = set()
+
+    def __call__(self, host, command, timeout=None):
+        if host in self.dead or host not in self.devices:
+            raise OSError("timed out")
+        self.commands.append((host, command))
+        d = self.devices[host]
+        word, _, arg = command.partition(" ")
+        if word == "Status" and arg == "0":
+            sts = ({"POWER": d["power"][0]} if len(d["power"]) == 1 else
+                   {f"POWER{i + 1}": p for i, p in enumerate(d["power"])})
+            return {"Status": {"DeviceName": d["device"], "FriendlyName": d["names"]},
+                    "StatusNET": {"Mac": d["mac"], "IPAddress": host}, "StatusSTS": {"Time": "x", **sts}}
+        if word.startswith("Power"):
+            n = int(word[5:] or 1)
+            d["power"][n - 1] = arg.upper()
+            return {"POWER" if len(d["power"]) == 1 else f"POWER{n}": arg.upper()}
+        if word.startswith("FriendlyName"):
+            d["names"][int(word[12:]) - 1] = arg
+            return {"FriendlyName" + word[12:]: arg}
+        if word == "DeviceName":
+            d["device"] = arg
+            return {"DeviceName": arg}
+        return {"Command": "Unknown"}
+
+
+class TestTasmota(unittest.TestCase):
+    def setUp(self):
+        from sentinel.engine.tasmota import TasmotaDriver
+        self.dir = tempfile.mkdtemp(prefix="sentinel-tasmota-")
+        self.fake = FakeTasmota()
+        self.driver = TasmotaDriver()
+        self.driver._command = self.fake
+        self.scans = []
+        self.driver._scan = lambda: self.scans.append(1) or ["192.168.1.1", "192.168.1.76", "192.168.1.77"]
+        self.sw = SmartSwitches(self.dir, drivers=[self.driver], clock=lambda: NOW)
+        self.sw.discover()
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_plugs_and_relays_are_switches(self):
+        items = {s.name: s for s in self.sw.switches()}
+        self.assertEqual(set(items), {"Smart plug", "lamp", "fan"})  # Tasmota's default name -> the device name
+        self.assertEqual(items["Smart plug"].id, "tasmota-dc4f22000001")
+        self.assertEqual(items["fan"].id, "tasmota-dc4f22000002-2")
+        self.assertEqual((items["lamp"].on, items["fan"].on, items["Smart plug"].on), (True, False, False))
+
+    def test_switch_on_and_rename(self):
+        self.assertTrue(self.sw.set("tasmota-dc4f22000001", True)[0])
+        self.assertIn(("192.168.1.76", "Power On"), self.fake.commands)
+        self.assertTrue(self.sw.set("tasmota-dc4f22000002-2", True)[0])
+        self.assertIn(("192.168.1.77", "Power2 On"), self.fake.commands)
+        self.assertEqual(self.sw.rename("tasmota-dc4f22000001", "Desk lamp"), (True, "Desk lamp"))
+        self.assertEqual(self.fake.devices["192.168.1.76"]["names"][0], "Desk lamp")
+        self.assertEqual(self.sw.command("turn off the desk lamp", "voice"), "Okay, Desk lamp off.")
+
+    def test_network_swept_only_when_needed(self):
+        self.assertEqual(len(self.scans), 1)  # nothing known yet
+        self.sw.discover()
+        self.assertEqual(len(self.scans), 1)  # both answered where they were
+        self.fake.devices["192.168.1.90"] = self.fake.devices.pop("192.168.1.76")  # DHCP moved it
+        self.driver._scan = lambda: self.scans.append(1) or ["192.168.1.90", "192.168.1.77"]
+        self.sw.discover()
+        self.assertEqual(len(self.scans), 2)
+        self.assertTrue(self.sw.set("tasmota-dc4f22000001", True)[0])
+        self.assertEqual(self.fake.commands[-2], ("192.168.1.90", "Power On"))
+
+    def test_other_web_servers_are_ignored(self):
+        from sentinel.engine.tasmota import TasmotaDriver
+        with self.assertRaises(ValueError):
+            TasmotaDriver._info({"Status": {}, "StatusNET": "x", "StatusSTS": {}})
+        with self.assertRaises(ValueError):
+            TasmotaDriver._info({"hello": 1})
+
+
 if __name__ == "__main__":
     unittest.main()
