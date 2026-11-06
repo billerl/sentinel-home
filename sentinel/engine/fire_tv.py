@@ -53,6 +53,13 @@ LINUX_KEYS = {"KEYCODE_DPAD_UP": [103], "KEYCODE_DPAD_DOWN": [108], "KEYCODE_DPA
 # Not DPAD_CENTER: written as KEY_SELECT (353) the Fire TV took it but didn't select anything (2026-11-03;
 # each input device's key layout differs), so the select button always goes through `input keyevent`.
 SLOW_PRESS_MS = 400  # presses slower than this are logged (to see where remote lag comes from)
+# The screen mirror: the Fire TV's own video encoder records its screen into this file (screenrecord), and Sentinel
+# reads what's new a few times a second. A PNG screenshot takes ~10 s on this hardware; and a live stream would
+# hold the one ADB connection the remote's key presses need (a Fire TV takes only one).
+MIRROR_FILE = "/data/local/tmp/sentinel-mirror.h264"
+MIRROR_SIZE = "960x540"
+MIRROR_BIT_RATE = "2M"
+MIRROR_SECONDS = 170  # screenrecord stops by itself after at most 180 s; Sentinel starts the next one
 # Package -> the name people say (Fire OS can't report app labels over ADB without extra tools).
 APP_NAMES = {
     "com.netflix.ninja": "Netflix", "com.amazon.firetv.youtube": "YouTube", "com.google.android.youtube.tv": "YouTube",
@@ -121,6 +128,9 @@ class FireTVDriver:
     def _shell(self, host: str, command: str, timeout: Optional[float] = None) -> str:
         """Run a shell command on the Fire TV (one kept-open connection per Fire TV, reconnected when lost).
         Raises OSError when it doesn't answer, ValueError when it hasn't allowed Sentinel."""
+        return self._run(host, command, timeout, binary=False)
+
+    def _run(self, host: str, command: str, timeout: Optional[float], binary: bool):
         from adb_shell.adb_device import AdbDeviceTcp
         from adb_shell.exceptions import (AdbConnectionError, AdbTimeoutError, DeviceAuthError, InvalidChecksumError,
                                           InvalidCommandError, InvalidResponseError, TcpTimeoutException)
@@ -133,6 +143,8 @@ class FireTVDriver:
                         dev = AdbDeviceTcp(host, PORT, default_transport_timeout_s=self.timeout)
                         dev.connect(rsa_keys=[self._signer()], auth_timeout_s=self.timeout)
                         self._devices[host] = dev
+                    if binary:  # exec: no terminal in between, so bytes arrive as they are
+                        return dev.exec_out(command, timeout_s=timeout or self.timeout, decode=False) or b""
                     return dev.shell(command, timeout_s=timeout or self.timeout) or ""
                 except DeviceAuthError:
                     self._close(host)
@@ -369,6 +381,32 @@ class FireTVDriver:
             self._shell(host, f"am force-stop {package}")
             time.sleep(1)
         self.launch(host, package)
+
+    # ------------------------------------------------------------ the screen mirror
+    def mirror_start(self, host: str) -> None:
+        """Start (or restart) recording the screen into MIRROR_FILE, in the background on the Fire TV."""
+        self._shell(host, f"kill $(pidof screenrecord) 2>/dev/null; rm -f {MIRROR_FILE}; "
+                          f"setsid nohup screenrecord --size {MIRROR_SIZE} --bit-rate {MIRROR_BIT_RATE} "
+                          f"--time-limit {MIRROR_SECONDS + 10} --output-format=h264 {MIRROR_FILE} "
+                          "</dev/null >/dev/null 2>&1 & sleep 1")  # (it dies if the shell ends at once)
+
+    def mirror_read(self, host: str, offset: int) -> bytes:
+        """What the recording has added since ``offset`` bytes (H.264)."""
+        return self._run(host, f"tail -c +{int(offset) + 1} {MIRROR_FILE} 2>/dev/null", None, binary=True)
+
+    def mirror_stop(self, host: str) -> None:
+        self._shell(host, f"kill $(pidof screenrecord) 2>/dev/null; rm -f {MIRROR_FILE}")
+
+    def tap(self, host: str, x: float, y: float) -> None:
+        """Touch the screen at (x, y), fractions of its width and height."""
+        mac, tv = self._tv(host)
+        size = tv.get("screen") if mac else None
+        if not size:
+            m = re.search(r"(\d+)x(\d+)\s*$", self._shell(host, "wm size").strip())
+            size = [int(m.group(1)), int(m.group(2))] if m else [1920, 1080]
+            if mac:
+                self._remember(mac, screen=size)
+        self._shell(host, f"input tap {int(min(max(x, 0.0), 1.0) * (size[0] - 1))} {int(min(max(y, 0.0), 1.0) * (size[1] - 1))}")
 
     def icon(self, host: str, app_id: str) -> Optional[bytes]:
         return None  # Fire OS doesn't hand out app icons over ADB without extra tools: the remote shows letters

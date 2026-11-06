@@ -283,6 +283,14 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   `supports()` hides the rest in the remote); apps = `pm list packages -3` + known Amazon ones (`APP_NAMES`).
   A Fire TV running Fully Kiosk (the live view) gets "Show/Reload cameras" (`show_live`) and "put the cameras
   on the TV" / "reload the cameras". Commands name the TV ("on the Sentinel TV"); unnamed = the Samsung.
+- **TV screen on the phone** (`sentinel/engine/tv_mirror.py`, `/api/tv/<id>/screen` MJPEG, `/api/tv/<id>/tap`):
+  while a Fire TV's remote is open, the TV's hardware encoder records its screen (`screenrecord`, 960x540 H.264,
+  started detached with `setsid nohup ... & sleep 1` or it dies with the shell) into `/data/local/tmp`; Sentinel
+  reads the new bytes every 0.25 s with `tail -c +N` over the normal ADB connection (a live stream would hold the
+  one connection the key presses need; a PNG screenshot takes ~10 s on that TV). The bundled ffmpeg decodes to
+  JPEGs: one thread each way + `-fps_mode passthrough`, else it holds back ~6 frames; after a quiet poll an access
+  unit delimiter (`FRAME_DONE`) releases the last frame of a still menu. No viewer for 15 s: recording stopped and
+  the file removed. Tapping the picture = `input tap`. Copy-protected apps (Netflix...) show black.
 - **Home screens off the tunnel** (`server._keep_home_screens_home`, `/handoff`, `auth.create_handoff`):
   `web.bind_host` may list several addresses (one werkzeug server each). When one is a home-LAN IPv4, a TV
   browser (`TV_BROWSER`) loading a page through the tunnel whose `Cf-Connecting-Ip` is in this PC's own public

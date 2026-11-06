@@ -479,6 +479,14 @@
     .tvr-app:active .ic { transform: scale(0.93); }
     .tvr-app:focus-visible .ic { outline: 3px solid #fff; outline-offset: 2px; }
     .tvr-app span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tvr-screen { position: relative; aspect-ratio: 16 / 9; background: #000; border: 1px solid #23343f; border-radius: 10px;
+                  overflow: hidden; margin: 0 0 4px; cursor: pointer; touch-action: manipulation; }
+    .tvr-screen img { display: block; width: 100%; height: 100%; object-fit: contain; }
+    .tvr-screen .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 12px;
+                       text-align: center; color: #7fb3c4; font-size: 0.82rem; pointer-events: none; }
+    .tvr-screen .dot { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%;
+                       border: 2px solid #7fe8ff; pointer-events: none; animation: tvr-dot 0.6s ease-out forwards; }
+    @keyframes tvr-dot { from { transform: scale(0.4); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
     #tvr-msg { min-height: 1.2em; margin-top: 10px; text-align: center; font-size: 0.8rem; color: #ffb3b3; }
     #tvr-msg.ok { color: #7fe8c8; }
     @media (max-width: 760px) {
@@ -664,6 +672,13 @@
         <div class="t"><b id="tvr-name">TV</b><small id="tvr-state"></small></div>
         <select id="tvr-pick" class="tvr-pick" hidden onchange="openRemote(this.value)" aria-label="Which TV"></select>
         <button type="button" class="tvr-x" onclick="closeRemote()" title="Close (Esc)">✕</button>
+      </div>
+      <div id="tvr-screen-box" hidden>
+        <div class="tvr-screen" id="tvr-screen" title="Tap to click there on the TV">
+          <img id="tvr-screen-img" alt="What the TV is showing">
+          <div class="msg" id="tvr-screen-msg"></div>
+        </div>
+        <div class="tvr-hint" style="margin: 0 0 8px;">What the TV shows · tap the picture to click there</div>
       </div>
       <div class="tvr-row tvr-live" id="tvr-live" hidden>
         <button type="button" class="tvr-btn" onclick="remoteLive(false)">📹 Show cameras</button>
@@ -1492,6 +1507,7 @@
       remoteMsg("");
       var apps = document.getElementById("tvr-apps");
       apps.innerHTML = "";
+      screenShow(null);
       try {
         var r = await fetch("/api/tv/" + encodeURIComponent(id));
         if (r.status === 401) { location.href = "/login"; return; }
@@ -1503,6 +1519,7 @@
           b.style.display = !v.keys || v.keys.indexOf(b.dataset.key) >= 0 ? "" : "none";
         });
         document.getElementById("tvr-live").hidden = !v.live;
+        screenShow(v.screen ? id : null);
         v.apps.forEach(function(a) {
           var b = document.createElement("button");
           b.type = "button";
@@ -1541,8 +1558,56 @@
       }
       openRemote(tvs.some(function(s) { return s.id === last; }) ? last : tvs[0].id);
     }
+    // ---- the TV's screen on the phone (Fire TV: sentinel/engine/tv_mirror.py) ----
+    var screenFor = null, screenRetry = null;
+    function screenShow(id) {
+      var box = document.getElementById("tvr-screen-box"), img = document.getElementById("tvr-screen-img"),
+          msg = document.getElementById("tvr-screen-msg");
+      clearTimeout(screenRetry);
+      screenFor = id;
+      box.hidden = !id;
+      img.onload = img.onerror = null;
+      img.removeAttribute("src");  // closes the stream: the TV stops recording a few seconds later
+      if (!id || document.hidden) return;
+      msg.textContent = "Getting the TV's picture… (a few seconds)";
+      img.style.visibility = "hidden";
+      img.onerror = function() {
+        msg.textContent = "The TV isn't sending its picture. Trying again…";
+        img.style.visibility = "hidden";
+        clearTimeout(screenRetry);
+        screenRetry = setTimeout(function() { if (screenFor === id) screenShow(id); }, 5000);
+      };
+      img.src = "/api/tv/" + encodeURIComponent(id) + "/screen?t=" + Date.now();
+      (function arrived() {  // (not every browser fires "load" for a stream of pictures)
+        if (screenFor !== id || !img.getAttribute("src")) return;
+        if (img.naturalWidth) { msg.textContent = ""; img.style.visibility = ""; return; }
+        screenRetry = setTimeout(arrived, 400);
+      })();
+    }
+    document.addEventListener("visibilitychange", function() {  // phone locked or tab hidden: let the TV rest
+      if (tvId && remoteOpen() && screenFor !== null) screenShow(tvId);
+    });
+    document.getElementById("tvr-screen").addEventListener("click", function(ev) {
+      if (!tvId) return;
+      var r = this.getBoundingClientRect(), x = (ev.clientX - r.left) / r.width, y = (ev.clientY - r.top) / r.height;
+      var dot = document.createElement("span");
+      dot.className = "dot";
+      dot.style.left = (x * 100) + "%";
+      dot.style.top = (y * 100) + "%";
+      this.appendChild(dot);
+      setTimeout(function() { dot.remove(); }, 700);
+      if (navigator.vibrate) { try { navigator.vibrate(8); } catch (e) {} }
+      var id = tvId;
+      tvQueue = tvQueue.then(async function() {
+        try {
+          var res = await switchPost("/api/tv/" + encodeURIComponent(id) + "/tap", { x: x, y: y });
+          if (!res.ok) remoteMsg(res.data.error || "That didn't work.");
+        } catch (e) { remoteMsg("Couldn't reach Sentinel."); }
+      });
+    });
     function closeRemote() {
       stopRepeat();
+      screenShow(null);
       document.getElementById("tvr").classList.remove("open");
       tvId = null;
       pollSwitches();
