@@ -36,6 +36,9 @@ sentinel-home/                         # repository root
     │   │                              #   every position (points) and each person's own web login
     │   ├── timeline.py                # Family timeline: positions -> stops + drives for one day
     │   ├── weather.py                 # Weather tile data (Open-Meteo, server-side, cached 10 min)
+    │   ├── weather_alerts.py          # Severe weather warnings (National Weather Service): voice, Telegram, banner
+    │   ├── packages.py                # Package alerts: something left at a door camera after a visit
+    │   ├── recap.py                   # Morning recap: the night in one message + a highlight video
     │   ├── spotify.py                 # Spotify Web API: PKCE sign-in, play/pause/skip/volume, now playing, voice phrases
     │   ├── assistant.py               # Opt-in: Telegram messages Sentinel doesn't understand -> `claude -p`
     │   ├── reminders.py               # "Remind me ..." -> Telegram message at that time (reminders.db)
@@ -54,6 +57,7 @@ sentinel-home/                         # repository root
     │   ├── nuisance.py                # Mutes spots where motion never stops (web on the lens, branches)
     │   ├── objects.py                 # YOLOX object detector (OpenVINO)
     │   ├── vehicle_type.py            # CLIP zero-shot vehicle type / delivery-company recognition
+    │   ├── package_check.py           # CLIP "is this a package?" for things left at the door (+ package_prompts.npz)
     │   ├── car_fingerprint.py         # DINOv2 fingerprints: which of the family's cars is this?
     │   ├── vehicle_prompts.npz        # Precomputed CLIP text embeddings (tools/build_vehicle_prompts.py)
     │   └── network_discovery.py       # RTSP discovery / resolve / endpoints

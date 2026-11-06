@@ -289,6 +289,25 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   IPv6 /64 (`_from_this_home`, read from /proc/net/if_inet6) is redirected to `http://<lan>:<port>/handoff`
   with a one-time 60 s ticket that signs the same login in there. The camera TV had been pulling ~3 Mbit/s
   out through Cloudflare and back, all day. Settings edits: stop the service first (it saves on shutdown).
+- **Severe weather warnings** (`sentinel/engine/weather_alerts.py`): api.weather.gov active alerts for the house
+  (`home_coords`, rounded to 2 decimals) every 2 min. `level()`: Warnings/Emergencies with severity Severe/Extreme
+  (minus slow ones like Flood Warning) = "loud": said out loud day or night + every chat (ignores pause) + the red
+  `/api/weather/alerts` banner on the camera and Home pages; other warnings and watches = Telegram + banner;
+  advisories/statements ignored. Announced ids (with their level) persist in `weather_alerts.json`; an Update
+  referencing an announced id stays quiet unless it became loud. "Any weather alerts?" by voice.
+- **Package alerts** (`sentinel/engine/packages.py`, `sentinel/detection/package_check.py`): every 10 s the door
+  cameras' snapshot (names with door/porch/entry/step, or `package_cameras`) is compared with the last one without a
+  person (`changes()`: brightness-matched diff, compact blobs, not the clock strip or edges). Only within
+  VISIT_WINDOW (3 min) after the camera pipeline saw a person (`visit()`, every person detection ≥0.45) and once
+  nobody has been seen for 20 s. A blob CLIP calls a package (PACKAGE_MIN 0.7; prompts in package_prompts.npz,
+  built by tools/build_vehicle_prompts.py) on two snapshots in a row is reported with a photo, stored as a
+  "package" event (visit headline, delivery questions, recap) and fires "seen: package" routines. Sunset reminder if
+  still there; "gone" message only when nobody is home. Replay of 18 days of Front Door clips: see the commit.
+- **Morning recap** (`sentinel/engine/recap.py`): at `recap_time` (07:00; skipped if Sentinel was down past 9:00)
+  every unpaused chat gets the night since `recap_since` (21:00) from the events table (people, deliveries, animals,
+  cars that stopped, a count of cars driving past, family cars, then parcels waiting, warnings and the weather) and
+  an H.264 highlight video: up to 8 moments x 4 s cut from the motion clips with OpenCV, captioned, piped to the
+  bundled ffmpeg. "Recap" in Telegram sends one for last night until now.
 - **Tasmota plugs** (`sentinel/engine/tasmota.py`, fourth SmartSwitches driver): plugs running the open Tasmota
   firmware, over its local HTTP API (`/cm?cmnd=Status 0`, `Power<n> On|Off`, `FriendlyName<n>`). Tasmota doesn't
   announce itself, so the home /24 is swept (port 80, then Status 0) when none is known, when a known one stops

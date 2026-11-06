@@ -171,6 +171,27 @@ class TestRunner(unittest.TestCase):
         self.runner.reload()
         return rid
 
+    def test_a_package_announcement_repeats_until_it_is_taken_in(self):
+        spec = {"when": {"type": "seen", "what": ["package"], "cameras": ["Front Door"], "repeat_hours": 2},
+                "then": [{"do": "say", "text": "There's a package at the front door"}]}
+        self.assertIn("again every 2 hours while the package is still there", describe(normalize(spec, CAT), CAT))
+        with self.assertRaises(ValueError):  # a person can't "repeat until taken in"
+            normalize({**spec, "when": {**spec["when"], "what": ["person"]}}, CAT)
+        self.add(spec)
+        self.runner.seen("192.168.0.10", "package")
+        self.runner.package_waiting("192.168.0.10")  # the watch's next look: the clock starts
+        self.assertEqual(len(self.fake.said), 1)
+        self.now += 3600
+        self.runner.package_waiting("192.168.0.10")
+        self.assertEqual(len(self.fake.said), 1)  # an hour: not yet
+        self.now += 3601
+        self.runner.package_waiting("192.168.0.10")
+        self.assertEqual(len(self.fake.said), 2)  # two hours: again
+        self.runner.package_gone("192.168.0.10")  # taken in / "✅ Got it"
+        self.now += 3 * 3600
+        self.runner.package_waiting("192.168.0.10")  # (the next parcel's first look)
+        self.assertEqual(len(self.fake.said), 2)
+
     def test_patio_lights_until_quiet(self):
         self.add(PATIO)
         self.runner.seen("192.168.0.10", "person")  # another camera

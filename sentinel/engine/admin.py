@@ -22,6 +22,13 @@ def _bool(value: Any) -> bool:
     raise ValueError("expected true/false")
 
 
+def _hhmm(value: Any) -> str:
+    m = re.fullmatch(r"([01]?\d|2[0-3]):([0-5]\d)", str(value).strip())
+    if not m:
+        raise ValueError("expected a time like 07:00")
+    return "%02d:%s" % (int(m.group(1)), m.group(2))
+
+
 def _num(lo: float, hi: float, cast: Callable = float) -> Callable[[Any], Any]:
     def check(value: Any) -> Any:
         if isinstance(value, bool):
@@ -142,6 +149,10 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "inference_device": lambda v: _choice(v, ("auto", "GPU", "CPU")),
     "household_ask_enabled": _bool,
     "weather_alerts_enabled": _bool,
+    "package_alerts_enabled": _bool,
+    "recap_enabled": _bool,
+    "recap_time": _hhmm,
+    "recap_since": _hhmm,
     "weather_alerts_speak": _bool,
     "household_ask_per_day": _num(0, 20, int),
     "detector_model": _detector_model,

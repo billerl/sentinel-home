@@ -321,6 +321,9 @@ class CameraPipeline:
                 return self.detector._box_in_active_zone(*box, w, h)
 
         ready = self.tracker.update(detections, frame, ts, in_zone)
+        packages = getattr(self._detections, "packages", None)
+        if packages is not None and any(d.group == "person" and d.score >= 0.45 for d in detections):
+            packages.visit(self.display_name, ts)  # someone at the door: anything new after they leave may be a parcel
         confirmed = [t for t in self.tracker.tracks if t.hits >= 2 and t.best_score >= 0.5]
         self._light_for_cars(confirmed, frame, in_zone)
         checker = getattr(self._detections, "subject_checker", None)

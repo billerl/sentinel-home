@@ -119,6 +119,14 @@ class SettingsManager:
             "weather_units": "fahrenheit",
             # Severe weather warnings (US National Weather Service) for the house: Telegram + the camera screens,
             # and out loud for dangerous ones (sentinel/engine/weather_alerts.py).
+            # "📦 A package was left at the Front Door" (sentinel/engine/packages.py); cameras by name, "" = any
+            # camera whose name has door/porch/entry/step in it.
+            "package_alerts_enabled": True,
+            # Morning recap (sentinel/engine/recap.py): the night in one message + a highlight video, to every chat.
+            "recap_enabled": True,
+            "recap_time": "07:00",
+            "recap_since": "21:00",
+            "package_cameras": "",
             "weather_alerts_enabled": True,
             "weather_alerts_speak": True,
             # Messages Sentinel doesn't understand go to Claude (the PC's signed-in subscription).

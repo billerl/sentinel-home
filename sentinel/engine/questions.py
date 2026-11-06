@@ -19,7 +19,7 @@ from sentinel.engine.queries import _TIME, _clock, _day_start
 
 VISIT_GAP_SECONDS = 240  # sightings closer than this are one visit (van pulls up, driver walks over)
 MAX_LINES = 10
-GROUP_PRIORITY = ("delivery", "person", "vehicle", "animal")  # what headlines a visit
+GROUP_PRIORITY = ("package", "delivery", "person", "vehicle", "animal")  # what headlines a visit
 
 _SUBJECTS = {
     "delivery": r"deliver\w*|packages?|parcels?|amazon|ups|fedex|usps|dhl|mail|mailman|postman|post",

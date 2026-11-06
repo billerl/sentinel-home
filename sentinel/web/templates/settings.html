@@ -166,6 +166,7 @@
       <h2>Alerts &amp; object detection</h2>
       <div class="card">
         <div class="row"><label><input type="checkbox" data-key="object_detection_enabled"> Recognise people, vehicles and animals</label></div>
+        <div class="row"><label><input type="checkbox" data-key="package_alerts_enabled"> 📦 Package alerts: a photo in Telegram when a package is left at the door (cameras with “door” or “porch” in their name), a reminder at sunset if it's still there</label></div>
         <div class="row"><label><input type="checkbox" data-key="household_ask_enabled"> Ask in Telegram <i>“Whose car is this?”</i> when a parked car isn't recognised</label>
           <div class="field" style="flex: 0 1 140px"><span>At most per day</span><input type="number" min="0" max="20" data-key="household_ask_per_day"></div></div>
         <div class="row"><label><input type="checkbox" data-key="vehicle_types_enabled"> Recognise delivery vans (UPS, FedEx, Amazon, USPS, DHL) and vehicle types (pickup, SUV, school bus…)</label></div>
@@ -209,6 +210,11 @@
         </div>
         <div class="row"><label><input type="checkbox" data-key="telegram_motion_alerts"> Send motion alerts</label></div>
         <div class="row"><label><input type="checkbox" data-key="telegram_include_video"> Attach the motion clip to alerts (otherwise text only)</label></div>
+        <div class="row"><label><input type="checkbox" data-key="recap_enabled"> 🌅 Morning recap: what happened overnight in one message, with a short highlight video</label></div>
+        <div class="row">
+          <div class="field" style="flex: 0 1 180px"><span>Send it at</span><input type="time" data-key="recap_time"></div>
+          <div class="field" style="flex: 0 1 220px"><span>Covering the night from</span><input type="time" data-key="recap_since"></div>
+        </div>
         <div class="row">
           <div class="field" style="flex: 0 1 220px"><span>Minimum seconds between alerts</span><input type="number" min="0" max="3600" data-key="telegram_cooldown"></div>
         </div>
@@ -431,6 +437,9 @@
         <ul>
           <li>Leaves, shadows, rain, insects and cloud changes are ignored because they aren't recognised objects.</li>
           <li>Parked cars don't alert; a vehicle has to move.</li>
+          <li><b>📦 Packages:</b> after someone comes to the door, Sentinel compares the porch before and after; something new that looks like a parcel gets a photo in Telegram (<i>“📦 A package was left at the Front Door”</i>), and at sunset a reminder if it's still there. If it disappears while nobody is home, it says so. Cameras with “door” or “porch” in their name are watched. Routines can start on it too (“a camera sees… 📦 Package left”), and can repeat every few hours while it's still there. Tap <b>✅ Got it</b> under the photo, or tell Jarvis “I got the package”, to stop the reminders. Ask Jarvis “any packages?”.</li>
+          <li><b>⚠️ Severe weather:</b> tornado, severe thunderstorm, flash flood and winter storm warnings from the National Weather Service are said out loud as soon as they're issued (day or night), sent to Telegram and shown as a red banner on the camera screens; watches only go to Telegram. Settings > Weather turns them off. Ask Jarvis “any weather alerts?”.</li>
+          <li><b>🌅 Morning recap:</b> at 7 am Telegram gets the night in one message (who came by, animals, cars, family cars coming and going, packages waiting, today's weather) and a short video of the moments worth seeing. Send <span class="cmd">Recap</span> for one any time. Settings > Telegram sets the time.</li>
           <li><b>Deliveries:</b> when a vehicle alerts, Sentinel takes a closer look and names UPS, FedEx, Amazon, USPS mail and DHL vans — <i>“📦 An Amazon van pulled in at the Front Door”</i> — and other types like pickup trucks, SUVs and school buses. It looks again as the vehicle comes closer, so a van that stops at the curb may get a second “📦” message. It recognises them by shape and colours, so an unmarked rental van won't be called a delivery, and at night (black-and-white picture) it only names one when it's very sure.</li>
           <li>Each camera repeats an alert for the same kind of thing at most once per cooldown (60 s by default).</li>
           <li>Name your zones in <a href="{{ url_for('zones_page') }}">Zones</a> so messages say where (“in the Driveway”).</li>
@@ -492,6 +501,7 @@
     var settings = null;
     var SECTIONS = {
       telegram: ["telegram_enabled", "telegram_chat_ids", "telegram_motion_alerts", "telegram_include_video", "telegram_cooldown",
+                 "recap_enabled", "recap_time", "recap_since",
                  "assistant_enabled", "assistant_daily_limit", "assistant_model"],
       recording: ["recording_retention_enabled", "recording_retention_days", "recording_min_free_percent",
                   "night_bug_start_hour", "night_bug_end_hour", "auto_reconnect_enabled",
@@ -500,7 +510,7 @@
       access: ["remote_web_url", "remote_rdp_user"],
       spotify: ["spotify_client_id", "spotify_device", "spotify_fallback_device", "spotify_speaker_name"],
       weather: ["weather_location", "weather_units", "weather_alerts_enabled", "weather_alerts_speak"],
-      detection: ["object_detection_enabled", "household_ask_enabled", "household_ask_per_day", "vehicle_types_enabled", "alert_mode", "detector_model", "inference_device", "object_alert_cooldown"]
+      detection: ["object_detection_enabled", "package_alerts_enabled", "household_ask_enabled", "household_ask_per_day", "vehicle_types_enabled", "alert_mode", "detector_model", "inference_device", "object_alert_cooldown"]
     };
 
     function $(id) { return document.getElementById(id); }
