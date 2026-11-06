@@ -31,6 +31,11 @@ VEHICLE_MIN_OWN_TRAVEL = 0.35
 # A car driving straight towards or away from the camera mostly changes size, not position
 # (an opening door adds only ~25% to the box).
 VEHICLE_MIN_AREA_CHANGE = 1.5
+# A vehicle that "moved" in one leap waits this long before alerting: a cloud shadow can hide a parked
+# car for a moment, and its track then grabs the car parked next to it (Back Yard, 2026-11-06: "A blue
+# SUV pulled into the Back Yard" for a pickup that never moved). If a car is back where the track started,
+# or was already standing where it leapt to, it was a jump between two parked cars, not a drive.
+VEHICLE_LEAP_WAIT = 2.0
 STATIC_MEMORY_SECONDS = 7 * 86400
 # Minimum best score per group before a track can alert. Tuned on real footage:
 # a person sitting on a porch at night scored 0.40-0.52 with the tiny model, while
@@ -111,6 +116,17 @@ class Track:
         areas = [b[2] * b[3] for _, b in self.boxes]
         first, last = max(1, areas[0]), max(1, areas[-1])
         return max(first, last) / min(first, last) >= VEHICLE_MIN_AREA_CHANGE
+
+    def leap(self) -> Optional[int]:
+        """Index of the box reached by one step holding most of the travel (and half the car's size), if any."""
+        centres = [(b[0] + b[2] / 2.0, b[1] + b[3] / 2.0) for _, b in self.boxes]
+        steps = [np.hypot(x1 - x0, y1 - y0) for (x0, y0), (x1, y1) in zip(centres, centres[1:])]
+        if not steps:
+            return None
+        k = int(np.argmax(steps))
+        total = np.hypot(centres[-1][0] - centres[0][0], centres[-1][1] - centres[0][1])
+        size = max(self.boxes[k][1][2], self.boxes[k][1][3])
+        return k + 1 if steps[k] >= 0.8 * total and steps[k] >= 0.5 * size else None
 
     def is_still(self, frame_width: int) -> bool:
         """Hasn't really moved: less than ~one body width (box jitter on a static
@@ -432,6 +448,13 @@ class CameraObjectTracker:
                     # Parked (or just jiggling: people at its doors). Keep watching rather than
                     # retiring it, so it still alerts if it starts to drive off.
                     continue
+                k = track.leap()
+                if k is not None:
+                    if self._jumped_between_cars(track, k, now):
+                        track.boxes = track.boxes[k:]  # it's that other parked car now: measure from there
+                        continue
+                    if now - track.boxes[k][0] < VEHICLE_LEAP_WAIT:
+                        continue
             else:
                 if track.group == "animal" and any(
                     t.group == "person" and now - t.last_seen < 1.0 and _iou(t.box, track.box) > 0.3
@@ -471,6 +494,19 @@ class CameraObjectTracker:
                 self._remember_static(t.box, now)
         self.tracks = alive
         self.static_spots = [s for s in self.static_spots if now - s[2] < STATIC_MEMORY_SECONDS]
+
+    def _jumped_between_cars(self, track: Track, k: int, now: float) -> bool:
+        """The leap at boxes[k] went from one parked car to another: a car is back where the track
+        started, or another car was already standing where it leapt to."""
+        start, there, leapt = track.boxes[0][1], track.boxes[k][1], track.boxes[k][0]
+        for t in self.tracks:
+            if t is track or t.group != "vehicle":
+                continue
+            if t.first_seen > track.first_seen and now - t.last_seen < 2.0 and _iou(t.box, start) > 0.5:
+                return True
+            if t.first_seen < leapt and _iou(t.box, there) > 0.5:
+                return True
+        return False
 
     @staticmethod
     def _matches_spot(box: Tuple[int, int, int, int], spot: Tuple[int, int, int, int]) -> bool:
