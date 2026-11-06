@@ -699,6 +699,12 @@ class TestFireTV(unittest.TestCase):
         self.assertEqual(self.shell.commands[-1], "input keyevent KEYCODE_CHANNEL_UP")
         self.assertEqual(sum(c.startswith("getevent") for c in self.shell.commands), 1)  # looked up once
 
+    def test_holding_home_opens_the_quick_menu(self):
+        self.fire.press("192.168.1.70", "KEY_HOME_HOLD")
+        self.assertEqual(self.shell.commands[-1], "input keyevent --longpress KEYCODE_HOME")  # a long press, not a tap
+        self.assertTrue(self.fire.supports("KEY_HOME_HOLD"))
+        self.assertFalse(self.fire.supports("KEY_SOURCE"))
+
     def test_without_access_to_its_input_devices(self):
         self.shell.commands.clear()
         self.fire._input.clear()
@@ -712,6 +718,10 @@ class TestFireTV(unittest.TestCase):
         self.assertTrue(v["live"])
         self.assertNotIn("source", v["keys"])  # no such button on a Fire TV
         self.assertIn("up", v["keys"])
+        self.assertIn("home_hold", v["keys"])  # holding Home: the quick menu
+        samsung = next(s.id for s in self.sw.switches() if s.id != self.fire_id and self.sw.tv_view(s.id))
+        self.assertNotIn("home_hold", self.sw.tv_view(samsung)["keys"])  # a TV that can't hold a button: a plain Home
+        self.assertEqual(self.sw.tv_key(samsung, "home_hold"), (False, "I don't know that button."))
         self.assertEqual([a["name"] for a in v["apps"]], ["Netflix", "Prime Video"])  # the live view has its own buttons
         self.assertEqual(self.sw.tv_key(self.fire_id, "source"), (False, "I don't know that button."))
         self.assertTrue(self.sw.tv_key(self.fire_id, "ok")[0])

@@ -663,7 +663,7 @@
       </div>
       <div class="tvr-row">
         <button type="button" class="tvr-btn" data-key="source">⇄ Input</button>
-        <button type="button" class="tvr-btn" data-key="home">⌂ Home</button>
+        <button type="button" class="tvr-btn" data-key="home" data-hold="home_hold" title="Hold for the quick menu">⌂ Home</button>
         <button type="button" class="tvr-btn" data-key="menu">☰ Menu</button>
         <button type="button" class="tvr-btn" data-key="guide">▤ Guide</button>
       </div>
@@ -1441,7 +1441,7 @@
       pollSwitches();
     }
     // ---------------- TV remote ----------------
-    var tvId = null, tvState = null, tvQueue = Promise.resolve(), tvRepeat = null;
+    var tvId = null, tvState = null, tvQueue = Promise.resolve(), tvRepeat = null, tvKeys = null;
     function remoteOpen() { return document.getElementById("tvr").classList.contains("open"); }
     function remoteMsg(text, ok) {
       var m = document.getElementById("tvr-msg");
@@ -1475,6 +1475,7 @@
         var v = await r.json();
         if (!r.ok) { remoteMsg(v.error || "That TV isn't answering."); return; }
         remoteShow(v);
+        tvKeys = v.keys || null;
         document.querySelectorAll("#tvr [data-key]").forEach(function(b) {  // only the buttons this device has
           b.style.display = !v.keys || v.keys.indexOf(b.dataset.key) >= 0 ? "" : "none";
         });
@@ -1576,9 +1577,22 @@
         e.preventDefault();
         stopRepeat();
         btn.classList.add("pressed");
+        var hold = btn.dataset.hold && tvKeys && tvKeys.indexOf(btn.dataset.hold) >= 0 ? btn.dataset.hold : null;
+        tvRepeat = { btn: btn, t: 0, i: 0, hold: hold, held: false };
+        if (hold) {  // a tap sends the button when it's let go; holding it sends the TV's long press (Home: quick menu)
+          tvRepeat.t = setTimeout(function() {
+            if (!tvRepeat || tvRepeat.btn !== btn) return;
+            tvRepeat.held = true;
+            remoteKey(hold);
+            remoteMsg("Held ✓ (the quick menu takes a few seconds to appear)", true);
+          }, 700);
+          return;
+        }
         remoteKey(key);
-        tvRepeat = { btn: btn, t: 0, i: 0 };
         if (repeat) tvRepeat.t = setTimeout(function() { if (tvRepeat) tvRepeat.i = setInterval(function() { remoteKey(key); }, 220); }, 450);
+      });
+      btn.addEventListener("pointerup", function() {
+        if (tvRepeat && tvRepeat.btn === btn && tvRepeat.hold && !tvRepeat.held) remoteKey(key);  // let go early: a tap
       });
       btn.addEventListener("click", function(e) { if (e.detail === 0) remoteKey(key); });  // keyboard / TV-browser "click"
     });

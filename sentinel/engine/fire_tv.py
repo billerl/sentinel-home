@@ -39,6 +39,8 @@ KEYS = {"KEY_UP": "KEYCODE_DPAD_UP", "KEY_DOWN": "KEYCODE_DPAD_DOWN", "KEY_LEFT"
         "KEY_CHUP": "KEYCODE_CHANNEL_UP", "KEY_CHDOWN": "KEYCODE_CHANNEL_DOWN", "KEY_GUIDE": "KEYCODE_GUIDE",
         "KEY_INFO": "KEYCODE_INFO", "KEY_POWER": "KEYCODE_POWER",
         **{f"KEY_{n}": f"KEYCODE_{n}" for n in range(10)}}
+# Held buttons. Home held opens the quick menu (picture settings, sleep timer): the remote's backlight is set there.
+LONG_KEYS = {"KEY_HOME_HOLD": "KEYCODE_HOME"}
 # The same keys as Linux input codes, best first, for writing straight into one of the Fire TV's input devices
 # (`sendevent`, a few ms; `input keyevent` starts a Java program per press, ~0.5-1 s on a Fire TV).
 LINUX_KEYS = {"KEYCODE_DPAD_UP": [103], "KEYCODE_DPAD_DOWN": [108], "KEYCODE_DPAD_LEFT": [105],
@@ -247,7 +249,7 @@ class FireTVDriver:
 
     # ------------------------------------------------------------ the remote
     def supports(self, key: str) -> bool:
-        return key in KEYS
+        return key in KEYS or key in LONG_KEYS
 
     def _input_device(self, host: str) -> Optional[Tuple[str, set]]:
         """The Fire TV's input device with the most remote keys (often its HDMI-CEC one), if Sentinel may write to
@@ -286,13 +288,16 @@ class FireTVDriver:
         return found
 
     def press(self, host: str, *keys: str) -> None:
-        names = [KEYS[k] for k in keys if k in KEYS]
+        names = [KEYS.get(k) or LONG_KEYS[k] for k in keys if k in KEYS or k in LONG_KEYS]
         if not names:
             return
         started = time.time()
-        device = self._input_device(host) if "KEY_POWER" not in keys else None
+        device = self._input_device(host) if "KEY_POWER" not in keys and not set(keys) & set(LONG_KEYS) else None
         commands = []
-        for name in names:
+        for key, name in zip([k for k in keys if k in KEYS or k in LONG_KEYS], names):
+            if key in LONG_KEYS:
+                commands.append(f"input keyevent --longpress {name}")
+                continue
             code = next((c for c in LINUX_KEYS.get(name, []) if device and c in device[1]), None)
             if code is None:
                 commands.append(f"input keyevent {name}")

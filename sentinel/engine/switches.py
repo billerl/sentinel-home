@@ -202,7 +202,8 @@ TV_KEYS = {"up": "KEY_UP", "down": "KEY_DOWN", "left": "KEY_LEFT", "right": "KEY
            "info": "KEY_INFO", "exit": "KEY_EXIT", "vol_up": "KEY_VOLUP", "vol_down": "KEY_VOLDOWN", "mute": "KEY_MUTE",
            "ch_up": "KEY_CHUP", "ch_down": "KEY_CHDOWN", "ch_list": "KEY_CH_LIST", "play": "KEY_PLAY",
            "pause": "KEY_PAUSE", "rewind": "KEY_REWIND", "forward": "KEY_FF",
-           **{str(n): f"KEY_{n}" for n in range(10)}}
+           "home_hold": "KEY_HOME_HOLD", **{str(n): f"KEY_{n}" for n in range(10)}}
+HELD_KEYS = {"KEY_HOME_HOLD"}  # only for TVs whose driver says it can hold a button (supports())
 TV_SYSTEM_APPS = {"Gallery", "Internet", "e-Manual", "PrivacyChoices", "Universal Guide"}
 
 
@@ -627,7 +628,7 @@ class SmartSwitches:
         sw, driver, host = tv
         apps = [{"id": app_id, "name": re.split(r"\s[-:]\s|:", name)[0].strip()}
                 for app_id, name in driver.apps(host).items()]
-        supports = getattr(driver, "supports", lambda key: True)
+        supports = getattr(driver, "supports", lambda key: key not in HELD_KEYS)
         live = hasattr(driver, "show_live") and driver.live_app(host) is not None
         return {"id": sw.id, "name": sw.name, "on": sw.on, "online": sw.online, "kind": driver.kind,
                 "keys": [k for k, name in TV_KEYS.items() if supports(name)], "live": live,
@@ -635,7 +636,7 @@ class SmartSwitches:
 
     def tv_key(self, switch_id: str, key: str) -> Tuple[bool, str]:
         tv = self._tv_for(switch_id)
-        if tv is None or key not in TV_KEYS or not getattr(tv[1], "supports", lambda k: True)(TV_KEYS[key]):
+        if tv is None or key not in TV_KEYS or not getattr(tv[1], "supports", lambda k: k not in HELD_KEYS)(TV_KEYS[key]):
             return False, "I don't know that button."
         try:
             tv[1].press(tv[2], TV_KEYS[key])
