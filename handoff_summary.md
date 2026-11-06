@@ -232,6 +232,14 @@ Use this file as continuity across chats. At the **start** of a new session, ask
       presence check saw (before the track began) stays quiet while that spot is occupied (a car box IoU>0.3,
       or a person covering it); one that started on a spot and left it says "X is leaving", named from the
       spot. Was: box changes (all four doors open) read as "Alex's Truck is driving past" on a parked Mercedes.
+      2026-11-06: "leaving" also needs the spot to stop *looking* like its car (`PresenceTracker.still_parked`:
+      `spot_look` vs the scans' looks and the camera thread's last view of the car there, `Parked.seen_look`, so
+      the white light switching on doesn't break the match) for LEAVE_EMPTY_FRAMES frames and LEAVE_EMPTY_SECONDS
+      in a row; one matching frame resets it. Rain and a cobweb across the infrared picture had the detector lose
+      the parked Edge and its track hop onto the next car: six false "Edge is leaving" in 15 minutes. The white
+      light ignores tracks still on a spot that looks the same (it had hidden the Civic from the driveway check
+      for 8 minutes, which then said it left). Replay of 06:10-06:36: 6 false alerts -> 0; five real departures
+      (day, dusk, night) alert as before.
     - Naming: `identify(exclude=, colour=)`. Cars parked elsewhere are ruled out; near-ties by day are
       settled by paint colour (`colour_signature`, HSV histogram of the crop's middle; COLOUR_POOL 0.03,
       COLOUR_MARGIN 0.08). Leave-one-day-out on the 140 family-named day photos: 38 right/2 wrong -> 69/6.

@@ -607,6 +607,9 @@ class Parked:
     empty_since: float = 0.0
     empty_frames: int = 0
     leaving_at: float = 0.0  # when motion detection saw this car drive off its spot ("X is leaving")
+    seen_look: Optional[np.ndarray] = None  # spot_look when motion detection last saw the car on its spot
+    gone_frames: int = 0  # ... and in how many of those (since when) the spot didn't look like its car either
+    gone_since: float = 0.0
     unchecked: bool = False  # its name was a guess: check it again by daylight
     doubts: int = 0  # daylight checks in a row whose paint colour says it's another car
     rechecks: int = 0
@@ -847,6 +850,15 @@ class PresenceTracker:
             return False  # nothing to compare in this light
         now = spot_look(frame, p.box)
         return now is not None and float((now * then).mean()) >= SAME_LOOK
+
+    @staticmethod
+    def still_parked(frame: np.ndarray, p: "Parked") -> bool:
+        """Does the spot still look like its car? For the camera thread's "is it leaving?". Compared with the
+        camera thread's last view of it as well as the scans': the white light switching on turns an
+        infrared spot into a colour one (the blue Edge: 0.24-0.30 alike, lit vs infrared)."""
+        now = spot_look(frame, p.box)
+        thens = list(p.looks.values()) + ([p.seen_look] if p.seen_look is not None else [])
+        return now is not None and any(float((now * then).mean()) >= SAME_LOOK for then in thens)
 
     def _home_except(self, p: "Parked") -> set:
         """Family cars parked in other spots right now: p can't be one of them."""

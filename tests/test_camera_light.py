@@ -116,6 +116,7 @@ class TestLightForCars(unittest.TestCase):
         self.asked = []
         lights = types.SimpleNamespace(available=lambda h: True, request=self.asked.append)
         self.pipe = types.SimpleNamespace(host="192.168.0.9", _detections=types.SimpleNamespace(lights=lights))
+        self.pipe._still_on_its_spot = lambda t, f: CameraPipeline._still_on_its_spot(self.pipe, t, f)
         self.call = lambda tracks, frame: CameraPipeline._light_for_cars(self.pipe, tracks, frame, lambda b: True)
 
     @staticmethod
@@ -130,6 +131,19 @@ class TestLightForCars(unittest.TestCase):
         self.call([self.car(True)], day)
         self.assertEqual(self.asked, [])  # daylight: no need
         self.call([self.car(True)], night)
+        self.assertEqual(self.asked, ["192.168.0.9"])
+
+    def test_not_for_a_parked_car_whose_box_jumps_about(self):
+        from sentinel.engine.household import Parked, PresenceTracker
+        night = np.full((720, 1280, 3), 50, np.uint8)
+        night[100:300, 100:400:30] = 200  # the parked car
+        spot = Parked((100, 100, 300, 200), 0, 0, confirmed=True)
+        PresenceTracker._remember_look(spot, night, True)
+        self.pipe._detections.presence = types.SimpleNamespace(spots=lambda key: [spot],
+                                                               still_parked=PresenceTracker.still_parked)
+        self.call([self.car(True)], night)  # rain streaks made its box "move": it's still on its spot
+        self.assertEqual(self.asked, [])
+        self.call([self.car(True)], np.full((720, 1280, 3), 50, np.uint8))  # its spot is empty: it drove off
         self.assertEqual(self.asked, ["192.168.0.9"])
 
 

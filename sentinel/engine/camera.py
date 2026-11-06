@@ -339,11 +339,11 @@ class CameraPipeline:
         classifier = getattr(self._detections, "vehicle_classifier", None)
         presence = getattr(self._detections, "presence", None)
         if presence is not None:
-            self._watch_spots(presence, detections, ts)
+            self._watch_spots(presence, detections, frame, ts)
         for track in ready:
             if track.not_a_subject:
                 continue  # a bin or a fan, not a person
-            if track.group == "vehicle" and presence is not None and self._parked_car_stays(presence, track, detections):
+            if track.group == "vehicle" and presence is not None and self._parked_car_stays(presence, track, detections, frame):
                 continue
             if classifier is not None and wants_type_check(track):
                 if self._check_in_hd_later(classifier, track, confirmed, ts, first=True):
@@ -446,15 +446,25 @@ class CameraPipeline:
         return any(d.group == "vehicle" and _iou(d.box, spot.box) > 0.3 or
                    d.group == "person" and _covers(d.box, spot.box) for d in detections)
 
-    def _watch_spots(self, presence, detections, ts: float) -> None:
+    def _watch_spots(self, presence, detections, frame: np.ndarray, ts: float) -> None:
+        from sentinel.engine.household import _iou, spot_look
+
         for spot in presence.spots(self.host):
             if self._spot_occupied(spot, detections):
                 spot.empty_since, spot.empty_frames = 0.0, 0
+                spot.gone_frames, spot.gone_since = 0, 0.0
+                if any(d.group == "vehicle" and _iou(d.box, spot.box) > 0.3 for d in detections):
+                    spot.seen_look = spot_look(frame, spot.box)  # in this light, for still_parked
             else:
                 spot.empty_since = spot.empty_since or ts
                 spot.empty_frames += 1
+                if presence.still_parked(frame, spot):
+                    spot.gone_frames, spot.gone_since = 0, 0.0
+                else:
+                    spot.gone_frames += 1
+                    spot.gone_since = spot.gone_since or ts
 
-    def _parked_car_stays(self, presence, track, detections) -> bool:
+    def _parked_car_stays(self, presence, track, detections, frame: np.ndarray) -> bool:
         """Parking spots (from the once-a-minute driveway check) decide whether a parked car moved.
         Its box changing (doors opening, people loading it, the tracker hopping onto the next car)
         doesn't count; only its spot going empty does. True = say nothing (yet)."""
@@ -471,6 +481,14 @@ class CameraPipeline:
             if (home.empty_frames < self.LEAVE_EMPTY_FRAMES
                     or track.last_seen - home.empty_since < self.LEAVE_EMPTY_SECONDS):
                 track.reported = False  # its spot only just looked empty: make sure
+                return True
+            if (not track.vehicle_moved(frame.shape[1]) or home.gone_frames < self.LEAVE_EMPTY_FRAMES
+                    or track.last_seen - home.gone_since < self.LEAVE_EMPTY_SECONDS):
+                # The detector lost it, but its spot looked the same at least once in the last 2 seconds
+                # (a strand across the lens spoils a frame now and then). Rain and a cobweb streaking across
+                # the picture made "the Edge is leaving" six times in 15 minutes while it sat there, the
+                # tracker hopping between parked cars looking like driving (2026-11-06 06:21).
+                track.reported = False
                 return True
             track.left_spot = True
             home.leaving_at = track.last_seen
@@ -490,8 +508,19 @@ class CameraPipeline:
 
         h, w = frame.shape[:2]
         if any(t.group == "vehicle" and t.box[2] * t.box[3] >= MIN_BOX_FRACTION * w * h and in_zone(t.box)
-               and t.vehicle_moved(w) for t in confirmed) and not is_daylight(frame):
+               and t.vehicle_moved(w) and not self._still_on_its_spot(t, frame) for t in confirmed) \
+                and not is_daylight(frame):
             lights.request(self.host)
+
+    def _still_on_its_spot(self, track, frame: np.ndarray) -> bool:
+        """A parked car whose box only jumps about (rain or a cobweb across the infrared picture): its spot
+        still looks the same. The light it switched on hid the Civic from the driveway check for 8 minutes,
+        which then said it had left (2026-11-06 06:28)."""
+        from sentinel.engine.household import _iou
+
+        presence = getattr(self._detections, "presence", None)
+        return presence is not None and any(_iou(p.box, track.box) >= 0.3 and presence.still_parked(frame, p)
+                                            for p in presence.spots(self.host))
 
     def _check_subject(self, checker, track) -> None:
         """CLIP second opinion on a person/animal track: relabel it (a "person" that's really a

@@ -108,9 +108,10 @@ class TestParkedAndDoors(TestPipeline):
 
     def park(self, *spots):
         """Spots the once-a-minute driveway check found (vehicle id or None for each box)."""
-        from sentinel.engine.household import Parked, Vehicle
+        from sentinel.engine.household import Parked, PresenceTracker, Vehicle
         parked = [Parked(box, 0, 0, seen=3, confirmed=True, vehicle_id=vid) for box, vid in spots]
-        presence = types.SimpleNamespace(spots=lambda key: parked, home_ids=lambda: set())
+        presence = types.SimpleNamespace(spots=lambda key: parked, home_ids=lambda: set(),
+                                         still_parked=PresenceTracker.still_parked)
         household = types.SimpleNamespace(vehicle=lambda vid: Vehicle(vid, "Alex's Truck", "Alex", [], "pickup"))
         self.p._detections = types.SimpleNamespace(subject_checker=None, vehicle_classifier=None, presence=presence,
                                                    household=household)
@@ -164,6 +165,41 @@ class TestParkedAndDoors(TestPipeline):
         for i, dets in enumerate(frames):
             self.p._handle_detections(dets, GREY, 2000.0 + i)
         self.assertEqual([e for e in self.events if "Someone" not in e], [])  # the person, yes; the car, no
+
+    @staticmethod
+    def car_at(*xs):
+        """A night picture with striped "cars" whose left edges are at xs."""
+        frame = np.full((720, 1280, 3), 40, np.uint8)
+        for x in xs:
+            for i in range(0, 300, 30):
+                frame[300:500, x + i:x + i + 15] = 200
+        return frame
+
+    def test_rain_hiding_a_parked_car_is_not_leaving(self):
+        from sentinel.engine.household import PresenceTracker
+        spot, beside = (300, 300, 300, 200), (570, 300, 300, 200)
+        self.park((spot, 4))
+        both = self.car_at(300, 570)
+        PresenceTracker._remember_look(self.p._detections.presence.spots("")[0], both, True)
+        # Streaks across the infrared picture: the detector loses the parked truck for a few seconds and its
+        # track hops onto the car beside it, which looks like driving off (2026-11-06 06:21, the Edge).
+        frames = [[spot], [spot], [], [], [], [beside], [beside], [beside]]
+        for i, boxes in enumerate(frames):
+            self.p._handle_detections([Detection("car", 0.8, b) for b in boxes], both, 2000.0 + i)
+        for i in range(12):  # the track times out
+            self.p._handle_detections([], both, 2010.0 + i)
+        self.assertEqual(self.events, [])
+
+    def test_a_car_that_really_drives_off_its_spot_still_leaves(self):
+        from sentinel.engine.household import PresenceTracker
+        spot = (500, 300, 300, 200)
+        self.park((spot, 4))
+        PresenceTracker._remember_look(self.p._detections.presence.spots("")[0], self.car_at(500), True)
+        for i, x in enumerate((500, 500, 520, 560, 620, 700, 800, 900, 960, 970, 975, 980, 980)):
+            self.p._handle_detections([Detection("car", 0.8, (x, 300, 300, 200))], self.car_at(x), 2000.0 + i * 0.5)
+        for i in range(12):
+            self.p._handle_detections([], self.car_at(960), 2010.0 + i)
+        self.assertEqual(self.events, ["🛻 Alex's Truck is leaving the Garage."])
 
     def test_arriving_car_still_alerts(self):
         self.park(((40, 200, 150, 100), None))  # someone else parked on the left
