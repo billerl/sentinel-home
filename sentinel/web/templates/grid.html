@@ -440,6 +440,8 @@
     .tvr-power { width: 46px; height: 46px; border-radius: 50%; font-size: 1.3rem; color: #ff8080; border-color: #5a2a2a;
                  background: radial-gradient(circle at 40% 30%, #3a1c1c, #1c0d0d); }
     .tvr-power.on { color: #fff; background: radial-gradient(circle at 40% 30%, #e04848, #8a1f1f); box-shadow: 0 0 14px rgba(255,70,70,0.45); }
+    .tvr-pick { background: #0e2a33; color: #fff; border: 1px solid #2a5866; border-radius: 8px; padding: 6px 8px;
+                font: inherit; font-size: 0.85rem; max-width: 45%; }
     .tvr-x { background: none; border: 0; color: #7fb3c4; font-size: 1.3rem; padding: 6px 10px; cursor: pointer; }
     .tvr-row { display: flex; gap: 8px; margin: 10px 0; }
     .tvr-row > * { flex: 1; min-width: 0; }
@@ -652,6 +654,7 @@
       <div class="tvr-head">
         <button type="button" class="tvr-btn tvr-power" id="tvr-power" onclick="remotePower()" title="Power">⏻</button>
         <div class="t"><b id="tvr-name">TV</b><small id="tvr-state"></small></div>
+        <select id="tvr-pick" class="tvr-pick" hidden onchange="openRemote(this.value)" aria-label="Which TV"></select>
         <button type="button" class="tvr-x" onclick="closeRemote()" title="Close (Esc)">✕</button>
       </div>
       <div class="tvr-row tvr-live" id="tvr-live" hidden>
@@ -1451,8 +1454,17 @@
       document.getElementById("tvr-state").textContent = !v.online ? "Not answering" : v.on ? "On" : "Off · tap ⏻ to turn it on";
       document.getElementById("tvr-power").classList.toggle("on", !!v.on);
     }
+    function remoteTvs() {
+      return switchList.filter(function(s) { return s.icon === "tv" && /^(samsung|firetv)-/.test(s.id); });
+    }
     async function openRemote(id) {
       tvId = id;
+      store("sentinel.remoteTv", id);
+      var tvs = remoteTvs(), pick = document.getElementById("tvr-pick");  // more than one TV: switch between them here
+      pick.hidden = tvs.length < 2;
+      document.getElementById("tvr-name").hidden = !pick.hidden;  // the picker already names it
+      pick.innerHTML = tvs.map(function(s) { return '<option value="' + esc(s.id) + '">' + esc(niceName(s.name)) + "</option>"; }).join("");
+      pick.value = id;
       document.getElementById("tvr").classList.add("open");
       remoteMsg("");
       var apps = document.getElementById("tvr-apps");
@@ -1491,6 +1503,19 @@
       } catch (e) { remoteMsg("Couldn't reach Sentinel."); }
       var first = document.querySelector("#tvr-dpad .ok");
       if (first && !isPhone()) first.focus();
+    }
+    async function openRemoteFromHome() {
+      try {
+        var r = await fetch("/api/switches");
+        if (r.ok) renderSwitches(await r.json());
+      } catch (e) {}
+      var tvs = remoteTvs(), last = recall("sentinel.remoteTv");
+      if (!tvs.length) {  // nothing to open: show the switches, which say what was found
+        if (isPhone()) setTab("switches"); else toggleSwitches(true);
+        switchMsg("No TV with a remote was found.");
+        return;
+      }
+      openRemote(tvs.some(function(s) { return s.id === last; }) ? last : tvs[0].id);
     }
     function closeRemote() {
       stopRepeat();
@@ -1896,7 +1921,10 @@
       var z = Number(recall("sentinel.timelineZoom"));
       if (z === 1 || z === 4 || z === 24) tlZoom = z;
       toggleTimeline(recall("sentinel.timeline") !== "0");
-      setTab("live");  // the Home page's Cameras tile opens the cameras, not whichever tab was used last
+      // The Home page's tiles: Cameras (the cameras, not whichever tab was used last), Switches (#switches), Remotes (#remote)
+      setTab(location.hash === "#switches" && isPhone() ? "switches" : "live");
+      if (location.hash === "#switches" && !isPhone()) toggleSwitches(true);
+      if (location.hash === "#remote") openRemoteFromHome();
       PHONE_QUERY.addEventListener("change", function() {
         if (isPhone()) setTab(currentTab);
         else toggleTimeline(recall("sentinel.timeline") !== "0");  // back to the desktop preference

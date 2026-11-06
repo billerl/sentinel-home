@@ -49,15 +49,9 @@
     .tile.big { grid-column: span 2; background: linear-gradient(135deg, #062330, #091015); border-color: #0b4a5a; }
     .tile.big .ic { font-size: 2rem; }
 
-    .switches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-    .sw { text-align: left; background: #0b1419; border: 1px solid #16303a; border-radius: 12px; padding: 12px; color: #9cc; }
-    .sw b { display: block; color: #fff; font-weight: 600; font-size: 0.92rem; margin-bottom: 3px; }
-    .sw.on { background: rgba(255, 201, 77, 0.12); border-color: #ffc94d; color: #ffc94d; }
-    .sw[disabled] { opacity: 0.5; cursor: default; }
-
     @media (max-width: 760px) {
       .top { grid-template-columns: 1fr; }
-      .tiles, .switches { grid-template-columns: repeat(2, 1fr); }
+      .tiles { grid-template-columns: repeat(2, 1fr); }
       .clock { display: none; }
     }
   </style>
@@ -87,6 +81,10 @@
         <span class="ic">📶</span><span class="t">Movement inside</span><span class="s" id="s-sensors">Wi-Fi motion sensors</span></a>
       <a class="tile" href="{{ url_for('house_page') }}">
         <span class="ic">🏠</span><span class="t">House</span><span class="s">3D map: sensors, switches, cameras</span></a>
+      <a class="tile" href="{{ url_for('live_page') }}#switches">
+        <span class="ic">💡</span><span class="t">Switches</span><span class="s" id="s-switches">Lights and plugs</span></a>
+      <a class="tile" href="{{ url_for('live_page') }}#remote">
+        <span class="ic">🎮</span><span class="t">Remotes</span><span class="s" id="s-remotes">TV remotes</span></a>
       <a class="tile" href="{{ url_for('sensors_history_page') }}">
         <span class="ic">🕒</span><span class="t">Movement history</span><span class="s">When each room saw movement</span></a>
       <a class="tile" href="{{ url_for('timeline_page') }}">
@@ -104,9 +102,6 @@
       <a class="tile" href="{{ url_for('settings_page') }}#help">
         <span class="ic">❓</span><span class="t">Help</span><span class="s">How everything works</span></a>
     </div>
-
-    <h2>Switches</h2>
-    <div class="switches" id="switches"><span class="muted">Loading…</span></div>
   </main>
 
   <script>
@@ -170,33 +165,13 @@
       } catch (e) { }
     }
 
-    var switchBusy = false;
     async function loadSwitches() {
-      if (switchBusy) return;
       try { var d = await getJson("/api/switches"); } catch (e) { return; }
-      var box = document.getElementById("switches");
-      if (!d.switches.length) { box.innerHTML = '<span class="muted">No smart plugs or switches found.</span>'; return; }
-      box.innerHTML = d.switches.map(function (s) {
-        var state = !s.online ? "not answering" : s.on ? "On" : "Off";
-        return '<button type="button" class="sw' + (s.on && s.online ? " on" : "") + '"' + (s.online ? "" : " disabled") +
-          ' data-id="' + esc(s.id) + '" data-on="' + (s.on ? 1 : 0) + '"><b>' + esc(s.name) + '</b>' + esc(state) + '</button>';
-      }).join("");
-      box.querySelectorAll(".sw").forEach(function (b) {
-        b.onclick = function () { flip(b.dataset.id, b.dataset.on !== "1", b); };
-      });
-    }
-    async function flip(id, on, button) {
-      switchBusy = true;
-      button.disabled = true;
-      try {
-        var r = await fetch("/api/switches/set", { method: "POST",
-          headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
-          body: JSON.stringify({ id: id, on: on }) });
-        if (!r.ok) { var j = await r.json().catch(function () { return {}; }); alert(j.error || "Couldn't switch it."); }
-      } finally {
-        switchBusy = false;
-        loadSwitches();
-      }
+      var plugs = d.switches.filter(function (s) { return s.icon !== "tv"; });
+      var on = plugs.filter(function (s) { return s.on && s.online; }).length;
+      setText("s-switches", !plugs.length ? "None found yet" : on ? on + " on · " + plugs.length + " in all" : "All off · " + plugs.length + " in all", on > 0);
+      var tvs = d.switches.filter(function (s) { return s.icon === "tv" && /^(samsung|firetv)-/.test(s.id); });
+      setText("s-remotes", tvs.length ? tvs.map(function (s) { return s.name; }).join(", ") : "No TVs found yet");
     }
 
     function refresh() { loadPeople(); loadStatus(); loadSwitches(); }
