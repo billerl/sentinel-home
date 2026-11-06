@@ -500,6 +500,14 @@ class WebServer:
                 return jsonify({"configured": False})
             return jsonify(engine.weather.current())
 
+        @app.route("/api/weather/alerts")
+        def api_weather_alerts():
+            """Severe weather warnings now (the camera screens' red banner): polled every minute."""
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            return jsonify({"alerts": engine.weather_alerts.active() if engine is not None else []})
+
         # ---- Family locations: OwnTracks posts, setup links, People page (sentinel/engine/location.py) ----
         location_failures: Dict[str, List[float]] = {}
 

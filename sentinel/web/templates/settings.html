@@ -345,6 +345,8 @@
           <div class="field" style="flex: 0 1 180px"><span>Temperature</span>
             <select data-key="weather_units"><option value="fahrenheit">°F</option><option value="celsius">°C</option></select></div>
         </div>
+        <div class="row"><label><input type="checkbox" data-key="weather_alerts_enabled"> Severe weather warnings from the National Weather Service: Telegram and a red banner on the camera screens (US only)</label></div>
+        <div class="row"><label><input type="checkbox" data-key="weather_alerts_speak"> Say dangerous warnings out loud (tornado, severe thunderstorm, flash flood, blizzard…), day or night</label></div>
         <div class="save-row"><button class="primary" onclick="saveSection('weather')">Save</button><span class="msg" id="msg-weather"></span></div>
       </div>
     </section>
@@ -497,7 +499,7 @@
       audio: ["volume", "speech_speed", "voice_id", "voice_jarvis_id", "audio_output", "voice_device", "audio_device", "music_device", "voice_enabled", "voice_wake_threshold", "voice_follow_up"],
       access: ["remote_web_url", "remote_rdp_user"],
       spotify: ["spotify_client_id", "spotify_device", "spotify_fallback_device", "spotify_speaker_name"],
-      weather: ["weather_location", "weather_units"],
+      weather: ["weather_location", "weather_units", "weather_alerts_enabled", "weather_alerts_speak"],
       detection: ["object_detection_enabled", "household_ask_enabled", "household_ask_per_day", "vehicle_types_enabled", "alert_mode", "detector_model", "inference_device", "object_alert_cooldown"]
     };
 

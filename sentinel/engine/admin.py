@@ -141,6 +141,8 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "vehicle_types_enabled": _bool,
     "inference_device": lambda v: _choice(v, ("auto", "GPU", "CPU")),
     "household_ask_enabled": _bool,
+    "weather_alerts_enabled": _bool,
+    "weather_alerts_speak": _bool,
     "household_ask_per_day": _num(0, 20, int),
     "detector_model": _detector_model,
     "alert_mode": lambda v: _choice(v, ("objects", "motion")),
