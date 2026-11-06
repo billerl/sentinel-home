@@ -43,6 +43,30 @@ class TestTracker(unittest.TestCase):
         ready = _feed(t, [(300, 100, 40, 120)] * 3, label="person")
         self.assertEqual([r.label for r in ready], ["person"])
 
+    def test_parked_car_track_jumping_to_its_neighbour_is_not_arriving(self):
+        """A cloud shadow hides the truck for a moment; its track grabs the Jeep parked beside it."""
+        t = CameraObjectTracker("cam")
+        truck, jeep = (100, 150, 80, 60), (150, 200, 80, 60)
+        ready = []
+        for i in range(4):
+            ready += t.update([Detection("car", 0.8, truck)], GREY, 1000.0 + i, _always)
+        ready += t.update([Detection("car", 0.8, jeep)], GREY, 1004.0, _always)  # the truck in shadow
+        for i in range(6):
+            ready += t.update([Detection("car", 0.8, truck), Detection("car", 0.8, jeep)], GREY, 1004.5 + i, _always)
+        self.assertEqual(ready, [])
+
+    def test_car_that_arrives_in_one_leap_still_reports(self):
+        t = CameraObjectTracker("cam")
+        boxes = [(100, 150, 80, 60)] + [(150, 200, 80, 60)] * 4  # seen once, then already parked
+        ready = []
+        for i, box in enumerate(boxes):
+            ready += t.update([Detection("car", 0.8, box)], GREY, 1000.0 + i, _always)
+            if i == 1:
+                self.assertEqual(ready, [])  # waits a moment first
+        self.assertEqual(len(ready), 1)
+        fast = CameraObjectTracker("cam")
+        self.assertEqual(len(_feed(fast, [(100 + 60 * i if i else 100, 150, 80, 60) for i in range(5)])), 1)
+
     def test_outside_zone_is_ignored(self):
         t = CameraObjectTracker("cam")
         self.assertEqual(_feed(t, [(300, 100, 40, 120)] * 3, label="person", in_zone=lambda b: False), [])

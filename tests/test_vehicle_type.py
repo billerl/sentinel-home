@@ -175,7 +175,7 @@ class TestPipelineAndAlerts(unittest.TestCase):
     def test_vehicle_alert_names_the_delivery(self):
         clf = _FakeClassifier({"amazon": 0.8, "van": 0.2})
         clf.classify = lambda frame, box, embedding=None: _vt("amazon")
-        self._drive(clf, [(100, 100, 60, 40), (150, 100, 60, 40)])
+        self._drive(clf, [(100, 100, 60, 40), (125, 100, 60, 40)])
         self.assertEqual(len(self.events), 1)
         self.assertTrue(self.events[0].description.startswith("📦 An Amazon van"))
         self.assertEqual(self.events[0].alert_group, "delivery")
@@ -184,12 +184,12 @@ class TestPipelineAndAlerts(unittest.TestCase):
         answers = iter([None, _vt("ups")])
         clf = _FakeClassifier({})
         clf.classify = lambda frame, box, embedding=None: next(answers)
-        self._drive(clf, [(100, 100, 60, 40), (150, 100, 60, 40), (160, 90, 100, 70)])
+        self._drive(clf, [(100, 100, 60, 40), (125, 100, 60, 40), (160, 90, 100, 70)])
         self.assertEqual([e.alert_group for e in self.events], ["vehicle", "delivery"])
         self.assertTrue(self.events[1].description.startswith("📦 A UPS truck"))
 
     def test_without_classifier_nothing_changes(self):
-        self._drive(None, [(100, 100, 60, 40), (150, 100, 60, 40)])
+        self._drive(None, [(100, 100, 60, 40), (125, 100, 60, 40)])
         self.assertEqual(self.events[0].alert_group, "vehicle")
 
     def _alert(self, groups, vt):
@@ -265,7 +265,7 @@ class TestHDView(TestPipelineAndAlerts):
         # Closest sub box (320,100,44,33) is centred at HD (1368,466), 176x132; the search region
         # starts at (928,268), so a vehicle found at region (352,132) is right where expected.
         worker = self._setup_hd((352, 132, 176, 132))
-        self._go([(290, 100, 40, 30), (320, 100, 44, 33)])
+        self._go([(290, 100, 40, 30), (305, 100, 42, 31), (320, 100, 44, 33)])
         self.assertEqual(worker.jobs, 1)
         self.assertEqual(self.seen[0][0], (H * 4, W * 4, 3))         # HD frame used
         self.assertEqual(self.seen[0][1], (1280, 400, 176, 132))     # re-found box, in HD coordinates
@@ -276,7 +276,7 @@ class TestHDView(TestPipelineAndAlerts):
 
     def test_wrong_vehicle_in_hd_falls_back_to_substream(self):
         self._setup_hd((0, 0, 900, 500))  # huge box far from the expected spot
-        self._go([(290, 100, 40, 30), (320, 100, 44, 33)])
+        self._go([(290, 100, 40, 30), (305, 100, 42, 31), (320, 100, 44, 33)])
         self.assertEqual(self.seen[0][0], (H, W, 3))
         self.assertEqual(self.events[0].snapshot.shape, (H, W, 3))
 
