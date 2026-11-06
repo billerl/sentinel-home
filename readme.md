@@ -110,8 +110,9 @@ Telegram, Claude, the voice assistant, Spotify and family locations, follow
   adjust a shape; double-click a dot to remove it. Sensitivity, recording, and the night bug
   filter are set per camera. **Save** applies immediately; no restart is needed.
 
-The server listens on `web.bind_host` (default `127.0.0.1`). Use a Cloudflare Tunnel or
-Tailscale for remote access; see `installation-guide.md`.
+The server listens on `web.bind_host` (default `127.0.0.1`; several addresses can be listed, comma-separated,
+such as loopback plus the PC's home-network address). Use a Cloudflare Tunnel or Tailscale for remote access;
+see `installation-guide.md`.
 
 ## Detection and trigger behavior
 

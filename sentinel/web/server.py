@@ -4,11 +4,13 @@ Flask HTTP server: login, MJPEG streams, camera JSON API.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import threading
 import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from urllib.parse import quote
 
 import cv2
 import segno
@@ -23,6 +25,7 @@ from flask import (
     send_from_directory,
     url_for,
 )
+from werkzeug.serving import make_server
 
 from sentinel.logging_utils import app_logger
 from sentinel.web.auth import WebAuthManager, _client_ip
@@ -39,6 +42,43 @@ if TYPE_CHECKING:
 
 # TV browsers show the live cameras full-time (Fire TV "AFT..." models in Fully Kiosk, Samsung/LG TV browsers).
 TV_BROWSER = re.compile(r"\bAFT[A-Z0-9]+\b|SMART-TV|Tizen|Web0S|webOS|BRAVIA")
+_home_nets: List[Any] = [0.0, []]  # (read at, this PC's public IPv6 /64s)
+
+
+def _home_lan_address(host: str) -> bool:
+    """A bind address other screens in the house can use: private IPv4, not loopback or Tailscale's range."""
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return (addr.version == 4 and addr.is_private and not addr.is_loopback
+            and addr not in ipaddress.ip_network("100.64.0.0/10"))
+
+
+def _from_this_home(client: str, if_inet6: str = "/proc/net/if_inet6") -> bool:
+    """Whether a visitor the tunnel reports (Cf-Connecting-Ip) is in this house: its IPv6 address in one of this
+    PC's own public /64s, which is how devices here reach Cloudflare. (Over IPv4 they'd share the router's
+    address, which this PC doesn't know without asking the internet; those simply aren't recognised.)"""
+    try:
+        ip = ipaddress.ip_address((client or "").strip())
+    except ValueError:
+        return False
+    if ip.version != 6:
+        return False
+    if time.time() - _home_nets[0] > 300:
+        nets = []
+        try:
+            with open(if_inet6) as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 4 and parts[3] == "00":  # global scope
+                        addr = ipaddress.ip_address(":".join(parts[0][i:i + 4] for i in range(0, 32, 4)))
+                        if not addr.is_private:
+                            nets.append(ipaddress.ip_network(f"{addr}/64", strict=False))
+        except (OSError, ValueError):
+            pass
+        _home_nets[:] = [time.time(), nets]
+    return any(ip in net for net in _home_nets[1])
 
 class _StreamLimiter:
     def __init__(self, global_max: int, per_ip_max: int) -> None:
@@ -143,12 +183,16 @@ class WebServer:
             )
             return False
 
-        bind_host = str(cfg.get("bind_host", "127.0.0.1"))
+        # One address or several, comma-separated: loopback for the tunnel plus this PC's home-network address
+        # lets screens in the house (the camera TV) reach Sentinel without a round trip through the internet.
+        bind_hosts = [h.strip() for h in str(cfg.get("bind_host", "127.0.0.1")).split(",") if h.strip()] or ["127.0.0.1"]
         camera_block = str(cfg.get("camera_subnet_block", "192.168.0.0/24"))
-        ok, msg = bind_host_allowed(bind_host, camera_block)
-        if not ok:
-            print(f"Web viewer: {msg}")
-            return False
+        for bind_host in bind_hosts:
+            ok, msg = bind_host_allowed(bind_host, camera_block)
+            if not ok:
+                print(f"Web viewer: {msg}")
+                return False
+        port = int(cfg.get("port", 8088))
 
         if not (auth_cfg.get("session_secret") or "").strip():
             import secrets as sec
@@ -225,6 +269,40 @@ class WebServer:
             max_age = 365 * 86400 if remember else int(auth_cfg.get("session_max_days", 7)) * 86400
             resp.set_cookie("sentinel_session", token, httponly=True, samesite="Lax", secure=secure,
                             max_age=max_age, path="/")
+
+        # ---- screens in the house that came in through the tunnel move to the home-network address ----
+        home_base = next((f"http://{h}:{port}" for h in bind_hosts if _home_lan_address(h)), None)
+
+        @app.before_request
+        def _keep_home_screens_home():
+            """A TV here that opens the public address sends its video out to Cloudflare and back all day (and
+            goes dark with the internet): move it, still signed in, to this PC's home-network address."""
+            if (home_base is None or auth is None or request.method != "GET"
+                    or not request.headers.get("Accept", "").startswith("text/html")  # pages, not images/streams
+                    or request.path.startswith(("/api/", "/static/", "/login", "/handoff", "/pair"))
+                    or request.remote_addr not in ("127.0.0.1", "::1")
+                    or not TV_BROWSER.search(request.headers.get("User-Agent", ""))
+                    or not _from_this_home(request.headers.get("Cf-Connecting-Ip", ""))):
+                return None
+            rec = auth.validate_session(_session_token(), _client_ip(request.remote_addr or "", request.headers))
+            ticket = auth.create_handoff(rec.username) if rec else None
+            if ticket is None:
+                return None
+            app_logger.log("info", "web_home_handoff", user_agent=request.headers.get("User-Agent", "")[:200],
+                           component="web_server", action="handoff")
+            return redirect(f"{home_base}/handoff?t={ticket}&next={quote(request.full_path.rstrip('?'), safe='')}")
+
+        @app.route("/handoff")
+        def handoff():
+            ip = request.remote_addr or ""
+            username = (auth.claim_handoff(request.args.get("t", ""))
+                        if auth is not None and ip not in ("127.0.0.1", "::1") else None)
+            if username is None:
+                return redirect(url_for("login"))
+            nxt = request.args.get("next", "/")
+            resp = redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else "/")
+            _set_session_cookie(resp, auth.create_session(username, ip, remember=True), True)
+            return resp
 
         # ---- QR sign-in: a TV shows a code, a signed-in phone scans it and approves ----
         @app.route("/login/pair", methods=["POST"])
@@ -1430,38 +1508,36 @@ class WebServer:
                 return "Clip not found or could not be converted", 404
             return send_file(path, mimetype="video/mp4", conditional=True, max_age=3600)
 
-        port = int(cfg.get("port", 8088))
         app_logger.log(
             "info",
             "web_server_start",
-            bind_host=bind_host,
+            bind_host=",".join(bind_hosts),
             port=port,
             component="web_server",
             action="start",
         )
 
-        def _run() -> None:
+        def _run(host: str) -> None:
             try:
-                app.run(
-                    host=bind_host,
-                    port=port,
-                    threaded=True,
-                    use_reloader=False,
-                    debug=False,
-                )
+                server = make_server(host, port, app, threaded=True)
             except OSError as e:
-                print(f"Web viewer: failed to bind {bind_host}:{port}: {e}")
+                print(f"Web viewer: failed to bind {host}:{port}: {e}")
                 app_logger.log(
                     "error",
                     "web_server_bind_failed",
-                    bind_host=bind_host,
+                    bind_host=host,
                     port=port,
                     error_message=str(e),
                     component="web_server",
                     action="start",
                 )
+                return
+            server.serve_forever()
 
-        self._thread = threading.Thread(target=_run, name="sentinel-web", daemon=True)
-        self._thread.start()
-        print(f"Web viewer: http://{bind_host}:{port}/")
+        threads = [threading.Thread(target=_run, args=(h,), name=f"sentinel-web-{i}", daemon=True)
+                   for i, h in enumerate(bind_hosts)]
+        for t in threads:
+            t.start()
+        self._thread = threads[0]
+        print("Web viewer: " + ", ".join(f"http://{h}:{port}/" for h in bind_hosts))
         return True

@@ -211,7 +211,7 @@ Edit **`settings.json`** (or rely on merged defaults after one app run) and set 
 }
 ```
 
-- **`bind_host`**: `127.0.0.1` is recommended when using **Cloudflare Tunnel** (`cloudflared` on the same PC talks to Flask over loopback). To allow phones on **home Wi‑Fi** without going through Cloudflare, set `bind_host` to this machine’s **LAN IP** (must **not** be an address inside `camera_subnet_block`, or startup will refuse — cameras stay isolated).
+- **`bind_host`**: `127.0.0.1` is recommended when using **Cloudflare Tunnel** (`cloudflared` on the same PC talks to Flask over loopback). To allow phones on **home Wi‑Fi** without going through Cloudflare, add this machine’s **LAN IP** after a comma, e.g. `"127.0.0.1,192.168.1.45"` (give the PC a fixed address; none may be inside `camera_subnet_block`, or startup will refuse — cameras stay isolated). With a LAN address listed, a TV in the house (Fire TV kiosk, smart-TV browser) that opens the tunnel's public address is sent to the LAN address automatically, still signed in, so its video stays inside the house and keeps working when the internet is down. It's recognised by its IPv6 address being in this PC's own /64; phones are never moved (they leave the house).
 - **`camera_subnet_block`**: CIDR used only to **block accidental bind** on your camera-only NIC (adjust if your cameras use a different subnet).
 - **`web.published_frame`**: `"overlay"` matches the on-screen overlays (zones/lines) when overlay mode is on; `"raw"` publishes the detector’s raw frame even if the UI shows overlays.
 

@@ -57,6 +57,8 @@ class Pairing:
 PAIRING_TTL_SECONDS = 180.0
 PAIRING_MAX_PER_IP = 3
 PAIRING_MAX = 50
+HANDOFF_TTL_SECONDS = 60.0  # a home screen moving from the tunnel to the home-network address
+HANDOFF_MAX = 20
 
 
 def _username_equal(a: str, b: str) -> bool:
@@ -89,6 +91,7 @@ class WebAuthManager:
         self._saved_at = 0.0
         self._load_sessions()
         self._pairings: Dict[str, Pairing] = {}
+        self._handoffs: Dict[str, Tuple[str, float]] = {}  # one-time ticket -> (username, created)
         self._fail_times: Dict[str, List[float]] = {}
         self._lockout_until: Dict[str, float] = {}
         self._lockout_generation: Dict[str, int] = {}
@@ -262,6 +265,25 @@ class WebAuthManager:
         rec = self._sessions.get(self._key(token))
         if rec:
             rec.last_seen = time.monotonic()
+
+    # ------------------------------------------------------------ home screens off the tunnel
+    def create_handoff(self, username: str) -> Optional[str]:
+        """One-time ticket that signs the same login in at Sentinel's home-network address (a TV that reached it
+        through the tunnel from inside the house); None when too many are waiting."""
+        now = time.monotonic()
+        self._handoffs = {t: h for t, h in self._handoffs.items() if now - h[1] <= HANDOFF_TTL_SECONDS}
+        if len(self._handoffs) >= HANDOFF_MAX:
+            return None
+        ticket = secrets.token_urlsafe(24)
+        self._handoffs[ticket] = (username, now)
+        return ticket
+
+    def claim_handoff(self, ticket: str) -> Optional[str]:
+        """The username a ticket was made for (once), or None."""
+        held = self._handoffs.pop(ticket, None) if ticket else None
+        if held is None or time.monotonic() - held[1] > HANDOFF_TTL_SECONDS:
+            return None
+        return held[0]
 
     # ------------------------------------------------------------ QR sign-in
     def _prune_pairings(self, now: float) -> None:

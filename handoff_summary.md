@@ -275,6 +275,12 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   `supports()` hides the rest in the remote); apps = `pm list packages -3` + known Amazon ones (`APP_NAMES`).
   A Fire TV running Fully Kiosk (the live view) gets "Show/Reload cameras" (`show_live`) and "put the cameras
   on the TV" / "reload the cameras". Commands name the TV ("on the Sentinel TV"); unnamed = the Samsung.
+- **Home screens off the tunnel** (`server._keep_home_screens_home`, `/handoff`, `auth.create_handoff`):
+  `web.bind_host` may list several addresses (one werkzeug server each). When one is a home-LAN IPv4, a TV
+  browser (`TV_BROWSER`) loading a page through the tunnel whose `Cf-Connecting-Ip` is in this PC's own public
+  IPv6 /64 (`_from_this_home`, read from /proc/net/if_inet6) is redirected to `http://<lan>:<port>/handoff`
+  with a one-time 60 s ticket that signs the same login in there. The camera TV had been pulling ~3 Mbit/s
+  out through Cloudflare and back, all day. Settings edits: stop the service first (it saves on shutdown).
 - **Tasmota plugs** (`sentinel/engine/tasmota.py`, fourth SmartSwitches driver): plugs running the open Tasmota
   firmware, over its local HTTP API (`/cm?cmnd=Status 0`, `Power<n> On|Off`, `FriendlyName<n>`). Tasmota doesn't
   announce itself, so the home /24 is swept (port 80, then Status 0) when none is known, when a known one stops
