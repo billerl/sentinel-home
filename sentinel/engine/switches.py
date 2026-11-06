@@ -235,6 +235,7 @@ class SmartSwitches:
         self._state: Dict[str, Dict[str, Any]] = {}  # device key -> last sysinfo
         self._failures: Dict[str, int] = {}
         self._last_discover = 0.0
+        self._mirrors: Dict[str, Any] = {}  # TV switch id -> TVMirror (the remote's screen mirror)
         self.scanning = False
         self._scan_wanted = False
         self._stopped = threading.Event()
@@ -632,6 +633,7 @@ class SmartSwitches:
         live = hasattr(driver, "show_live") and driver.live_app(host) is not None
         return {"id": sw.id, "name": sw.name, "on": sw.on, "online": sw.online, "kind": driver.kind,
                 "keys": [k for k, name in TV_KEYS.items() if supports(name)], "live": live,
+                "screen": hasattr(driver, "mirror_start"),
                 "apps": [a for a in apps if a["name"] not in TV_SYSTEM_APPS and not (live and a["name"] == "Sentinel live view")]}
 
     def tv_key(self, switch_id: str, key: str) -> Tuple[bool, str]:
@@ -684,6 +686,28 @@ class SmartSwitches:
         except (OSError, ValueError) as e:
             return False, f"The {tv[0].name} didn't do it ({e})."
         return True, "reloaded" if reload else "showing"
+
+    def tv_screen(self, switch_id: str):
+        """The TV's screen mirror (sentinel/engine/tv_mirror.py), for TVs that can show it; else None."""
+        tv = self._tv_for(switch_id)
+        if tv is None or not hasattr(tv[1], "mirror_start"):
+            return None
+        if switch_id not in self._mirrors:
+            from sentinel.engine.tv_mirror import TVMirror
+            from sentinel.recordings.store import find_ffmpeg
+
+            self._mirrors[switch_id] = TVMirror(tv[1], tv[2], find_ffmpeg(), tv[0].name)
+        return self._mirrors[switch_id]
+
+    def tv_tap(self, switch_id: str, x: float, y: float) -> Tuple[bool, str]:
+        tv = self._tv_for(switch_id)
+        if tv is None or not hasattr(tv[1], "tap"):
+            return False, "That TV can't be tapped."
+        try:
+            tv[1].tap(tv[2], float(x), float(y))
+        except (OSError, ValueError, TypeError) as e:
+            return False, f"The {tv[0].name} didn't take it ({e})."
+        return True, "tapped"
 
     def tv_icon(self, switch_id: str, app_id: str) -> Optional[bytes]:
         tv = self._tv_for(switch_id)

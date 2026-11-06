@@ -45,6 +45,7 @@ sentinel-home/                         # repository root
     │   ├── switches.py                # Smart plugs/switches (Kasa, local protocol): Live page panel, voice, Telegram
     │   ├── samsung_tv.py              # Samsung TVs as a switch (Wake-on-LAN + power key), apps, volume, mute
     │   ├── fire_tv.py                 # Fire TVs over ADB: switch, remote, apps, "put the cameras on the TV"
+    │   ├── tv_mirror.py               # the remote's live picture of a Fire TV's screen (screenrecord -> JPEGs)
     │   ├── tasmota.py                 # plugs running Tasmota firmware as switches (local HTTP; network sweep)
     │   ├── wifi_motion.py             # Wi-Fi motion sensors (ESP32 CSI boards): find, poll, judge motion, daily CSVs
     │   ├── house.py                   # House page: the 3D drawing of the home (house.json) + where each device sits

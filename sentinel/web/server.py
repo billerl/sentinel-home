@@ -1001,6 +1001,43 @@ class WebServer:
             resp.headers["Cache-Control"] = "private, max-age=604800"
             return resp
 
+        @app.route("/api/tv/<tv_id>/screen")
+        def api_tv_screen(tv_id):
+            """The TV's screen as MJPEG, while the remote is open (sentinel/engine/tv_mirror.py)."""
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            mirror = engine.switches.tv_screen(tv_id[:40]) if engine is not None else None
+            if mirror is None:
+                return jsonify({"error": "this TV can't show its screen"}), 404
+            ip = _client_ip(request.remote_addr or "", request.headers)
+            token = _session_token()
+            # (Not counted against the camera streams' limit: one picture of one TV, only while its remote is open.)
+
+            def generate():
+                last, sent_at, started = -1, 0.0, time.monotonic()
+                next_auth_check = time.monotonic() + 5.0
+                while True:
+                    if time.monotonic() >= next_auth_check:
+                        if auth is None or not auth.validate_session(token, ip):
+                            return
+                        next_auth_check = time.monotonic() + 5.0
+                    jpeg, count = mirror.latest()  # also keeps the TV recording
+                    if jpeg is None and time.monotonic() - started > 30.0:
+                        return  # the TV isn't sending a picture (off, or not answering): the page says so
+                    # A still screen is sent again every 2 s: a closed page is only noticed when sending fails,
+                    # and until then the TV would keep recording.
+                    if jpeg is not None and (count != last or time.monotonic() - sent_at > 2.0):
+                        last, sent_at = count, time.monotonic()
+                        yield (f"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len(jpeg)}\r\n\r\n"
+                               ).encode() + jpeg + b"\r\n"
+                    time.sleep(0.1)
+
+            resp = Response(generate(), mimetype="multipart/x-mixed-replace; boundary=frame")
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+            resp.headers["X-Accel-Buffering"] = "no"
+            return resp
+
         @app.route("/api/tv/<tv_id>/<action>", methods=["POST"])
         def api_tv_action(tv_id, action):
             err = _config_guard()
@@ -1016,6 +1053,8 @@ class WebServer:
                 return _result(*engine.switches.tv_type(tv_id, str(body.get("text") or "")[:100]))
             if action == "live":
                 return _result(*engine.switches.tv_live(tv_id, body.get("reload") is True))
+            if action == "tap":
+                return _result(*engine.switches.tv_tap(tv_id, body.get("x"), body.get("y")))
             return jsonify({"error": "unknown action"}), 404
 
         # ---- routines: "when this happens, do that" (sentinel/engine/routines.py) ----
