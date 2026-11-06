@@ -562,9 +562,17 @@
       position: absolute; padding: 8px 14px; border-radius: 4px;
       background: rgba(0,0,0,0.75); pointer-events: none;
     }
+    /* Severe weather warning banner (sentinel/engine/weather_alerts.py) */
+    .wx-alert { position: fixed; left: 0; right: 0; top: 0; z-index: 9000; padding: 10px 16px; text-align: center;
+      font-weight: 700; font-size: 1.15rem; color: #fff; background: #b3261e; box-shadow: 0 2px 12px rgba(0,0,0,0.5); }
+    .wx-alert.notice { background: #8a5a00; }
+    .wx-alert.loud { animation: wx-pulse 1.6s ease-in-out infinite; }
+    @keyframes wx-pulse { 50% { background: #e5372b; } }
+    @media (prefers-reduced-motion: reduce) { .wx-alert.loud { animation: none; } }
   </style>
 </head>
 <body>
+  <div id="wx-alert" class="wx-alert" role="alert" hidden></div>
   <header>
     <a class="header-btn home-link" href="{{ url_for('index') }}" title="Home: family, switches, sensors, routines, settings">⌂ Home</a>
     <h1>Sentinel Live</h1>
@@ -1089,6 +1097,21 @@
       setTimeout(loadWeather, next);
     }
     loadWeather();
+    // Severe weather warnings: a banner across the top while one is in effect (checked every minute).
+    async function loadWeatherAlerts() {
+      try {
+        var r = await fetch("/api/weather/alerts");
+        if (r.ok) {
+          var alerts = (await r.json()).alerts || [], el = document.getElementById("wx-alert");
+          el.hidden = !alerts.length;
+          el.className = "wx-alert " + (alerts.length && alerts[0].level === "loud" ? "loud" : "notice");
+          el.textContent = alerts.map(function(a) {
+            return (/Tornado/.test(a.event) ? "🌪️ " : "⚠️ ") + a.event.toUpperCase() + (a.until ? " until " + a.until : "");
+          }).join("  ·  ");
+        }
+      } catch (e) {}
+    }
+    loadWeatherAlerts(); setInterval(loadWeatherAlerts, 60 * 1000);
 
     async function loadFamily() {
       try {

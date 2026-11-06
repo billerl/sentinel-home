@@ -117,6 +117,10 @@ class SettingsManager:
             # Weather tile in the live grid's spare cell: town or ZIP ("" = off).
             "weather_location": "",
             "weather_units": "fahrenheit",
+            # Severe weather warnings (US National Weather Service) for the house: Telegram + the camera screens,
+            # and out loud for dangerous ones (sentinel/engine/weather_alerts.py).
+            "weather_alerts_enabled": True,
+            "weather_alerts_speak": True,
             # Messages Sentinel doesn't understand go to Claude (the PC's signed-in subscription).
             "assistant_enabled": False,
             "assistant_daily_limit": 30,

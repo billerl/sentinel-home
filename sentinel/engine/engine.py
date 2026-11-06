@@ -190,6 +190,11 @@ class Engine:
         self.camera_lights = CameraLights()  # white light for cars at night (cameras in camera_admin.json)
         self.telegram = TelegramNotifier(self.settings)
         self.weather = WeatherService(self.settings)
+        from sentinel.engine.weather_alerts import WeatherAlerts
+
+        self.weather_alerts = WeatherAlerts(
+            self.settings, self.home_coords, self._tell_everyone,
+            lambda text: self.audio.speak(text) if self.audio is not None else None, VIDEO_DIR)
         self.assistant = Assistant(self.settings)
         self.spotify = SpotifyService(self.settings, lambda: self.settings_manager.save_settings(force=True))
         self.spotify.open_on_tv = lambda words: self.switches.open_app(words, "spotify", "spotify")
@@ -671,6 +676,7 @@ class Engine:
                 if time.time() - self._routines_ticked >= 5:
                     self._routines_ticked = time.time()
                     self.routines.tick()
+                    self.weather_alerts.tick()  # checks the NWS itself every 2 minutes, on its own thread
                 for chat_id, text in self.telegram.consume_switch_commands():
                     threading.Thread(target=self._switch_reply, args=(chat_id, text), name="switch",
                                      daemon=True).start()  # a plug that doesn't answer takes seconds
@@ -973,6 +979,11 @@ class Engine:
         where = "" if self.telegram.is_configured() else " (Telegram isn't set up yet, so it can't be sent)"
         return f"Okay, I'll remind you {when_words(due, now)}: {what}{where}."
 
+    def _tell_everyone(self, text: str) -> None:
+        """A message to every Sentinel chat (weather warnings)."""
+        for chat in list(self.telegram.chat_ids):
+            self.telegram.reply_to_chat(chat, text)
+
     def send_due_reminders(self) -> None:
         from sentinel.engine.reminders import due_message
 
@@ -1190,6 +1201,8 @@ class Engine:
             return VoiceReply("Spotify isn't connected yet. Connect it on the Settings page, under Spotify.")
         if re.search(r"\bwhat time is it\b|\bwhat'?s the time\b|\bwhat is the time\b", low):
             return VoiceReply(f"It's {_fmt_clock(time.time())}.")
+        if re.search(r"\b(weather|storm) (alerts?|warnings?|watch(es)?)\b|\bany (weather )?(alerts|warnings)\b", low):
+            return VoiceReply(self.weather_alerts.summary())
         if re.search(r"\b(weather|temperature|how (hot|cold|warm)|rain\w*|snow\w*)\b", low) \
                 and self.settings.get("weather_location"):
             w = self.weather.current()
