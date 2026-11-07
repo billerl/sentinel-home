@@ -68,7 +68,11 @@ sentinel-home/                         # repository root
     ├── recordings/
     │   └── store.py                   # Clip index (SQLite), retention, MP4 transcoding for browsers
     ├── web/                           # Web viewer = the user interface
-    │   ├── server.py                  # Flask routes: login, live grid, MJPEG, timeline, zone editor API
+    │   ├── server.py                  # Flask app: settings, sign-in setup, listeners; calls each routes/ module
+    │   ├── context.py                 # WebContext: what every area's routes share (session check, write guard)
+    │   ├── routes/                    # Pages + API, one module per area, each with register(app, ctx):
+    │   │                              #   signin, live, cameras, recordings, family, vehicles, switches (+ TV
+    │   │                              #   remote), spotify, sensors, house, routines, settings
     │   ├── auth.py                    # Bcrypt login, sessions (saved as hashes in .web_sessions.json),
     │   │                              #   lockout / backoff, QR sign-in pairing for TVs
     │   ├── frame_broker.py            # Latest frame per camera; opaque ids; lazy JPEG encoding
