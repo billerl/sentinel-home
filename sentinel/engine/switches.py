@@ -210,6 +210,7 @@ _BACK_WORDS = ("rewind", "go back", "skip back", "jump back", "back up")
 _SPOTIFY_WORDS = ("go back", "skip back", "skip ahead", "skip forward", "jump back", "jump ahead", "go forward", "back up")
 SEEK_STEP = 10  # seconds one arrow press skips in Netflix, YouTube, Hulu, Disney+, Prime Video
 SEEK_MAX = 30 * 60
+SEEK_SETTLE = 1.0  # seconds after the last arrow before pressing Play
 _COUNT = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
           "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "fifteen": 15, "twenty": 20, "thirty": 30,
           "forty": 40, "forty five": 45, "fifty": 50, "sixty": 60, "ninety": 90, "a couple": 2, "a couple of": 2,
@@ -662,10 +663,18 @@ class SmartSwitches:
                 return f"Okay, {sw.name} {'paused' if pause else 'playing'}."
             if what == "seek":
                 # One arrow press skips SEEK_STEP seconds in the TV apps; the presses are sent in the background
-                # (a third of a second apart: 5 minutes takes 10 s).
+                # (a third of a second apart: 5 minutes takes 10 s). The apps then wait on the new spot (the
+                # user had to say "play" after every rewind, 2026-11-07), so Play follows once they've settled;
+                # it does nothing in an app that kept playing.
                 back, presses = detail[1], max(1, round(detail[2] / SEEK_STEP))
                 keys = ["KEY_LEFT" if back else "KEY_RIGHT"] * presses
-                self._after(0, lambda: self._press_later(sw, driver, host, keys, "seek", source))
+
+                def seek() -> None:
+                    self._press_later(sw, driver, host, keys, "seek", source)
+                    time.sleep(SEEK_SETTLE)
+                    self._press_later(sw, driver, host, ["KEY_PLAY"], "seek", source)
+
+                self._after(0, seek)
                 app_logger.log("info", "tv_seek", tv=sw.name, seconds=presses * SEEK_STEP * (-1 if back else 1),
                                source=source, component="switches", action="tv")
                 return f"Okay, {'back' if back else 'ahead'} {say_duration(presses * SEEK_STEP)}."

@@ -192,7 +192,7 @@ class TestEngine(unittest.TestCase):
             for text, said, key in (("Pause the TV.", "Okay, TV paused.", "KEY_PAUSE"),
                                     ("Pause.", "Okay, TV paused.", "KEY_PAUSE"),
                                     ("Play.", "Okay, TV playing.", "KEY_PLAY"),
-                                    ("Rewind 30 seconds.", "Okay, back 30 seconds.", "KEY_LEFT"),
+                                    ("Rewind 30 seconds.", "Okay, back 30 seconds.", "KEY_PLAY"),  # after the arrows
                                     ("Mute for 2 minutes.", "Okay, TV muted for 2 minutes.", "KEY_MUTE")):
                 self.assertEqual(self.engine.answer_voice(text, lambda _s: None).text, said, text)
                 self.assertEqual(tv.calls[-1][1], key, text)
@@ -386,8 +386,8 @@ class TestTV(unittest.TestCase):
                                  ("rewind 15 seconds", "Okay, back 20 seconds.", ["KEY_LEFT"] * 2),  # 10 s a press
                                  ("rewind", "Okay, back 10 seconds.", ["KEY_LEFT"])):
             self.assertEqual(self.sw.command(text, "voice"), said, text)
-            later.pop()[1]()  # the presses go out in the background
-            self.assertEqual(self.tv.calls[-1], ("press",) + tuple(keys), text)
+            later.pop()[1]()  # the presses go out in the background, then Play (the apps wait on the new spot)
+            self.assertEqual(self.tv.calls[-2:], [("press",) + tuple(keys), ("press", "KEY_PLAY")], text)
 
     def test_said_without_tv_it_is_the_tv_by_voice_while_on(self):
         """The user's rule: unless they say Spotify, the TV is the default."""
