@@ -10,6 +10,11 @@ when the family asked for a Google-Timeline-style history).
 
 A person's phone says where they are; their car is a separate thing. Family members swap
 cars, so answers give both: "Elizabeth is at the salon. Elizabeth's Fusion is at home."
+
+A family member can also be a pet with a GPS tracker on its collar (a Meshtastic tracker heard by a LoRa
+base station, which posts its positions here like a phone: tools/meshtastic_bridge.py). Places are too loose
+for a dog (leaving needs 100+ m), so trackers also get the yard: a shape drawn on the Family page, with
+"Xena left the yard" / "Xena is back in the yard" within a few metres. Trackers don't count as someone home.
 """
 
 import base64
@@ -41,6 +46,10 @@ HISTORY_DAYS = 30
 INVITE_DAYS = 7
 LOGIN_LINK_DAYS = 7  # a personal "choose your Sentinel password" link
 MIN_WEB_PASSWORD = 8
+# The yard (trackers only): outside means beyond the edge by more than the fix's own uncertainty (at least
+# YARD_MARGIN_M: a collar GPS wanders a few metres); fixes vaguer than YARD_MAX_ACC_M never move the dog.
+YARD_MARGIN_M = 8
+YARD_MAX_ACC_M = 50
 
 
 def distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -149,6 +158,7 @@ class Person:
     aliases: List[str] = field(default_factory=list)  # "Liz", "Mom"
     username: str = ""  # what the phone app logs in with
     token: str = ""  # the phone app's password (a random device key, shown in the setup QR code)
+    tracker: str = ""  # a collar GPS tracker instead of a phone (its Meshtastic id, "!a1cacb2a"): a pet
 
     def words(self) -> List[str]:
         return [w for w in dict.fromkeys([self.name.lower()] + [a.lower() for a in self.aliases]) if w]
@@ -175,7 +185,7 @@ class Place:
 
 @dataclass
 class Change:
-    kind: str  # "arrived", "left", "started" (first position from a phone)
+    kind: str  # "arrived", "left", "started" (first position from a phone), "left_yard", "back_in_yard"
     person: Person
     place: Optional[Place]
     ts: float
@@ -211,6 +221,12 @@ class LocationStore:
             if "invite" not in columns:  # setup link sent to the person's own phone (no Sentinel login needed)
                 conn.execute("ALTER TABLE people ADD COLUMN invite TEXT NOT NULL DEFAULT ''")
                 conn.execute("ALTER TABLE people ADD COLUMN invite_expires REAL NOT NULL DEFAULT 0")
+            if "tracker" not in columns:
+                conn.execute("ALTER TABLE people ADD COLUMN tracker TEXT NOT NULL DEFAULT ''")
+            if "in_yard" not in {row[1] for row in conn.execute("PRAGMA table_info(fixes)")}:
+                conn.execute("ALTER TABLE fixes ADD COLUMN in_yard INTEGER")
+            # The yard's outline for pets' trackers: [[lat, lon], ...] (one row).
+            conn.execute("CREATE TABLE IF NOT EXISTS yard (id INTEGER PRIMARY KEY CHECK (id = 1), points TEXT NOT NULL)")
             if "web_hash" not in columns:  # the person's own Sentinel web login (bcrypt) and its setup link
                 conn.execute("ALTER TABLE people ADD COLUMN web_hash TEXT NOT NULL DEFAULT ''")
                 conn.execute("ALTER TABLE people ADD COLUMN login_code TEXT NOT NULL DEFAULT ''")
@@ -229,7 +245,8 @@ class LocationStore:
     # ------------------------------------------------------------ people
     @staticmethod
     def _person(r) -> Person:
-        return Person(r["id"], r["name"], [a for a in r["aliases"].split(",") if a], r["username"], r["token"])
+        return Person(r["id"], r["name"], [a for a in r["aliases"].split(",") if a], r["username"], r["token"],
+                      r["tracker"] if "tracker" in r.keys() else "")
 
     def people(self) -> List[Person]:
         with self._connect() as conn:
@@ -255,6 +272,27 @@ class LocationStore:
                 return int(cur.lastrowid)
             conn.execute("UPDATE people SET name = ?, aliases = ? WHERE id = ?", (name, alias_text, person_id))
             return person_id
+
+    def set_tracker(self, person_id: int, tracker: str) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute("UPDATE people SET tracker = ? WHERE id = ?", (tracker, person_id))
+
+    def yard(self) -> List[Tuple[float, float]]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT points FROM yard WHERE id = 1").fetchone()
+        try:
+            return [(float(a), float(b)) for a, b in json.loads(row["points"])] if row else []
+        except (ValueError, TypeError):
+            return []
+
+    def set_yard(self, points: List[Tuple[float, float]]) -> None:
+        """A new outline (3+ corners), or [] to remove it. Pets' in/out state starts over."""
+        with self._lock, self._connect() as conn:
+            if points:
+                conn.execute("INSERT OR REPLACE INTO yard (id, points) VALUES (1, ?)", (json.dumps(points),))
+            else:
+                conn.execute("DELETE FROM yard")
+            conn.execute("UPDATE fixes SET in_yard = NULL")
 
     def new_token(self, person_id: int) -> None:
         """New phone password: the old setup (and any setup link) stops working (lost phone, shared by mistake)."""
@@ -506,12 +544,20 @@ class LocationStore:
                     if arrived is not None:
                         changes.append(Change("arrived", person, arrived, ts))
                         current, since = arrived, ts
-            conn.execute("INSERT OR REPLACE INTO fixes (person_id, ts, lat, lon, acc, batt, vel, place_id, place_since)"
-                         " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            in_yard = row["in_yard"] if row is not None and "in_yard" in row.keys() else None
+            yard = self.yard() if person.tracker else []
+            if yard and acc <= YARD_MAX_ACC_M:
+                inside, edge = yard_position(yard, lat, lon)
+                now_in = True if inside else (False if edge > max(YARD_MARGIN_M, acc) else in_yard)
+                if in_yard is not None and now_in is not None and bool(now_in) != bool(in_yard):
+                    changes.append(Change("back_in_yard" if now_in else "left_yard", person, None, ts))
+                in_yard = now_in
+            conn.execute("INSERT OR REPLACE INTO fixes (person_id, ts, lat, lon, acc, batt, vel, place_id, place_since,"
+                         " in_yard) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                          (person.id, ts, lat, lon, acc, None if batt is None else int(batt), vel,
-                          current.id if current else None, since))
+                          current.id if current else None, since, None if in_yard is None else int(bool(in_yard))))
             for c in changes:
-                if c.kind != "started":
+                if c.kind in ("arrived", "left"):
                     conn.execute("INSERT INTO visits (person_id, place_id, place_name, kind, ts) VALUES (?, ?, ?, ?, ?)",
                                  (person.id, c.place.id, c.place.name, c.kind, c.ts))
         if now - self._pruned > 86400:
@@ -545,6 +591,54 @@ class LocationStore:
 
 
 # --------------------------------------------------------------- phone setup
+def yard_position(outline: List[Tuple[float, float]], lat: float, lon: float) -> Tuple[bool, float]:
+    """(inside the outline?, metres to its nearest edge), on a flat local map (a yard is small)."""
+    lat0 = outline[0][0]
+    kx, ky = 111320.0 * math.cos(math.radians(lat0)), 110540.0
+
+    def xy(a: float, b: float) -> Tuple[float, float]:
+        return (b - outline[0][1]) * kx, (a - lat0) * ky
+
+    x, y = xy(lat, lon)
+    pts = [xy(a, b) for a, b in outline]
+    inside, edge = False, float("inf")
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:] + pts[:1]):
+        if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+            inside = not inside
+        dx, dy = x2 - x1, y2 - y1
+        t = max(0.0, min(1.0, ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy))) if dx or dy else 0.0
+        edge = min(edge, math.hypot(x - (x1 + t * dx), y - (y1 + t * dy)))
+    return inside, edge
+
+
+OUTING_SECONDS = 3600  # "the dogs are going out": their trackers are asked for a position often, for up to an hour
+OUTING_POLL_SECONDS = 30
+_PETS = r"(?:the\s+)?(?:dogs?|pets?|pups?|puppies|doggies?)"
+
+
+def outing_command(text: str, people: List[Person]) -> Optional[Tuple[str, List[Person]]]:
+    """("out" | "in", the pets) for "the dogs are going out" / "let Xena out" / "Xena's back inside"; None otherwise.
+    Questions ("is Xena outside?") are left to location_question."""
+    low = re.sub(r"[.!]+$", "", text.strip().lower()).replace("’", "'")
+    pets = [p for p in people if p.tracker]
+    if not pets or low.endswith("?") or re.match(r"(is|are|where|did|has|have|when|was|were)\b", low):
+        return None
+    for kind, word in (("out", r"out(?:side)?"), ("in", r"(?:back\s+)?in(?:side)?")):
+        m = (re.match(rf"(?:i'?m\s+|we'?re\s+)?(?:let(?:ting)?|put(?:ting)?|tak(?:e|ing)|took|bring(?:ing)?|brought)"
+                      rf"\s+(?P<s>.+?)\s+{word}$", low)
+             or re.match(rf"(?P<s>.+?)\s*(?:\s(?:is|are)|'s|'re)\s+(?:going\s+|gone\s+|head(?:ed|ing)\s+|back\s+)?{word}"
+                         rf"(?:\s+now)?$", low))
+        if not m:
+            continue
+        subject = m.group("s")
+        if re.fullmatch(rf"(?:all\s+)?{_PETS}|both\s+(?:of\s+)?{_PETS}|both|everyone|everybody", subject):
+            return kind, pets
+        named = [p for p in pets if any(re.search(rf"\b{re.escape(w)}\b", subject) for w in p.words())]
+        if named and re.fullmatch(r"[\w' ,&]+", subject):
+            return kind, named
+    return None
+
+
 def initials(name: str) -> str:
     """OwnTracks shows a two-letter tag on its map."""
     letters = [w[0] for w in re.findall(r"[A-Za-z0-9]+", name)]
@@ -652,6 +746,7 @@ class PersonView:
     place: Optional[Place]  # where the phone is now (None = not at a named place)
     visits: List[Dict[str, Any]] = field(default_factory=list)  # newest first
     cars: List[CarLine] = field(default_factory=list)
+    yard: List[Tuple[float, float]] = field(default_factory=list)  # for trackers: the yard's outline, if drawn
 
 
 def _clock(ts: float) -> str:
@@ -695,9 +790,22 @@ def _miles(m: float) -> str:
     return f"{mi:.1f} miles" if mi < 10 else f"{round(mi)} miles"
 
 
+def _feet(m: float) -> str:
+    ft = m * 3.28084
+    return f"{max(10, round(ft, -1)):.0f} ft" if ft < 1000 else _miles(m)
+
+
 def whereabouts(view: PersonView, places: List[Place], now: float) -> str:
     """'at the salon (since 2:15pm)' / 'about 3.2 miles northeast of home, driving (about 40 mph)'."""
     fix = view.fix or {}
+    if view.person.tracker and view.yard and fix.get("in_yard") is not None:
+        if fix["in_yard"]:
+            return "in the yard"
+        edge = yard_position(view.yard, fix["lat"], fix["lon"])[1]
+        if edge < 500:
+            lat0 = sum(a for a, _ in view.yard) / len(view.yard)
+            lon0 = sum(b for _, b in view.yard) / len(view.yard)
+            return f"outside the yard, about {_feet(edge)} {bearing_word(lat0, lon0, fix['lat'], fix['lon'])} of it"
     if view.place is not None:
         text = at_phrase(view.place)
         if fix.get("place_since"):
@@ -722,14 +830,14 @@ def whereabouts(view: PersonView, places: List[Place], now: float) -> str:
 def _freshness(view: PersonView, now: float) -> str:
     fix = view.fix or {}
     if fix and now - fix["ts"] > FRESH_SECONDS:
-        return f" (last update from the phone {_when(fix['ts'], now)})"
+        return f" (last update from the {'tracker' if view.person.tracker else 'phone'} {_when(fix['ts'], now)})"
     return ""
 
 
 def _battery(view: PersonView, now: float) -> str:
     fix = view.fix or {}
     if fix.get("batt") is not None and fix["batt"] <= 15 and now - fix["ts"] < 2 * 3600:
-        return f" {view.person.name}'s phone battery is at {fix['batt']}%."
+        return f" {view.person.name}'s {'tracker' if view.person.tracker else 'phone'} battery is at {fix['batt']}%."
     return ""
 
 
@@ -744,7 +852,8 @@ def _cars(view: PersonView, now: float) -> str:
 
 
 def _no_phone(view: PersonView, now: float) -> str:
-    text = f"{view.person.name}'s phone isn't sharing its location with Sentinel yet"
+    text = (f"{view.person.name}'s tracker hasn't sent a position yet" if view.person.tracker
+            else f"{view.person.name}'s phone isn't sharing its location with Sentinel yet")
     if view.cars:
         return text + ", so I can only tell you about the car:" + _cars(view, now)
     return text + "."
@@ -840,9 +949,14 @@ def answer_location(q: LocationQuestion, views: Dict[int, PersonView], places: L
 def change_message(change: Change, cars: List[CarLine]) -> Optional[str]:
     """Telegram text for an arrival/departure ('📍 Elizabeth got to the salon.')."""
     name, place = change.person.name, change.place
+    if change.kind == "left_yard":
+        return f"🐕 {name} left the yard!"
+    if change.kind == "back_in_yard":
+        return f"🐕 {name} is back in the yard."
     if change.kind == "started":
         where = f" ({at_phrase(place)})" if place else ""
-        return f"📍 {name}'s phone is now sharing its location with Sentinel{where}."
+        device = "tracker is now sending" if change.person.tracker else "phone is now sharing"
+        return f"📍 {name}'s {device} its location with Sentinel{where}."
     if place is None:
         return None
     if change.kind == "arrived":

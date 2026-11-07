@@ -9,7 +9,12 @@
   <link rel="manifest" href="/static/manifest.webmanifest">
   <meta name="theme-color" content="#001525">
   <title>Sentinel — Family</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='leaflet/leaflet.css') }}">
   <style>
+    #yard-map { height: 340px; border-radius: 10px; margin: 8px 0; }
+    #yard-map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9); }
+    #yard-map .leaflet-control-attribution { background: rgba(0,0,0,0.6); color: #6aa; }
+    #yard-map .leaflet-control-attribution a { color: #9cc; }
     * { box-sizing: border-box; }
     html { color-scheme: dark; }
     body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; }
@@ -117,6 +122,17 @@
     </section>
 
     <section>
+      <h2>Yard</h2>
+      <div class="card">
+        <p class="hint" style="margin-top:0">For a pet with a collar tracker: tap the corners of your yard on the map, then
+          Save. Sentinel tells you (Telegram, with a map pin, and out loud) when the pet goes outside it, and when it's back.</p>
+        <div id="yard-map"></div>
+        <div class="row"><button onclick="yardUndo()">Undo corner</button><button onclick="yardClear()">Start over</button>
+          <button class="primary" onclick="yardSave()">Save yard</button><span class="msg" id="yard-msg"></span></div>
+      </div>
+    </section>
+
+    <section>
       <h2>Messages</h2>
       <label class="check"><input type="checkbox" id="alerts" onchange="setAlerts()"> Send a Telegram message when someone
         arrives at or leaves a place</label>
@@ -125,6 +141,7 @@
     </section>
   </main>
 
+  <script src="{{ url_for('static', filename='leaflet/leaflet.js') }}"></script>
   <script>
     var data = null;
     function $(id) { return document.getElementById(id); }
@@ -187,11 +204,12 @@
           bits.push("updated " + ago(p.ts));
           if (p.batt != null) bits.push("🔋 " + p.batt + "%");
         } else {
-          bits.push("Not sharing yet — send them a setup link");
+          bits.push(p.tracker ? "No position from the tracker yet" : "Not sharing yet — send them a setup link");
         }
+        if (p.tracker) bits.push("🐕 collar tracker " + p.tracker);
         if (p.aliases.length) bits.push("also: " + p.aliases.join(", "));
         if (p.cars.length) bits.push("car: " + p.cars.join(", "));
-        bits.push(p.has_login ? "Sentinel login: " + p.username : "no Sentinel login of their own yet");
+        if (!p.tracker) bits.push(p.has_login ? "Sentinel login: " + p.username : "no Sentinel login of their own yet");
         card.appendChild(el("div", "meta", bits.join(" · ")));
 
         var row = el("div", "row");
@@ -227,7 +245,8 @@
         armed(del, "Tap again to delete " + p.name, function() {
           api("/api/people/" + p.id + "/delete", {}).then(load).catch(function(e) { say(msg, e.message, false); });
         });
-        [link, login, tl, edit, nologin, forget, pw, del, msg].forEach(function(b) { row.appendChild(b); });
+        (p.tracker ? [tl, edit, forget, del, msg]  // a pet: no phone setup, no login
+                   : [link, login, tl, edit, nologin, forget, pw, del, msg]).forEach(function(b) { row.appendChild(b); });
         card.appendChild(row);
         card.dataset.person = p.id;
         root.appendChild(card);
@@ -326,14 +345,16 @@
       box.innerHTML =
         '<div class="row"><div class="field"><span>Name</span><input type="text" maxlength="30" data-f="name"></div>' +
         '<div class="field"><span>Other names (commas)</span><input type="text" maxlength="120" data-f="aliases"></div></div>' +
+        '<div class="row"><div class="field"><span>Pet? Its collar tracker\'s id (Meshtastic, like !a1cacb2a)</span>' +
+        '<input type="text" maxlength="9" data-f="tracker" placeholder="leave empty for a person"></div></div>' +
         '<div class="row"><button class="primary">Save</button><button>Cancel</button><span class="msg"></span></div>';
       card.appendChild(box);
       var f = function(n) { return box.querySelector('[data-f="' + n + '"]'); };
-      f("name").value = p.name; f("aliases").value = p.aliases.join(", ");
+      f("name").value = p.name; f("aliases").value = p.aliases.join(", "); f("tracker").value = p.tracker || "";
       var buttons = box.querySelectorAll("button");
       buttons[1].onclick = function() { box.remove(); };
       buttons[0].onclick = async function() {
-        try { await api("/api/people", { id: p.id, name: f("name").value, aliases: f("aliases").value }); await load(); }
+        try { await api("/api/people", { id: p.id, name: f("name").value, aliases: f("aliases").value, tracker: f("tracker").value }); await load(); }
         catch (e) { say(box.querySelector(".msg"), e.message, false); }
       };
     }
@@ -455,6 +476,44 @@
       $("alerts").checked = data.alerts_enabled;
       renderPeople();
       renderPlaces();
+      renderYard();
+    }
+
+    // ---- the yard: tap its corners (pets' collar trackers) ----
+    var yardMap = null, yardLayer = null, yardPts = null;
+    function renderYard() {
+      if (yardMap && yardPts !== null && yardPts.length) { drawYard(); return; }  // keep a half-drawn outline
+      yardPts = (data.yard || []).map(function(p) { return [p[0], p[1]]; });
+      if (!yardMap) {
+        yardMap = L.map("yard-map", { keyboard: false });
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 20, maxNativeZoom: 19, referrerPolicy: "strict-origin-when-cross-origin",
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'
+        }).addTo(yardMap);
+        yardLayer = L.layerGroup().addTo(yardMap);
+        yardMap.on("click", function(ev) { yardPts.push([ev.latlng.lat, ev.latlng.lng]); drawYard(); });
+        var home = (data.places || []).filter(function(p) { return p.home; })[0];
+        if (yardPts.length) yardMap.fitBounds(yardPts, { padding: [30, 30] });
+        else if (home) yardMap.setView([home.lat, home.lon], 19);
+        else yardMap.setView([41.114, -88.178], 4);
+      }
+      drawYard();
+    }
+    function drawYard() {
+      yardLayer.clearLayers();
+      if (yardPts.length >= 3) L.polygon(yardPts, { color: "#7fe8c8", weight: 2, fillOpacity: 0.15 }).addTo(yardLayer);
+      else if (yardPts.length === 2) L.polyline(yardPts, { color: "#7fe8c8", weight: 2 }).addTo(yardLayer);
+      yardPts.forEach(function(p) { L.circleMarker(p, { radius: 5, color: "#fff", fillColor: "#7fe8c8", fillOpacity: 1 }).addTo(yardLayer); });
+      (data.people || []).forEach(function(p) {
+        if (p.tracker && p.lat != null) L.circleMarker([p.lat, p.lon], { radius: 7, color: "#ffb347", fillOpacity: 0.9 })
+          .bindTooltip(p.name).addTo(yardLayer);
+      });
+    }
+    function yardUndo() { yardPts.pop(); drawYard(); }
+    function yardClear() { yardPts = []; drawYard(); say($("yard-msg"), "Tap the yard's corners in order, around the edge."); }
+    async function yardSave() {
+      try { say($("yard-msg"), (await api("/api/yard", { points: yardPts })).message, true); yardPts = null; await load(); }
+      catch (e) { say($("yard-msg"), e.message, false); }
     }
     load();
     setInterval(function() { if (!document.querySelector(".invite, .edit, .moving:not([hidden]), input:focus")) load(); }, 60000);

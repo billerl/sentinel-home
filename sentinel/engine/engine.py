@@ -184,6 +184,7 @@ class Engine:
         self._place_pins: Dict[str, Tuple[float, float, float]] = {}  # chat -> pin waiting for a name (lat, lon, until)
         self._location_alerted: Dict[Tuple[int, int], float] = {}  # (person, place) -> last alert
         self._location_asked: Dict[int, float] = {}  # person -> last time we asked their phone for a fresh fix
+        self._outings: Dict[int, float] = {}  # pet -> until when its tracker is asked often ("the dogs are going out")
         self.presence = None  # PresenceTracker, when object detection + CLIP are available
         self.packages = None  # PackageWatch (parcels left at a door camera), likewise
         from sentinel.engine.camera_light import CameraLights
@@ -409,6 +410,7 @@ class Engine:
                     or (TAKEN_IN.match(text.strip()) is not None and self.packages is not None
                         and bool(self.packages.packages()))
                     or self.location_question(text) is not None
+                    or self.outing(text, apply=False) is not None
                     or self._indoor_question(text) is not None)
 
         self.telegram.question_filter = _household_filter
@@ -738,6 +740,10 @@ class Engine:
 
         if TAKEN_IN.match(text.strip()):
             self.telegram.reply_to_chat(chat_id, self.packages_taken_in())
+            return
+        outing = self.outing(text)
+        if outing is not None:
+            self.telegram.reply_to_chat(chat_id, "🐕 " + outing)
             return
         lq = self.location_question(text)
         if lq is not None:
@@ -1252,6 +1258,9 @@ class Engine:
             return VoiceReply(self.change_volume(*volume))
         from sentinel.engine.routines import REQUEST as NEW_ROUTINE
 
+        outing = self.outing(low)
+        if outing is not None:
+            return VoiceReply(outing)
         switched = None if NEW_ROUTINE.search(low) else self.switches.command(low, source="voice")
         if switched:
             return VoiceReply(switched)
@@ -1402,11 +1411,13 @@ class Engine:
 
         statuses = self.vehicle_statuses()[0] if self.presence is not None else {}
         places = {p.id: p for p in self.locations.places()}
+        yard = self.locations.yard()
         views = {}
         for person in self.locations.people():
             fix = self.locations.fix(person.id)
             views[person.id] = PersonView(person, fix, places.get((fix or {}).get("place_id")),
-                                          self.locations.visits(person.id), self._cars_of(person, statuses))
+                                          self.locations.visits(person.id), self._cars_of(person, statuses),
+                                          yard if person.tracker else [])
         return views
 
     def answer_location_question(self, q) -> Tuple[str, List[Tuple[str, float, float]]]:
@@ -1418,6 +1429,29 @@ class Engine:
         if q.kind == "list" and self.presence is not None and self.household.vehicles():
             text += "\n\nCars:\n" + self.answer_household_question(HouseholdQuestion("list"))
         return text, pins
+
+    def outing(self, text: str, apply: bool = True) -> Optional[str]:
+        """"The dogs are going out": ask their trackers for a position every OUTING_POLL_SECONDS for up to an
+        hour (the LoRa base pings the collar), "the dogs are in" stops. The reply, or None if it isn't that."""
+        from sentinel.engine.location import OUTING_POLL_SECONDS, OUTING_SECONDS, outing_command
+
+        parsed = outing_command(text, self.locations.people())
+        if parsed is None or not apply:
+            return None if parsed is None else ""
+        kind, pets = parsed
+        names = " and ".join(p.name for p in pets)
+        now = time.time()
+        for p in pets:
+            if kind == "out":
+                self._outings[p.id] = now + OUTING_SECONDS
+            else:
+                self._outings.pop(p.id, None)
+        app_logger.log("info", "pet_outing", kind=kind, pets=names, component="engine", action="location")
+        if kind == "in":
+            return f"OK, {names} {'are' if len(pets) > 1 else 'is'} in. Back to normal checking."
+        yard = "" if self.locations.yard() else " (Draw the yard on the Family page so I can tell you if they leave it.)"
+        return (f"OK, I'll keep a close eye on {names}: a position every {OUTING_POLL_SECONDS} seconds for the next "
+                f"hour, or until you say they're in.{yard}")
 
     def owntracks_post(self, username: str, password: str, payload: Any) -> Optional[List[Dict[str, Any]]]:
         """A message from a family phone. Returns what to send back to the phone, or None if the
@@ -1432,11 +1466,20 @@ class Engine:
         now = time.time()
         fix = self.locations.fix(person.id)
         reply: List[Dict[str, Any]] = []
-        if ((fix is None or now - fix["ts"] > LOCATION_STALE_S)
+        if (not person.tracker and (fix is None or now - fix["ts"] > LOCATION_STALE_S)
                 and now - self._location_asked.get(person.id, 0) > LOCATION_STALE_S):
             self._location_asked[person.id] = now
             reply = [{"_type": "cmd", "action": "reportLocation"}]
         msg = payload if isinstance(payload, dict) else {}
+        if person.tracker:  # the LoRa base checks in every 20 s: "ping the collar now?"
+            from sentinel.engine.location import OUTING_POLL_SECONDS
+
+            if (self._outings.get(person.id, 0) > now and (fix is None or now - fix["ts"] >= OUTING_POLL_SECONDS - 5)
+                    and now - self._location_asked.get(person.id, 0) >= OUTING_POLL_SECONDS - 5):
+                self._location_asked[person.id] = now
+                reply = [{"_type": "cmd", "action": "reportLocation"}]
+            if msg.get("_type") != "location":
+                return reply  # (check-ins aren't logged: one every 20 s)
         try:
             age = round(now - float(msg["tst"])) if "tst" in msg else None
         except (TypeError, ValueError):
@@ -1450,6 +1493,11 @@ class Engine:
                 app_logger.log("info", "location_" + change.kind, person=person.name,
                                place=change.place.name if change.place else None, component="engine",
                                action="location")
+                if change.kind in ("left_yard", "back_in_yard"):
+                    self._yard_alert(change, fix)
+                    continue
+                if person.tracker and change.kind != "started":
+                    continue  # a pet: the yard says it better than "left home" 100+ m later
                 if change.kind in ("arrived", "left") and change.place is not None and change.place.is_home:
                     self.routines.person("arrive" if change.kind == "arrived" else "leave", person.id)
                 if change.kind != "started" and not (self.settings.get("location_alerts_enabled", True)
@@ -1464,6 +1512,30 @@ class Engine:
                 if text:
                     self._send_location_alert(text)
         return reply
+
+    def _yard_alert(self, change, fix: Optional[Dict[str, Any]]) -> None:
+        """A pet left the yard (or came back): Telegram with a map pin, and said out loud in the house."""
+        from sentinel.engine.location import change_message
+
+        if not self.settings.get("location_alerts_enabled", True):
+            return
+        key = (change.person.id, change.kind)
+        if time.time() - self._location_alerted.get(key, 0) < 5 * 60:
+            return  # nosing along the fence: one message is enough
+        self._location_alerted[key] = time.time()
+        text = change_message(change, [])
+        now = time.time()
+        for chat_id in self.telegram.chat_ids:
+            if self.telegram._is_paused(chat_id, now):
+                continue
+
+            def send(chat=chat_id):
+                self.telegram.reply_to_chat(chat, text)
+                if fix and change.kind == "left_yard":
+                    self.telegram.send_location(chat, fix["lat"], fix["lon"])
+            threading.Thread(target=send, name="yard-alert", daemon=True).start()
+        if change.kind == "left_yard" and self.audio is not None:
+            self.audio.speak(f"Heads up: {change.person.name} left the yard.")
 
     def _send_location_alert(self, text: str) -> None:
         now = time.time()
@@ -1557,7 +1629,7 @@ class Engine:
 
     def _nobody_home(self) -> bool:
         """Every phone that shares its location is away (False when no phone shares one: we don't know)."""
-        views = [v for v in self.person_views().values() if v.fix]
+        views = [v for v in self.person_views().values() if v.fix and not v.person.tracker]  # (a dog isn't someone)
         return bool(views) and not any(v.place is not None and v.place.is_home for v in views)
 
     def _routine_message(self, text: str, jpeg: Optional[bytes]) -> None:
@@ -1817,6 +1889,7 @@ class Engine:
                 "lat": fix.get("lat"), "lon": fix.get("lon"), "cars": [c.name for c in v.cars],
                 "invite": {"url": self._join_url(base_url, invite[0]), "expires": invite[1]} if invite else None,
                 "username": p.username, "has_login": self.locations.has_web_login(p.id),
+                "tracker": p.tracker, "in_yard": fix.get("in_yard"),
             })
         vehicles = self.household.vehicles()
         car_words = set(car_name_words(vehicles))
@@ -1832,6 +1905,7 @@ class Engine:
             "people": people, "suggestions": suggestions,
             "places": [{"id": p.id, "name": p.name, "lat": p.lat, "lon": p.lon, "radius": p.radius,
                         "alerts": p.alerts, "home": p.is_home} for p in places],
+            "yard": self.locations.yard(),
             "alerts_enabled": bool(self.settings.get("location_alerts_enabled", True)),
             "public_url": str(self.settings.get("remote_web_url") or ""),
             "telegram": self.telegram.is_configured(),
@@ -1855,7 +1929,15 @@ class Engine:
         others = [p for p in self.locations.people() if p.id != person_id]
         if any(name.lower() in o.words() for o in others):
             return False, f"There's already someone called {name}."
+        tracker = body.get("tracker")
+        if tracker is not None:
+            tracker = tracker.strip().lower() if isinstance(tracker, str) else ""
+            if tracker and not re.fullmatch(r"!?[0-9a-f]{8}", tracker):
+                return False, "A tracker id looks like !a1cacb2a (shown in the Meshtastic app)."
+            tracker = ("!" + tracker.lstrip("!")) if tracker else ""
         new_id = self.locations.save_person(name, aliases, person_id)
+        if tracker is not None:
+            self.locations.set_tracker(new_id, tracker)
         app_logger.log("info", "location_person_saved", new=person_id is None, component="engine", action="location")
         return True, str(new_id)
 
@@ -1879,6 +1961,19 @@ class Engine:
             return False, "Unknown action."
         app_logger.log("info", "location_person_" + action.replace("-", "_"), component="engine", action="location")
         return True, "Done."
+
+    def yard_save(self, body: Dict[str, Any]) -> Tuple[bool, str]:
+        """The yard's outline for pets' trackers: {"points": [[lat, lon], ...]} (3-40 corners, or none)."""
+        points = body.get("points") if isinstance(body, dict) else None
+        try:
+            outline = [(float(a), float(b)) for a, b in points or []]
+        except (TypeError, ValueError):
+            return False, "That outline didn't make sense."
+        if outline and not (3 <= len(outline) <= 40 and all(-90 <= a <= 90 and -180 <= b <= 180 for a, b in outline)):
+            return False, "Tap at least 3 corners around the yard."
+        self.locations.set_yard(outline)
+        app_logger.log("info", "location_yard_saved", corners=len(outline), component="engine", action="location")
+        return True, "Yard saved." if outline else "Yard removed."
 
     def place_save(self, body: Dict[str, Any]) -> Tuple[bool, str]:
         from sentinel.engine.location import (DEFAULT_RADIUS_M, _miles, bearing_word, distance_m,

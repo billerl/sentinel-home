@@ -17,8 +17,8 @@ import bcrypt
 
 from sentinel.engine.household import Vehicle
 from sentinel.engine.location import (
-    CarLine, LocationQuestion, LocationStore, PersonView, answer_location, change_message, distance_m,
-    location_question, owntracks_config, owntracks_link, parse_coordinates, resolve_map_link,
+    CarLine, LocationQuestion, LocationStore, Person, PersonView, answer_location, change_message, distance_m,
+    location_question, outing_command, owntracks_config, owntracks_link, parse_coordinates, resolve_map_link,
 )
 
 HOME = (41.1145, -88.1780)
@@ -117,6 +117,74 @@ class TestGeofence(unittest.TestCase):
         self.assertEqual(self.store.visits(self.liz.id), [])
         self.store.delete_person(self.liz.id)
         self.assertIsNone(self.store.person(self.liz.id))
+
+
+class TestYard(unittest.TestCase):
+    """A dog's collar tracker and the yard: in/out within metres, not the 100+ m a phone needs to leave home."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="sentinel-loc-")
+        self.store = LocationStore(self.dir)
+        self.store.save_place("Home", *HOME, radius=150)
+        self.dog = self.store.person(self.store.save_person("Grace"))
+        self.store.set_tracker(self.dog.id, "!a1cacb2a")
+        self.dog = self.store.person(self.dog.id)
+        # a 40 m x 30 m yard around the house (~0.00036 deg lat, ~0.00036 deg lon at 41 N)
+        self.store.set_yard([(HOME[0] - 0.00018, HOME[1] - 0.00024), (HOME[0] - 0.00018, HOME[1] + 0.00024),
+                             (HOME[0] + 0.00018, HOME[1] + 0.00024), (HOME[0] + 0.00018, HOME[1] - 0.00024)])
+        self.t = 1_800_000_000
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def at(self, dlat, ts, acc=5):
+        return [c.kind for c in self.store.record(self.dog, fix(HOME[0] + dlat, HOME[1], self.t + ts, acc=acc),
+                                                  now=self.t + 10_000)]
+
+    def test_left_and_back(self):
+        self.assertEqual(self.at(0, 0), ["started"])  # in the yard: noted quietly
+        self.assertEqual(self.store.fix(self.dog.id)["in_yard"], 1)
+        self.assertEqual(self.at(0.00022, 30), [])  # ~4 m past the edge: GPS wander at the fence
+        self.assertEqual(self.at(0.00040, 60), ["left_yard"])  # ~24 m past it
+        self.assertEqual(self.at(0.00060, 90), [])  # still out: said once
+        self.assertEqual(self.at(0.00045, 120, acc=80), [])  # a vague fix moves nobody
+        self.assertEqual(self.at(0.00010, 150), ["back_in_yard"])
+        self.assertEqual(self.store.visits(self.dog.id), [])  # the yard isn't a place visit
+
+    def test_words(self):
+        self.at(0, 0)
+        self.at(0.00040, 60)
+        view = PersonView(self.dog, self.store.fix(self.dog.id), None, yard=self.store.yard())
+        text, pins = answer_location(LocationQuestion("where", [self.dog.id]), {self.dog.id: view},
+                                     self.store.places(), now=self.t + 70)
+        self.assertIn("Grace is outside the yard, about 80 ft north of it", text)
+        self.assertEqual(change_message(type("C", (), {"kind": "left_yard", "person": self.dog, "place": None})(), []),
+                         "🐕 Grace left the yard!")
+
+    def test_redrawing_the_yard_starts_over(self):
+        self.at(0, 0)
+        self.store.set_yard([])
+        self.assertIsNone(self.store.fix(self.dog.id)["in_yard"])
+        self.assertEqual(self.at(0.001, 60), [])  # no yard: nothing to leave (and too close to leave home)
+
+
+class TestOuting(unittest.TestCase):
+    """"The dogs are going out" (their collars report often) / "the dogs are in"."""
+
+    def test_phrases(self):
+        people = [Person(1, "Alex"), Person(2, "Grace", tracker="!a"), Person(3, "Ben", tracker="!b")]
+
+        def said(text):
+            r = outing_command(text, people)
+            return r and (r[0], [p.name for p in r[1]])
+
+        self.assertEqual(said("The dogs are going out"), ("out", ["Grace", "Ben"]))
+        self.assertEqual(said("let Grace out."), ("out", ["Grace"]))
+        self.assertEqual(said("Grace's back inside"), ("in", ["Grace"]))
+        self.assertEqual(said("bring the dogs in"), ("in", ["Grace", "Ben"]))
+        for not_it in ("is Grace outside?", "are the dogs out", "Alex is outside", "the lights are out"):
+            self.assertIsNone(said(not_it), not_it)
+        self.assertIsNone(outing_command("the dogs are out", people[:1]))  # no pets with trackers
 
 
 class TestHelpers(unittest.TestCase):
