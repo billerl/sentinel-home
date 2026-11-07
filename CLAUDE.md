@@ -63,5 +63,5 @@ If `CLAUDE.local.md` exists (git-ignored), read it too: it holds the notes for o
 - Code style: match the surrounding code; short docstrings that say *why*; no new dependencies
   without a good reason (and they must be free/open-source).
 - User-facing text (web Help page in `settings.html`, Telegram replies) is plain English for a
-  non-developer; update the Help section and `_commands_help_text` when adding user features.
+  non-developer; update the Help section and `commands_help_text` when adding user features.
 - Keep `handoff_summary.md` and `project-structure.md` current when adding modules or behaviour.
