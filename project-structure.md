@@ -52,6 +52,8 @@ sentinel-home/                         # repository root
     │   ├── house.py                   # House page: the 3D drawing of the home (house.json) + where each device sits
     │   ├── routines.py                # "When X, only if Y, then Z": check/describe, sunrise/sunset maths, runner (routines.db), Wi-Fi sensor rules + 24 h replay
     │   ├── questions.py               # Telegram questions ("did anyone come by?", "is Kate home?")
+    │   ├── commands.py                # Command registry: what both Telegram and voice understand, registered
+    │   │                              #   once each (Engine._build_commands); the enable/disable parser
     │   ├── queries.py                 # "videos <when>" parsing
     │   └── admin.py                   # Settings schema, status, access message helpers
     ├── detection/
