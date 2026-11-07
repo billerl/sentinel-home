@@ -194,6 +194,14 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     Telegram: a 📍 pin then a name adds/moves a place (`text_interceptor`); "where" answers send map pins
     for people between places. Live page: `/api/family` -> lights row in the weather tile (tile gets class
     `fam` to tighten spacing; measured to fit at 1280x800, 1920x1080 and phone width).
+  - Pets with collar trackers (2026-11-06): a person with `tracker` set (Meshtastic node id) is a pet. A LoRa base
+    station (Pi + meshtasticd) runs `tools/meshtastic_bridge.py`, which posts the tracker's positions to /owntracks
+    with the pet's own login (acc from precisionBits/HDOP, so public-channel blur never counts) and checks in
+    every 20 s with `{"_type": "status"}`. The yard (table `yard`, one outline tapped on the Family page) gives
+    `left_yard`/`back_in_yard` changes (outside = beyond the edge by max(8 m, acc); fixes > 50 m ignored;
+    `fixes.in_yard`) -> Telegram + map pin + speaker, 5 min cooldown. Pets skip place alerts and person routines
+    and don't count for `_nobody_home`. "The dogs are going out" (`outing_command`): for an hour, check-ins
+    get `reportLocation` every 30 s and the base asks the collar (`sendPosition(wantResponse=True)`).
   - Family timeline + personal logins (2026-10-31; restore point: tag `pre-timeline` +
     `../checkpoints/pre-timeline/`). `/timeline`: person chips, month calendar (days with points), the day's
     stops and drives (`sentinel/engine/timeline.py`: positions with acc <= 300 m clustered within 120 m;

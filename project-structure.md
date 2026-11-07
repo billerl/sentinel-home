@@ -13,6 +13,7 @@ sentinel-home/                         # repository root
 ├── tools/build_vehicle_prompts.py     # Rebuilds the CLIP vehicle-type text embeddings
 ├── tools/replay_detections.py        # Replays recorded clips through detection (tune thresholds)
 ├── tools/dev_harness.py              # Login-free test copy of the web UI on :18091 (dev only)
+├── tools/meshtastic_bridge.py         # Runs on the LoRa base (a Pi): pets' collar trackers -> /owntracks
 ├── CLAUDE.md                          # Working notes for Claude Code sessions
 ├── firmware/wifi_motion/              # ESP32-S3 sensor (Arduino): CSI -> motion score, GET /status, setup portal, OTA
 ├── firmware/wifi_motion_beacon/       # ESP32-S3 beacon: fixed-rate 802.11n ESP-NOW frames for the sensor to measure
