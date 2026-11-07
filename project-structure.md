@@ -84,7 +84,8 @@ sentinel-home/                         # repository root
     │   ├── bind_util.py               # Refuse binding on camera-only subnets
     │   ├── set_password.py            # CLI: `python -m sentinel.web.set_password`
     │   ├── static/                    # Icons + web app manifest; leaflet/ = Leaflet 1.9.4 (BSD-2, map on the Timeline),
-    │   │                              #   three/ = three.js r128 + OrbitControls (MIT, the House page)
+    │   │                              #   three/ = three.js r128 + OrbitControls (MIT, the House page),
+    │   │                              #   grid.js + grid.css = the live page's script and styles (?v=boot id)
     │   └── templates/                 # login (+ QR), pair (phone approves a TV), home (`/`: weather, who's home,
     │                                  #   page tiles, switches), grid (`/live`: cameras + weather/clock +
     │                                  #   family lights + switches + timeline + player), zones, settings, vehicles,
