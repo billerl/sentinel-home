@@ -119,11 +119,11 @@ class TestOnTheEngine(unittest.TestCase):
         self.assertTrue(self.engine.commands.claims("The dogs are going out"))
         self.engine.answer_question("111", "The dogs are going out")
         self.assertTrue(self.engine.telegram.texts[-1].startswith("🐕 OK, I'll keep a close eye on Xena"))
-        self.assertIn(self.xena, self.engine._outings)
+        self.assertIn(self.xena, self.engine.family._outings)
         self.assertTrue(self.voice("the dogs are in").startswith("OK, Xena is in."))
-        self.assertNotIn(self.xena, self.engine._outings)
+        self.assertNotIn(self.xena, self.engine.family._outings)
         self.assertEqual(self.voice("Recall Xena"), "Beeping Xena's collar.")
-        self.assertIn(self.xena, self.engine._beeps)
+        self.assertIn(self.xena, self.engine.family._beeps)
 
     def test_package_taken_in(self):
         self.assertFalse(self.engine.commands.claims("I got the package"))  # nothing waiting: not ours to take

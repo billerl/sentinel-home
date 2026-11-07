@@ -28,6 +28,9 @@ sentinel-home/                         # repository root
     ├── logging_utils.py               # JSONL logger with credential redaction + rotation
     ├── engine/
     │   ├── engine.py                  # Engine: cameras, Telegram control/alerts, audio, web, config API
+    │   ├── family.py                  # Family: phones/pets/places glue (OwnTracks posts, arrive/leave + yard
+    │   │                              #   alerts, 📍 pins, "where is X?", Family/Timeline page actions)
+    │   ├── news.py                    # HouseNews: unprompted messages (packages, recap, routines, weather)
     │   ├── camera.py                  # CameraPipeline: one thread per camera (capture, motion,
     │   │                              #   recording, clip requests, reconnect with backoff)
     │   ├── objects.py                 # Detection worker, tracking, plain-English descriptions

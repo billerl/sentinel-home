@@ -69,7 +69,7 @@ def register(app: Flask, ctx: WebContext) -> None:
         me = _viewer_person_id()
         if me is not None:  # signed in as themselves: their own password
             person = engine.locations.person(me)
-            if person is None or engine.person_login(person.username, current) is None:
+            if person is None or engine.family.person_login(person.username, current) is None:
                 auth.record_failure(ip)
                 return jsonify({"error": "current password is wrong"}), 400
             from sentinel.engine.location import MIN_WEB_PASSWORD

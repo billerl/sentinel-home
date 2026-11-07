@@ -18,6 +18,11 @@ Use this file as continuity across chats. At the **start** of a new session, ask
 - **Headless engine.** The PySide6 GUI was removed. It only ever ran invisibly under `xvfb-run`.
   `main.py` → `sentinel/engine/engine.py` (`Engine`) → one `CameraPipeline` thread per camera
   profile (`sentinel/engine/camera.py`). The web viewer is the UI; Telegram is the remote control.
+  Feature glue lives in small classes the engine builds and hands what they need (late-starting parts such
+  as `presence`/`packages`/`audio` as lambdas, so tests can swap them): `Engine.family`
+  (`sentinel/engine/family.py`: phones, pets, places, the Family/Timeline pages) and `Engine.news`
+  (`sentinel/engine/news.py`: package, recap, routine and weather messages to every unpaused chat).
+  Engine code uses only Telegram's public methods (`is_paused`, `unpaused_chats`, `commands_help_text`).
 - **Deploy:** `sentinel.service` runs `xvfb-run venv/bin/python main.py`. Xvfb is no longer
   needed, but the unit still works with it. To deploy without sudo, SIGTERM the python process;
   systemd restarts it in about 10 s, and SIGTERM finalizes in-progress clips.
@@ -203,7 +208,7 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     every 20 s with `{"_type": "status"}`. The yard (table `yard`, one outline tapped on the Family page) gives
     `left_yard`/`back_in_yard` changes (outside = beyond the edge by max(8 m, acc); fixes > 50 m ignored;
     `fixes.in_yard`) -> Telegram + map pin + speaker, 5 min cooldown. Pets skip place alerts and person routines
-    and don't count for `_nobody_home`. "The dogs are going out" (`outing_command`): for an hour, check-ins
+    and don't count for `Family.nobody_home`. "The dogs are going out" (`outing_command`): for an hour, check-ins
     get `reportLocation` every 30 s and the base asks the collar (`sendPosition(wantResponse=True)`).
   - Family timeline + personal logins (2026-10-31; restore point: tag `pre-timeline` +
     `../checkpoints/pre-timeline/`). `/timeline`: person chips, month calendar (days with points), the day's

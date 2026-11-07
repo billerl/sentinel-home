@@ -596,6 +596,11 @@ class SmartSwitches:
                     out.append(short)
         return out
 
+    def samsung_tv_on(self) -> bool:
+        """A Samsung TV (with sound) is on: the voice is stricter after the wake word. The Fire TV is the silent
+        camera view, so it doesn't count."""
+        return any(s.on for s in self.switches() if s.id.startswith("samsung-"))
+
     def open_app(self, tv_words: str, app_words: str, source: str) -> Optional[str]:
         """Turn on the TV a phrase names (else the plain "TV") and open an app on it, for "play X on the TV"
         (Spotify): the TV's name, or None when that TV hasn't got the app. Raises OSError when it didn't do it."""

@@ -59,7 +59,7 @@ class TelegramNotifier:
         self.update_settings(settings)
 
     @staticmethod
-    def _commands_help_text() -> str:
+    def commands_help_text() -> str:
         return (
             "Sentinel bot commands (case-insensitive):\n\n"
             "Pause / resume:\n"
@@ -292,7 +292,7 @@ class TelegramNotifier:
         def _send() -> None:
             now_ts = time.time()
             for chat_id in self.chat_ids:
-                if self._is_paused(chat_id, now_ts):
+                if self.is_paused(chat_id, now_ts):
                     continue
                 if buttons and self.send_photo_with_buttons(chat_id, jpeg, caption, buttons):
                     continue
@@ -302,12 +302,17 @@ class TelegramNotifier:
         threading.Thread(target=_send, daemon=True).start()
         return True
 
-    def _is_paused(self, chat_id: str, now_ts: float) -> bool:
+    def is_paused(self, chat_id: str, now_ts: float) -> bool:
         paused_until = self.paused_until_by_chat.get(chat_id, 0.0)
         if paused_until <= now_ts:
             self.paused_until_by_chat.pop(chat_id, None)
             return False
         return True
+
+    def unpaused_chats(self) -> List[str]:
+        """The chats that get news Sentinel sends on its own (everyone who hasn't said Pause)."""
+        now_ts = time.time()
+        return [chat_id for chat_id in self.chat_ids if not self.is_paused(chat_id, now_ts)]
 
     def _remaining_pause_minutes(self, chat_id: str) -> int:
         now_ts = time.time()
@@ -331,7 +336,7 @@ class TelegramNotifier:
         now_ts = time.time()
         recipients = target_chat_ids if target_chat_ids else self.chat_ids
         for chat_id in recipients:
-            if self._is_paused(chat_id, now_ts):
+            if self.is_paused(chat_id, now_ts):
                 continue
             use_video = (self.include_video or force_video) and video_path and os.path.exists(video_path)
             if use_video:
@@ -610,7 +615,7 @@ class TelegramNotifier:
         if re.match(r"^help$", text, flags=re.IGNORECASE):
             self._send_message_to_chat(
                 chat_id,
-                self._commands_help_text(),
+                self.commands_help_text(),
             )
             return
 
@@ -644,7 +649,7 @@ class TelegramNotifier:
                 self._send_message_to_chat(chat_id, "Sorry, I didn't catch that. " + QUESTION_HELP
                                            + "\n\nSend Help for all commands.")
             else:
-                self._send_message_to_chat(chat_id, self._commands_help_text())
+                self._send_message_to_chat(chat_id, self.commands_help_text())
             return
         minutes = max(1, int(match.group(1)))
         self.paused_until_by_chat[chat_id] = time.time() + (minutes * 60)

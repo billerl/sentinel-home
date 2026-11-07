@@ -46,7 +46,7 @@ def register(app: Flask, ctx: WebContext) -> None:
             return jsonify([]), 429
         creds = request.authorization
         payload = request.get_json(silent=True, force=True)
-        reply = engine.owntracks_post(creds.username if creds else "", creds.password if creds else "", payload)
+        reply = engine.family.owntracks_post(creds.username if creds else "", creds.password if creds else "", payload)
         if reply is None:
             _location_failed(ip, "phone login")
             return Response("[]", status=401, mimetype="application/json",
@@ -57,7 +57,7 @@ def register(app: Flask, ctx: WebContext) -> None:
         ip = _client_ip(request.remote_addr or "", request.headers)
         if engine is None or _location_blocked(ip):
             return None
-        view = engine.join_view(code, _base_url())
+        view = engine.family.join_view(code, _base_url())
         if view is None:
             _location_failed(ip, "setup link")
         return view
@@ -147,7 +147,7 @@ def register(app: Flask, ctx: WebContext) -> None:
         err = _config_guard()
         if err:
             return err
-        ok, url = engine.people_action(person_id, "login-link", _base_url())
+        ok, url = engine.family.people_action(person_id, "login-link", _base_url())
         if not ok:
             return jsonify({"error": url}), 400
         return jsonify({"ok": True, "url": url,
@@ -167,14 +167,14 @@ def register(app: Flask, ctx: WebContext) -> None:
             return jsonify({"error": "unauthorized"}), 401
         if engine is None:
             return jsonify({"error": "configuration unavailable"}), 503
-        return jsonify({"me": _viewer_person_id(), "people": engine.timeline_people()})
+        return jsonify({"me": _viewer_person_id(), "people": engine.family.timeline_people()})
 
     @app.route("/api/timeline/<int:person_id>/<date>")
     def api_timeline_day(person_id: int, date: str):
         redir = _require_session()
         if redir:
             return jsonify({"error": "unauthorized"}), 401
-        view = engine.timeline_day(person_id, date) if engine is not None else None
+        view = engine.family.timeline_day(person_id, date) if engine is not None else None
         if view is None:
             return jsonify({"error": "not found"}), 404
         return jsonify(view)
@@ -186,7 +186,7 @@ def register(app: Flask, ctx: WebContext) -> None:
             return err
         if _viewer_person_id() != person_id:  # only your own, signed in as yourself
             return jsonify({"error": "Only the person themselves can delete their history."}), 403
-        return _result(*engine.timeline_delete(person_id, (request.get_json(silent=True) or {}).get("before")))
+        return _result(*engine.family.timeline_delete(person_id, (request.get_json(silent=True) or {}).get("before")))
 
     @app.route("/people")
     def people_page():
@@ -200,7 +200,7 @@ def register(app: Flask, ctx: WebContext) -> None:
         redir = _require_session()
         if redir:
             return jsonify({"error": "unauthorized"}), 401
-        return jsonify({"people": engine.family_lights() if engine is not None else []})
+        return jsonify({"people": engine.family.family_lights() if engine is not None else []})
 
     @app.route("/api/people")
     def api_people():
@@ -209,7 +209,7 @@ def register(app: Flask, ctx: WebContext) -> None:
             return jsonify({"error": "unauthorized"}), 401
         if engine is None:
             return jsonify({"error": "configuration unavailable"}), 503
-        return jsonify(engine.people_view(_base_url()))
+        return jsonify(engine.family.people_view(_base_url()))
 
     @app.route("/api/people", methods=["POST"])
     def api_people_save():
@@ -219,21 +219,21 @@ def register(app: Flask, ctx: WebContext) -> None:
         body = request.get_json(silent=True)
         if not isinstance(body, dict):
             return jsonify({"error": "expected a JSON object"}), 400
-        return _result(*engine.people_save(body))
+        return _result(*engine.family.people_save(body))
 
     @app.route("/api/yard", methods=["POST"])
     def api_yard_save():
         err = _config_guard()
         if err:
             return err
-        return _result(*engine.yard_save(request.get_json(silent=True) or {}))
+        return _result(*engine.family.yard_save(request.get_json(silent=True) or {}))
 
     @app.route("/api/people/<int:person_id>/<action>", methods=["POST"])
     def api_people_action(person_id: int, action: str):
         err = _config_guard()
         if err:
             return err
-        return _result(*engine.people_action(person_id, action, _base_url()))
+        return _result(*engine.family.people_action(person_id, action, _base_url()))
 
     @app.route("/api/people/<int:person_id>/qr")
     def api_people_qr(person_id: int):
@@ -244,7 +244,7 @@ def register(app: Flask, ctx: WebContext) -> None:
         invite = engine.locations.invite(person_id) if engine is not None else None
         if not invite:
             return jsonify({"error": "no setup link yet"}), 404
-        url = engine._join_url(_base_url(), invite[0])
+        url = engine.family.join_url(_base_url(), invite[0])
         return jsonify({"qr": segno.make(url, error="m").svg_inline(scale=5, dark="#000", light="#fff", border=2)})
 
     @app.route("/api/places", methods=["POST"])
@@ -255,18 +255,18 @@ def register(app: Flask, ctx: WebContext) -> None:
         body = request.get_json(silent=True)
         if not isinstance(body, dict):
             return jsonify({"error": "expected a JSON object"}), 400
-        return _result(*engine.place_save(body))
+        return _result(*engine.family.place_save(body))
 
     @app.route("/api/places/<int:place_id>/delete", methods=["POST"])
     def api_places_delete(place_id: int):
         err = _config_guard()
         if err:
             return err
-        return _result(*engine.place_delete(place_id))
+        return _result(*engine.family.place_delete(place_id))
 
     @app.route("/api/location/alerts", methods=["POST"])
     def api_location_alerts():
         err = _config_guard()
         if err:
             return err
-        return _result(*engine.location_alerts((request.get_json(silent=True) or {}).get("on")))
+        return _result(*engine.family.location_alerts((request.get_json(silent=True) or {}).get("on")))

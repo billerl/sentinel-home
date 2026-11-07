@@ -424,14 +424,14 @@ class TestEndpoints(unittest.TestCase):
         self.post("elizabeth", self.liz.token, fix(HOME[0] + 0.05, HOME[1], time.time() + 1))
         self.wait_for(2)
         self.assertIn("👋 Elizabeth left home.", self.sent)
-        self.assertIn("Elizabeth is about", self.engine.answer_location_question(self.engine.location_question("where is elizabeth"))[0])
+        self.assertIn("Elizabeth is about", self.engine.family.answer_location_question(self.engine.family.location_question("where is elizabeth"))[0])
 
     def test_stale_position_asks_phone_for_a_fresh_one(self):
         ask = [{"_type": "cmd", "action": "reportLocation"}]
         self.assertEqual(self.post("elizabeth", self.liz.token, fix(*HOME, time.time() - 3600)).get_json(), ask)
         # the phone's next check-in repeats the old reading: don't keep nagging it
         self.assertEqual(self.post("elizabeth", self.liz.token, fix(*HOME, time.time() - 3600)).get_json(), [])
-        self.engine._location_asked.clear()
+        self.engine.family._location_asked.clear()
         self.assertEqual(self.post("elizabeth", self.liz.token, fix(*HOME, time.time())).get_json(), [])
 
     def test_car_seen_driving_off_is_not_still_here(self):
@@ -445,11 +445,11 @@ class TestEndpoints(unittest.TestCase):
         spot = Parked(box=(0, 0, 10, 10), first_seen=0, last_seen=0, vehicle_id=vid, confirmed=True)
         self.engine.presence = SimpleNamespace(where_is=lambda v: ("garage", spot) if v == vid else None)
         statuses = {vid: VehicleStatus("Elizabeth's Fusion", True, "Garage", None, None, None)}
-        self.assertTrue(self.engine._cars_of(self.liz, statuses)[0].here)
+        self.assertTrue(self.engine.family._cars_of(self.liz, statuses)[0].here)
         spot.leaving_at, spot.empty_since = time.time(), time.time()  # camera: it pulled out, spot empty
-        self.assertFalse(self.engine._cars_of(self.liz, statuses)[0].here)
+        self.assertFalse(self.engine.family._cars_of(self.liz, statuses)[0].here)
         spot.empty_since = 0.0  # it came straight back (or it was a false "leaving")
-        self.assertTrue(self.engine._cars_of(self.liz, statuses)[0].here)
+        self.assertTrue(self.engine.family._cars_of(self.liz, statuses)[0].here)
 
     def test_wrong_logins_get_blocked(self):
         for _ in range(20):
@@ -459,7 +459,7 @@ class TestEndpoints(unittest.TestCase):
 
     def test_setup_link_page(self):
         self.assertEqual(self.client.get("/join/" + "x" * 22).status_code, 404)
-        ok, url = self.engine.people_action(self.liz.id, "invite")
+        ok, url = self.engine.family.people_action(self.liz.id, "invite")
         self.assertTrue(url.startswith("https://sentinel.example.org/join/"))
         code = url.rsplit("/", 1)[1]
         page = self.client.get("/join/" + code).get_data(as_text=True)
@@ -473,7 +473,7 @@ class TestEndpoints(unittest.TestCase):
 
     def test_setup_visits_are_logged_with_the_phone_type(self):
         from sentinel.logging_utils import app_logger
-        ok, url = self.engine.people_action(self.liz.id, "invite")
+        ok, url = self.engine.family.people_action(self.liz.id, "invite")
         code = url.rsplit("/", 1)[1]
         google_app = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 GSA/350.0 Mobile/15E148"
         self.client.get("/join/" + code, headers={"User-Agent": google_app})
@@ -488,28 +488,28 @@ class TestEndpoints(unittest.TestCase):
         self.assertEqual(self.client.get("/people").status_code, 302)
 
     def test_people_and_places_from_the_page(self):
-        self.assertFalse(self.engine.people_save({"name": "elizabeth"})[0])  # already there
-        ok, _ = self.engine.people_save({"name": "Katherine", "aliases": "Kate, Mom"})
+        self.assertFalse(self.engine.family.people_save({"name": "elizabeth"})[0])  # already there
+        ok, _ = self.engine.family.people_save({"name": "Katherine", "aliases": "Kate, Mom"})
         self.assertTrue(ok)
-        self.assertFalse(self.engine.place_save({"name": "the salon", "where": "the salon"})[0])
-        ok, _ = self.engine.place_save({"name": "the salon", "where": "41.157, -88.178", "radius": 5})
+        self.assertFalse(self.engine.family.place_save({"name": "the salon", "where": "the salon"})[0])
+        ok, _ = self.engine.family.place_save({"name": "the salon", "where": "41.157, -88.178", "radius": 5})
         self.assertTrue(ok)
         salon = next(p for p in self.engine.locations.places() if p.name == "the salon")
         self.assertEqual(salon.radius, 50)  # clamped
-        ok, msg = self.engine.place_save({"name": "school", "where": "41°08'00\"N 88°10'40\"W"})
+        ok, msg = self.engine.family.place_save({"name": "school", "where": "41°08'00\"N 88°10'40\"W"})
         self.assertEqual((ok, msg), (True, "Saved — about 1.3 miles north of home"))
-        self.assertFalse(self.engine.place_save({"name": "home", "where": "41, -83"})[0])  # Home exists
-        view = self.engine.people_view("http://localhost")
+        self.assertFalse(self.engine.family.place_save({"name": "home", "where": "41, -83"})[0])  # Home exists
+        view = self.engine.family.people_view("http://localhost")
         self.assertEqual([p["name"] for p in view["people"]], ["Elizabeth", "Katherine"])
         self.assertNotIn(self.liz.token, json.dumps(view))  # the phone password only goes in the setup link
 
     def test_telegram_pin_then_name(self):
-        self.engine._on_telegram_pin("111", 41.12, -88.20)
+        self.engine.family.on_telegram_pin("111", 41.12, -88.20)
         self.assertIn("What should I call this place?", self.sent[-1])
-        self.assertFalse(self.engine._name_pinned_place("111", "did anyone come by?"))  # a question passes through
-        self.assertTrue(self.engine._name_pinned_place("111", "School"))
+        self.assertFalse(self.engine.family.name_pinned_place("111", "did anyone come by?"))  # a question passes through
+        self.assertTrue(self.engine.family.name_pinned_place("111", "School"))
         self.assertIn("Saved “School”", self.sent[-1])
-        self.assertFalse(self.engine._name_pinned_place("111", "hello"))  # only one name per pin
+        self.assertFalse(self.engine.family.name_pinned_place("111", "hello"))  # only one name per pin
         self.assertTrue(any(p.name == "School" for p in self.engine.locations.places()))
 
 

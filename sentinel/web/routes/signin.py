@@ -186,7 +186,7 @@ def register(app: Flask, ctx: WebContext, home_base: Optional[str]) -> None:
         # one on the Family page; "alex" is both, and the password says which one is meant).
         session_name = username if auth.verify_password(username, password) else None
         if session_name is None and engine is not None:
-            person = engine.person_login(username, password)
+            person = engine.family.person_login(username, password)
             session_name = PERSON_PREFIX + person.username if person else None
         if session_name is not None:
             auth.record_success(ip)
