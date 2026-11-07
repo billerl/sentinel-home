@@ -434,6 +434,9 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   movement, ...) and the switches. The camera grid moved to `/live` (`grid.html`; its header keeps only camera controls:
   Home, Timeline, Data saver, Zones, Switches, Reload). TV browsers (`TV_BROWSER` in `sentinel/web/context.py`: Fire TV "AFT..." in
   Fully Kiosk, Samsung Tizen) still get the grid at `/`, so kiosk start URLs didn't change. Other pages' back link = Home.
+  Since 2026-11-07 the grid's script and styles are `static/grid.js` + `static/grid.css` (`grid.html` is only the
+  markup). They load with `?v=<boot id>`, so a page that reloads itself after an update gets the new files; `BOOT_ID`
+  and the first camera list stay inline in `grid.html` (they come from the server). `/static` needs no login.
 - **Movement history** (`/sensors/history`, `/api/wifi_motion/events?day=`): stretches of indoor movement per path
   (gaps < 2 min merged) in `recorded_videos/wifi_motion.db`, 30 days. `WifiMotion.answer()` answers "any movement
   inside today?" / "anyone in the living room?" (a path named in the text) on Telegram and by voice; camera names or
