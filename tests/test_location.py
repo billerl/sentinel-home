@@ -145,18 +145,32 @@ class TestYard(unittest.TestCase):
         self.assertEqual(self.at(0, 0), ["started"])  # in the yard: noted quietly
         self.assertEqual(self.store.fix(self.dog.id)["in_yard"], 1)
         self.assertEqual(self.at(0.00022, 30), [])  # ~4 m past the edge: GPS wander at the fence
-        self.assertEqual(self.at(0.00040, 60), ["left_yard"])  # ~24 m past it
-        self.assertEqual(self.at(0.00060, 90), [])  # still out: said once
-        self.assertEqual(self.at(0.00045, 120, acc=80), [])  # a vague fix moves nobody
-        self.assertEqual(self.at(0.00010, 150), ["back_in_yard"])
+        self.assertEqual(self.at(0.00040, 60), [])  # ~24 m past it: one reading could be a stray one ...
+        self.assertEqual(self.at(0.00050, 90), ["left_yard"])  # ... a second one agrees
+        self.assertEqual(self.at(0.00060, 120), [])  # still out: said once
+        self.assertEqual(self.at(0.00045, 150, acc=80), [])  # a vague fix moves nobody
+        self.assertEqual(self.at(0.00010, 180), [])
+        self.assertEqual(self.at(0.00005, 210), ["back_in_yard"])
         self.assertEqual(self.store.visits(self.dog.id), [])  # the yard isn't a place visit
+
+    def test_one_stray_reading_is_not_an_escape(self):
+        """2026-11-07: the collar sat in the house (by the yard's edge) and single readings 8-26 m outside
+        sent "Xena left the yard!" three times, each followed by a normal one 30 s later."""
+        self.at(0, 0)
+        for t in (100, 300, 500):
+            self.assertEqual(self.at(0.00045, t), [])  # a stray reading outside
+            self.assertEqual(self.at(0.00005, t + 30), [])  # back to normal
+        self.assertEqual(self.at(0.00045, 600), [])
+        self.assertEqual(self.at(0.00021, 630), [])  # at the fence: doesn't decide either way
+        self.assertEqual(self.at(0.00050, 660), ["left_yard"])
 
     def test_words(self):
         self.at(0, 0)
         self.at(0.00040, 60)
+        self.at(0.00040, 90)
         view = PersonView(self.dog, self.store.fix(self.dog.id), None, yard=self.store.yard())
         text, pins = answer_location(LocationQuestion("where", [self.dog.id]), {self.dog.id: view},
-                                     self.store.places(), now=self.t + 70)
+                                     self.store.places(), now=self.t + 100)
         self.assertIn("Grace is outside the yard, about 80 ft north of it", text)
         self.assertEqual(change_message(type("C", (), {"kind": "left_yard", "person": self.dog, "place": None})(), []),
                          "🐕 Grace left the yard!")

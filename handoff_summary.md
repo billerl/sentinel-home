@@ -209,7 +209,7 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     with the pet's own login (acc from precisionBits/HDOP, so public-channel blur never counts) and checks in
     every 20 s with `{"_type": "status"}`. The yard (table `yard`, one outline tapped on the Family page) gives
     `left_yard`/`back_in_yard` changes (outside = beyond the edge by max(8 m, acc); fixes > 50 m ignored;
-    `fixes.in_yard`) -> Telegram + map pin + speaker, 5 min cooldown. Pets skip place alerts and person routines
+    `fixes.in_yard`; a change needs two readings in a row, `_yard_pending`, since 2026-11-07: indoor strays) -> Telegram + map pin + speaker, 5 min cooldown. Pets skip place alerts and person routines
     and don't count for `Family.nobody_home`. "The dogs are going out" (`outing_command`): for an hour, check-ins
     get `reportLocation` every 30 s and the base asks the collar (`sendPosition(wantResponse=True)`).
   - Family timeline + personal logins (2026-10-31; restore point: tag `pre-timeline` +

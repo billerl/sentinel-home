@@ -48,6 +48,9 @@ LOGIN_LINK_DAYS = 7  # a personal "choose your Sentinel password" link
 MIN_WEB_PASSWORD = 8
 # The yard (trackers only): outside means beyond the edge by more than the fix's own uncertainty (at least
 # YARD_MARGIN_M: a collar GPS wanders a few metres); fixes vaguer than YARD_MAX_ACC_M never move the dog.
+# In or out takes two readings in a row: a collar left indoors strays 10-25 m while claiming ~6 m, and single
+# readings 8-26 m past the edge sent "Xena left the yard!" 3 times in a day (2026-11-07). A dog that really got
+# out is reported one reading (~30 s) later.
 YARD_MARGIN_M = 8
 YARD_MAX_ACC_M = 50
 
@@ -201,6 +204,7 @@ class LocationStore:
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._lock = threading.RLock()
         self._pruned = 0.0
+        self._yard_pending: Dict[int, bool] = {}  # person id -> in/out that one reading said; the next must agree
         with self._connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("CREATE TABLE IF NOT EXISTS people (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,"
@@ -293,6 +297,7 @@ class LocationStore:
             else:
                 conn.execute("DELETE FROM yard")
             conn.execute("UPDATE fixes SET in_yard = NULL")
+            self._yard_pending.clear()
 
     def new_token(self, person_id: int) -> None:
         """New phone password: the old setup (and any setup link) stops working (lost phone, shared by mistake)."""
@@ -548,10 +553,17 @@ class LocationStore:
             yard = self.yard() if person.tracker else []
             if yard and acc <= YARD_MAX_ACC_M:
                 inside, edge = yard_position(yard, lat, lon)
-                now_in = True if inside else (False if edge > max(YARD_MARGIN_M, acc) else in_yard)
-                if in_yard is not None and now_in is not None and bool(now_in) != bool(in_yard):
-                    changes.append(Change("back_in_yard" if now_in else "left_yard", person, None, ts))
-                in_yard = now_in
+                said = True if inside else (False if edge > max(YARD_MARGIN_M, acc) else None)  # None: at the fence
+                if in_yard is None:
+                    in_yard = said
+                elif said is not None and said == bool(in_yard):
+                    self._yard_pending.pop(person.id, None)
+                elif said is not None:
+                    if self._yard_pending.pop(person.id, None) is said:
+                        changes.append(Change("back_in_yard" if said else "left_yard", person, None, ts))
+                        in_yard = said
+                    else:
+                        self._yard_pending[person.id] = said
             conn.execute("INSERT OR REPLACE INTO fixes (person_id, ts, lat, lon, acc, batt, vel, place_id, place_since,"
                          " in_yard) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                          (person.id, ts, lat, lon, acc, None if batt is None else int(batt), vel,
