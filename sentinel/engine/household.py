@@ -182,6 +182,17 @@ def spot_look(frame: np.ndarray, box: Tuple[int, int, int, int]) -> Optional[np.
     return (g - g.mean()) / std if std > 1.0 else None
 
 
+def _saved_looks(saved: Any) -> Dict[bool, np.ndarray]:
+    """Spot looks from the state file (keyed "day"/"night"); a damaged one is just left out."""
+    looks = {}
+    for name, values in (saved or {}).items():
+        try:
+            looks[name == "night"] = np.asarray(values, dtype=np.float32).reshape(36, 48)
+        except (TypeError, ValueError):
+            pass
+    return looks
+
+
 def sentence_case(name: str) -> str:
     return name[:1].upper() + name[1:] if name else name
 
@@ -922,7 +933,11 @@ class PresenceTracker:
         with self._lock:
             data = {k: [{"box": list(p.box), "first_seen": p.first_seen, "last_seen": p.last_seen,
                          "vehicle_id": p.vehicle_id, "confirmed": p.confirmed,
-                         "unchecked": p.unchecked} for p in v]
+                         "unchecked": p.unchecked, "day_sure": p.day_sure,
+                         # the spot's look, so a car the detector misses (at night it often does) isn't
+                         # "gone" just because we restarted (2026-11-07 01:42: "Lincoln's Jeep left" twice)
+                         "looks": {"night" if night else "day": np.round(look, 2).ravel().tolist()
+                                   for night, look in p.looks.items()}} for p in v]
                     for k, v in self.parked.items()}
         tmp = self.state_path + ".tmp"
         try:
@@ -945,6 +960,7 @@ class PresenceTracker:
         for key, cars in data.items():
             self.parked[key] = [Parked(tuple(c["box"]), c["first_seen"], c["last_seen"], seen=CONFIRM_SCANS,
                                        vehicle_id=c.get("vehicle_id"), confirmed=c.get("confirmed", False),
-                                       announced=True, asked=True, unchecked=c.get("unchecked", True))
+                                       announced=True, asked=True, unchecked=c.get("unchecked", True),
+                                       day_sure=c.get("day_sure", False), looks=_saved_looks(c.get("looks")))
                                 for c in cars if c.get("last_seen", 0) >= cutoff]
             self._baseline.add(key)  # restored: changes from here on are real

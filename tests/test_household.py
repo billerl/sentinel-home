@@ -331,6 +331,26 @@ class TestPresence(unittest.TestCase):
                                 on_change=lambda *a: self.changes.append(a), state_path=path)
         self.assertIsNotNone(again.where_is(self.sierra))
 
+    def test_restart_at_night_keeps_a_car_the_detector_misses(self):
+        """2026-11-07 01:42: restarted at night, the Jeep at the edge of the view (which the detector misses in
+        infrared) 'left' 3 minutes later and 'got home' again: the restored spot had no look to compare with."""
+        path = os.path.join(self.dir, "presence.json")
+        self.tracker.state_path = path
+        self.t = time.time() - 300
+        night = self.textured(3, night=True)
+        self.scan([]); self.scan([self.BOX]); self.scan([self.BOX]); self.scan([self.BOX], night)
+        self.tracker._save()
+        self.changes.clear()
+        self.tracker = PresenceTracker(self.store, self.det, self.clf, cameras=lambda: [self.cam],
+                                       on_change=lambda kind, cam, v, ts, jpeg: self.changes.append((kind, v.name, ts)),
+                                       state_path=path)
+        for _ in range(10):
+            self.scan([], night)  # missed every time, but the spot looks the same
+        self.assertEqual(self.changes, [])
+        gone = self.textured(2, night=True)
+        self.scan([], gone); self.scan([], gone); self.scan([], gone)
+        self.assertEqual(self.changes[-1][:2], ("left", "Alex's Sierra"))
+
 
 class TestPresenceFlipFlops(TestPresence):
     """2026-10-25: cars 'got home' and 'left' over and over while parked in the Garage view."""

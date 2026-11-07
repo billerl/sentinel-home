@@ -267,6 +267,8 @@ Use this file as continuity across chats. At the **start** of a new session, ask
       18 -> 96 photos/day. 195 hidden since 2026-10-21 were given back (all night ones, plus clear family-car
       day ones); 99 day ones kept as "not ours".
     - The 3-a-day "whose car?" limit is kept in .household/asks.json (restarts used to reset it: 10 asks).
+    - Parked cars survive a restart in .household/presence.json, including each spot's day/night look:
+      without it, a car the detector misses at night "left" 3 minutes after a restart (2026-11-07).
     - Telegram car alerts carry "✏️ Wrong car?" / "🚗 Whose car is this?" (`fx:` buttons): pick a family car
       or "Not ours"; the photo is filed as a user label and a still-parked spot takes the new identity.
   - VLM evaluation (2026-10-25): Tencent WeVisOne-VL-2B on this CPU took 3.5–6.5 min per image (good
