@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='leaflet/leaflet.css') }}">
   <style>
     #yard-map { height: 340px; border-radius: 10px; margin: 8px 0; }
-    #yard-map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9); }
+    #yard-map .osm-dark { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9); }
     #yard-map .leaflet-control-attribution { background: rgba(0,0,0,0.6); color: #6aa; }
     #yard-map .leaflet-control-attribution a { color: #9cc; }
     * { box-sizing: border-box; }
@@ -486,10 +486,16 @@
       yardPts = (data.yard || []).map(function(p) { return [p[0], p[1]]; });
       if (!yardMap) {
         yardMap = L.map("yard-map", { keyboard: false });
-        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          maxZoom: 20, maxNativeZoom: 19, referrerPolicy: "strict-origin-when-cross-origin",
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'
+        // Satellite first: fences, lawn and driveway show; the street map is one tap away.
+        var photo = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+          maxZoom: 21, maxNativeZoom: 19, referrerPolicy: "strict-origin-when-cross-origin",
+          attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics'
         }).addTo(yardMap);
+        var street = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 21, maxNativeZoom: 19, className: "osm-dark", referrerPolicy: "strict-origin-when-cross-origin",
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'
+        });
+        L.control.layers({ "Satellite": photo, "Map": street }, null, { collapsed: false }).addTo(yardMap);
         yardLayer = L.layerGroup().addTo(yardMap);
         yardMap.on("click", function(ev) { yardPts.push([ev.latlng.lat, ev.latlng.lng]); drawYard(); });
         var home = (data.places || []).filter(function(p) { return p.home; })[0];
@@ -501,7 +507,7 @@
     }
     function drawYard() {
       yardLayer.clearLayers();
-      if (yardPts.length >= 3) L.polygon(yardPts, { color: "#7fe8c8", weight: 2, fillOpacity: 0.15 }).addTo(yardLayer);
+      if (yardPts.length >= 3) L.polygon(yardPts, { color: "#7fe8c8", weight: 3, fillOpacity: 0.15 }).addTo(yardLayer);
       else if (yardPts.length === 2) L.polyline(yardPts, { color: "#7fe8c8", weight: 2 }).addTo(yardLayer);
       yardPts.forEach(function(p) { L.circleMarker(p, { radius: 5, color: "#fff", fillColor: "#7fe8c8", fillOpacity: 1 }).addTo(yardLayer); });
       (data.people || []).forEach(function(p) {
