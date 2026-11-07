@@ -631,12 +631,28 @@ def outing_command(text: str, people: List[Person]) -> Optional[Tuple[str, List[
         if not m:
             continue
         subject = m.group("s")
-        if re.fullmatch(rf"(?:all\s+)?{_PETS}|both\s+(?:of\s+)?{_PETS}|both|everyone|everybody", subject):
+        if re.fullmatch(r"everyone|everybody", subject):
             return kind, pets
-        named = [p for p in pets if any(re.search(rf"\b{re.escape(w)}\b", subject) for w in p.words())]
-        if named and re.fullmatch(r"[\w' ,&]+", subject):
+        named = _pets_named(subject, pets)
+        if named:
             return kind, named
     return None
+
+
+def _pets_named(subject: str, pets: List[Person]) -> List[Person]:
+    subject = re.sub(r"'s\s+collars?$|\s+collars?$", "", subject.strip())
+    if re.fullmatch(rf"(?:all\s+)?{_PETS}|both\s+(?:of\s+)?{_PETS}|both", subject):
+        return pets
+    named = [p for p in pets if any(re.search(rf"\b{re.escape(w)}\b", subject) for w in p.words())]
+    return named if named and re.fullmatch(r"[\w' ,&]+", subject) else []
+
+
+def beep_command(text: str, people: List[Person]) -> Optional[List[Person]]:
+    """The pets whose collars should beep ("recall Xena", "beep the dogs", "beep Xena's collar"); None otherwise."""
+    low = re.sub(r"[.!]+$", "", text.strip().lower()).replace("\u2019", "'")
+    pets = [p for p in people if p.tracker]
+    m = re.match(r"(?:please\s+)?(?:recall|beep|buzz)\s+(?P<s>.+?)(?:\s+(?:now|please))?$", low)
+    return (_pets_named(m.group("s"), pets) or None) if pets and m else None
 
 
 def initials(name: str) -> str:

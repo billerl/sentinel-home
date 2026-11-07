@@ -28,8 +28,9 @@ class TestBridge(unittest.TestCase):
         self.assertEqual(B.accuracy_m({}), 10.0)
 
     def test_sentinel_asks_for_a_position(self):
-        self.assertTrue(B.wants_position([{"_type": "cmd", "action": "reportLocation"}]))
-        self.assertFalse(B.wants_position([]))
+        self.assertEqual(B.commands([{"_type": "cmd", "action": "reportLocation"}, {"_type": "cmd", "action": "beep"}]),
+                         {"reportLocation", "beep"})
+        self.assertEqual(B.commands([]), set())
 
 
 if __name__ == "__main__":
