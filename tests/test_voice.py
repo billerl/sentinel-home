@@ -532,6 +532,18 @@ class TestWhisperPrompt(unittest.TestCase):
         self.assertIn("Did Ben leave?", whisper_prompt(["A", "B", "Ben"]))
         plugs = whisper_prompt([], ["patio lights", "patio outlet", "patio lights"])
         self.assertIn("Turn on the patio lights. Patio outlet off. ", plugs)  # what was misheard as "Turn Petty"
+        pets = whisper_prompt(["Emma"], pets=["Grace", "Ben"])
+        self.assertIn("The dogs are going out. Let Grace and Ben out. Recall Grace. ", pets)  # "Lean is going outside"
+
+    def test_names_before_nicknames(self):
+        """2026-11-07: nicknames came right after each name, so the 10th entry, the dog, never made the hint."""
+        from sentinel.engine.engine import Engine
+
+        people = [types.SimpleNamespace(name=n, aliases=a, tracker=t) for n, a, t in
+                  (("Alex", ["Dad"], ""), ("Kate", ["Mom", "Katie"], ""), ("Ben", ["Benny"], ""), ("Grace", [], "!a"))]
+        fake = types.SimpleNamespace(locations=types.SimpleNamespace(people=lambda: people),
+                                     household=types.SimpleNamespace(vehicles=lambda: []))
+        self.assertEqual(Engine._voice_names(fake)[:4], ["Alex", "Kate", "Ben", "Grace"])
 
 
 if __name__ == "__main__":

@@ -854,14 +854,17 @@ class Engine:
         self.voice = VoiceAssistant(self.settings, self.answer_voice, self.audio, names=self._voice_names,
                                     switches=lambda: [s.name for s in self.switches.switches()],
                                     apps=self.switches.tv_apps, artists=self.spotify.artists,
-                                    tv_on=self.switches.samsung_tv_on)
+                                    tv_on=self.switches.samsung_tv_on,
+                                    pets=lambda: [p.name for p in self.locations.people() if p.tracker])
         self.voice.start()
 
     def _voice_names(self) -> List[str]:
-        """Everyone the family might ask about, so Whisper spells them right: phones, then car owners."""
-        names: List[str] = []
-        for p in self.locations.people():
-            names += [p.name] + p.aliases
+        """Everyone the family might ask about, so Whisper spells them right: names, then nicknames, then car
+        owners (only the first few fit: nicknames first left Xena out, 2026-11-07)."""
+        people = self.locations.people()
+        names: List[str] = [p.name for p in people]
+        for p in people:
+            names += p.aliases
         for v in self.household.vehicles():
             names += ([v.owner] if v.owner else []) + v.aliases
         return names

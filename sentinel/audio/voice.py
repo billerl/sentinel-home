@@ -65,14 +65,15 @@ PROMPT_REST = ("Did anyone come by today? Any deliveries? What's the weather? Fr
                "Enable messages. Play some Tom Petty. Pause. Skip. Volume up. What's playing? Take a note for Claude. "
                "Never mind. Cancel.")
 PROMPT = PROMPT_START + PROMPT_REST
-MAX_PROMPT_NAMES = 8
+MAX_PROMPT_NAMES = 10
+MAX_PROMPT_PETS = 4
 MAX_PROMPT_SWITCHES = 6
 MAX_PROMPT_APPS = 12
 MAX_PROMPT_ARTISTS = 12  # with everything else the hint stays well under Whisper's 224 tokens
 
 
 def whisper_prompt(names: List[str], switches: Optional[List[str]] = None, apps: Optional[List[str]] = None,
-                   artists: Optional[List[str]] = None) -> str:
+                   artists: Optional[List[str]] = None, pets: Optional[List[str]] = None) -> str:
     """The hint for Whisper, with this household's names (and smart plugs) said the way people ask about them.
     Without the plugs, "turn the patio light on" came out as "Turn Petty, or light home." (2026-11-02)."""
     names = [n for n in dict.fromkeys(n.strip() for n in names) if n][:MAX_PROMPT_NAMES]
@@ -83,6 +84,9 @@ def whisper_prompt(names: List[str], switches: Optional[List[str]] = None, apps:
     if len(names) > 2:
         rest = names[2:]
         said += f"Did {', '.join(rest[:-1]) + ' or ' + rest[-1] if len(rest) > 1 else rest[0]} leave? "
+    pets = [p for p in dict.fromkeys((p or "").strip() for p in (pets or [])) if p][:MAX_PROMPT_PETS]
+    if pets:  # "Xena is going outside" was heard as "Lean is going outside" (2026-11-07)
+        said += f"The dogs are going out. Let {' and '.join(pets)} out. Recall {pets[0]}. "
     if plugs:
         said += f"Turn on the {plugs[0]}. " + "".join(f"{p[:1].upper()}{p[1:]} off. " for p in plugs[1:])
     apps = [a.replace("+", " Plus") for a in dict.fromkeys((a or "").strip() for a in (apps or [])) if a][:MAX_PROMPT_APPS]
@@ -237,12 +241,14 @@ class VoiceAssistant:
                  switches: Optional[Callable[[], List[str]]] = None,
                  apps: Optional[Callable[[], List[str]]] = None,
                  artists: Optional[Callable[[], List[str]]] = None,
-                 tv_on: Optional[Callable[[], bool]] = None) -> None:
+                 tv_on: Optional[Callable[[], bool]] = None,
+                 pets: Optional[Callable[[], List[str]]] = None) -> None:
         self.settings = settings
         self.names = names  # the family's names and nicknames, for Whisper's hint
         self.switches = switches  # smart plug names, likewise
         self.apps = apps  # TV app names, likewise
         self.artists = artists  # the family's Spotify artists, likewise
+        self.pets = pets  # pets with collar trackers, likewise
         self.tv_on = tv_on  # a TV (with sound) is on: stricter right after the wake word
         self.answer = answer
         self.last_doubt = 0.0  # Whisper's noise score for the last words heard (doubt())
@@ -448,7 +454,8 @@ class VoiceAssistant:
         if prompt is None:
             try:
                 prompt = whisper_prompt(self.names() if self.names else [], self.switches() if self.switches else [],
-                                        self.apps() if self.apps else [], self.artists() if self.artists else [])
+                                        self.apps() if self.apps else [], self.artists() if self.artists else [],
+                                        self.pets() if self.pets else [])
             except Exception:  # a database hiccup shouldn't cost the question
                 prompt = PROMPT
         started = time.time()

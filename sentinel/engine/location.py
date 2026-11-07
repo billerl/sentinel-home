@@ -638,8 +638,8 @@ def outing_command(text: str, people: List[Person]) -> Optional[Tuple[str, List[
     for kind, word in (("out", r"out(?:side)?"), ("in", r"(?:back\s+)?in(?:side)?")):
         m = (re.match(rf"(?:i'?m\s+|we'?re\s+)?(?:let(?:ting)?|put(?:ting)?|tak(?:e|ing)|took|bring(?:ing)?|brought)"
                       rf"\s+(?P<s>.+?)\s+{word}$", low)
-             or re.match(rf"(?P<s>.+?)\s*(?:\s(?:is|are)|'s|'re)\s+(?:going\s+|gone\s+|head(?:ed|ing)\s+|back\s+)?{word}"
-                         rf"(?:\s+now)?$", low))
+             or re.match(rf"(?P<s>.+?)\s*(?:\s(?:is|are)|'s|'re)?\s+(?:going\s+|gone\s+|head(?:ed|ing)\s+|back\s+)?{word}"
+                         rf"(?:\s+now)?$", low))  # (also short: "dogs outside", "Xena going out", 2026-11-07)
         if not m:
             continue
         subject = m.group("s")

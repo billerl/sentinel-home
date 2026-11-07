@@ -196,6 +196,12 @@ class TestOuting(unittest.TestCase):
         self.assertEqual(said("let Grace out."), ("out", ["Grace"]))
         self.assertEqual(said("Grace's back inside"), ("in", ["Grace"]))
         self.assertEqual(said("bring the dogs in"), ("in", ["Grace", "Ben"]))
+        # said short (2026-11-07: "Dogs outside." went nowhere)
+        self.assertEqual(said("Dogs outside."), ("out", ["Grace", "Ben"]))
+        self.assertEqual(said("Grace going out"), ("out", ["Grace"]))
+        self.assertEqual(said("dogs in"), ("in", ["Grace", "Ben"]))
+        for not_it in ("Alex outside", "lights out", "dogs out?"):
+            self.assertIsNone(said(not_it), not_it)
         for not_it in ("is Grace outside?", "are the dogs out", "Alex is outside", "the lights are out"):
             self.assertIsNone(said(not_it), not_it)
         self.assertIsNone(outing_command("the dogs are out", people[:1]))  # no pets with trackers
