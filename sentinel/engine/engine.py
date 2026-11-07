@@ -22,6 +22,7 @@ from sentinel.constants import CAPTURE_DIR, VIDEO_DIR
 from sentinel.engine import admin
 from sentinel.engine.camera import CLIP_REQUEST_REASON, CameraPipeline, camera_host
 from sentinel.engine.assistant import Assistant, build_context
+from sentinel.engine.commands import Command, Commands, parse_feature_toggle
 from sentinel.engine.spotify import NO_SUCH_SPEAKER, SpotifyService, parse_music_command
 from sentinel.engine.weather import WeatherService
 from sentinel.logging_utils import app_logger
@@ -213,6 +214,7 @@ class Engine:
         self.spotify_player = SpotifyPlayer(self.settings)  # this PC as a Spotify speaker (spotifyd)
         self._command_offers: Dict[int, Tuple[str, str, float]] = {}  # "Do it" buttons under Claude's replies
         self._offer_ids = itertools.count(1)
+        self.commands = self._build_commands()
         self.audio = self._init_audio()
         self.voice = None  # "Hey Jarvis" listener (sentinel.audio.voice), when enabled
         self.frame_broker = None
@@ -399,23 +401,7 @@ class Engine:
         self.switches.start()
         self.wifi_motion.start()
 
-        def _household_filter(text: str) -> bool:
-            from sentinel.engine.questions import household_question
-
-            from sentinel.engine.recap import RECAP
-
-            from sentinel.engine.packages import TAKEN_IN
-
-            return (household_question(text, self.household.vehicles()) is not None
-                    or RECAP.match(text.strip()) is not None
-                    or (TAKEN_IN.match(text.strip()) is not None and self.packages is not None
-                        and bool(self.packages.packages()))
-                    or self.location_question(text) is not None
-                    or self.outing(text, apply=False) is not None
-                    or self.beep_pets(text, apply=False) is not None
-                    or self._indoor_question(text) is not None)
-
-        self.telegram.question_filter = _household_filter
+        self.telegram.question_filter = self.commands.claims
         self.telegram.location_handler = self._on_telegram_pin
         self.telegram.text_interceptor = self._name_pinned_place
         self.telegram.switch_filter = self.switches.understands
@@ -729,42 +715,53 @@ class Engine:
         """Movement inside the house (the Wi-Fi sensors), unless a camera is named."""
         return self.wifi_motion.indoor_question(text, [p.display_name for p in self.cameras.values()])
 
-    def answer_question(self, chat_id: str, text: str) -> None:
-        """Reply to 'did anyone come by?'-style questions from the event history."""
-        from sentinel.engine.questions import _fmt_clock, household_question
-
+    def _build_commands(self) -> Commands:
+        """What both Telegram and voice understand, each once, in the order Telegram checks them."""
+        from sentinel.audio.voice import to_speech
+        from sentinel.engine.location import beep_command, outing_command
+        from sentinel.engine.packages import TAKEN_IN
+        from sentinel.engine.questions import household_question
         from sentinel.engine.recap import RECAP
 
-        if RECAP.match(text.strip()):
-            self.recap.run(chat_id)  # last night until now, to this chat
-            return
-        from sentinel.engine.packages import TAKEN_IN
-
-        if TAKEN_IN.match(text.strip()):
-            self.telegram.reply_to_chat(chat_id, self.packages_taken_in())
-            return
-        outing = self.outing(text) or self.beep_pets(text)
-        if outing:
-            self.telegram.reply_to_chat(chat_id, "🐕 " + outing)
-            return
-        lq = self.location_question(text)
-        if lq is not None:
+        def send_location_reply(chat_id: str, lq, _text: str) -> None:
             reply, pins = self.answer_location_question(lq)
             self.telegram.reply_to_chat(chat_id, reply)
             for _name, lat, lon in pins[:3]:
                 self.telegram.send_location(chat_id, lat, lon)
-            app_logger.log("info", "question_answered", kind="location_" + lq.kind, component="engine",
-                           action="answer_question")
-            return
-        hq = household_question(text, self.household.vehicles())
-        if hq is not None:
-            self.telegram.reply_to_chat(chat_id, self.answer_household_question(hq))
-            app_logger.log("info", "question_answered", kind="household_" + hq.kind, component="engine",
-                           action="answer_question")
-            return
-        if self._indoor_question(text) is not None:
-            self.telegram.reply_to_chat(chat_id, self.wifi_motion.answer(text))
-            app_logger.log("info", "question_answered", kind="indoor", component="engine", action="answer_question")
+
+        commands = Commands(lambda chat_id, text: self.telegram.reply_to_chat(chat_id, text))
+        commands.add(Command(
+            "recap", lambda t: RECAP.match(t.strip()), lambda _m, _t: "",
+            telegram=lambda chat_id, _m, _t: self.recap.run(chat_id)))  # last night until now, to this chat
+        commands.add(Command(
+            "package taken in", lambda t: TAKEN_IN.match(t.strip()), lambda _m, _t: self.packages_taken_in(),
+            speak=lambda said: said.replace("✅ ", ""),
+            voice_if=lambda t: not t.strip().startswith(("got it", "ok")),
+            claim_if=lambda: self.packages is not None and bool(self.packages.packages())))
+        commands.add(Command(
+            "pets going out", lambda t: outing_command(t, self.locations.people()),
+            lambda m, _t: self.start_outing(*m), speak=lambda said: said, prefix="🐕 "))
+        commands.add(Command(
+            "beep pets", lambda t: beep_command(t, self.locations.people()),
+            lambda m, _t: self.beep_pets(m), speak=lambda said: said, prefix="🐕 "))
+        commands.add(Command(
+            "location", self.location_question, lambda m, _t: self.answer_location_question(m)[0],
+            speak=to_speech, voice_stage="late", telegram=send_location_reply,
+            log_kind=lambda m: "location_" + m.kind))
+        commands.add(Command(
+            "household cars", lambda t: household_question(t, self.household.vehicles()),
+            lambda m, _t: self.answer_household_question(m), speak=to_speech, voice_stage="late",
+            log_kind=lambda m: "household_" + m.kind))
+        commands.add(Command(
+            "movement inside", self._indoor_question, lambda _m, t: self.wifi_motion.answer(t),
+            speak=to_speech, voice_stage="late", log_kind=lambda _m: "indoor"))
+        return commands
+
+    def answer_question(self, chat_id: str, text: str) -> None:
+        """Reply to 'did anyone come by?'-style questions from the event history."""
+        from sentinel.engine.questions import _fmt_clock
+
+        if self.commands.telegram_reply(chat_id, text):
             return
         reply, photos = self.event_question_reply(text)
         self.telegram.reply_to_chat(chat_id, reply)
@@ -1244,7 +1241,7 @@ class Engine:
         doubtful (a follow-up that may be room talk): None instead of asking Claude."""
         from sentinel.audio.voice import VoiceReply, to_speech
         from sentinel.engine.assistant import split_command
-        from sentinel.engine.questions import _fmt_clock, household_question, is_question
+        from sentinel.engine.questions import _fmt_clock, is_question
 
         plain = re.sub(r"\s+", " ", re.sub(r"[^\w\s'?:-]", " ", text)).strip()
         low = plain.lower().rstrip("?")
@@ -1260,9 +1257,9 @@ class Engine:
             return VoiceReply(self.change_volume(*volume))
         from sentinel.engine.routines import REQUEST as NEW_ROUTINE
 
-        outing = self.outing(low) or self.beep_pets(low)
-        if outing:
-            return VoiceReply(outing)
+        said = self.commands.voice_reply(low, "early")
+        if said:
+            return VoiceReply(said)
         switched = None if NEW_ROUTINE.search(low) else self.switches.command(low, source="voice")
         if switched:
             return VoiceReply(switched)
@@ -1280,10 +1277,6 @@ class Engine:
             return VoiceReply("Spotify isn't connected yet. Connect it on the Settings page, under Spotify.")
         if re.search(r"\bwhat time is it\b|\bwhat'?s the time\b|\bwhat is the time\b", low):
             return VoiceReply(f"It's {_fmt_clock(time.time())}.")
-        from sentinel.engine.packages import TAKEN_IN
-
-        if TAKEN_IN.match(low.strip()) and not low.strip().startswith(("got it", "ok")):
-            return VoiceReply(self.packages_taken_in().replace("✅ ", ""))
         if re.search(r"\b(any|a) (packages?|parcels?|deliver(y|ies))\b|\bpackages? (here|outside|at the door)\b", low):
             waiting = self.packages.packages() if self.packages is not None else {}
             return VoiceReply("Yes: " + ", ".join(f"{n} at the {cam}" for cam, n in waiting.items()) + "." if waiting
@@ -1297,7 +1290,7 @@ class Engine:
                 return VoiceReply(f"It's {w['temp']} degrees and {w.get('words', '').lower()} in {w.get('place')}. "
                                   f"High of {w.get('high')}, low of {w.get('low')}, "
                                   f"and a {w.get('rain_today')} percent chance of rain today.")
-        changes, _err = self.telegram._parse_feature_toggle_command(low)
+        changes, _err = parse_feature_toggle(low)
         if changes:
             return self._voice_toggle(changes)
         from sentinel.engine.routines import COMMAND as ROUTINE_JSON, REQUEST as ROUTINE_REQUEST, is_routine_command
@@ -1310,14 +1303,9 @@ class Engine:
             return VoiceReply(self.routine_command(low, spoken=True))
         if re.fullmatch(r"(?:what are |list |read )?(?:my |the |any )?reminders|do i have any reminders", low):
             return VoiceReply(self.reminder_command(None, "reminders"))
-        lq = None if ROUTINE_REQUEST.search(low) else self.location_question(low)
-        if lq is not None:
-            return VoiceReply(to_speech(self.answer_location_question(lq)[0]))
-        hq = None if ROUTINE_REQUEST.search(low) else household_question(low, self.household.vehicles())
-        if hq is not None:
-            return VoiceReply(to_speech(self.answer_household_question(hq)))
-        if not ROUTINE_REQUEST.search(low) and self._indoor_question(low) is not None:
-            return VoiceReply(to_speech(self.wifi_motion.answer(low)))
+        said = None if ROUTINE_REQUEST.search(low) else self.commands.voice_reply(low, "late")
+        if said is not None:
+            return VoiceReply(said)
         if is_question(low) and not ROUTINE_REQUEST.search(low):
             return VoiceReply(to_speech(self.event_question_reply(low)[0]))
         if doubtful:
@@ -1338,7 +1326,7 @@ class Engine:
             return VoiceReply(f"Sorry, I couldn't get an answer: {self.assistant.last_error}.")
         text_part, command = split_command(reply)
         spoken = to_speech(text_part or reply, max_lines=6, max_chars=600)
-        changes = self.telegram._parse_feature_toggle_command(command)[0] if command else None
+        changes = parse_feature_toggle(command)[0] if command else None
         if changes:
             return VoiceReply(spoken + " Should I do that? Say yes or no.", self._voice_toggle(changes).confirm)
         from sentinel.engine.reminders import is_reminder_command
@@ -1432,15 +1420,11 @@ class Engine:
             text += "\n\nCars:\n" + self.answer_household_question(HouseholdQuestion("list"))
         return text, pins
 
-    def outing(self, text: str, apply: bool = True) -> Optional[str]:
+    def start_outing(self, kind: str, pets) -> str:
         """"The dogs are going out": ask their trackers for a position every OUTING_POLL_SECONDS for up to an
-        hour (the LoRa base pings the collar), "the dogs are in" stops. The reply, or None if it isn't that."""
-        from sentinel.engine.location import OUTING_POLL_SECONDS, OUTING_SECONDS, outing_command
+        hour (the LoRa base pings the collar), "the dogs are in" stops. The reply."""
+        from sentinel.engine.location import OUTING_POLL_SECONDS, OUTING_SECONDS
 
-        parsed = outing_command(text, self.locations.people())
-        if parsed is None or not apply:
-            return None if parsed is None else ""
-        kind, pets = parsed
         names = " and ".join(p.name for p in pets)
         now = time.time()
         for p in pets:
@@ -1455,14 +1439,9 @@ class Engine:
         return (f"OK, I'll keep a close eye on {names}: a position every {OUTING_POLL_SECONDS} seconds for the next "
                 f"hour, or until you say they're in.{yard}")
 
-    def beep_pets(self, text: str, apply: bool = True) -> Optional[str]:
+    def beep_pets(self, pets) -> str:
         """"Recall Xena" / "beep the dogs": the collar's buzzer sounds (the LoRa base sends it an alert-bell
-        message on its next check-in, within ~5 s). The reply, or None if it isn't that."""
-        from sentinel.engine.location import beep_command
-
-        pets = beep_command(text, self.locations.people())
-        if pets is None or not apply:
-            return None if pets is None else ""
+        message on its next check-in, within ~5 s). The reply."""
         for p in pets:
             self._beeps[p.id] = time.time()
         names = " and ".join(p.name for p in pets)

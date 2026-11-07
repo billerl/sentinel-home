@@ -103,57 +103,6 @@ class TelegramNotifier:
             "- Enable night bug filter"
         )
 
-    # Aliases ordered longest-first so compound phrases match first.
-    _FEATURE_ALIAS_TO_KEY: Tuple[Tuple[str, str], ...] = (
-        ("night bug filter", "night_bug"),
-        ("night bug", "night_bug"),
-        ("auto reconnect", "reconnect"),
-        ("telegram clips", "clips"),
-        ("video clips", "clips"),
-        ("recording", "recording"),
-        ("messages", "messages"),
-        ("alerts", "messages"),  # what people actually say
-        ("alert", "messages"),
-        ("notifications", "messages"),
-        ("motion alerts", "messages"),
-        ("photo alerts", "messages"),
-        ("telegram alerts", "messages"),
-        ("clips", "clips"),
-        ("reconnect", "reconnect"),
-    )
-
-    @classmethod
-    def _parse_feature_toggle_command(cls, text: str) -> Tuple[Optional[Dict[str, bool]], Optional[str]]:
-        """Parse enable/disable feature phrases; returns (changes dict or None, error or None)."""
-        raw = text.strip()
-        m = re.match(r"^(enable|disable)\s+(.+)$", raw, flags=re.IGNORECASE)
-        if not m:
-            return None, None
-        want_on = m.group(1).lower() == "enable"
-        rest = m.group(2).strip().lower().replace(",", " and ")
-        parts = [p.strip() for p in re.split(r"\s+and\s+", rest) if p.strip()]
-        if not parts:
-            return None, "Say what to enable or disable, e.g. recording, messages, or clips."
-
-        changes: Dict[str, bool] = {}
-        unknown: List[str] = []
-        for part in parts:
-            matched_key = None
-            for alias, key in cls._FEATURE_ALIAS_TO_KEY:
-                if part == alias:
-                    matched_key = key
-                    break
-            if matched_key is not None:
-                changes[matched_key] = want_on
-            else:
-                unknown.append(part)
-        if unknown:
-            return None, (
-                f"Unknown: {', '.join(unknown)}. You can enable or disable: alerts (messages), clips, "
-                "recording, night bug, reconnect."
-            )
-        return changes, None
-
     @staticmethod
     def _parse_chat_ids(value: str) -> List[str]:
         return [item.strip() for item in value.split(",") if item.strip()]
@@ -595,6 +544,7 @@ class TelegramNotifier:
     @classmethod
     def is_command(cls, text: str) -> bool:
         """Is this exactly one of Sentinel's own commands (what a "Do it" button may run)?"""
+        from sentinel.engine.commands import parse_feature_toggle
         from sentinel.engine.queries import is_video_query
         from sentinel.engine.reminders import is_reminder_command
         from sentinel.engine.routines import is_routine_command
@@ -604,7 +554,7 @@ class TelegramNotifier:
         if re.fullmatch(r"(?i)(resume|status|help|clip|pause\s+\d{1,4})", t) or cls._is_access_request(t) \
                 or is_reminder_command(t) or SWITCH_COMMAND.match(t) or is_routine_command(t):
             return True
-        changes, err = cls._parse_feature_toggle_command(t)
+        changes, err = parse_feature_toggle(t)
         return bool(changes) and err is None or is_video_query(t)
 
     def route_text(self, chat_id: str, text: str, from_button: bool = False) -> None:
@@ -672,7 +622,9 @@ class TelegramNotifier:
             )
             return
 
-        changes, parse_err = self._parse_feature_toggle_command(text)
+        from sentinel.engine.commands import parse_feature_toggle
+
+        changes, parse_err = parse_feature_toggle(text)
         if parse_err is not None:
             if not from_button and self.assistant_available is not None and self.assistant_available():
                 self._pending_free_text.append((chat_id, text))  # "enable alerts": let Claude work it out

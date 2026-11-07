@@ -141,7 +141,10 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     question; segments with no_speech_prob > 0.6 and stock inventions like "Thank you" dropped). Recording
     starts at the wake word, so one-breath "Hey Jarvis, who's home?" works. `Engine.answer_voice`: time,
     weather, enable/disable (asks first), household and event questions locally (`to_speech` strips emoji,
-    bullets, links, long lists), else Claude with `VOICE_SYSTEM_PROMPT`; Claude's COMMAND needs a spoken
+    bullets, links, long lists), else Claude. Requests both Telegram and voice understand (recap, package taken
+    in, pets going out / recall, where is X, family cars, movement inside) are registered once each in
+    `Engine._build_commands` (`sentinel/engine/commands.py`): Telegram's question filter, `answer_question` and
+    `answer_voice` all ask that registry. Then Claude with `VOICE_SYSTEM_PROMPT`; Claude's COMMAND needs a spoken
     "yes". Follow-ups without the wake word for 5 s, at most 5 turns. A follow-up Whisper doubts (no-speech > `FOLLOW_UP_DOUBT` 0.3)
     is acted on only if Sentinel understands it itself (`answer_voice(doubtful=True)` returns None before Claude),
     else ignored (`voice_ignored`): room talk had been answered by Claude, but real "Pause"/"Stop" score ~0.55. Alerts stay silent during a

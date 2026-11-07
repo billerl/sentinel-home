@@ -9,6 +9,7 @@ from unittest import mock
 
 from sentinel.engine import assistant as am
 from sentinel.engine.assistant import Assistant, build_command, build_context, split_command
+from sentinel.engine.commands import parse_feature_toggle
 from sentinel.notifications.telegram_notifier import TelegramNotifier
 
 
@@ -134,10 +135,10 @@ class TestTelegramRouting(unittest.TestCase):
 
     def test_enable_alerts_means_messages(self):
         for phrase in ("enable alerts", "Enable notifications", "disable motion alerts"):
-            changes, err = TelegramNotifier._parse_feature_toggle_command(phrase)
+            changes, err = parse_feature_toggle(phrase)
             self.assertIsNone(err, phrase)
             self.assertEqual(list(changes), ["messages"], phrase)
-        _, err = TelegramNotifier._parse_feature_toggle_command("enable lasers")
+        _, err = parse_feature_toggle("enable lasers")
         self.assertIn("alerts (messages)", err)
 
     def test_photos_and_strangers_are_logged_not_silent(self):
