@@ -712,6 +712,13 @@ class WebServer:
                 return jsonify({"error": "expected a JSON object"}), 400
             return _result(*engine.people_save(body))
 
+        @app.route("/api/yard", methods=["POST"])
+        def api_yard_save():
+            err = _config_guard()
+            if err:
+                return err
+            return _result(*engine.yard_save(request.get_json(silent=True) or {}))
+
         @app.route("/api/people/<int:person_id>/<action>", methods=["POST"])
         def api_people_action(person_id: int, action: str):
             err = _config_guard()
