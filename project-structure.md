@@ -31,6 +31,8 @@ sentinel-home/                         # repository root
     │   ├── family.py                  # Family: phones/pets/places glue (OwnTracks posts, arrive/leave + yard
     │   │                              #   alerts, 📍 pins, "where is X?", Family/Timeline page actions)
     │   ├── news.py                    # HouseNews: unprompted messages (packages, recap, routines, weather)
+    │   ├── cars.py                    # Cars: Vehicles page, "whose car?"/"Wrong car?" buttons,
+    │   │                              #   driveway arrive/leave events, car statuses
     │   ├── camera.py                  # CameraPipeline: one thread per camera (capture, motion,
     │   │                              #   recording, clip requests, reconnect with backoff)
     │   ├── objects.py                 # Detection worker, tracking, plain-English descriptions
