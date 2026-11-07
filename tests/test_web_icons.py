@@ -44,6 +44,15 @@ class TestIcons(unittest.TestCase):
             self.assertGreater(len(resp.data), 100)
             resp.close()
 
+    def test_live_page_script_and_style_load(self):
+        # served with nosniff, so a wrong type would stop the browser running them
+        for path, kind in (("/static/grid.js", "text/javascript"), ("/static/grid.css", "text/css")):
+            resp = self.client.get(path + "?v=1")
+            self.assertEqual(resp.status_code, 200, path)
+            self.assertTrue(resp.content_type.startswith(kind), (path, resp.content_type))
+            self.assertGreater(len(resp.data), 1000)
+            resp.close()
+
     def test_pages_link_the_icon(self):
         login = self.client.get("/login").get_data(as_text=True)
         self.assertIn('rel="apple-touch-icon"', login)
