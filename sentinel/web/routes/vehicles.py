@@ -28,7 +28,7 @@ def register(app: Flask, ctx: WebContext) -> None:
             return jsonify({"error": "unauthorized"}), 401
         if engine is None:
             return jsonify({"error": "configuration unavailable"}), 503
-        return jsonify(engine.household_view())
+        return jsonify(engine.cars.view())
 
     @app.route("/api/household/vehicles", methods=["POST"])
     def api_household_save():
@@ -38,14 +38,14 @@ def register(app: Flask, ctx: WebContext) -> None:
         body = request.get_json(silent=True)
         if not isinstance(body, dict):
             return jsonify({"error": "expected a JSON object"}), 400
-        return _result(*engine.household_save(body))
+        return _result(*engine.cars.save(body))
 
     @app.route("/api/household/vehicles/<int:vehicle_id>/delete", methods=["POST"])
     def api_household_delete(vehicle_id: int):
         err = _config_guard()
         if err:
             return err
-        return _result(*engine.household_delete(vehicle_id))
+        return _result(*engine.cars.delete(vehicle_id))
 
     @app.route("/api/household/assign", methods=["POST"])
     def api_household_assign():
@@ -55,7 +55,7 @@ def register(app: Flask, ctx: WebContext) -> None:
         body = request.get_json(silent=True)
         if not isinstance(body, dict):
             return jsonify({"error": "expected a JSON object"}), 400
-        return _result(*engine.household_assign(body))
+        return _result(*engine.cars.assign(body))
 
     @app.route("/household/photos/<int:sighting_id>.jpg")
     def household_photo(sighting_id: int):

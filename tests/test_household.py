@@ -622,19 +622,19 @@ class TestEngineHousehold(unittest.TestCase):
 
     def test_save_validates(self):
         e = self.engine
-        self.assertFalse(e.household_save({"name": ""})[0])
-        self.assertFalse(e.household_save({"name": "<script>"})[0])
-        self.assertFalse(e.household_save({"name": "Ok", "kind": "tank"})[0])
-        ok, vid = e.household_save({"name": "Alex's Sierra", "owner": "Alex", "aliases": "Al, ", "kind": "pickup"})
+        self.assertFalse(e.cars.save({"name": ""})[0])
+        self.assertFalse(e.cars.save({"name": "<script>"})[0])
+        self.assertFalse(e.cars.save({"name": "Ok", "kind": "tank"})[0])
+        ok, vid = e.cars.save({"name": "Alex's Sierra", "owner": "Alex", "aliases": "Al, ", "kind": "pickup"})
         self.assertTrue(ok)
         v = e.household.vehicle(int(vid))
         self.assertEqual((v.name, v.owner, v.aliases, v.kind), ("Alex's Sierra", "Alex", ["Al"], "pickup"))
-        self.assertFalse(e.household_assign({"ids": "1", "vehicle": int(vid)})[0])
-        self.assertFalse(e.household_assign({"ids": [1], "vehicle": 999})[0])
-        view = e.household_view()
+        self.assertFalse(e.cars.assign({"ids": "1", "vehicle": int(vid)})[0])
+        self.assertFalse(e.cars.assign({"ids": [1], "vehicle": 999})[0])
+        view = e.cars.view()
         self.assertEqual(view["vehicles"][0]["name"], "Alex's Sierra")
-        self.assertTrue(e.household_delete(int(vid))[0])
-        self.assertEqual(e.household_view()["vehicles"], [])
+        self.assertTrue(e.cars.delete(int(vid))[0])
+        self.assertEqual(e.cars.view()["vehicles"], [])
 
 
 if __name__ == "__main__":
@@ -696,7 +696,7 @@ class TestAskWhoseCar(unittest.TestCase):
         self.cam = types.SimpleNamespace(host="192.168.0.9", display_name="Garage")
         e.presence = PresenceTracker(e.household, self.det, self.clf, cameras=lambda: [self.cam],
                                      on_change=lambda kind, cam, v, ts, jpeg: self.changes.append((kind, v.name)),
-                                     on_unknown=e._ask_whose_car)
+                                     on_unknown=e.cars.ask_whose_car)
         self.t = time.time() - 600
 
     def tearDown(self):
@@ -787,7 +787,7 @@ class TestWrongCarButton(TestAskWhoseCar):
         track.known_vehicle = self.engine.household.vehicle(named) if named else None
         event = ObjectEvent("192.168.0.9", "Garage", track, None, "🛻 Alex's Sierra is leaving the Garage.", COLOUR, time.time())
         pipeline = types.SimpleNamespace(host="192.168.0.9", display_name="Garage")
-        return self.engine._car_fix_button(pipeline, event)
+        return self.engine.cars.fix_button(pipeline, event)
 
     def setUp(self):
         super().setUp()
@@ -826,7 +826,7 @@ class TestWrongCarButton(TestAskWhoseCar):
         from sentinel.engine.objects import ObjectEvent, Track
         bike = Track(2, "bicycle", "vehicle", 0, 0, [(0, self.BOX)], 0.9, 3, best_frame=COLOUR, best_box=self.BOX)
         event = ObjectEvent("192.168.0.9", "Garage", bike, None, "🚲 Someone on a bicycle", COLOUR, time.time())
-        self.assertIsNone(self.engine._car_fix_button(types.SimpleNamespace(host="h", display_name="G"), event))
+        self.assertIsNone(self.engine.cars.fix_button(types.SimpleNamespace(host="h", display_name="G"), event))
 
     def test_ask_limit_survives_a_restart(self):
         from sentinel.engine import Engine
@@ -834,7 +834,7 @@ class TestWrongCarButton(TestAskWhoseCar):
         self.park_stranger()
         self.assertEqual(len(self.sent), 1)
         again = Engine(self.engine.settings_manager)
-        self.assertEqual(again._car_ask_days, self.engine._car_ask_days)
+        self.assertEqual(again.cars._ask_days, self.engine.cars._ask_days)
 
     test_asks_once_with_likeliest_first = None
     test_answer_names_it_and_records_the_arrival = None

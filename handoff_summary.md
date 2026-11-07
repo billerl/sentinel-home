@@ -22,6 +22,8 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   as `presence`/`packages`/`audio` as lambdas, so tests can swap them): `Engine.family`
   (`sentinel/engine/family.py`: phones, pets, places, the Family/Timeline pages) and `Engine.news`
   (`sentinel/engine/news.py`: package, recap, routine and weather messages to every unpaused chat).
+  `Engine.cars` (`sentinel/engine/cars.py`): the Vehicles page, the "whose car is this?" and "Wrong car?"
+  Telegram buttons, and the driveway's arrive/leave events and car statuses.
   Engine code uses only Telegram's public methods (`is_paused`, `unpaused_chats`, `commands_help_text`).
 - **Deploy:** `sentinel.service` runs `xvfb-run venv/bin/python main.py`. Xvfb is no longer
   needed, but the unit still works with it. To deploy without sudo, SIGTERM the python process;
