@@ -288,6 +288,10 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   of the picture). On = Wake-on-LAN until it answers (~10 s, needs "Power On with Mobile"), then KEY_POWER
   (the packet only wakes its network). `tv_parse`/`tv_command` in switches.py: open/put on <app>, volume,
   mute, "what's on"; `understands()` routes Telegram/Claude suggestions. Can't pick channels inside apps.
+  Playback (2026-11-07): pause/play (KEY_PAUSE/KEY_PLAY), rewind/fast forward N seconds/minutes = arrow
+  presses of SEEK_STEP (10 s, sent in the background), "mute for N" = KEY_MUTE + a timer that presses it again
+  (cancelled by a Sentinel mute/unmute meanwhile). By voice, said without "TV" they still mean the TV while it's
+  on (the family's rule: TV unless Spotify/"the music" is named); Telegram's bare "pause" stays the alerts'.
   Power state is tracked by Sentinel (dark network wake-ups every few minutes look like "on"; SCREEN_AFTER).
   KEY_POWER only works once the TV is fully awake (port 9197 answers; ~30 s after a wake, and closed in the
   shutdown minutes after "off"), so `_power_on` waits for it, then presses again if the TV drops away.

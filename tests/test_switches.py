@@ -179,6 +179,27 @@ class TestEngine(unittest.TestCase):
         self.assertIsNone(reply.confirm)
         self.assertEqual(self.kasa.calls, [("192.168.1.40", "80060000", True)])
 
+    def test_voice_playback_goes_to_the_tv(self):
+        """2026-11-06: "Pause the TV" went to Claude ("I can only turn the TV on or off ..."). And the TV is
+        the default, unless Spotify is named."""
+        tv = FakeTV()
+        tv.on = True
+        self.engine.switches = SmartSwitches(self.dir, drivers=[self.kasa, tv])
+        self.engine.switches.discover()
+        self.engine.switches._after = lambda seconds, fn: fn() or mock.Mock()
+        with mock.patch.object(self.engine.spotify, "connected", return_value=True), \
+                mock.patch.object(self.engine.spotify, "command", return_value="Paused.") as spotify:
+            for text, said, key in (("Pause the TV.", "Okay, TV paused.", "KEY_PAUSE"),
+                                    ("Pause.", "Okay, TV paused.", "KEY_PAUSE"),
+                                    ("Play.", "Okay, TV playing.", "KEY_PLAY"),
+                                    ("Rewind 30 seconds.", "Okay, back 30 seconds.", "KEY_LEFT"),
+                                    ("Mute for 2 minutes.", "Okay, TV muted for 2 minutes.", "KEY_MUTE")):
+                self.assertEqual(self.engine.answer_voice(text, lambda _s: None).text, said, text)
+                self.assertEqual(tv.calls[-1][1], key, text)
+            spotify.assert_not_called()
+            self.assertEqual(self.engine.answer_voice("Pause the music.", lambda _s: None).text, "Paused.")
+            spotify.assert_called_once()
+
     def test_claude_suggestion_asks_first(self):
         with mock.patch.object(self.engine.assistant, "ask",
                                return_value="I can turn the porch lamp on for you.\nCOMMAND: Turn on porch lamp"), \
@@ -347,6 +368,71 @@ class TestTV(unittest.TestCase):
         self.assertEqual(self.tv.calls[-1], ("press", "KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN"))
         self.assertEqual(self.sw.command("mute the TV", "telegram"), "Okay, TV muted.")
         self.assertEqual(self.tv.calls[-1], ("press", "KEY_MUTE"))
+
+    def test_pause_play_and_skip(self):
+        self.tv.on = True
+        self.sw.poll()
+        later = []
+        self.sw._after = lambda seconds, fn: later.append((seconds, fn)) or mock.Mock()
+        self.assertEqual(self.sw.command("pause the TV", "telegram"), "Okay, TV paused.")
+        self.assertEqual(self.tv.calls[-1], ("press", "KEY_PAUSE"))
+        self.assertEqual(self.sw.command("resume the tv", "voice"), "Okay, TV playing.")
+        self.assertEqual(self.tv.calls[-1], ("press", "KEY_PLAY"))
+        for text, said, keys in (("rewind 30 seconds", "Okay, back 30 seconds.", ["KEY_LEFT"] * 3),
+                                 ("fast forward the TV 2 minutes", "Okay, ahead 2 minutes.", ["KEY_RIGHT"] * 12),
+                                 ("skip ahead a minute and a half", "Okay, ahead 1 minute 30 seconds.", ["KEY_RIGHT"] * 9),
+                                 ("go back two minutes on the TV", "Okay, back 2 minutes.", ["KEY_LEFT"] * 12),
+                                 ("Fast-forward 1 minute 30 seconds.", "Okay, ahead 1 minute 30 seconds.", ["KEY_RIGHT"] * 9),
+                                 ("rewind 15 seconds", "Okay, back 20 seconds.", ["KEY_LEFT"] * 2),  # 10 s a press
+                                 ("rewind", "Okay, back 10 seconds.", ["KEY_LEFT"])):
+            self.assertEqual(self.sw.command(text, "voice"), said, text)
+            later.pop()[1]()  # the presses go out in the background
+            self.assertEqual(self.tv.calls[-1], ("press",) + tuple(keys), text)
+
+    def test_said_without_tv_it_is_the_tv_by_voice_while_on(self):
+        """The user's rule: unless they say Spotify, the TV is the default."""
+        for text in ("pause", "play", "rewind 30 seconds", "mute for 2 minutes"):
+            self.assertIsNone(self.sw.command(text, "voice"), text)  # TV off: Spotify's (or nobody's)
+        self.tv.on = True
+        self.sw.poll()
+        self.sw._after = lambda seconds, fn: mock.Mock()
+        self.assertEqual(self.sw.command("pause", "voice"), "Okay, TV paused.")
+        self.assertEqual(self.sw.command("mute", "voice"), "Okay, TV muted.")
+        self.assertIsNone(self.sw.command("pause", "telegram"))  # Telegram's "pause" pauses the alerts
+        for text in ("pause the music", "pause spotify", "play some Tom Petty", "play on the TV", "go back", "skip",
+                     "skip ahead", "go back to the beginning"):
+            self.assertIsNone(self.sw.command(text, "voice"), text)
+
+    def test_mute_for_a_while(self):
+        self.tv.on = True
+        self.sw.poll()
+        timers = []
+        self.sw._after = lambda seconds, fn: timers.append((seconds, fn, mock.Mock())) or timers[-1][2]
+        self.assertEqual(self.sw.command("mute the TV for 2 minutes", "voice"), "Okay, TV muted for 2 minutes.")
+        self.assertEqual(self.tv.calls[-1], ("press", "KEY_MUTE"))
+        self.assertEqual(timers[-1][0], 120)
+        timers[-1][1]()  # 2 minutes later: sound back on
+        self.assertEqual(self.tv.calls[-2:], [("press", "KEY_MUTE"), ("press", "KEY_MUTE")])
+        presses = len(self.tv.calls)
+        self.sw.command("mute for 30 seconds", "voice")
+        self.assertEqual(self.sw.command("unmute the TV", "voice"), "Okay, TV unmuted.")
+        self.assertTrue(timers[-1][2].cancel.called)
+        self.assertEqual(len(self.tv.calls), presses + 2)  # muted, unmuted: the timer won't press again
+        self.sw.command("mute for 30 seconds", "voice")
+        self.sw.command("mute the TV", "voice")  # already muted: stays muted, for good now
+        self.assertEqual(len(self.tv.calls), presses + 3)
+        self.tv.on = False
+        self.sw.poll()
+        self.sw.command("mute for 30 seconds", "voice")
+        self.assertEqual(self.sw.command("mute the TV for 30 seconds", "voice"), "The TV is off.")
+
+    def test_times(self):
+        from sentinel.engine.switches import tv_duration
+        for words, seconds in (("30 seconds", 30), ("two minutes", 120), ("a minute", 60), ("90 secs", 90),
+                               ("1 minute 30 seconds", 90), ("a minute and a half", 90), ("half a minute", 30),
+                               ("forty five seconds", 45), ("a couple of minutes", 120), ("2 and a half minutes", None),
+                               ("the beginning", None), ("1.5 minutes", 90)):
+            self.assertEqual(tv_duration(words), seconds, words)
 
     def test_other_words_are_left_alone(self):
         self.assertEqual(self.sw.command("turn on the patio lights", "voice"), "Okay, patio lights on.")

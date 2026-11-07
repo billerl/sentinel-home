@@ -9,9 +9,10 @@ outlet. Names are the ones set in the Kasa app; renaming here writes the new nam
 the app, the web page and voice all use the same one.
 
 Other makes are other drivers with the same methods (discover, status, set, rename): Samsung TVs
-(samsung_tv.py) are one, with apps, volume and mute on top ("put on Netflix", "mute the TV"); plugs running
-the open Tasmota firmware (tasmota.py) are another. Shelly has a similar simple local HTTP API. Newer Kasa/Tapo devices that only speak the encrypted
-KLAP protocol don't answer on 9999 and aren't supported yet.
+(samsung_tv.py) are one, with apps, volume, mute and playback on top ("put on Netflix", "mute the TV for 2
+minutes", "rewind 30 seconds"); plugs running the open Tasmota firmware (tasmota.py) are another. Shelly has a
+similar simple local HTTP API. Newer Kasa/Tapo devices that only speak the encrypted KLAP protocol don't answer
+on 9999 and aren't supported yet.
 
 Known devices (MAC -> last address) are kept in switches.json next to the other stores, so a restart
 finds them straight away and a plug that moved to a new address is found again by its MAC.
@@ -195,6 +196,24 @@ _TV_LIVE = re.compile(r"^(?:put|show|bring up|switch)\s+(?:the )?(?:cameras?|cam
                       r"\s+(?:on|to)\s+" + _TV + r"$|^(reload|refresh|restart)\s+(?:the )?(?:cameras?|camera view|live view)"
                       r"(?:\s+on\s+" + _TV + r")?$", re.IGNORECASE)
 _TV_WHAT = re.compile(r"^what(?:'s| is) (?:on|playing on) " + _TV + r"$", re.IGNORECASE)
+# Playing on the TV: pause/play, back or ahead by a time, mute for a while. By voice they mean the TV even without
+# "TV" (while it's on); naming Spotify or "the music" sends them to Spotify instead (the user's rule, 2026-11-07).
+_ON_TV = r"(?:\s+(?:on\s+)?(" + _TV + r"))?"
+_TV_PLAY = re.compile(r"^(pause|play|resume|unpause)(?:\s+(?!on )(" + _TV + r"))?$", re.IGNORECASE)  # ("play on the TV": Spotify)
+_TV_MUTE_BARE = re.compile(r"^(mute|unmute)$", re.IGNORECASE)
+_TV_MUTE_FOR = re.compile(r"^mute" + _ON_TV + r"\s+for\s+(.+?)" + _ON_TV + r"$", re.IGNORECASE)
+# "rewind 30 seconds", "fast forward the TV 2 minutes", "skip ahead a minute and a half". "Go back" and "skip"
+# alone are Spotify's (previous song, next song): those words need a time or "TV".
+_TV_SEEK = re.compile(r"^(rewind|fast[ -]?forward|go back|skip back|jump back|back up|skip ahead|skip forward|"
+                      r"jump ahead|go forward)" + _ON_TV + r"(?:\s+(?:by\s+)?(.+?))?" + _ON_TV + r"$", re.IGNORECASE)
+_BACK_WORDS = ("rewind", "go back", "skip back", "jump back", "back up")
+_SPOTIFY_WORDS = ("go back", "skip back", "skip ahead", "skip forward", "jump back", "jump ahead", "go forward", "back up")
+SEEK_STEP = 10  # seconds one arrow press skips in Netflix, YouTube, Hulu, Disney+, Prime Video
+SEEK_MAX = 30 * 60
+_COUNT = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+          "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "fifteen": 15, "twenty": 20, "thirty": 30,
+          "forty": 40, "forty five": 45, "fifty": 50, "sixty": 60, "ninety": 90, "a couple": 2, "a couple of": 2,
+          "couple": 2, "a few": 3, "few": 3}
 VOLUME_STEPS = 3
 # The web remote's buttons -> the TV's key names (nothing else is sent).
 TV_KEYS = {"up": "KEY_UP", "down": "KEY_DOWN", "left": "KEY_LEFT", "right": "KEY_RIGHT", "ok": "KEY_ENTER",
@@ -205,6 +224,34 @@ TV_KEYS = {"up": "KEY_UP", "down": "KEY_DOWN", "left": "KEY_LEFT", "right": "KEY
            "home_hold": "KEY_HOME_HOLD", **{str(n): f"KEY_{n}" for n in range(10)}}
 HELD_KEYS = {"KEY_HOME_HOLD"}  # only for TVs whose driver says it can hold a button (supports())
 TV_SYSTEM_APPS = {"Gallery", "Internet", "e-Manual", "PrivacyChoices", "Universal Guide"}
+
+
+def tv_duration(words: str) -> Optional[int]:
+    """Seconds in "30 seconds", "two minutes", "a minute and a half", "1 minute 30 seconds", "90 secs"; None if
+    the words aren't a time."""
+    total, found = 0.0, False
+    rest = re.sub(r"\s+", " ", words.lower().replace("-", " ")).strip()
+    if rest == "half a minute":
+        return 30
+    for m in re.finditer(r"(?:^|\s|and\s)(\d+(?:\.\d+)?|[a-z]+(?: [a-z]+)?(?: of)?)\s+(seconds?|secs?|minutes?|mins?)"
+                         r"( and a half)?\b", rest):
+        number = m.group(1)
+        n = float(number) if number[0].isdigit() else _COUNT.get(number, _COUNT.get(number.split()[-1]))
+        if n is None:
+            return None
+        n += 0.5 if m.group(3) else 0
+        total += n * (60 if m.group(2).startswith("min") else 1)
+        found = True
+    if not found:
+        return None
+    return int(round(total)) or None
+
+
+def say_duration(seconds: int) -> str:
+    minutes, secs = divmod(seconds, 60)
+    parts = ([f"{minutes} minute{'s' if minutes != 1 else ''}"] if minutes else []) + \
+            ([f"{secs} second{'s' if secs != 1 else ''}"] if secs else [])
+    return " ".join(parts)
 
 
 def _app_words(name: str) -> List[str]:
@@ -231,6 +278,7 @@ class SmartSwitches:
         self._drivers = {d.kind: d for d in drivers}
         self._clock = clock
         self._lock = threading.Lock()
+        self._unmute: Dict[str, Any] = {}  # TV switch id -> the timer that ends "mute the TV for 2 minutes"
         self._known: Dict[str, Dict[str, Any]] = {}  # device key ("kasa-<mac>") -> {kind, host, model}
         self._state: Dict[str, Dict[str, Any]] = {}  # device key -> last sysinfo
         self._failures: Dict[str, int] = {}
@@ -511,13 +559,18 @@ class SmartSwitches:
                     return app_id, name
         return None
 
-    def tv_parse(self, text: str) -> Optional[Tuple[str, Any]]:
-        """('app', (tv, app id, app name)) / ('volume', (tv, 'up')) / ('mute', (tv, 'mute')) / ('what', tv), or None."""
+    def tv_parse(self, text: str, bare: bool = False) -> Optional[Tuple[str, Any]]:
+        """('app', (tv, app id, app name)) / ('volume', (tv, 'up')) / ('mute', (tv, 'mute')) / ('what', tv) /
+        ('play', (tv, 'pause')) / ('seek', (tv, back?, seconds)) / ('mute_for', (tv, seconds)), or None.
+        bare (voice): pause/play/seek/mute without "TV" mean the TV while it's on."""
         t = re.sub(r"\s+", " ", re.sub(r"[^\w\s'+-]", " ", text or "")).strip()
         tvs = self._tvs()
         if not tvs:
             return None
         tv = self._pick_tv(t, tvs)
+        playback = self._tv_playback(t, tv)
+        if playback is not None and (playback[1] or (bare and tv[0].on)):
+            return playback[0]
         m = _TV_LIVE.match(t)
         if m:
             live = [x for x in tvs if hasattr(x[1], "show_live") and x[1].live_app(x[2])]
@@ -543,8 +596,32 @@ class SmartSwitches:
                 return "app", (tv, app[0], app[1])
         return None
 
+    @staticmethod
+    def _tv_playback(t: str, tv) -> Optional[Tuple[Tuple[str, Any], bool]]:
+        """(parsed, said "TV"?) for pause/play, rewind/fast forward and "mute for", or None."""
+        m = _TV_PLAY.match(t)
+        if m:
+            return ("play", (tv, m.group(1).lower())), bool(m.group(2))
+        m = _TV_MUTE_BARE.match(t)
+        if m:
+            return ("mute", (tv, m.group(1).lower())), False
+        m = _TV_MUTE_FOR.match(t)
+        if m:
+            seconds = tv_duration(m.group(2))
+            return (("mute_for", (tv, min(seconds, 3600))), bool(m.group(1) or m.group(3))) if seconds else None
+        m = _TV_SEEK.match(t)
+        if m:
+            verb, named = re.sub(r"[ -]+", " ", m.group(1).lower()), bool(m.group(2) or m.group(4))
+            seconds = tv_duration(m.group(3)) if m.group(3) else None
+            if m.group(3) and seconds is None:
+                return None  # "go back to the beginning", "skip ahead to the end": not a time
+            if seconds is None and verb in _SPOTIFY_WORDS and not named:
+                return None  # "go back" / "skip ahead" alone: Spotify's previous/next song
+            return ("seek", (tv, verb in _BACK_WORDS, min(seconds or SEEK_STEP, SEEK_MAX))), named
+        return None
+
     def tv_command(self, text: str, source: str) -> Optional[str]:
-        parsed = self.tv_parse(text)
+        parsed = self.tv_parse(text, bare=source == "voice")
         if parsed is None:
             return None
         what, detail = parsed
@@ -579,12 +656,53 @@ class SmartSwitches:
             if what == "volume":
                 driver.press(host, *(["KEY_VOLUP" if detail[1] == "up" else "KEY_VOLDOWN"] * VOLUME_STEPS))
                 return f"Okay, {sw.name} {'louder' if detail[1] == 'up' else 'quieter'}."
-            driver.press(host, "KEY_MUTE")  # the TV has one button for both
+            if what == "play":
+                pause = detail[1] == "pause"
+                driver.press(host, "KEY_PAUSE" if pause else "KEY_PLAY")
+                return f"Okay, {sw.name} {'paused' if pause else 'playing'}."
+            if what == "seek":
+                # One arrow press skips SEEK_STEP seconds in the TV apps; the presses are sent in the background
+                # (a third of a second apart: 5 minutes takes 10 s).
+                back, presses = detail[1], max(1, round(detail[2] / SEEK_STEP))
+                keys = ["KEY_LEFT" if back else "KEY_RIGHT"] * presses
+                self._after(0, lambda: self._press_later(sw, driver, host, keys, "seek", source))
+                app_logger.log("info", "tv_seek", tv=sw.name, seconds=presses * SEEK_STEP * (-1 if back else 1),
+                               source=source, component="switches", action="tv")
+                return f"Okay, {'back' if back else 'ahead'} {say_duration(presses * SEEK_STEP)}."
+            # Mute is one button for both ways, so a timed mute is undone by pressing it again; the timer is
+            # dropped when Sentinel is asked to mute or unmute meanwhile (the TV's own remote can't be seen).
+            pending = self._unmute.pop(sw.id, None)
+            if pending is not None:
+                pending.cancel()  # still muted from "mute for": only "unmute" presses the button
+            if pending is None or detail[1] == "unmute":
+                driver.press(host, "KEY_MUTE")
+            if what == "mute_for":
+                self._unmute[sw.id] = self._after(detail[1], lambda: self._press_later(
+                    sw, driver, host, ["KEY_MUTE"], "unmute", source, only=self._unmute.pop(sw.id, None)))
+                return f"Okay, {sw.name} muted for {say_duration(detail[1])}."
             return f"Okay, {sw.name} {'muted' if detail[1] == 'mute' else 'unmuted'}."
         except (OSError, ValueError) as e:
             app_logger.log("warning", "tv_failed", what=what, error_message=str(e), source=source,
                            component="switches", action="tv")
             return f"The {sw.name} didn't do it ({e})."
+
+    def _after(self, seconds: float, fn: Callable[[], None]):
+        timer = threading.Timer(seconds, fn)
+        timer.daemon = True
+        timer.start()
+        return timer
+
+    def _press_later(self, sw: Switch, driver, host: str, keys: List[str], what: str, source: str,
+                     only: Any = True) -> None:
+        """Timed/background presses: skipped when the timer was cancelled (only=None) or the TV went off."""
+        now = next((s for s in self.switches() if s.id == sw.id), None)
+        if only is None or now is None or not now.on:
+            return
+        try:
+            driver.press(host, *keys)
+        except (OSError, ValueError) as e:
+            app_logger.log("warning", "tv_failed", what=what, error_message=str(e), source=source,
+                           component="switches", action="tv")
 
     def tv_apps(self) -> List[str]:
         """The TVs' apps by their short names (for the speech recogniser's hint and replies)."""

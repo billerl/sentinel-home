@@ -84,7 +84,7 @@ class TelegramNotifier:
             "Smart plugs and switches (names from the Kasa app):\n"
             "- Patio lights on / Turn off the patio lights — switch one\n"
             "- Are the patio lights on? — check one\n"
-            "- TV on / TV off; Put on Netflix / Turn on the TV to Hulu (any app on the TV); TV volume up / down; Mute the TV; What's on the TV?\n"
+            "- TV on / TV off; Put on Netflix / Turn on the TV to Hulu (any app on the TV); TV volume up / down; Mute the TV (for 2 minutes); Pause / Resume the TV; Rewind the TV 30 seconds / Fast forward the TV 2 minutes; What's on the TV?\n"
             "- Put the cameras on the Sentinel TV / Reload the cameras — a Fire TV showing the live view\n\n"
             "Routines (when this happens, do that):\n"
             "- New routine: when the back yard camera sees a person after dark, turn on the patio lights until there's no motion for 2 minutes — in plain words (Claude reads it back; tap ✅ to save)\n"
