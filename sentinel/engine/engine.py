@@ -185,6 +185,7 @@ class Engine:
         self._location_alerted: Dict[Tuple[int, int], float] = {}  # (person, place) -> last alert
         self._location_asked: Dict[int, float] = {}  # person -> last time we asked their phone for a fresh fix
         self._outings: Dict[int, float] = {}  # pet -> until when its tracker is asked often ("the dogs are going out")
+        self._beeps: Dict[int, float] = {}  # pet -> when "recall Xena" was asked (the LoRa base picks it up)
         self.presence = None  # PresenceTracker, when object detection + CLIP are available
         self.packages = None  # PackageWatch (parcels left at a door camera), likewise
         from sentinel.engine.camera_light import CameraLights
@@ -411,6 +412,7 @@ class Engine:
                         and bool(self.packages.packages()))
                     or self.location_question(text) is not None
                     or self.outing(text, apply=False) is not None
+                    or self.beep_pets(text, apply=False) is not None
                     or self._indoor_question(text) is not None)
 
         self.telegram.question_filter = _household_filter
@@ -741,8 +743,8 @@ class Engine:
         if TAKEN_IN.match(text.strip()):
             self.telegram.reply_to_chat(chat_id, self.packages_taken_in())
             return
-        outing = self.outing(text)
-        if outing is not None:
+        outing = self.outing(text) or self.beep_pets(text)
+        if outing:
             self.telegram.reply_to_chat(chat_id, "🐕 " + outing)
             return
         lq = self.location_question(text)
@@ -1258,8 +1260,8 @@ class Engine:
             return VoiceReply(self.change_volume(*volume))
         from sentinel.engine.routines import REQUEST as NEW_ROUTINE
 
-        outing = self.outing(low)
-        if outing is not None:
+        outing = self.outing(low) or self.beep_pets(low)
+        if outing:
             return VoiceReply(outing)
         switched = None if NEW_ROUTINE.search(low) else self.switches.command(low, source="voice")
         if switched:
@@ -1453,6 +1455,20 @@ class Engine:
         return (f"OK, I'll keep a close eye on {names}: a position every {OUTING_POLL_SECONDS} seconds for the next "
                 f"hour, or until you say they're in.{yard}")
 
+    def beep_pets(self, text: str, apply: bool = True) -> Optional[str]:
+        """"Recall Xena" / "beep the dogs": the collar's buzzer sounds (the LoRa base sends it an alert-bell
+        message on its next check-in, within ~5 s). The reply, or None if it isn't that."""
+        from sentinel.engine.location import beep_command
+
+        pets = beep_command(text, self.locations.people())
+        if pets is None or not apply:
+            return None if pets is None else ""
+        for p in pets:
+            self._beeps[p.id] = time.time()
+        names = " and ".join(p.name for p in pets)
+        app_logger.log("info", "pet_beep", pets=names, component="engine", action="location")
+        return f"Beeping {names}'s collar{'s' if len(pets) > 1 else ''}."
+
     def owntracks_post(self, username: str, password: str, payload: Any) -> Optional[List[Dict[str, Any]]]:
         """A message from a family phone. Returns what to send back to the phone, or None if the
         login is wrong. A phone left alone mostly re-sends its last position (its 15-minute check-in
@@ -1471,13 +1487,16 @@ class Engine:
             self._location_asked[person.id] = now
             reply = [{"_type": "cmd", "action": "reportLocation"}]
         msg = payload if isinstance(payload, dict) else {}
-        if person.tracker:  # the LoRa base checks in every 20 s: "ping the collar now?"
+        if person.tracker:  # the LoRa base checks in every 5 s: "ping or beep the collar now?"
             from sentinel.engine.location import OUTING_POLL_SECONDS
 
             if (self._outings.get(person.id, 0) > now and (fix is None or now - fix["ts"] >= OUTING_POLL_SECONDS - 5)
                     and now - self._location_asked.get(person.id, 0) >= OUTING_POLL_SECONDS - 5):
                 self._location_asked[person.id] = now
                 reply = [{"_type": "cmd", "action": "reportLocation"}]
+            asked = self._beeps.pop(person.id, None)
+            if asked is not None and now - asked < 60:  # (a beep a minute late would only confuse her)
+                reply = reply + [{"_type": "cmd", "action": "beep"}]
             if msg.get("_type") != "location":
                 return reply  # (check-ins aren't logged: one every 20 s)
         try:

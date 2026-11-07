@@ -18,7 +18,7 @@ import bcrypt
 from sentinel.engine.household import Vehicle
 from sentinel.engine.location import (
     CarLine, LocationQuestion, LocationStore, Person, PersonView, answer_location, change_message, distance_m,
-    location_question, outing_command, owntracks_config, owntracks_link, parse_coordinates, resolve_map_link,
+    location_question, beep_command, outing_command, owntracks_config, owntracks_link, parse_coordinates, resolve_map_link,
 )
 
 HOME = (41.1145, -88.1780)
@@ -185,6 +185,14 @@ class TestOuting(unittest.TestCase):
         for not_it in ("is Grace outside?", "are the dogs out", "Alex is outside", "the lights are out"):
             self.assertIsNone(said(not_it), not_it)
         self.assertIsNone(outing_command("the dogs are out", people[:1]))  # no pets with trackers
+
+    def test_recall(self):
+        people = [Person(1, "Alex"), Person(2, "Grace", tracker="!a"), Person(3, "Ben", tracker="!b")]
+        self.assertEqual([p.name for p in beep_command("Recall Grace", people)], ["Grace"])
+        self.assertEqual([p.name for p in beep_command("beep the dogs", people)], ["Grace", "Ben"])
+        self.assertEqual([p.name for p in beep_command("beep Grace's collar", people)], ["Grace"])
+        for not_it in ("beep Alex", "recall the last message", "beep"):
+            self.assertIsNone(beep_command(not_it, people), not_it)
 
 
 class TestHelpers(unittest.TestCase):

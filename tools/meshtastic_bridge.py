@@ -12,7 +12,9 @@ bridge.json (keep it private: chmod 600):
 
 It also checks in with Sentinel every CHECK_IN_SECONDS. While a pet is out ("the dogs are going out" by voice or
 Telegram) Sentinel answers "reportLocation" (the OwnTracks command it sends phones), and the base asks that
-collar for its position at once, instead of waiting for the tracker's own schedule.
+collar for its position at once, instead of waiting for the tracker's own schedule. "Recall Xena" answers
+"beep": the base sends the collar a bell message, which sounds its buzzer (set the tracker's External
+Notification to beep for the alert bell only, so nothing else makes it beep).
 
 Needs the `meshtastic` Python package. Exits when the radio connection drops (systemd starts it again).
 Positions shared with reduced precision (public channels blur them to kilometres) are posted with that
@@ -27,7 +29,8 @@ import time
 import urllib.request
 
 M_PER_DEG = 111320.0
-CHECK_IN_SECONDS = 20
+CHECK_IN_SECONDS = 5  # "recall Xena" shouldn't wait long
+BELL = "\x07"  # a text with the bell character sounds the collar's buzzer (External Notification: alert bell)
 
 
 def accuracy_m(position: dict) -> float:
@@ -66,8 +69,9 @@ def post(url: str, login: dict, msg: dict) -> list:
     return reply if isinstance(reply, list) else []
 
 
-def wants_position(reply: list) -> bool:
-    return any(isinstance(c, dict) and c.get("_type") == "cmd" and c.get("action") == "reportLocation" for c in reply)
+def commands(reply: list) -> set:
+    """The actions Sentinel asked for: "reportLocation", "beep"."""
+    return {c.get("action") for c in reply if isinstance(c, dict) and c.get("_type") == "cmd"}
 
 
 def main() -> None:
@@ -80,6 +84,13 @@ def main() -> None:
     battery: dict = {}
     lost = threading.Event()
     radio = None
+
+    def beep(node: str) -> None:
+        try:
+            radio.sendText(BELL, destinationId=node, wantAck=True, channelIndex=0)
+            print(f"{node}: beeped", flush=True)
+        except Exception as e:
+            print(f"{node}: couldn't beep: {e}", flush=True)
 
     def ask(node: str) -> None:
         """Ask the collar for its position now (it answers in a few seconds; the answer comes in as a packet)."""
@@ -113,7 +124,10 @@ def main() -> None:
     while not lost.wait(CHECK_IN_SECONDS):
         for node, login in trackers.items():
             try:
-                if wants_position(post(config["sentinel"], login, {"_type": "status"})):
+                wanted = commands(post(config["sentinel"], login, {"_type": "status"}))
+                if "beep" in wanted:
+                    beep(node)
+                if "reportLocation" in wanted:
                     ask(node)
             except OSError:
                 pass  # Sentinel restarting: next time

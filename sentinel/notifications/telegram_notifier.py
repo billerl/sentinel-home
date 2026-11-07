@@ -72,7 +72,7 @@ class TelegramNotifier:
             "- Ask in plain words — Did anyone come by? Any deliveries today? What happened last night?\n"
             "- Movement inside (Wi-Fi sensors) — Any movement inside today? Anyone in the living room this morning?\n"
             "- Family (phones with OwnTracks) — Where is Elizabeth? Who's home? Is Mom at work? When did Ben get to school?\n"
-            "- Pets with a collar tracker — Where's Grace? The dogs are going out (checks often for an hour) / The dogs are in\n"
+            "- Pets with a collar tracker — Where's Grace? The dogs are going out (checks often for an hour) / The dogs are in / Recall Grace (her collar beeps)\n"
             "- Send a 📍 location pin, then a name, to add a place (home, school, the salon)\n"
             "- Help — this message\n\n"
             "Reminders (sent here on Telegram):\n"
