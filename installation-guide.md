@@ -250,6 +250,20 @@ Install Tailscale on the PC and your phone, then browse `http://<tailscale-ip>:8
 
 ---
 
+## Backup drive (optional)
+
+Sentinel can back itself up every night to a USB drive plugged into the PC (Settings → Backup). It only writes
+inside a `Sentinel Backup` folder on the drive, so the drive can hold other files too. Because Sentinel runs as a
+background service, Linux won't let it open USB drives until you allow it once:
+
+```bash
+echo 'polkit.addRule(function(a, s) { if (s.user == "'$USER'" && (a.id == "org.freedesktop.udisks2.filesystem-mount" || a.id == "org.freedesktop.udisks2.filesystem-mount-other-seat")) return polkit.Result.YES; });' | sudo tee /etc/polkit-1/rules.d/50-sentinel-usb.rules
+```
+
+Run it as the user Sentinel runs as. Then plug the drive in and tap **Use this drive for backups**.
+
+---
+
 ## Telegram setup (optional)
 
 1. Create a bot with `@BotFather`, copy the token.  

@@ -126,6 +126,12 @@ class SettingsManager:
             "recap_enabled": True,
             "recap_time": "07:00",
             "recap_since": "21:00",
+            # Nightly backup to a USB drive (sentinel/engine/backup.py): the last N days of video come too, and
+            # backup_remote (an SSH host such as "pi@backup-pi", "" = none) gets the databases and settings.
+            "backup_enabled": True,
+            "backup_time": "03:30",
+            "backup_video_days": 3,
+            "backup_remote": "",
             "package_cameras": "",
             "weather_alerts_enabled": True,
             "weather_alerts_speak": True,

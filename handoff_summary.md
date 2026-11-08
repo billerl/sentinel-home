@@ -250,6 +250,18 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     (`cooking_command`: next/back/repeat/go to step N/how much X/ingredients/timer) only while it's open (4 h),
     the page polls to follow; the timer is spoken by Jarvis when done. "What can I make with X" ranks the box
     locally (`can_make`). The TV tile's "Open remote" is now its own big button beside the power tile.
+  - Backup (2026-11-08, `sentinel/engine/backup.py`, Settings → Backup, state in recorded_videos/backup.json):
+    nightly at `backup_time` (03:30, `due()` like the recap, 3 h window) and "Back up now". Finds USB filesystems
+    with lsblk (transport passed down to partitions) and mounts them with `udisksctl mount` — the service is
+    outside the desktop session, so that needs the polkit rule in installation-guide.md "Backup drive". Only a
+    drive with a "Sentinel Backup" folder is used ("Use this drive" makes it + README.txt); `_remove` refuses any
+    path outside that folder (the family keeps their own files on the drive). Layout: snapshots/<date>/ (every
+    *.db via SQLite's backup API, the small files and folders of recorded_videos, settings.json; last 7 nights),
+    mirror/ (wifi_motion logs, models/, firmware/ minus build dirs; kept in step), videos/<day>/ (the last
+    `backup_video_days` days, newest first; when full, older days give way). `backup_remote` (SSH host,
+    validated against option smuggling) gets the snapshot by rsync into dated folders hard-linked to the night
+    before (last 7). Problems (drive gone after it was set up, copy errors, remote failure) go to the first
+    Telegram chat.
   - Family timeline + personal logins (2026-10-31; restore point: tag `pre-timeline` +
     `../checkpoints/pre-timeline/`). `/timeline`: person chips, month calendar (days with points), the day's
     stops and drives (`sentinel/engine/timeline.py`: positions with acc <= 300 m clustered within 120 m;

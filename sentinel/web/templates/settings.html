@@ -92,6 +92,7 @@
       <a href="#detection">Detection</a>
       <a href="#telegram">Telegram</a>
       <a href="#recording">Recording</a>
+      <a href="#backup">Backup</a>
       <a href="#audio">Audio</a>
       <a href="#spotify">Spotify</a>
       <a href="#weather">Weather</a>
@@ -260,6 +261,25 @@
         </div>
         <p class="hint">Processing rate changes apply after a camera reconnects.</p>
         <div class="save-row"><button class="primary" onclick="saveSection('recording')">Save</button><span class="msg" id="msg-recording"></span></div>
+      </div>
+    </section>
+
+    <!-- ======================= BACKUP ======================= -->
+    <section id="backup">
+      <h2>Backup</h2>
+      <div class="card">
+        <p id="bk-state" style="margin-top:0">Checking…</p>
+        <div id="bk-drives"></div>
+        <div class="row"><button onclick="backupNow()">Back up now</button><span class="msg" id="msg-backup"></span></div>
+        <h3>Every night</h3>
+        <div class="row"><label><input type="checkbox" data-key="backup_enabled"> Back up every night</label></div>
+        <div class="row">
+          <div class="field" style="flex: 0 1 160px"><span>At</span><input type="time" data-key="backup_time"></div>
+          <div class="field" style="flex: 0 1 200px"><span>Days of video to include</span><input type="number" min="0" max="60" data-key="backup_video_days"></div>
+          <div class="field" style="flex: 1 1 240px"><span>Also copy to another computer (SSH, optional)</span><input type="text" placeholder="e.g. backup-pi" data-key="backup_remote"></div>
+        </div>
+        <p class="hint">Everything except the videos is about 1 GB. Each day of video is several GB, so a 128 GB drive holds about two weeks. The other computer only gets the databases, settings and photos, and needs this PC's SSH key.</p>
+        <div class="save-row"><button class="primary" onclick="saveSection('backup')">Save</button><span class="msg" id="msg-backup-save"></span></div>
       </div>
     </section>
 
@@ -487,6 +507,15 @@
       </details>
 
       <details>
+        <summary>Backup</summary>
+        <p>Every night (3:30 am by default) Sentinel copies its databases, settings, family and car photos, recipes and the last few days of video to a USB drive plugged into this PC. A <b>128 GB</b> USB 3 thumb drive holds everything plus about two weeks of video. The databases are copied safely while Sentinel keeps running, the last 7 nights are kept, and the oldest video on the drive makes room for the newest. If a backup goes wrong, or the drive gets unplugged, you get a Telegram message.</p>
+        <p><b>Setting up a drive:</b> plug it in, open <a href="#backup">Backup</a> and tap <b>Use this drive for backups</b>. Its other files are left alone: the backup goes in a <code>Sentinel Backup</code> folder, with a <code>README.txt</code> that explains how to restore.</p>
+        <p><b>One-time permission:</b> Sentinel runs in the background, so Linux doesn't let it open USB drives until you allow it. If the Backup section says so, run this once in a terminal on the PC (it asks for your password):</p>
+        <pre style="white-space:pre-wrap">echo 'polkit.addRule(function(a, s) { if (s.user == "'$USER'" &amp;&amp; (a.id == "org.freedesktop.udisks2.filesystem-mount" || a.id == "org.freedesktop.udisks2.filesystem-mount-other-seat")) return polkit.Result.YES; });' | sudo tee /etc/polkit-1/rules.d/50-sentinel-usb.rules</pre>
+        <p><b>Another computer:</b> to keep a copy away from this PC too (in case of fire or theft), type the SSH name of another computer on your network, such as a Raspberry Pi, under <a href="#backup">Backup</a>. This PC needs to be able to sign in to it with an SSH key, and it gets the databases, settings and photos (no video).</p>
+      </details>
+
+      <details>
         <summary>Troubleshooting</summary>
         <ul>
           <li><b>A camera shows offline</b> — check it has power and network, then press <b>Reconnect</b> under <a href="#cameras">Cameras</a>. Sentinel also retries on its own.</li>
@@ -509,6 +538,7 @@
       recording: ["recording_retention_enabled", "recording_retention_days", "recording_min_free_percent",
                   "night_bug_start_hour", "night_bug_end_hour", "auto_reconnect_enabled",
                   "reconnect_interval_seconds", "feed_fps", "web.max_fps", "web.show_zones"],
+      backup: ["backup_enabled", "backup_time", "backup_video_days", "backup_remote"],
       audio: ["volume", "speech_speed", "voice_id", "voice_jarvis_id", "audio_output", "voice_device", "audio_device", "music_device", "voice_enabled", "voice_wake_threshold", "voice_follow_up"],
       access: ["remote_web_url", "remote_rdp_user"],
       spotify: ["spotify_client_id", "spotify_device", "spotify_fallback_device", "spotify_speaker_name"],
@@ -621,14 +651,68 @@
         body.object_alert_groups = Array.prototype.filter.call(
           document.querySelectorAll("#groups input"), function(i) { return i.checked; }).map(function(i) { return i.value; });
       }
-      say("msg-" + name, "Saving…");
+      var msgId = name === "backup" ? "msg-backup-save" : "msg-" + name;
+      say(msgId, "Saving…");
       try {
         await api("/api/settings", body);
         $("tg-token").value = "";
         await loadSettings();
-        say("msg-" + name, "Saved", true);
+        say(msgId, "Saved", true);
         if (name === "access") loadStatus();
-      } catch (e) { say("msg-" + name, e.message, false); }
+      } catch (e) { say(msgId, e.message, false); }
+    }
+
+    // ---------------- backup ----------------
+    var backupTimer = null;
+    function when(t) {
+      if (!t) return "";
+      var d = new Date(t * 1000), today = new Date();
+      var day = d.toDateString() === today.toDateString() ? "today" :
+        d.toDateString() === new Date(today - 86400000).toDateString() ? "yesterday" : d.toLocaleDateString();
+      return day + " at " + d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    }
+    function gb(n) { return (n / 1073741824).toFixed(n < 10737418240 ? 1 : 0) + " GB"; }
+    async function loadBackup() {
+      clearTimeout(backupTimer);
+      var b = await api("/api/backup").catch(function() { return null; });
+      if (!b) { $("bk-state").textContent = "Couldn't check the backup."; return; }
+      var ours = b.drives.filter(function(d) { return d.ours; })[0];
+      var lines = [];
+      if (b.running) lines.push("⏳ Backing up: " + b.running.toLowerCase() + "…");
+      if (b.last_ok && (!b.last_failed || b.last_ok > b.last_failed)) {
+        lines.push("✅ Last backup " + when(b.last_ok) + (b.video_days != null ? ", with " + b.video_days + " day" + (b.video_days === 1 ? "" : "s") + " of video" : "") +
+                   (b.video_full ? " (the drive is full, so older video was left out)" : "") + ".");
+      } else if (b.last_failed) {
+        lines.push("⚠️ Backup " + when(b.last_failed) + " had problems: " + b.problems.join("; ") + ".");
+      } else if (!ours) {
+        lines.push("No backup yet. Plug a USB drive into this PC, then choose it below.");
+      }
+      if (ours) lines.push("💾 Backup drive: " + (ours.label || ours.path) + ", " + gb(ours.free) + " free of " + gb(ours.size) + ".");
+      if (b.remote) lines.push("🖥️ Copy to " + b.remote + ": " + (b.remote_ok ? "last made " + when(b.remote_ok) : "not made yet") + ".");
+      $("bk-state").innerHTML = lines.map(esc).join("<br>");
+      var html = "";
+      b.drives.forEach(function(d) {
+        if (d.ours) return;
+        var name = esc(d.label || "USB drive") + " (" + gb(d.size) + ")";
+        html += d.mounted
+          ? '<div class="row"><span>' + name + ' is plugged in.</span><button onclick="useDrive(\'' + esc(d.path) + '\')">Use this drive for backups</button></div>'
+          : '<p class="hint">' + name + " is plugged in, but Sentinel isn't allowed to open USB drives yet. See Help → Backup for the one-time setup.</p>";
+      });
+      $("bk-drives").innerHTML = html;
+      if (b.running) backupTimer = setTimeout(loadBackup, 3000);
+    }
+    async function useDrive(path) {
+      if (!confirm("Use this drive for Sentinel's backups? Its other files are left alone; the backup goes in a \"Sentinel Backup\" folder.")) return;
+      say("msg-backup", "Setting it up…");
+      try { var r = await api("/api/backup", { use: path }); say("msg-backup", r.message, true); }
+      catch (e) { say("msg-backup", e.message, false); }
+      loadBackup();
+    }
+    async function backupNow() {
+      say("msg-backup", "Starting…");
+      try { var r = await api("/api/backup", { now: true }); say("msg-backup", r.message, true); }
+      catch (e) { say("msg-backup", e.message, false); }
+      setTimeout(loadBackup, 800);
     }
 
     async function telegramTest() {
@@ -935,6 +1019,7 @@
     loadSettings().catch(function(e) { say("msg-telegram", e.message, false); });
     loadCameras();
     loadStatus();
+    loadBackup();
     setInterval(function() { if (!document.hidden) loadStatus(); }, 15000);
   </script>
 </body>

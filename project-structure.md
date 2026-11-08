@@ -36,6 +36,8 @@ sentinel-home/                         # repository root
     │   ├── recipes.py                 # RecipeBox: family recipes from links (schema.org data, else Claude) and
     │   │                              #   cooking videos (yt-dlp + Whisper + Claude), family version beside the
     │   │                              #   original, swaps/twists, what-can-I-make, cooking mode + Jarvis (recipes.db)
+    │   ├── backup.py                  # Backup: nightly copy to a USB drive (databases, settings, photos, recent
+    │   │                              #   video) and optionally the snapshot to another computer over SSH
     │   ├── news.py                    # HouseNews: unprompted messages (packages, recap, routines, weather)
     │   ├── cars.py                    # Cars: Vehicles page, "whose car?"/"Wrong car?" buttons,
     │   │                              #   driveway arrive/leave events, car statuses

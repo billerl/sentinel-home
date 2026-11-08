@@ -47,6 +47,29 @@ def register(app: Flask, ctx: WebContext) -> None:
             return jsonify({"error": "expected a JSON object"}), 400
         return _result(*engine.update_settings(body))
 
+    @app.route("/api/backup", methods=["GET", "POST"])
+    def api_backup():
+        # GET: the USB drives plugged in and last night's result; POST: {"now": true} or {"use": "/dev/sdX1"}
+        if request.method == "GET":
+            redir = _require_session()
+            if redir:
+                return jsonify({"error": "unauthorized"}), 401
+            if engine is None:
+                return jsonify({"error": "configuration unavailable"}), 503
+            return jsonify(engine.backup.status())
+        err = _config_guard()
+        if err:
+            return err
+        body = request.get_json(silent=True) or {}
+        if body.get("use"):
+            ok, message = engine.backup.use_drive(str(body["use"]))
+            if ok:
+                engine.backup.start()
+            return _result(ok, message)
+        if body.get("now"):
+            return _result(True, "Backing up now." if engine.backup.start() else "A backup is already running.")
+        return jsonify({"error": "nothing to do"}), 400
+
     @app.route("/api/settings/telegram-test", methods=["POST"])
     def api_telegram_test():
         err = _config_guard()

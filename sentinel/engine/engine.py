@@ -229,6 +229,10 @@ class Engine:
 
         self.recipes = RecipeBox(  # the family recipe box (the Recipes page); Claude for swaps and twists
             VIDEO_DIR, self.assistant, speak=lambda text: self.audio.speak(text) if self.audio is not None else None)
+        from sentinel.engine.backup import Backup
+
+        self.backup = Backup(self.settings, VIDEO_DIR, os.getcwd(),  # nightly, to a USB drive (Settings → Backup)
+                             warn=lambda text: [self.telegram.reply_to_chat(c, text) for c in self.telegram.chat_ids[:1]])
         self.spotify = SpotifyService(self.settings, lambda: self.settings_manager.save_settings(force=True))
         self.spotify.open_on_tv = lambda words: self.switches.open_app(words, "spotify", "spotify")
         from sentinel.audio.spotify_player import SpotifyPlayer  # (sentinel.audio loads the speech engines)
@@ -591,6 +595,8 @@ class Engine:
                     self.weather_alerts.tick()  # checks the NWS itself every 2 minutes, on its own thread
                     if self.recap.due(time.time()):
                         threading.Thread(target=self.recap.run, name="recap", daemon=True).start()
+                    if self.backup.due(time.time()):
+                        self.backup.start()
                 for chat_id, text in self.telegram.consume_switch_commands():
                     threading.Thread(target=self._switch_reply, args=(chat_id, text), name="switch",
                                      daemon=True).start()  # a plug that doesn't answer takes seconds

@@ -29,6 +29,15 @@ def _hhmm(value: Any) -> str:
     return "%02d:%s" % (int(m.group(1)), m.group(2))
 
 
+def _backup_remote(value: Any) -> str:
+    from sentinel.engine.backup import REMOTE_HOST
+
+    text = str(value or "").strip()
+    if text and not REMOTE_HOST.match(text):
+        raise ValueError("expected an SSH host like backup-pi or pi@192.168.1.20")
+    return text
+
+
 def _num(lo: float, hi: float, cast: Callable = float) -> Callable[[Any], Any]:
     def check(value: Any) -> Any:
         if isinstance(value, bool):
@@ -153,6 +162,10 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "recap_enabled": _bool,
     "recap_time": _hhmm,
     "recap_since": _hhmm,
+    "backup_enabled": _bool,
+    "backup_time": _hhmm,
+    "backup_video_days": _num(0, 60, int),
+    "backup_remote": _backup_remote,
     "weather_alerts_speak": _bool,
     "household_ask_per_day": _num(0, 20, int),
     "detector_model": _detector_model,
@@ -328,6 +341,8 @@ EVENT_LABELS = {
     "engine_stopped": "Sentinel stopped",
     "recording_maintenance": "Old clips cleaned up",
     "recording_maintenance_failed": "Clip cleanup failed",
+    "backup_done": "Backup made",
+    "backup_failed": "Backup problem",
     "settings_updated": "Settings changed",
     "remote_feature_toggle": "Changed from Telegram",
     "web_login_success": "Web sign-in",
