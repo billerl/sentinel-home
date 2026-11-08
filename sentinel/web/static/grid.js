@@ -649,7 +649,7 @@ function renderSwitches(data) {
         var r = document.createElement("button");
         r.type = "button";
         r.className = "sw-remote";
-        r.textContent = "🎮 Open remote";
+        r.innerHTML = '<span class="ico">🎮</span>Open remote';
         r.onclick = function(ev) { ev.stopPropagation(); openRemote(s.id); };
         t.appendChild(r);
       }

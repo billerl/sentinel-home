@@ -407,12 +407,17 @@ button:disabled { opacity: 0.35; cursor: default; }
 .sw-foot button { width: 100%; margin-bottom: 8px; padding: 9px; border-radius: 10px; font-size: 0.85rem; }
 #sw-msg { color: #ffb3b3; margin-bottom: 6px; }
 #sw-msg:empty { display: none; }
-/* A TV gets a wide tile with a button that opens its remote */
-.sw-cell.wide { grid-column: 1 / -1; }
-.sw-cell.wide .sw-tile { min-height: 96px; }
-.sw-remote { position: absolute; right: 44px; bottom: 10px; padding: 7px 14px; border-radius: 999px;
-             border: 1px solid #2a6f7e; background: #0f2a33; color: #bff3ff; font: inherit; font-size: 0.85rem; cursor: pointer; }
+/* A TV gets a full-width row: its power tile and, beside it (not on it), a big button that opens its remote.
+   The button used to sit inside the tile, and a near miss turned the TV off. */
+.sw-cell.wide { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sw-cell.wide .sw-tile { min-height: 110px; }
+.sw-cell.wide .sw-edit { right: calc(50% + 13px); }
+.sw-remote { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+             min-height: 110px; padding: 14px; border-radius: 16px; border: 1px solid #2a6f7e; background: #0f2a33;
+             color: #bff3ff; font: inherit; font-size: 1.05rem; font-weight: 600; cursor: pointer; }
+.sw-remote .ico { font-size: 1.9rem; line-height: 1; }
 .sw-remote:hover, .sw-remote:focus-visible { background: #16404d; color: #fff; }
+.sw-remote:active { transform: scale(0.97); }
 
 /* ---- TV remote: a sheet over the page (full screen on phones) ---- */
 #tvr { position: fixed; inset: 0; z-index: 1100; display: none; align-items: center; justify-content: center;
