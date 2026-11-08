@@ -72,7 +72,7 @@
     .compose textarea { resize: vertical; min-height: 42px; max-height: 140px; }
     .count { font-size: 0.72rem; color: #6aa; text-align: right; }
     .count.bad { color: #ff6b6b; }
-    .newchat { display: flex; gap: 8px; margin-top: 10px; }
+    .newchat { display: flex; gap: 8px; margin-bottom: 10px; }
 
     .invites { display: grid; grid-template-columns: 1fr; gap: 12px; }
     @media (min-width: 760px) { .invites { grid-template-columns: 1fr 1fr; } }
@@ -111,11 +111,11 @@
       <h2>Chats</h2>
       <div class="chat">
         <div>
-          <div id="chats"></div>
           <div class="newchat">
-            <select id="new-peer" aria-label="Radio to message"></select>
-            <button id="new-go">Message</button>
+            <select id="new-peer" aria-label="Start a chat with"></select>
+            <button id="new-go">Open</button>
           </div>
+          <div id="chats"></div>
         </div>
         <div class="card" id="thread">
           <div id="thread-head">Pick a chat</div>
@@ -239,20 +239,24 @@
     }
 
     function renderChats() {
-      var box = $("chats"), html = "";
-      data.chats.forEach(function (c) {
+      var box = $("chats"), html = "", list = data.chats.slice();
+      if (peer && !chatFor(peer) && nodeFor(peer)) {  // opened from the radio list, nothing sent yet
+        var n = nodeFor(peer), firstDm = list.findIndex(function (c) { return !c.channel; });
+        list.splice(firstDm < 0 ? list.length : firstDm, 0, { peer: peer, name: n.name || n.id, channel: false, private: n.pki, unread: 0 });
+      }
+      list.forEach(function (c) {
         var tag = c.channel ? (c.public ? '<span class="tag">public</span>' : '<span class="tag">group</span>')
                             : (c.private ? '<span class="tag">🔒</span>' : "");
         html += '<button class="conv' + (c.peer === peer ? " sel" : "") + '" data-peer="' + esc(c.peer) + '">' +
           '<span class="top"><span class="n">' + esc(c.name) + "</span>" + tag +
           (c.unread ? '<span class="badge">' + c.unread + "</span>" : "") + "</span>" +
-          '<span class="last">' + esc(c.last || (c.channel ? "No messages yet" : "")) + "</span></button>";
+          '<span class="last">' + esc(c.last || (c.channel ? "No messages yet" : "New chat")) + "</span></button>";
       });
       box.innerHTML = html || '<div class="empty">No chats yet.</div>';
       box.querySelectorAll(".conv").forEach(function (el) {
         el.onclick = function () { openChat(el.dataset.peer, true); };
       });
-      var sel = $("new-peer"), keep = sel.value, opts = '<option value="">Message a radio…</option>';
+      var sel = $("new-peer"), keep = sel.value, opts = '<option value="">Start a chat with…</option>';
       if (JSON.stringify(data.nodes) === nodesShown) return;  // (rebuilding would close an open list)
       nodesShown = JSON.stringify(data.nodes);
       data.nodes.forEach(function (n) {
@@ -354,9 +358,11 @@
       $("thread-head").textContent = nameOf(peer);
       var sub = "";
       if (c && c.channel) sub = c.public ? "The public channel: everyone on the mesh reads it." : "Group: everyone who joined this channel.";
-      else if ((c && c.private) || (n && n.pki)) sub = "Direct message 🔒 private" + (n && n.hops != null ? " · " + (n.hops === 0 ? "heard directly" : n.hops + " relays away") : "");
+      else if ((c && c.private) || (n && n.pki)) sub = "Direct message 🔒 private" + (n && n.hops != null ? " · " + (n.hops === 0 ? "heard directly" : n.hops + (n.hops === 1 ? " relay" : " relays") + " away") : "");
       else sub = "Direct message · the radios haven't swapped keys yet (send them the one-to-one invite below)";
       $("thread-sub").textContent = sub;
+      $("text").placeholder = c && c.channel ? (c.public ? "To everyone on " + c.name + " (public)" : "To everyone in " + c.name)
+                                             : ((c && c.private) || (n && n.pki) ? "Private message to " : "Direct message to ") + nameOf(peer);
       var d;
       try { d = await api("/api/mesh/thread?peer=" + encodeURIComponent(peer)); } catch (e) { return; }
       var key = JSON.stringify(d.messages);
