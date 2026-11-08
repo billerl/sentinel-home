@@ -373,7 +373,7 @@ class Backup:
             return "not a valid host name"
         day = time.strftime("%Y-%m-%d", time.localtime(now))
         try:
-            listing = self.run_cmd(SSH + [host, "mkdir -p sentinel-backup && ls sentinel-backup"],
+            listing = self.run_cmd(SSH + [host, "mkdir -p sentinel-backup && chmod 700 sentinel-backup && ls sentinel-backup"],
                                    capture_output=True, text=True, timeout=60)
             if listing.returncode:
                 return (listing.stderr or "no answer").strip().splitlines()[-1][:120]
