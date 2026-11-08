@@ -33,6 +33,7 @@ from sentinel.logging_utils import app_logger
 KNOWN_FILE = "switches.json"
 POLL_SECONDS = 10.0  # changes made with the plug's own button or the Kasa app show up within this
 DISCOVER_SECONDS = 15 * 60
+TV_APPS_EVERY = 300.0  # the voice hint's app names (each TV remembers its own list for an hour)
 NAME_MAX = 30
 NAME_OK = re.compile(r"^[\w '&().\-]{1,%d}$" % NAME_MAX)
 
@@ -285,6 +286,8 @@ class SmartSwitches:
         self._failures: Dict[str, int] = {}
         self._last_discover = 0.0
         self._mirrors: Dict[str, Any] = {}  # TV switch id -> TVMirror (the remote's screen mirror)
+        self._tv_apps: Tuple[float, List[str]] = (0.0, [])
+        self._tv_apps_busy = False
         self.scanning = False
         self._scan_wanted = False
         self._stopped = threading.Event()
@@ -636,7 +639,7 @@ class SmartSwitches:
             app_logger.log("info", "tv_live_view", tv=sw.name, reload=detail[1], source=source, component="switches", action="tv")
             return f"Okay, {'reloading' if detail[1] else 'showing'} the cameras on the {sw.name}."
         if what == "no_app":
-            return f"I couldn't find {detail[1]} on the {sw.name}. I can open its apps, like {', '.join(self.tv_apps()[:4])}."
+            return f"I couldn't find {detail[1]} on the {sw.name}. I can open its apps, like {', '.join(self._list_tv_apps()[:4])}."
         try:
             if what == "what":
                 if not sw.on:
@@ -714,7 +717,24 @@ class SmartSwitches:
                            component="switches", action="tv")
 
     def tv_apps(self) -> List[str]:
-        """The TVs' apps by their short names (for the speech recogniser's hint and replies)."""
+        """The TVs' apps by their short names (for the speech recogniser's hint and replies). Never waits: asked
+        on every "Hey Jarvis", and a sleeping Fire TV took 10 s to not answer (2026-11-08), so it answers from
+        what it has and refreshes in the background."""
+        at, names = self._tv_apps
+        if self._clock() - at > TV_APPS_EVERY and not self._tv_apps_busy:
+            self._tv_apps_busy = True
+            threading.Thread(target=self._refresh_tv_apps, daemon=True, name="tv-apps").start()
+        return list(names)
+
+    def _refresh_tv_apps(self) -> None:
+        try:
+            self._tv_apps = (self._clock(), self._list_tv_apps())
+        except Exception as e:
+            app_logger.log("info", "tv_apps_failed", error_message=str(e), component="switches", action="apps")
+        finally:
+            self._tv_apps_busy = False
+
+    def _list_tv_apps(self) -> List[str]:
         out: List[str] = []
         for _sw, driver, host in self._tvs():
             for name in driver.apps(host).values():

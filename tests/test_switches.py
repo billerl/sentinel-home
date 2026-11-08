@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -350,7 +351,7 @@ class TestTV(unittest.TestCase):
         said = self.sw.command("turn on the TV to Judge Judy", "voice")
         self.assertTrue(said.startswith("I couldn't find Judge Judy on the TV. I can open its apps, like Netflix"), said)
         self.assertEqual(self.sw.command("turn the TV on", "voice"), "Okay, TV on.")  # no app: just power
-        self.assertNotIn("Gallery", self.sw.tv_apps())
+        self.assertNotIn("Gallery", self.sw._list_tv_apps())
 
     def test_open_spotify_for_play_on_the_tv(self):
         self.assertEqual(self.sw.open_app("tv", "spotify", "spotify"), "TV")
@@ -756,6 +757,45 @@ class TestFireTV(unittest.TestCase):
     def test_apps_are_what_people_open(self):
         self.assertEqual(self.fire.apps("192.168.1.70"), {"de.ozerov.fully": "Sentinel live view",
                                                           "com.netflix.ninja": "Netflix", "com.amazon.avod": "Prime Video"})
+
+    def test_voice_hint_never_waits_for_a_tv(self):
+        """Asked on every "Hey Jarvis": a sleeping Fire TV held the question up 10 s (2026-11-08)."""
+        started = threading.Event()
+        release = threading.Event()
+        real = self.sw._list_tv_apps
+
+        def slow():
+            started.set()
+            release.wait(5)
+            return real()
+        self.sw._list_tv_apps = slow
+        self.assertEqual(self.sw.tv_apps(), [])  # nothing yet: answers at once and asks in the background
+        self.assertTrue(started.wait(2))
+        self.assertEqual(self.sw.tv_apps(), [])  # still asking: not asked twice
+        release.set()
+        for _ in range(100):
+            if self.sw.tv_apps():
+                break
+            threading.Event().wait(0.01)  # (time.sleep is mocked here)
+        self.assertIn("Netflix", self.sw.tv_apps())
+
+    def test_asleep_fire_tv_isnt_asked_again_straight_away(self):
+        from sentinel.engine import fire_tv
+        self.fire.apps("192.168.1.70")
+        mac = next(iter(self.fire._tvs))
+        self.fire._tvs[mac]["apps_at"] = 0  # stale
+        asked = []
+
+        def asleep(host, command, timeout=None):
+            asked.append(command)
+            raise OSError("timed out")
+        self.fire._shell = asleep
+        self.assertIn("Netflix", self.fire.apps("192.168.1.70").values())  # what it had
+        self.assertIn("Netflix", self.fire.apps("192.168.1.70").values())
+        self.assertEqual(len(asked), 1)
+        self.fire._apps_failed["192.168.1.70"] -= fire_tv.APPS_RETRY
+        self.fire.apps("192.168.1.70")
+        self.assertEqual(len(asked), 2)
 
     def test_commands_go_to_the_tv_named(self):
         self.assertEqual(self.sw.command("open prime video on the sentinel tv", "voice"), "Okay, Prime Video on the Sentinel TV.")

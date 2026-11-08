@@ -29,6 +29,7 @@ KEY_DIR = ".adb"
 PORT = 5555
 SCAN_EVERY = 6 * 3600.0  # look for newly enabled Fire TVs across the home network at most this often
 APPS_EVERY = 3600.0
+APPS_RETRY = 600.0  # after a Fire TV didn't answer
 LIVE_VIEW_APPS = ("de.ozerov.fully", "com.fullykiosk.emm")  # Fully Kiosk Browser: Sentinel's live view
 # The remote's keys (named as Samsung's, see switches.TV_KEYS) -> Android key codes.
 KEYS = {"KEY_UP": "KEYCODE_DPAD_UP", "KEY_DOWN": "KEYCODE_DPAD_DOWN", "KEY_LEFT": "KEYCODE_DPAD_LEFT",
@@ -108,6 +109,7 @@ class FireTVDriver:
         self._last_scan = 0.0
         self._input: Dict[str, Optional[Tuple[str, set]]] = {}  # host -> (input device, its key codes) or None
         self._tvs: Dict[str, Dict[str, Any]] = {}  # mac -> {host, name, model, apps, apps_at}
+        self._apps_failed: Dict[str, float] = {}  # host -> when listing its apps last failed
         try:
             with open(self.path) as f:
                 self._tvs = {k: v for k, v in json.load(f).items() if isinstance(v, dict)}
@@ -331,13 +333,16 @@ class FireTVDriver:
         mac, tv = self._tv(host)
         if mac is None:
             return {}
-        if tv.get("apps") and time.time() - tv.get("apps_at", 0) < APPS_EVERY:
+        now = time.time()
+        if tv.get("apps") and (now - tv.get("apps_at", 0) < APPS_EVERY
+                               or now - self._apps_failed.get(host, 0) < APPS_RETRY):
             return dict(tv["apps"])
         try:  # what the family installed, plus Amazon's own apps people open (Prime Video, Silk)
             listed = self._shell(host, "pm list packages -3; echo ---; pm list packages").split("---")
             packages = [[ln.split(":", 1)[1].strip() for ln in part.splitlines() if ln.startswith("package:")]
                         for part in listed]
         except (OSError, ValueError):
+            self._apps_failed[host] = now  # asleep: don't hold every other command up asking again straight away
             return dict(tv.get("apps") or {})
         found: Dict[str, str] = {}
         for pkg in sorted(set(packages[0]) | {p for p in (packages[1] if len(packages) > 1 else []) if p in APP_NAMES}):
