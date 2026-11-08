@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <meta name="theme-color" content="#001525">
+  <title>Sentinel — Mesh</title>
+  <style>
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; }
+    a { color: #00ffff; }
+    header { position: sticky; top: 0; z-index: 10; background: #1a1a1a; border-bottom: 1px solid #033; }
+    .bar { display: flex; align-items: center; gap: 12px; padding: 0 1rem; height: 44px; }
+    .bar a { text-decoration: none; font-size: 0.85rem; }
+    h1 { font-size: 0.95rem; margin: 0; flex: 1; color: #00ffff; }
+    main { max-width: 980px; margin: 0 auto; padding: 12px 16px 60px; }
+    section { margin: 18px 0 28px; }
+    h2 { font-size: 1rem; color: #00ffff; margin: 0 0 10px; border-bottom: 1px solid #033; padding-bottom: 6px; }
+    .intro { font-size: 0.85rem; line-height: 1.6; color: #9cc; margin: 4px 0 0; }
+    .card { background: #0b0b0b; border: 1px solid #033; border-radius: 6px; padding: 12px 14px; margin-bottom: 12px; }
+    .status { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; margin: 12px 0 0; }
+    .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex: none; background: #444; }
+    .dot.on { background: #3f3; box-shadow: 0 0 6px #3f3; }
+    .dot.off { background: #f55; box-shadow: 0 0 6px #f55; }
+    [hidden] { display: none !important; }
+    input[type=text], select, textarea {
+      background: #111; color: #e6ffff; border: 1px solid #066; border-radius: 4px;
+      padding: 7px 8px; font: inherit; font-size: 0.9rem; width: 100%; color-scheme: dark;
+    }
+    button {
+      background: rgba(0,255,255,0.15); color: #00ffff; border: 1px solid #00ffff;
+      padding: 7px 12px; border-radius: 4px; cursor: pointer; font: inherit; font-size: 0.85rem;
+    }
+    button.primary { background: #00ffff; color: #000; font-weight: 600; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    label.check { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; cursor: pointer; }
+    .msg { font-size: 0.8rem; min-height: 1.2em; }
+    .msg.ok { color: #6f6; } .msg.err { color: #ff6b6b; }
+    .hint { color: #6aa; font-size: 0.78rem; line-height: 1.5; margin: 6px 0 0; }
+    .empty { color: #6aa; font-size: 0.85rem; padding: 6px 0; }
+    .warn { color: #ffd479; font-size: 0.8rem; line-height: 1.5; }
+
+    .chat { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (min-width: 760px) { .chat { grid-template-columns: 280px 1fr; } }
+    #chats { display: flex; flex-direction: column; gap: 6px; }
+    .conv { text-align: left; background: #0b0b0b; border: 1px solid #033; color: #cfe; padding: 9px 10px;
+            display: flex; flex-direction: column; gap: 2px; width: 100%; }
+    .conv.sel { border-color: #00ffff; background: #021c1c; }
+    .conv .top { display: flex; align-items: center; gap: 6px; font-weight: 600; color: #fff; }
+    .conv .top .n { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .conv .last { font-size: 0.78rem; color: #6aa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .badge { background: #00ffff; color: #000; border-radius: 10px; padding: 0 7px; font-size: 0.75rem; font-weight: 700; }
+    .tag { font-size: 0.7rem; color: #9cc; border: 1px solid #066; border-radius: 3px; padding: 0 4px; font-weight: 400; }
+    #thread { display: flex; flex-direction: column; min-height: 360px; }
+    #thread-head { font-weight: 600; color: #fff; margin-bottom: 4px; }
+    #thread-sub { font-size: 0.78rem; color: #6aa; margin-bottom: 8px; line-height: 1.4; }
+    #messages { flex: 1; overflow-y: auto; max-height: 55vh; display: flex; flex-direction: column; gap: 8px;
+                padding: 6px 2px; }
+    .bubble { max-width: 82%; padding: 7px 10px; border-radius: 10px; font-size: 0.9rem; line-height: 1.4;
+              white-space: pre-wrap; overflow-wrap: anywhere; }
+    .bubble.in { align-self: flex-start; background: #12262a; }
+    .bubble.out { align-self: flex-end; background: #00444a; }
+    .bubble .who { font-size: 0.72rem; color: #9cc; margin-bottom: 2px; }
+    .bubble .when { font-size: 0.7rem; color: #6aa; margin-top: 3px; text-align: right; }
+    .bubble .when.bad { color: #ff8a8a; }
+    .compose { display: flex; gap: 8px; margin-top: 8px; align-items: flex-end; }
+    .compose textarea { resize: vertical; min-height: 42px; max-height: 140px; }
+    .count { font-size: 0.72rem; color: #6aa; text-align: right; }
+    .count.bad { color: #ff6b6b; }
+    .newchat { display: flex; gap: 8px; margin-top: 10px; }
+
+    .invites { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (min-width: 760px) { .invites { grid-template-columns: 1fr 1fr; } }
+    .invites h3 { font-size: 0.95rem; margin: 0 0 6px; color: #fff; }
+    .qr { background: #fff; display: inline-block; padding: 4px; border-radius: 4px; margin-top: 8px; }
+    .qr svg { display: block; width: 190px; height: 190px; }
+    code.link { display: block; word-break: break-all; background: #111; padding: 6px 8px; border-radius: 4px;
+                font-size: 0.72rem; color: #e6ffff; margin: 8px 0; max-height: 4.5em; overflow: hidden; }
+    .btns { display: flex; flex-wrap: wrap; gap: 8px; }
+
+    .node { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid #022; }
+    .node .n { font-weight: 600; color: #fff; flex: 1; min-width: 10rem; }
+    .node .meta { font-size: 0.78rem; color: #6aa; }
+    .row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
+    .field { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; flex: 1 1 160px; min-width: 0; }
+    .field span { color: #9cc; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <a href="{{ url_for('index') }}">← Home</a>
+      <h1>Mesh chat</h1>
+      <a href="{{ url_for('people_page') }}">Family</a>
+      <a href="{{ url_for('settings_page') }}">Settings</a>
+    </div>
+  </header>
+
+  <main>
+    <p class="intro">Text family and friends over the <b>Meshtastic</b> radio mesh, through the LoRa base station
+      that listens for the dog's collar. It works without phone service or internet: radios pass messages along to
+      each other for miles. New messages to the house come to Telegram.</p>
+    <p class="status"><span class="dot" id="dot"></span><span id="status">Checking the base station…</span></p>
+
+    <section>
+      <h2>Chats</h2>
+      <div class="chat">
+        <div>
+          <div id="chats"></div>
+          <div class="newchat">
+            <select id="new-peer" aria-label="Radio to message"></select>
+            <button id="new-go">Message</button>
+          </div>
+        </div>
+        <div class="card" id="thread">
+          <div id="thread-head">Pick a chat</div>
+          <div id="thread-sub"></div>
+          <div id="messages"></div>
+          <div class="compose" id="compose" hidden>
+            <textarea id="text" rows="2" placeholder="Message"></textarea>
+            <button class="primary" id="send">Send</button>
+          </div>
+          <div class="count" id="count" hidden></div>
+          <div class="msg" id="send-msg"></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Invite someone</h2>
+      <p class="intro">They need a Meshtastic radio paired with the Meshtastic app on their phone, within reach of the
+        mesh. Have them scan a code below with their phone's camera (or send them the link): it opens in the
+        Meshtastic app. If a web page opens instead, use the app's own <i>scan QR code</i> option.</p>
+      <div class="invites">
+        <div class="card">
+          <h3>Chat one-to-one</h3>
+          <div class="hint">Adds the base station to their contacts, so they can message it straight away
+            (no waiting for the radios to find each other). Private: only the two radios can read it.
+            Nothing secret is in this code.</div>
+          <div id="contact-box"><div class="empty">Waiting for the base station…</div></div>
+        </div>
+        <div class="card">
+          <h3>Family group chat</h3>
+          <div class="hint">A private channel everyone in the family can join: one message reaches all of
+            them.</div>
+          <div id="family-box"><div class="empty">Waiting for the base station…</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Radios the base station hears</h2>
+      <div id="nodes"><div class="empty">Waiting for the base station…</div></div>
+      <p class="hint">🔒 = the two radios have swapped keys, so direct messages are private. Without it a direct message
+        goes out on the public channel (other radios relay it but don't show it). “Direct” radios are heard
+        without a relay. A better-placed antenna (higher, by a window or outside) hears many more.</p>
+    </section>
+
+    <section>
+      <h2>Base station</h2>
+      <div class="card">
+        <div class="row">
+          <label class="field"><span>Name everyone on the mesh sees</span><input type="text" id="base-name" maxlength="39"></label>
+          <label class="field" style="flex: 0 1 110px"><span>Short name</span><input type="text" id="base-short" maxlength="4"></label>
+          <button id="base-save">Rename</button>
+        </div>
+        <div class="msg" id="base-msg"></div>
+        <p class="hint">The name is public on the mesh: a first name or a nickname, not your address.</p>
+        <label class="check"><input type="checkbox" id="alerts"> Send new mesh messages to Telegram
+          (direct messages and private channels; not the public channel)</label>
+        <div class="msg" id="alerts-msg"></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    var $ = function (id) { return document.getElementById(id); };
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+      });
+    }
+    async function api(url, body) {
+      var opts = body === undefined ? {} : {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+        body: JSON.stringify(body)
+      };
+      var r = await fetch(url, opts);
+      if (r.status === 401) { location.href = "/login"; throw new Error("signed out"); }
+      var d = await r.json().catch(function () { return {}; });
+      if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
+      return d;
+    }
+    function say(node, text, ok) { node.textContent = text; node.className = "msg" + (ok === undefined ? "" : ok ? " ok" : " err"); }
+    function ago(ts) {
+      var s = Date.now() / 1000 - ts;
+      if (s < 90) return "just now";
+      if (s < 3600) return Math.round(s / 60) + " min ago";
+      if (s < 86400) return Math.round(s / 3600) + " h ago";
+      return Math.round(s / 86400) + " days ago";
+    }
+    function when(ts) {
+      var d = new Date(ts * 1000), today = new Date().toDateString() === d.toDateString();
+      var t = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+      return today ? t : d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " " + t;
+    }
+    var STATUS = { queued: "⏳ waiting for the base station", sent: "✓ sent", relayed: "✓ a radio passed it on",
+                   delivered: "✓✓ delivered", heard: "" };
+
+    var data = null, peer = null, shown = "", nodesShown = "", invitesShown = "";
+    try { peer = localStorage.getItem("mesh-peer"); } catch (e) {}
+
+    function chatFor(p) { return data && data.chats.find(function (c) { return c.peer === p; }); }
+    function nodeFor(p) { return data && data.nodes.find(function (n) { return n.id === p; }); }
+    function nameOf(p) {
+      var c = chatFor(p), n = nodeFor(p);
+      return (c && c.name) || (n && n.name) || p;
+    }
+
+    function renderStatus() {
+      var b = data.base, dot = $("dot");
+      dot.className = "dot " + (data.connected ? "on" : "off");
+      if (!data.checked_in) {
+        $("status").textContent = "The base station hasn't checked in since Sentinel started. It needs the newest " +
+          "tools/meshtastic_bridge.py (see Help).";
+        return;
+      }
+      var name = b.name ? "“" + b.name + "” (" + b.id + ")" : "The base station";
+      $("status").textContent = data.connected
+        ? name + " is connected · hears " + data.nodes.length + " other radio" + (data.nodes.length === 1 ? "" : "s")
+        : name + " is not connected (last check-in " + ago(data.checked_in) + "). Messages wait until it's back.";
+    }
+
+    function renderChats() {
+      var box = $("chats"), html = "";
+      data.chats.forEach(function (c) {
+        var tag = c.channel ? (c.public ? '<span class="tag">public</span>' : '<span class="tag">group</span>')
+                            : (c.private ? '<span class="tag">🔒</span>' : "");
+        html += '<button class="conv' + (c.peer === peer ? " sel" : "") + '" data-peer="' + esc(c.peer) + '">' +
+          '<span class="top"><span class="n">' + esc(c.name) + "</span>" + tag +
+          (c.unread ? '<span class="badge">' + c.unread + "</span>" : "") + "</span>" +
+          '<span class="last">' + esc(c.last || (c.channel ? "No messages yet" : "")) + "</span></button>";
+      });
+      box.innerHTML = html || '<div class="empty">No chats yet.</div>';
+      box.querySelectorAll(".conv").forEach(function (el) {
+        el.onclick = function () { openChat(el.dataset.peer, true); };
+      });
+      var sel = $("new-peer"), keep = sel.value, opts = '<option value="">Message a radio…</option>';
+      if (JSON.stringify(data.nodes) === nodesShown) return;  // (rebuilding would close an open list)
+      nodesShown = JSON.stringify(data.nodes);
+      data.nodes.forEach(function (n) {
+        opts += '<option value="' + esc(n.id) + '">' + esc(n.name || n.id) + (n.short ? " (" + esc(n.short) + ")" : "") +
+          (n.pki ? " 🔒" : "") + "</option>";
+      });
+      sel.innerHTML = opts;
+      sel.value = keep;
+    }
+
+    function renderInvites() {
+      var key = JSON.stringify([data.invites, data.family_channel, data.making_channel, data.connected, data.base.name]);
+      if (key === invitesShown) return;  // (keep "Copied ✓" and a half-made selection)
+      invitesShown = key;
+      var c = $("contact-box"), f = $("family-box");
+      c.innerHTML = data.invites.contact ? inviteHtml("contact", data.invites.contact,
+        "Then “" + (data.base.name || "the base station") + "” appears in their node list: tap it and send a message.")
+        : '<div class="empty">' + (data.connected ? "The base station hasn't sent its contact code yet." : "Needs the base station connected.") + "</div>";
+      if (data.invites.family) {
+        f.innerHTML = inviteHtml("family", data.invites.family, "") +
+          '<div class="warn">Anyone with this code can read the family chat: share it only with family, in person or in a private text.</div>';
+      } else if (data.family_channel || data.making_channel) {
+        f.innerHTML = '<div class="empty">Adding the channel… (a few seconds)</div>';
+      } else {
+        f.innerHTML = '<p class="hint">The base station doesn\'t have a Family channel yet. Adding one doesn\'t change ' +
+          "the dog's collar or the public channel.</p>" +
+          '<button id="make-family"' + (data.connected ? "" : " disabled") + ">Add the Family channel</button>" +
+          '<div class="msg" id="family-msg"></div>';
+        $("make-family").onclick = async function () {
+          this.disabled = true;
+          try { say($("family-msg"), (await api("/api/mesh/family-channel", {})).message, true); }
+          catch (e) { say($("family-msg"), e.message, false); this.disabled = false; }
+        };
+      }
+      document.querySelectorAll("[data-share]").forEach(function (b) {
+        b.onclick = async function () {
+          var url = data.invites[b.dataset.share], done = b.dataset.done;
+          try {
+            if (navigator.share && b.dataset.how === "share") { await navigator.share({ url: url }); return; }
+            await navigator.clipboard.writeText(url);
+            b.textContent = "Copied ✓";
+          } catch (e) {
+            if (e && e.name === "AbortError") return;
+            var code = b.closest(".card").querySelector("code.link");
+            var range = document.createRange(); range.selectNodeContents(code);
+            getSelection().removeAllRanges(); getSelection().addRange(range);
+            b.textContent = "Selected: copy it";
+          }
+          setTimeout(function () { b.textContent = done; }, 2500);
+        };
+      });
+    }
+    function inviteHtml(kind, url, after) {
+      var buttons = '<button data-share="' + kind + '" data-how="copy" data-done="Copy link">Copy link</button>';
+      if (navigator.share) buttons += '<button data-share="' + kind + '" data-how="share" data-done="Send…">Send…</button>';
+      return '<div class="qr">' + (data.qr[kind] || "") + "</div>" +
+        '<code class="link">' + esc(url) + "</code>" + '<div class="btns">' + buttons + "</div>" +
+        (after ? '<p class="hint">' + esc(after) + "</p>" : "");
+    }
+
+    function renderNodes() {
+      var box = $("nodes");
+      if (!data.nodes.length) {
+        box.innerHTML = '<div class="empty">' + (data.connected ? "No other radios heard yet." : "Waiting for the base station…") + "</div>";
+        return;
+      }
+      box.innerHTML = data.nodes.map(function (n) {
+        var hops = n.hops == null ? "" : n.hops === 0 ? "direct" : n.hops + " relay" + (n.hops === 1 ? "" : "s") + " away";
+        var bits = [n.id, hops, n.heard ? "heard " + ago(n.heard) : ""].filter(Boolean).join(" · ");
+        return '<div class="node"><span class="n">' + esc(n.name || n.id) + (n.short ? ' <span class="tag">' + esc(n.short) + "</span>" : "") +
+          (n.pki ? " 🔒" : "") + '</span><span class="meta">' + esc(bits) + '</span>' +
+          '<button data-msg="' + esc(n.id) + '">Message</button></div>';
+      }).join("");
+      box.querySelectorAll("[data-msg]").forEach(function (b) {
+        b.onclick = function () { openChat(b.dataset.msg, true); };
+      });
+    }
+
+    async function openChat(p, scroll) {
+      peer = p;
+      try { localStorage.setItem("mesh-peer", p); } catch (e) {}
+      shown = "";
+      $("compose").hidden = false;
+      $("count").hidden = false;
+      say($("send-msg"), "");
+      if (data) renderChats();
+      await loadThread();
+      if (scroll && window.innerWidth < 760) $("thread").scrollIntoView({ behavior: "smooth" });
+    }
+
+    async function loadThread() {
+      if (!peer) return;
+      var c = chatFor(peer), n = nodeFor(peer);
+      $("thread-head").textContent = nameOf(peer);
+      var sub = "";
+      if (c && c.channel) sub = c.public ? "The public channel: everyone on the mesh reads it." : "Group: everyone who joined this channel.";
+      else if ((c && c.private) || (n && n.pki)) sub = "Direct message 🔒 private" + (n && n.hops != null ? " · " + (n.hops === 0 ? "heard directly" : n.hops + " relays away") : "");
+      else sub = "Direct message · the radios haven't swapped keys yet (send them the one-to-one invite below)";
+      $("thread-sub").textContent = sub;
+      var d;
+      try { d = await api("/api/mesh/thread?peer=" + encodeURIComponent(peer)); } catch (e) { return; }
+      var key = JSON.stringify(d.messages);
+      if (key === shown) return;  // (don't jump the scroll while reading)
+      shown = key;
+      var box = $("messages");
+      box.innerHTML = d.messages.length ? d.messages.map(function (m) {
+        var st = m.inbound ? "" : (STATUS[m.status] !== undefined ? STATUS[m.status] : "✗ " + m.status.replace(/^failed: /, "didn't go: "));
+        var bad = !m.inbound && m.status.indexOf("failed") === 0;
+        return '<div class="bubble ' + (m.inbound ? "in" : "out") + '">' +
+          (m.inbound && c && c.channel ? '<div class="who">' + esc(m.name) + "</div>" : "") + esc(m.text) +
+          '<div class="when' + (bad ? " bad" : "") + '">' + esc(when(m.ts) + (st ? " · " + st : "")) + "</div></div>";
+      }).join("") : '<div class="empty">No messages yet. Say hello!</div>';
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function updateCount() {
+      var n = new TextEncoder().encode($("text").value.trim()).length, max = data ? data.text_max : 200;
+      $("count").textContent = n + " / " + max;
+      $("count").className = "count" + (n > max ? " bad" : "");
+      $("send").disabled = !n || n > max;
+    }
+    $("text").addEventListener("input", updateCount);
+    $("text").addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (!$("send").disabled) send(); }
+    });
+    async function send() {
+      var text = $("text").value.trim();
+      if (!peer || !text) return;
+      $("send").disabled = true;
+      try {
+        var d = await api("/api/mesh/send", { peer: peer, text: text });
+        $("text").value = "";
+        say($("send-msg"), d.message.indexOf("Queued") === 0 ? d.message : "", true);
+        shown = "";
+        await loadThread();
+      } catch (e) { say($("send-msg"), e.message, false); }
+      updateCount();
+    }
+    $("send").onclick = send;
+    $("new-go").onclick = function () { if ($("new-peer").value) openChat($("new-peer").value, true); };
+
+    $("base-save").onclick = async function () {
+      try { say($("base-msg"), (await api("/api/mesh/base-name", { name: $("base-name").value, short: $("base-short").value })).message, true); }
+      catch (e) { say($("base-msg"), e.message, false); }
+    };
+    $("alerts").onchange = async function () {
+      try { say($("alerts-msg"), (await api("/api/mesh/alerts", { on: this.checked })).message, true); }
+      catch (e) { say($("alerts-msg"), e.message, false); this.checked = !this.checked; }
+    };
+
+    var first = true;
+    async function load() {
+      try { data = await api("/api/mesh"); } catch (e) { $("status").textContent = "Couldn't reach Sentinel: " + e.message; return; }
+      renderStatus();
+      renderChats();
+      renderInvites();
+      renderNodes();
+      $("alerts").checked = data.alerts;
+      if (document.activeElement !== $("base-name") && document.activeElement !== $("base-short") && !$("base-name").value) {
+        $("base-name").value = data.base.name || "";
+        $("base-short").value = data.base.short || "";
+      }
+      if (first) {
+        first = false;
+        if ((!peer || !chatFor(peer)) && data.chats.length)  // the latest conversation
+          peer = data.chats.slice().sort(function (a, b) { return b.ts - a.ts; })[0].peer;
+        if (peer) openChat(peer, false);
+        updateCount();
+      } else if (peer) {
+        loadThread();
+      }
+    }
+    load();
+    setInterval(function () { if (!document.hidden) load(); }, 5000);
+  </script>
+</body>
+</html>

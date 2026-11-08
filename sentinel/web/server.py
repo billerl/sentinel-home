@@ -17,7 +17,7 @@ from sentinel.web.auth import WebAuthManager
 from sentinel.web.bind_util import bind_host_allowed
 from sentinel.web.context import TV_BROWSER, WebContext  # noqa: F401  (TV_BROWSER: tests import it from here)
 from sentinel.web.frame_broker import FrameBroker
-from sentinel.web.routes import (cameras, family, house, live, recordings, routines, sensors, settings,
+from sentinel.web.routes import (cameras, family, house, live, mesh, recordings, routines, sensors, settings,
                                  signin, spotify, switches, vehicles)
 from sentinel.web.routes.signin import _from_this_home, _home_nets  # noqa: F401  (tests use them here)
 
@@ -174,7 +174,7 @@ class WebServer:
         # screens in the house that came in through the tunnel move to the home-network address
         home_base = next((f"http://{h}:{port}" for h in bind_hosts if _home_lan_address(h)), None)
         signin.register(app, ctx, home_base)
-        for area in (live, family, spotify, switches, sensors, house, routines, cameras, vehicles, settings,
+        for area in (live, family, mesh, spotify, switches, sensors, house, routines, cameras, vehicles, settings,
                      recordings):
             area.register(app, ctx)
 

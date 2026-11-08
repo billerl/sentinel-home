@@ -187,6 +187,11 @@ class Engine:
             household_answer=self.cars.answer_question,
             on_home=lambda kind, person_id: self.routines.person(kind, person_id),
             speak=lambda text: self.audio.speak(text) if self.audio is not None else None)
+        from sentinel.engine.mesh import MeshChat
+
+        self.mesh = MeshChat(  # chat over the LoRa mesh, through the pets' base station (the Mesh page)
+            VIDEO_DIR, self.settings, self.settings_manager, self.locations.authenticate, self.telegram,
+            trackers=lambda: [p.tracker for p in self.locations.people() if p.tracker])
         from sentinel.engine.news import HouseNews
 
         self.news = HouseNews(  # package news, the morning recap, routine and weather messages

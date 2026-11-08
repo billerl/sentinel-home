@@ -13,7 +13,8 @@ sentinel-home/                         # repository root
 ├── tools/build_vehicle_prompts.py     # Rebuilds the CLIP vehicle-type text embeddings
 ├── tools/replay_detections.py        # Replays recorded clips through detection (tune thresholds)
 ├── tools/dev_harness.py              # Login-free test copy of the web UI on :18091 (dev only)
-├── tools/meshtastic_bridge.py         # Runs on the LoRa base (a Pi): pets' collar trackers -> /owntracks
+├── tools/meshtastic_bridge.py         # Runs on the LoRa base (a Pi): pets' collar trackers -> /owntracks,
+│                                      #   mesh chat <-> /mesh/bridge
 ├── CLAUDE.md                          # Working notes for Claude Code sessions
 ├── firmware/wifi_motion/              # ESP32-S3 sensor (Arduino): CSI -> motion score, GET /status, setup portal, OTA
 ├── firmware/wifi_motion_beacon/       # ESP32-S3 beacon: fixed-rate 802.11n ESP-NOW frames for the sensor to measure
@@ -30,6 +31,8 @@ sentinel-home/                         # repository root
     │   ├── engine.py                  # Engine: cameras, Telegram control/alerts, audio, web, config API
     │   ├── family.py                  # Family: phones/pets/places glue (OwnTracks posts, arrive/leave + yard
     │   │                              #   alerts, 📍 pins, "where is X?", Family/Timeline page actions)
+    │   ├── mesh.py                    # MeshChat: text chat over the Meshtastic mesh via the LoRa base station
+    │   │                              #   (its check-ins bring/take messages), invites, Telegram alerts (mesh.db)
     │   ├── news.py                    # HouseNews: unprompted messages (packages, recap, routines, weather)
     │   ├── cars.py                    # Cars: Vehicles page, "whose car?"/"Wrong car?" buttons,
     │   │                              #   driveway arrive/leave events, car statuses
@@ -77,7 +80,7 @@ sentinel-home/                         # repository root
     │   ├── context.py                 # WebContext: what every area's routes share (session check, write guard)
     │   ├── routes/                    # Pages + API, one module per area, each with register(app, ctx):
     │   │                              #   signin, live, cameras, recordings, family, vehicles, switches (+ TV
-    │   │                              #   remote), spotify, sensors, house, routines, settings
+    │   │                              #   remote), spotify, sensors, house, routines, settings, mesh
     │   ├── auth.py                    # Bcrypt login, sessions (saved as hashes in .web_sessions.json),
     │   │                              #   lockout / backoff, QR sign-in pairing for TVs
     │   ├── frame_broker.py            # Latest frame per camera; opaque ids; lazy JPEG encoding
@@ -92,7 +95,8 @@ sentinel-home/                         # repository root
     │                                  #   sensors (Wi-Fi motion lines) + sensors_history (movement by day),
     │                                  #   routines (when X then Y editor), house (3D map of the home, live),
     │                                  #   people (Family page), join (setup link opened on a family phone),
-    │                                  #   timeline (Family timeline), account (a person picks their own password)
+    │                                  #   timeline (Family timeline), account (a person picks their own password),
+    │                                  #   mesh (Mesh chat: conversations, invite QR codes, radios heard)
     ├── notifications/
     │   └── telegram_notifier.py       # HTTPS Bot API, commands, clips
     ├── audio/

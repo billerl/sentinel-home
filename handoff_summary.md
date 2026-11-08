@@ -212,6 +212,18 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     `fixes.in_yard`; a change needs two readings in a row, `_yard_pending`, since 2026-11-07: indoor strays) -> Telegram + map pin + speaker, 5 min cooldown. Pets skip place alerts and person routines
     and don't count for `Family.nobody_home`. "The dogs are going out" (`outing_command`): for an hour, check-ins
     get `reportLocation` every 30 s and the base asks the collar (`sendPosition(wantResponse=True)`).
+  - Mesh chat (2026-11-08, `sentinel/engine/mesh.py`, page `/mesh`): the same bridge also checks in at
+    POST /mesh/bridge (Basic auth = the first tracker's login; `bridge_checkin` refuses non-trackers) with the
+    base's id/name, channels (public = default/no key), invite links and every text it heard; Sentinel answers
+    with messages to send (`send`, handed out until the base reports sent/relayed/delivered/failed; given up
+    after 10 min), `want_nodes` (node list at most once a minute; kept in memory) and one-shot
+    `make_channel`/`rename`. Conversations: peer = node id (direct, only those addressed to the base) or
+    "#<channel index>"; inbound deduped on (sender, packet id). Direct messages go out on the public channel
+    (or the private one the radio was heard on), never the primary "Sentinel" one (the collars'); with known
+    keys the firmware encrypts them end to end. Invites: the base's contact URL (meshtastic.org/v/, public key
+    only) and, per private secondary channel, an add-only channel URL (meshtastic.org/e/?add=true#, holds the
+    key; the page response is no-store). The primary channel is never offered. Telegram: direct + private
+    channels, setting `mesh_alerts_enabled`, respects Pause. Pets' collars are left out of the radio list.
   - Family timeline + personal logins (2026-10-31; restore point: tag `pre-timeline` +
     `../checkpoints/pre-timeline/`). `/timeline`: person chips, month calendar (days with points), the day's
     stops and drives (`sentinel/engine/timeline.py`: positions with acc <= 300 m clustered within 120 m;
