@@ -76,20 +76,25 @@ Written {when}.
 
 def _disks(run=subprocess.run) -> List[Dict[str, Any]]:
     """Filesystems on USB drives (lsblk), with the drive's transport passed down to its partitions."""
-    out = run(["lsblk", "-J", "-b", "-o", "PATH,TRAN,TYPE,FSTYPE,MOUNTPOINT,LABEL,SIZE"],
+    out = run(["lsblk", "-J", "-b", "-o", "NAME,PKNAME,PATH,TRAN,TYPE,FSTYPE,MOUNTPOINT,LABEL,SIZE"],
               capture_output=True, text=True, timeout=10)
-    found: List[Dict[str, Any]] = []
+    devs: List[Dict[str, Any]] = []
 
-    def walk(devs, tran):
-        for d in devs or []:
-            t = d.get("tran") or tran
-            if t == "usb" and (d.get("fstype") or "") in FILESYSTEMS:
-                found.append({"path": d.get("path"), "label": d.get("label") or "", "size": int(d.get("size") or 0),
-                              "mount": d.get("mountpoint") or ""})
-            walk(d.get("children"), t)
+    def flatten(items):  # lsblk nests partitions under their disk in some versions and lists them flat in others
+        for d in items or []:
+            devs.append(d)
+            flatten(d.get("children"))
 
-    walk(json.loads(out.stdout or "{}").get("blockdevices"), None)
-    return found
+    flatten(json.loads(out.stdout or "{}").get("blockdevices"))
+    tran = {d.get("name"): d.get("tran") for d in devs}
+
+    def usb(d, hops=0):
+        return d.get("tran") == "usb" or (hops < 4 and d.get("pkname") in tran and
+                                          usb(next(x for x in devs if x.get("name") == d["pkname"]), hops + 1))
+
+    return [{"path": d.get("path"), "label": d.get("label") or "", "size": int(d.get("size") or 0),
+             "mount": d.get("mountpoint") or ""}
+            for d in devs if (d.get("fstype") or "") in FILESYSTEMS and usb(d)]
 
 
 def _mount(path: str, run=subprocess.run) -> str:
@@ -232,7 +237,7 @@ class Backup:
         if drive is None:
             return False, "That drive isn't plugged in any more."
         if not drive["mounted"]:
-            return False, "Sentinel isn't allowed to open USB drives yet (see Help → Backup)."
+            return False, "Sentinel couldn't open that drive (see Help → Backup)."
         try:
             os.makedirs(os.path.join(drive["mount"], FOLDER), exist_ok=True)
             with open(os.path.join(drive["mount"], FOLDER, "README.txt"), "w") as f:

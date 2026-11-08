@@ -34,11 +34,13 @@ class _Disks:
         self.calls.append(cmd)
         if cmd[0] == "lsblk":
             tree = {"blockdevices": [
-                {"path": "/dev/nvme0n1", "tran": "nvme", "type": "disk", "children": [
-                    {"path": "/dev/nvme0n1p2", "tran": None, "type": "part", "fstype": "ext4", "mountpoint": "/"}]},
-                {"path": "/dev/sda", "tran": "usb", "type": "disk", "size": 0},  # an empty card-reader slot
-                {"path": "/dev/sdb", "tran": "usb", "type": "disk", "size": 128_000_000_000, "children": [
-                    {"path": "/dev/sdb1", "tran": None, "type": "part", "fstype": "exfat", "label": "STICK",
+                {"name": "nvme0n1", "path": "/dev/nvme0n1", "tran": "nvme", "type": "disk", "children": [
+                    {"name": "nvme0n1p2", "pkname": "nvme0n1", "path": "/dev/nvme0n1p2", "tran": None,
+                     "type": "part", "fstype": "ext4", "mountpoint": "/"}]},
+                {"name": "sda", "path": "/dev/sda", "tran": "usb", "type": "disk", "size": 0},  # empty card slot
+                {"name": "sdb", "path": "/dev/sdb", "tran": "usb", "type": "disk", "size": 128_000_000_000, "children": [
+                    {"name": "sdb1", "pkname": "sdb", "path": "/dev/sdb1", "tran": None, "type": "part",
+                     "fstype": "exfat", "label": "STICK",
                      "size": 128_000_000_000, "mountpoint": self.mount if self.mounted else None}]}]}
             return SimpleNamespace(returncode=0, stdout=json.dumps(tree), stderr="")
         if cmd[0] == "udisksctl":
@@ -94,6 +96,20 @@ class TestBackup(unittest.TestCase):
         self._use_stick()
         self.assertTrue(self.backup.drives()[0]["ours"])
 
+    def test_flat_lsblk_listing(self):
+        # util-linux 2.39 without a tree lists partitions flat, with only the disk carrying the transport
+        flat = {"blockdevices": [
+            {"name": "sdf", "pkname": None, "path": "/dev/sdf", "tran": "usb", "type": "disk", "fstype": None},
+            {"name": "sdf1", "pkname": "sdf", "path": "/dev/sdf1", "tran": None, "type": "part", "fstype": None},
+            {"name": "sdf2", "pkname": "sdf", "path": "/dev/sdf2", "tran": None, "type": "part", "fstype": "exfat",
+             "label": "Crucial X9", "size": 2000382066688, "mountpoint": None},
+            {"name": "nvme0n1", "pkname": None, "path": "/dev/nvme0n1", "tran": "nvme", "type": "disk"},
+            {"name": "nvme0n1p2", "pkname": "nvme0n1", "path": "/dev/nvme0n1p2", "tran": None, "type": "part",
+             "fstype": "ext4", "mountpoint": "/"}]}
+        run = lambda cmd, **_kw: SimpleNamespace(returncode=0, stdout=json.dumps(flat), stderr="")  # noqa: E731
+        self.assertEqual(B._disks(run), [{"path": "/dev/sdf2", "label": "Crucial X9", "size": 2000382066688,
+                                          "mount": ""}])
+
     def test_a_drive_it_isnt_allowed_to_open_is_reported_not_used(self):
         self.disks.mounted = False
         drives = self.backup.drives()
@@ -101,7 +117,7 @@ class TestBackup(unittest.TestCase):
         self.assertIn(["udisksctl", "mount", "--no-user-interaction", "-b", "/dev/sdb1"], self.disks.calls)
         ok, message = self.backup.use_drive("/dev/sdb1")
         self.assertFalse(ok)
-        self.assertIn("isn't allowed", message)
+        self.assertIn("couldn't open", message)
 
     def test_a_drive_that_isnt_ours_is_left_alone(self):
         result = self.backup.run()

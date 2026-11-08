@@ -512,6 +512,7 @@
         <p><b>Setting up a drive:</b> plug it in, open <a href="#backup">Backup</a> and tap <b>Use this drive for backups</b>. Its other files are left alone: the backup goes in a <code>Sentinel Backup</code> folder, with a <code>README.txt</code> that explains how to restore.</p>
         <p><b>One-time permission:</b> Sentinel runs in the background, so Linux doesn't let it open USB drives until you allow it. If the Backup section says so, run this once in a terminal on the PC (it asks for your password):</p>
         <pre style="white-space:pre-wrap">echo 'polkit.addRule(function(a, s) { if (s.user == "'$USER'" &amp;&amp; (a.id == "org.freedesktop.udisks2.filesystem-mount" || a.id == "org.freedesktop.udisks2.filesystem-mount-other-seat")) return polkit.Result.YES; });' | sudo tee /etc/polkit-1/rules.d/50-sentinel-usb.rules</pre>
+        <p>If a drive still won't open after that, the PC's disk service may be stuck: <code>sudo systemctl restart udisks2</code> fixes it (it doesn't touch any data).</p>
         <p><b>Another computer:</b> to keep a copy away from this PC too (in case of fire or theft), type the SSH name of another computer on your network, such as a Raspberry Pi, under <a href="#backup">Backup</a>. This PC needs to be able to sign in to it with an SSH key, and it gets the databases, settings and photos (no video).</p>
       </details>
 
@@ -696,7 +697,7 @@
         var name = esc(d.label || "USB drive") + " (" + gb(d.size) + ")";
         html += d.mounted
           ? '<div class="row"><span>' + name + ' is plugged in.</span><button onclick="useDrive(\'' + esc(d.path) + '\')">Use this drive for backups</button></div>'
-          : '<p class="hint">' + name + " is plugged in, but Sentinel isn't allowed to open USB drives yet. See Help → Backup for the one-time setup.</p>";
+          : '<p class="hint">' + name + " is plugged in, but Sentinel couldn't open it. See Help → Backup.</p>";
       });
       $("bk-drives").innerHTML = html;
       if (b.running) backupTimer = setTimeout(loadBackup, 3000);
