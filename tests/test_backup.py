@@ -143,6 +143,27 @@ class TestBackup(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(self.stick)), ["2026-11-01", "Photos", B.FOLDER])
         self.assertTrue(os.path.isdir(os.path.join(root, "snapshots")))
 
+    def test_recovery_kit_goes_on_the_drive_only(self):
+        keys = os.path.join(self.tmp, "home", ".ssh")
+        _write(os.path.join(keys, "id_ed25519"), b"private key")
+        _write(os.path.join(self.app, "CLAUDE.local.md"), b"notes about this house")
+        self.settings["backup_extra"] = [keys, "CLAUDE.local.md", "/no/such/file"]
+        self.settings["backup_remote"] = "backup-pi"
+        root = self._use_stick()
+        self.backup.run()
+        files = os.path.join(root, "recovery", "files")
+        self.assertTrue(os.path.exists(os.path.join(files, keys.lstrip(os.sep), "id_ed25519")))
+        self.assertTrue(os.path.exists(os.path.join(files, self.app.lstrip(os.sep), "CLAUDE.local.md")))
+        with open(os.path.join(root, "recovery", "RECOVERY.md")) as f:
+            guide = f.read()
+        self.assertIn(keys, guide)
+        self.assertNotIn("/no/such/file", guide)
+        self.assertIn("backup-pi", guide)
+        rsync = next(c for c in self.disks.calls if c[0] == "rsync")
+        sent = rsync[-2]  # the temporary snapshot folder sent to the other computer
+        self.assertFalse(os.path.exists(sent))  # (gone again) - and it never held the kit:
+        self.assertFalse(any("recovery" in part or "id_ed25519" in part for part in rsync))
+
     def test_old_nights_and_days_roll_off(self):
         root = self._use_stick()
         self.backup.run()

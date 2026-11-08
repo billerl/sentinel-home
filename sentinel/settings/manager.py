@@ -132,6 +132,8 @@ class SettingsManager:
             "backup_time": "03:30",
             "backup_video_days": 3,
             "backup_remote": "",
+            # Keys and notes a new install would need, copied to the drive's recovery/ folder (not the remote).
+            "backup_extra": ["~/.ssh", "CLAUDE.local.md"],
             "package_cameras": "",
             "weather_alerts_enabled": True,
             "weather_alerts_speak": True,

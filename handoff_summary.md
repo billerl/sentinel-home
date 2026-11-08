@@ -261,7 +261,9 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     `backup_video_days` days, newest first; when full, older days give way). `backup_remote` (SSH host,
     validated against option smuggling) gets the snapshot by rsync into dated folders hard-linked to the night
     before (last 7). Problems (drive gone after it was set up, copy errors, remote failure) go to the first
-    Telegram chat.
+    Telegram chat. recovery/ on the drive only: `backup_extra` paths (default ~/.ssh + CLAUDE.local.md; JSON-only
+    setting) copied at their original paths under files/, plus a generated RECOVERY.md (restore steps for a person
+    or a new Claude).
   - Family timeline + personal logins (2026-10-31; restore point: tag `pre-timeline` +
     `../checkpoints/pre-timeline/`). `/timeline`: person chips, month calendar (days with points), the day's
     stops and drives (`sentinel/engine/timeline.py`: positions with acc <= 300 m clustered within 120 m;

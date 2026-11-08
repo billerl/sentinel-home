@@ -47,11 +47,31 @@ README = """This drive holds Sentinel's nightly backup.
 snapshots/<date>  databases, settings.json, family/car photos, recipes - one folder per night
 mirror/           Wi-Fi motion logs, models and firmware (recorded_videos/..., models/, firmware/)
 videos/<day>      the last few days of camera clips
+recovery/         keys, notes and other files this install needs (read recovery/RECOVERY.md first)
 
 To restore on a fresh install: stop Sentinel, copy the newest snapshot's files into recorded_videos/ (except
 settings.json, which goes in the sentinel-home folder), copy mirror/ back over sentinel-home/, and optionally the
 videos/ day folders into recorded_videos/. Then start Sentinel.
 """
+RECOVERY_DEFAULT = ["~/.ssh", "CLAUDE.local.md"]  # backup_extra: what else a new install would need
+RECOVERY = """# Bringing Sentinel back from this drive
+
+For whoever sets Sentinel up again, a person or an AI assistant such as Claude Code: read this first.
+Written {when}.
+
+1. Install Sentinel on the new computer from GitHub (installation-guide.md), ideally as the same user name
+   ({user}). Don't start it yet.
+2. Copy the files of the newest folder in snapshots/ into sentinel-home/recorded_videos/, except settings.json,
+   which goes in sentinel-home/ itself (it holds the camera, Telegram and other logins).
+3. Copy mirror/ over sentinel-home/ (mirror/recorded_videos/wifi_motion -> recorded_videos/wifi_motion, and
+   models/, firmware/). Optionally copy the videos/ day folders into recorded_videos/ too.
+4. files/ holds what else this install needed, at its original path (files/home/{user}/.ssh was ~/.ssh):
+{paths}
+   Copy them back. USB drives don't keep Linux permissions, so afterwards: chmod 700 ~/.ssh && chmod 600 ~/.ssh/*
+   (and the same for any other key folder). Notes files such as CLAUDE.local.md describe this particular house
+   and its devices: read them before changing anything.
+5. Start Sentinel and check sentinel_events.log for engine_started and camera_connected.
+{remote}"""
 
 
 def _disks(run=subprocess.run) -> List[Dict[str, Any]]:
@@ -320,11 +340,47 @@ class Backup:
             shutil.copy2(settings_file, os.path.join(dest, "settings.json"))
         return total
 
+    def _recovery_kit(self, dest: str, now: float) -> int:
+        """Keys and notes a new install would need (backup_extra), at their original paths, plus RECOVERY.md.
+        Only ever on the drive: the remote copy doesn't get them."""
+        files = os.path.join(dest, "files")
+        os.makedirs(files, exist_ok=True)
+        total, kept, listed = 0, set(), []
+        for item in self.settings.get("backup_extra", RECOVERY_DEFAULT) or []:
+            src = os.path.abspath(os.path.join(self.app_dir, os.path.expanduser(str(item))))
+            if not os.path.exists(src):
+                continue
+            target = os.path.join(files, src.lstrip(os.sep))
+            kept.add(src.lstrip(os.sep).split(os.sep)[0])
+            listed.append(f"   - {src}")
+            try:
+                if os.path.isdir(src):
+                    total += sync_tree(src, target)["bytes"]
+                else:
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    shutil.copy2(src, target)
+                    total += os.path.getsize(src)
+            except OSError:
+                pass  # unreadable (another user's file): the rest still counts
+        for name in os.listdir(files):
+            if name not in kept:
+                _remove(os.path.join(files, name))
+        remote = str(self.settings.get("backup_remote") or "").strip()
+        with open(os.path.join(dest, "RECOVERY.md"), "w") as f:
+            f.write(RECOVERY.format(
+                when=time.strftime("%Y-%m-%d %H:%M", time.localtime(now)),
+                user=os.path.basename(os.path.expanduser("~")),
+                paths="\n".join(listed) or "   (nothing)",
+                remote=(f"\nIf this drive is lost too: the databases, settings and photos are also on {remote}, in\n"
+                        f"~/sentinel-backup/<date> (a folder per night).\n") if remote else ""))
+        return total
+
     def _to_drive(self, root: str, now: float) -> Dict[str, Any]:
         day = time.strftime("%Y-%m-%d", time.localtime(now))
         snaps = os.path.join(root, "snapshots")
         self.running = "Copying the databases and settings"
         total = self._snapshot(os.path.join(snaps, day))
+        total += self._recovery_kit(os.path.join(root, "recovery"), now)
         for old in sorted(n for n in os.listdir(snaps) if DAY_DIR.match(n))[:-SNAPSHOTS_KEPT]:
             _remove(os.path.join(snaps, old))
 
