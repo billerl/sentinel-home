@@ -134,8 +134,9 @@
     <section>
       <h2>Invite someone</h2>
       <p class="intro">They need a Meshtastic radio paired with the Meshtastic app on their phone, within reach of the
-        mesh. Have them scan a code below with their phone's camera (or send them the link): it opens in the
-        Meshtastic app. If a web page opens instead, use the app's own <i>scan QR code</i> option.</p>
+        mesh (Meshtastic app 2.6 or newer). Have them scan a code below with their phone's camera, or send them the
+        link: it isn't a web page, it opens in the Meshtastic app. Apps like Messenger open it in their own browser,
+        which shows a blank page: tap ⋯ → <i>Open in browser</i> there, or send it by text message instead.</p>
       <div class="invites">
         <div class="card">
           <h3>Chat one-to-one</h3>
@@ -290,7 +291,12 @@
         b.onclick = async function () {
           var url = data.invites[b.dataset.share], done = b.dataset.done;
           try {
-            if (navigator.share && b.dataset.how === "share") { await navigator.share({ url: url }); return; }
+            if (navigator.share && b.dataset.how === "share") {
+              var what = b.dataset.share === "family" ? "join our Family group chat" : "add " + (data.base.name || "my base station") + " as a contact so we can message";
+              await navigator.share({ text: "Open this on the phone that has the Meshtastic app to " + what +
+                ". If it opens a blank page, tap ⋯ and choose Open in browser, or scan the QR code instead.", url: url });
+              return;
+            }
             await navigator.clipboard.writeText(url);
             b.textContent = "Copied ✓";
           } catch (e) {
