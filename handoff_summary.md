@@ -232,6 +232,24 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     "read my mesh messages" (`read_command`, in the command registry: Telegram + voice) reads up to 5 and marks
     them read. The wrong-login lockout for phones, setup links and the base station is now shared
     (`WebContext.device_login_blocked/failed`).
+  - Recipes (2026-11-08, `sentinel/engine/recipes.py`, page `/recipes`, recipes.db + recorded_videos/recipes/
+    photos): save a link (page, Telegram `save_link_command`, Android share target in manifest.webmanifest ->
+    /recipes?url=). Saving is a background job (`start_save` -> /api/recipes/job/<id>). Pages: schema.org Recipe
+    JSON-LD (`recipe_data`, handles @graph/HowToSection/ISO durations), else Claude reads the page text
+    (`Assistant.complete`, a new one-off call with its own system prompt, same lockdown and daily limit).
+    Videos (`VIDEO_LINK`: Instagram reels, TikTok, Shorts, Facebook): yt-dlp in the venv (keep it current;
+    Instagram reels download without a login as of 2026-11-08), audio via the bundled ffmpeg -> Whisper base.en
+    (faster-whisper's own decoder fails with this PyAV); when caption + speech hold < 3 amounts, on-screen text
+    is read too (RapidOCR in the venv, a frame per 1.5 s, unchanged frames skipped, max 40; ~50 s for a 1-min
+    reel; Instagram's auto captions aren't downloadable). Claude writes it up marking guessed amounts "(est.)",
+    the cover (or the sharpest frame) is the photo, the URL is kept ("▶ Watch the reel"). Pasted text works too.
+    Fetching only reaches public addresses (`_public`, every redirect checked). A recipe has `original` and
+    `ours` (the family's version; edits/swaps/twists are drafts in the page until "Save as our version").
+    Swap = Claude options per ingredient (amounts as written, step rewrites); twist = Claude rewrites keeping
+    ingredient ids. Cooking mode posts its step to /api/recipes/cooking; Jarvis/Telegram cooking commands
+    (`cooking_command`: next/back/repeat/go to step N/how much X/ingredients/timer) only while it's open (4 h),
+    the page polls to follow; the timer is spoken by Jarvis when done. "What can I make with X" ranks the box
+    locally (`can_make`). The TV tile's "Open remote" is now its own big button beside the power tile.
   - Family timeline + personal logins (2026-10-31; restore point: tag `pre-timeline` +
     `../checkpoints/pre-timeline/`). `/timeline`: person chips, month calendar (days with points), the day's
     stops and drives (`sentinel/engine/timeline.py`: positions with acc <= 300 m clustered within 120 m;

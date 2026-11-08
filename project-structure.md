@@ -33,6 +33,9 @@ sentinel-home/                         # repository root
     │   │                              #   alerts, 📍 pins, "where is X?", Family/Timeline page actions)
     │   ├── mesh.py                    # MeshChat: text chat over the Meshtastic mesh via the LoRa base station
     │   │                              #   (its check-ins bring/take messages), invites, Telegram alerts (mesh.db)
+    │   ├── recipes.py                 # RecipeBox: family recipes from links (schema.org data, else Claude) and
+    │   │                              #   cooking videos (yt-dlp + Whisper + Claude), family version beside the
+    │   │                              #   original, swaps/twists, what-can-I-make, cooking mode + Jarvis (recipes.db)
     │   ├── news.py                    # HouseNews: unprompted messages (packages, recap, routines, weather)
     │   ├── cars.py                    # Cars: Vehicles page, "whose car?"/"Wrong car?" buttons,
     │   │                              #   driveway arrive/leave events, car statuses
@@ -80,7 +83,7 @@ sentinel-home/                         # repository root
     │   ├── context.py                 # WebContext: what every area's routes share (session check, write guard)
     │   ├── routes/                    # Pages + API, one module per area, each with register(app, ctx):
     │   │                              #   signin, live, cameras, recordings, family, vehicles, switches (+ TV
-    │   │                              #   remote), spotify, sensors, house, routines, settings, mesh
+    │   │                              #   remote), spotify, sensors, house, routines, settings, mesh, recipes
     │   ├── auth.py                    # Bcrypt login, sessions (saved as hashes in .web_sessions.json),
     │   │                              #   lockout / backoff, QR sign-in pairing for TVs
     │   ├── frame_broker.py            # Latest frame per camera; opaque ids; lazy JPEG encoding
@@ -96,7 +99,8 @@ sentinel-home/                         # repository root
     │                                  #   routines (when X then Y editor), house (3D map of the home, live),
     │                                  #   people (Family page), join (setup link opened on a family phone),
     │                                  #   timeline (Family timeline), account (a person picks their own password),
-    │                                  #   mesh (Mesh chat: conversations, invite QR codes, radios heard)
+    │                                  #   mesh (Mesh chat: conversations, invite QR codes, radios heard),
+    │                                  #   recipes (recipe box, one recipe, cooking mode)
     ├── notifications/
     │   └── telegram_notifier.py       # HTTPS Bot API, commands, clips
     ├── audio/

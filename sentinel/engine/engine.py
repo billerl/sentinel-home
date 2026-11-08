@@ -225,6 +225,10 @@ class Engine:
             self.settings, self.family.home_coords, self.news.tell_everyone,
             lambda text: self.audio.speak(text) if self.audio is not None else None, VIDEO_DIR)
         self.assistant = Assistant(self.settings)
+        from sentinel.engine.recipes import RecipeBox
+
+        self.recipes = RecipeBox(  # the family recipe box (the Recipes page); Claude for swaps and twists
+            VIDEO_DIR, self.assistant, speak=lambda text: self.audio.speak(text) if self.audio is not None else None)
         self.spotify = SpotifyService(self.settings, lambda: self.settings_manager.save_settings(force=True))
         self.spotify.open_on_tv = lambda words: self.switches.open_app(words, "spotify", "spotify")
         from sentinel.audio.spotify_player import SpotifyPlayer  # (sentinel.audio loads the speech engines)
@@ -617,6 +621,7 @@ class Engine:
         from sentinel.engine.packages import TAKEN_IN
         from sentinel.engine.questions import household_question
         from sentinel.engine.recap import RECAP
+        from sentinel.engine.recipes import can_make_command, cooking_command, is_video_link, save_link_command
 
         def send_location_reply(chat_id: str, lq, _text: str) -> None:
             reply, pins = self.family.answer_location_question(lq)
@@ -642,6 +647,22 @@ class Engine:
         commands.add(Command(
             "mesh messages", read_command, lambda _m, _t: self.mesh.read_unread(),
             speak=lambda said: to_speech(said, max_lines=20, max_chars=1200), prefix="📡 "))
+        commands.add(Command(  # cooking mode is open somewhere: "next step", "how much garlic?", "start the timer"
+            "cooking", cooking_command, lambda m, _t: self.recipes.answer_cooking(m, spoken=True),
+            speak=lambda said: to_speech(said, max_lines=20, max_chars=1200), prefix="🍳 ",
+            voice_if=lambda _t: self.recipes.cooking(), claim_if=self.recipes.cooking))
+        commands.add(Command(
+            "what can I make", can_make_command, lambda m, _t: self.recipes.answer_can_make(m),
+            speak=lambda said: said, prefix="🍳 "))
+        def save_recipe(chat_id: str, url: str, _text: str) -> None:
+            if is_video_link(url):
+                self.telegram.reply_to_chat(chat_id, "🎬 Watching the video for the recipe. "
+                                                     "I'll send it here in a minute or two.")
+            self.recipes.start_save(url, "Telegram", on_done=lambda _ok, message, _rid:
+                                    self.telegram.reply_to_chat(chat_id, "🍳 " + message))
+
+        commands.add(Command(  # Telegram only: a recipe link (or an Instagram reel) to keep
+            "save recipe", save_link_command, lambda _u, _t: "", telegram=save_recipe))
         commands.add(Command(
             "location", self.family.location_question, lambda m, _t: self.family.answer_location_question(m)[0],
             speak=to_speech, voice_stage="late", telegram=send_location_reply,

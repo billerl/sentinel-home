@@ -178,11 +178,29 @@ class Assistant:
             self.last_error = f"today's limit of {self._limit()} Claude questions is used up"
             return None
         prompt = f"{context}\n\n{'SAID OUT LOUD' if voice else 'MESSAGE'} FROM THE FAMILY:\n{text.strip()[:1000]}"
+        name = re.sub(r"[^A-Za-z' -]", "", str(name or self.settings.get("voice_name") or "Jarvis"))[:20] or "Jarvis"
+        system = VOICE_SYSTEM_PROMPT.replace("You are Jarvis,", f"You are {name},") if voice else SYSTEM_PROMPT
+        return self._call(claude, prompt, system, voice=voice)
+
+    def complete(self, system: str, prompt: str, what: str) -> Optional[str]:
+        """A one-off job with its own instructions (a recipe swap, say): Claude's reply, or None. Same rules as
+        ask(): opt-in, no tools, counted against the daily limit; what = the job, for the log."""
+        if not self.enabled():
+            self.last_error = "Claude is turned off (Settings → Assistant)"
+            return None
+        claude = find_claude(str(self.settings.get("assistant_claude_path") or ""))
+        if not claude:
+            self.last_error = "the claude command isn't installed"
+            return None
+        if not self._take_slot():
+            self.last_error = f"today's limit of {self._limit()} Claude questions is used up"
+            return None
+        return self._call(claude, prompt, system, what=what)
+
+    def _call(self, claude: str, prompt: str, system: str, voice: bool = False, what: str = "") -> Optional[str]:
         model = str(self.settings.get("assistant_model") or "sonnet")
         started = time.time()
         try:
-            name = re.sub(r"[^A-Za-z' -]", "", str(name or self.settings.get("voice_name") or "Jarvis"))[:20] or "Jarvis"
-            system = VOICE_SYSTEM_PROMPT.replace("You are Jarvis,", f"You are {name},") if voice else SYSTEM_PROMPT
             r = self._run(build_command(claude, prompt, model, system),
                           capture_output=True, text=True,
                           timeout=TIMEOUT_SECONDS, env=_env(), cwd=self._work_dir())
@@ -203,7 +221,7 @@ class Assistant:
                                f"Claude didn't answer ({detail[:120] or 'exit ' + str(r.returncode)})")
         usage = data.get("usage") or {}
         app_logger.log("info" if ok else "warning", "assistant_answered" if ok else "assistant_failed",
-                       seconds=round(time.time() - started, 1), model=model, voice=voice,
+                       seconds=round(time.time() - started, 1), model=model, voice=voice, job=what or None,
                        input_tokens=sum(int(usage.get(k) or 0) for k in
                                         ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")),
                        output_tokens=usage.get("output_tokens"), error_message=None if ok else self.last_error,
