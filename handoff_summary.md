@@ -224,6 +224,8 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     only) and, per private secondary channel, an add-only channel URL (meshtastic.org/e/?add=true#, holds the
     key; the page response is no-store). The primary channel is never offered. Telegram: direct + private
     channels, setting `mesh_alerts_enabled`, respects Pause. Pets' collars are left out of the radio list.
+    Nicknames (table `nicknames`, node -> name; Sentinel-only, never sent to the mesh) replace the radio's name in
+    chats, the radio list, thread senders and Telegram; `radio` / `nick` fields keep the radio's own name.
   - Family timeline + personal logins (2026-10-31; restore point: tag `pre-timeline` +
     `../checkpoints/pre-timeline/`). `/timeline`: person chips, month calendar (days with points), the day's
     stops and drives (`sentinel/engine/timeline.py`: positions with acc <= 300 m clustered within 120 m;

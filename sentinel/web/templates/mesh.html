@@ -57,7 +57,9 @@
     .badge { background: #00ffff; color: #000; border-radius: 10px; padding: 0 7px; font-size: 0.75rem; font-weight: 700; }
     .tag { font-size: 0.7rem; color: #9cc; border: 1px solid #066; border-radius: 3px; padding: 0 4px; font-weight: 400; }
     #thread { display: flex; flex-direction: column; min-height: 360px; }
-    #thread-head { font-weight: 600; color: #fff; margin-bottom: 4px; }
+    #thread-head { font-weight: 600; color: #fff; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    #thread-head button, .node button.nick { padding: 3px 8px; font-size: 0.75rem; font-weight: 400; }
+    .radio { font-size: 0.75rem; color: #6aa; font-weight: 400; }
     #thread-sub { font-size: 0.78rem; color: #6aa; margin-bottom: 8px; line-height: 1.4; }
     #messages { flex: 1; overflow-y: auto; max-height: 55vh; display: flex; flex-direction: column; gap: 8px;
                 padding: 6px 2px; }
@@ -221,7 +223,19 @@
     function nodeFor(p) { return data && data.nodes.find(function (n) { return n.id === p; }); }
     function nameOf(p) {
       var c = chatFor(p), n = nodeFor(p);
-      return (c && c.name) || (n && n.name) || p;
+      return (c && c.name) || (n && (n.nick || n.name)) || p;
+    }
+    function radioOf(p) {  // the radio's own name, when a nickname hides it
+      var c = chatFor(p), n = nodeFor(p);
+      return (n && n.nick && n.name) || (c && c.radio) || "";
+    }
+    async function nickname(p) {
+      var radio = radioOf(p) || nameOf(p), cur = (nodeFor(p) || {}).nick || ((chatFor(p) || {}).radio ? nameOf(p) : "");
+      var v = prompt("Nickname for " + radio + " (only you see it; leave blank to use the radio's own name):", cur);
+      if (v === null) return;
+      try { await api("/api/mesh/nickname", { node: p, name: v }); } catch (e) { alert(e.message); return; }
+      nodesShown = "";
+      await load();
     }
 
     function renderStatus() {
@@ -242,13 +256,13 @@
       var box = $("chats"), html = "", list = data.chats.slice();
       if (peer && !chatFor(peer) && nodeFor(peer)) {  // opened from the radio list, nothing sent yet
         var n = nodeFor(peer), firstDm = list.findIndex(function (c) { return !c.channel; });
-        list.splice(firstDm < 0 ? list.length : firstDm, 0, { peer: peer, name: n.name || n.id, channel: false, private: n.pki, unread: 0 });
+        list.splice(firstDm < 0 ? list.length : firstDm, 0, { peer: peer, name: n.nick || n.name || n.id, radio: n.nick ? n.name : "", channel: false, private: n.pki, unread: 0 });
       }
       list.forEach(function (c) {
         var tag = c.channel ? (c.public ? '<span class="tag">public</span>' : '<span class="tag">group</span>')
                             : (c.private ? '<span class="tag">🔒</span>' : "");
         html += '<button class="conv' + (c.peer === peer ? " sel" : "") + '" data-peer="' + esc(c.peer) + '">' +
-          '<span class="top"><span class="n">' + esc(c.name) + "</span>" + tag +
+          '<span class="top"><span class="n">' + esc(c.name) + (c.radio ? ' <span class="radio">' + esc(c.radio) + "</span>" : "") + "</span>" + tag +
           (c.unread ? '<span class="badge">' + c.unread + "</span>" : "") + "</span>" +
           '<span class="last">' + esc(c.last || (c.channel ? "No messages yet" : "New chat")) + "</span></button>";
       });
@@ -260,7 +274,7 @@
       if (JSON.stringify(data.nodes) === nodesShown) return;  // (rebuilding would close an open list)
       nodesShown = JSON.stringify(data.nodes);
       data.nodes.forEach(function (n) {
-        opts += '<option value="' + esc(n.id) + '">' + esc(n.name || n.id) + (n.short ? " (" + esc(n.short) + ")" : "") +
+        opts += '<option value="' + esc(n.id) + '">' + esc(n.nick ? n.nick + " – " + (n.name || n.id) : n.name || n.id) + (n.short ? " (" + esc(n.short) + ")" : "") +
           (n.pki ? " 🔒" : "") + "</option>";
       });
       sel.innerHTML = opts;
@@ -331,12 +345,17 @@
       box.innerHTML = data.nodes.map(function (n) {
         var hops = n.hops == null ? "" : n.hops === 0 ? "direct" : n.hops + " relay" + (n.hops === 1 ? "" : "s") + " away";
         var bits = [n.id, hops, n.heard ? "heard " + ago(n.heard) : ""].filter(Boolean).join(" · ");
-        return '<div class="node"><span class="n">' + esc(n.name || n.id) + (n.short ? ' <span class="tag">' + esc(n.short) + "</span>" : "") +
+        return '<div class="node"><span class="n">' + esc(n.nick || n.name || n.id) + (n.nick ? ' <span class="radio">' + esc(n.name || "") + "</span>" : "") +
+          (n.short ? ' <span class="tag">' + esc(n.short) + "</span>" : "") +
           (n.pki ? " 🔒" : "") + '</span><span class="meta">' + esc(bits) + '</span>' +
+          '<button class="nick" data-nick="' + esc(n.id) + '" title="Nickname">✏️</button>' +
           '<button data-msg="' + esc(n.id) + '">Message</button></div>';
       }).join("");
       box.querySelectorAll("[data-msg]").forEach(function (b) {
         b.onclick = function () { openChat(b.dataset.msg, true); };
+      });
+      box.querySelectorAll("[data-nick]").forEach(function (b) {
+        b.onclick = function () { nickname(b.dataset.nick); };
       });
     }
 
@@ -355,7 +374,12 @@
     async function loadThread() {
       if (!peer) return;
       var c = chatFor(peer), n = nodeFor(peer);
-      $("thread-head").textContent = nameOf(peer);
+      var head = esc(nameOf(peer)) + (radioOf(peer) ? ' <span class="radio">' + esc(radioOf(peer)) + "</span>" : "");
+      if (!(c && c.channel)) head += '<button id="nick-btn">✏️ Nickname</button>';
+      if ($("thread-head").innerHTML !== head) {
+        $("thread-head").innerHTML = head;
+        if ($("nick-btn")) $("nick-btn").onclick = function () { nickname(peer); };
+      }
       var sub = "";
       if (c && c.channel) sub = c.public ? "The public channel: everyone on the mesh reads it." : "Group: everyone who joined this channel.";
       else if ((c && c.private) || (n && n.pki)) sub = "Direct message 🔒 private" + (n && n.hops != null ? " · " + (n.hops === 0 ? "heard directly" : n.hops + (n.hops === 1 ? " relay" : " relays") + " away") : "");

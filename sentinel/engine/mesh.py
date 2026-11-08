@@ -70,6 +70,8 @@ class MeshChat:
             conn.execute("CREATE INDEX IF NOT EXISTS messages_peer ON messages (peer, ts)")
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS messages_heard ON messages (sender, packet_id)"
                          " WHERE inbound = 1")  # the base sends a message again if Sentinel didn't answer
+            # What the family calls a radio here ("KD1ABC" -> "Uncle Ben"): shown instead of the radio's own name.
+            conn.execute("CREATE TABLE IF NOT EXISTS nicknames (node TEXT PRIMARY KEY, name TEXT NOT NULL)")
         try:
             os.chmod(self.db_path, 0o600)  # family conversations
         except OSError:
@@ -145,7 +147,7 @@ class MeshChat:
         if info.get("public") or not self.settings.get("mesh_alerts_enabled", True):
             return
         where = "" if channel is None else f" in {info.get('name') or 'a channel'}"
-        text = f"📡 {name}{where} (mesh): {text}"
+        text = f"📡 {self.nicknames().get(sender) or name}{where} (mesh): {text}"
         for chat_id in self.telegram.unpaused_chats():
             threading.Thread(target=self.telegram.reply_to_chat, args=(chat_id, text),
                              name="mesh-alert", daemon=True).start()
@@ -189,10 +191,11 @@ class MeshChat:
                 "SELECT peer, MAX(ts) AS ts, SUM(inbound = 1 AND read = 0) AS unread, COUNT(*) AS n FROM messages"
                 " GROUP BY peer").fetchall()
             last = {r["peer"]: r for r in conn.execute(
-                "SELECT m.peer, m.text, m.sender_name, m.inbound FROM messages m JOIN"
+                "SELECT m.peer, m.text, m.sender, m.sender_name, m.inbound FROM messages m JOIN"
                 " (SELECT peer, MAX(id) AS id FROM messages GROUP BY peer) l ON m.id = l.id")}
             names = {r["sender"]: r["sender_name"] for r in conn.execute(  # (the newest name wins)
                 "SELECT sender, sender_name FROM messages WHERE inbound = 1 ORDER BY id")}
+        nicks = self.nicknames()
         chats = []
         for ch in base.get("channels") or []:  # every channel has a conversation, even before anyone writes
             if ch.get("index") == 0 and not ch.get("public"):
@@ -204,19 +207,22 @@ class MeshChat:
                 chats.append({"peer": r["peer"], "name": f"Channel {r['peer'][1:]}", "channel": True, "public": False})
             elif not r["peer"].startswith("#"):
                 node = nodes.get(r["peer"]) or {}
-                chats.append({"peer": r["peer"], "name": node.get("name") or names.get(r["peer"]) or r["peer"],
-                              "channel": False, "private": bool(node.get("pki"))})
+                radio = node.get("name") or names.get(r["peer"]) or r["peer"]
+                chats.append({"peer": r["peer"], "name": nicks.get(r["peer"]) or radio,
+                              "radio": radio if r["peer"] in nicks else "", "channel": False,
+                              "private": bool(node.get("pki"))})
         for c in chats:
             r = next((x for x in rows if x["peer"] == c["peer"]), None)
             c["ts"], c["unread"] = (r["ts"], int(r["unread"] or 0)) if r else (0, 0)
             if c["peer"] in last:
                 m = last[c["peer"]]
-                c["last"] = ("" if not m["inbound"] else m["sender_name"] + ": " if c["channel"] else "") + m["text"]
+                who = nicks.get(m["sender"]) or m["sender_name"]
+                c["last"] = ("" if not m["inbound"] else who + ": " if c["channel"] else "") + m["text"]
         # channels first (Family, then the public one), then direct chats, newest first
         chats.sort(key=lambda c: (not c["channel"], c.get("public", False), -c["ts"]))
         collars = set(self._trackers())
-        heard = sorted((n for n in nodes.values() if n["id"] != me and n["id"] not in collars),
-                       key=lambda n: -(n.get("heard") or 0))
+        heard = sorted((dict(n, nick=nicks.get(n["id"], "")) for n in nodes.values()
+                        if n["id"] != me and n["id"] not in collars), key=lambda n: -(n.get("heard") or 0))
         family = next((c for c in base.get("channels") or [] if c.get("name") == FAMILY_CHANNEL), None)
         return {
             "connected": self.connected(), "checked_in": self._checked_in or None, "now": now,
@@ -234,8 +240,10 @@ class MeshChat:
             rows = conn.execute("SELECT * FROM messages WHERE peer = ? ORDER BY id DESC LIMIT ?",
                                 (peer, limit)).fetchall()
             conn.execute("UPDATE messages SET read = 1 WHERE peer = ? AND read = 0", (peer,))
+        nicks = self.nicknames()
         return [{"id": r["id"], "ts": r["ts"], "inbound": bool(r["inbound"]), "sender": r["sender"],
-                 "name": r["sender_name"], "text": r["text"], "status": r["status"]} for r in reversed(rows)]
+                 "name": nicks.get(r["sender"]) or r["sender_name"], "text": r["text"], "status": r["status"]}
+                for r in reversed(rows)]
 
     def send(self, peer: Any, text: Any) -> Tuple[bool, str]:
         peer = str(peer or "")
@@ -278,6 +286,22 @@ class MeshChat:
         with self._lock:
             self._rename = {"long": long_name, "short": short_name}
         return True, "Renaming the base station… everyone on the mesh will see the new name."
+
+    def nicknames(self) -> Dict[str, str]:
+        with self._connect() as conn:
+            return {r["node"]: r["name"] for r in conn.execute("SELECT node, name FROM nicknames")}
+
+    def set_nickname(self, node: Any, name: Any) -> Tuple[bool, str]:
+        """Blank removes it (back to the radio's own name)."""
+        node, name = _node_id(node), " ".join(_clip(name, 60).split())[:30]
+        if not node:
+            return False, "That isn't a radio."
+        with self._lock, self._connect() as conn:
+            if name:
+                conn.execute("INSERT OR REPLACE INTO nicknames (node, name) VALUES (?, ?)", (node, name))
+            else:
+                conn.execute("DELETE FROM nicknames WHERE node = ?", (node,))
+        return True, f"Nickname saved: {name}." if name else "Nickname removed."
 
     def set_alerts(self, on: Any) -> Tuple[bool, str]:
         if not isinstance(on, bool):

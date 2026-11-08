@@ -90,6 +90,14 @@ def register(app: Flask, ctx: WebContext) -> None:
         body = request.get_json(silent=True) or {}
         return _result(*engine.mesh.rename_base(body.get("name"), body.get("short")))
 
+    @app.route("/api/mesh/nickname", methods=["POST"])
+    def api_mesh_nickname():
+        err = _config_guard()
+        if err:
+            return err
+        body = request.get_json(silent=True) or {}
+        return _result(*engine.mesh.set_nickname(body.get("node"), body.get("name")))
+
     @app.route("/api/mesh/alerts", methods=["POST"])
     def api_mesh_alerts():
         err = _config_guard()

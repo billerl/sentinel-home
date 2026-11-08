@@ -88,6 +88,23 @@ class TestMeshChat(unittest.TestCase):
         self.assertEqual([c["peer"] for c in chats], ["#2", "#1"])  # Family, then public; the collars' never
         self.assertEqual(chats[0]["last"], "Ben: home soon")
 
+    def test_nicknames(self):
+        heard = {"packet": 3, "from": "!b2079b56", "to": "^all", "channel": 2, "name": "KD1ABC", "text": "hi", "ts": 1}
+        self.checkin(nodes=[{"id": "!b2079b56", "name": "KD1ABC"}])
+        self.assertFalse(self.chat.set_nickname("nobody", "Ben")[0])
+        self.assertTrue(self.chat.set_nickname("!B2079B56", "  Uncle   Ben ")[0])
+        self.checkin(received=[heard, dict(heard, packet=4, to="!3248f6ed")])
+        self.wait_for_telegram(2)
+        self.assertEqual(sorted(self.telegram.sent), ["📡 Uncle Ben (mesh): hi", "📡 Uncle Ben in Family (mesh): hi"])
+        view = self.chat.view()
+        dm = next(c for c in view["chats"] if c["peer"] == "!b2079b56")
+        self.assertEqual((dm["name"], dm["radio"]), ("Uncle Ben", "KD1ABC"))
+        self.assertEqual(next(c for c in view["chats"] if c["peer"] == "#2")["last"], "Uncle Ben: hi")
+        self.assertEqual(view["nodes"][0]["nick"], "Uncle Ben")
+        self.assertEqual(self.chat.thread("#2")[0]["name"], "Uncle Ben")
+        self.chat.set_nickname("!b2079b56", "")
+        self.assertEqual(self.chat.thread("#2")[0]["name"], "KD1ABC")
+
     def test_alerts_can_be_turned_off(self):
         self.assertTrue(self.chat.set_alerts(False)[0])
         self.checkin(received=[{"packet": 9, "from": "!b2079b56", "to": "!3248f6ed", "text": "hi", "ts": 1}])
