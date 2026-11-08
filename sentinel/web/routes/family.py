@@ -5,9 +5,6 @@ Family locations: OwnTracks posts, setup links, personal logins, the People and 
 
 from __future__ import annotations
 
-import time
-from typing import Dict, List
-
 import segno
 from flask import Flask, Response, jsonify, redirect, render_template, request, url_for
 
@@ -21,20 +18,7 @@ def register(app: Flask, ctx: WebContext) -> None:
     _set_session_cookie, _base_url = ctx.set_session_cookie, ctx.base_url
     _config_guard, _result = ctx.config_guard, ctx.result
 
-    location_failures: Dict[str, List[float]] = {}
-
-    def _location_blocked(ip: str) -> bool:
-        """Too many wrong phone logins / setup links from one address: refuse for a while."""
-        now = time.time()
-        recent = [t for t in location_failures.get(ip, []) if now - t < 600]
-        location_failures[ip] = recent
-        return len(recent) >= 20
-
-    def _location_failed(ip: str, what: str) -> None:
-        location_failures.setdefault(ip, []).append(time.time())
-        app_logger.log("warning", "location_auth_failed", what=what, ip=ip, component="web_server",
-                       action="location")
-
+    _location_blocked, _location_failed = ctx.device_login_blocked, ctx.device_login_failed  # (shared with mesh)
 
     @app.route("/owntracks", methods=["POST"])
     def owntracks():

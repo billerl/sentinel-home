@@ -97,22 +97,29 @@ var weather = null;  // last /api/weather answer
 function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
 
 var family = [];  // last /api/family answer: [{name, state: home|out|off, label, lat, lon}]
+var mesh = { unread: 0, from: [] };  // last /api/mesh/unread answer: messages over the radio mesh not read yet
+function meshHtml() {
+  if (!mesh.unread) return "";
+  var who = mesh.from.join(", ");
+  return '<a class="mesh" href="/mesh" title="' + esc(mesh.unread + " unread mesh message" + (mesh.unread === 1 ? "" : "s") +
+    (who ? " from " + who : "")) + '">📡 ' + mesh.unread + (who ? ' <span class="who">' + esc(mesh.from[0]) + "</span>" : "") + "</a>";
+}
 function familyHtml() {
-  if (!family.length) return "";
+  if (!family.length && !mesh.unread) return "";
   return '<div class="wx-family">' + family.map(function(p) {
     var inner = '<span class="dot ' + esc(p.state) + '"></span>' + esc(p.name);
     var title = esc(p.name + " — " + p.label);
     if (p.lat == null || p.id == null) return '<span class="p" title="' + title + '">' + inner + '</span>';
     // Sentinel's own map (the Family timeline), in this window: a new tab is a pop-up to a TV's kiosk browser
     return '<a href="/timeline?person=' + encodeURIComponent(p.id) + '" title="' + title + '">' + inner + '</a>';
-  }).join("") + '</div>';
+  }).join("") + meshHtml() + '</div>';
 }
 
 function renderWeather() {
   var w = weather;
   if (!w) { weatherTile.innerHTML = ""; return; }
   renderWeatherOnly(w);
-  weatherTile.classList.toggle("fam", family.length > 0);
+  weatherTile.classList.toggle("fam", family.length > 0 || mesh.unread > 0);
   weatherTile.insertAdjacentHTML("beforeend", familyHtml());
 }
 
@@ -360,6 +367,18 @@ async function loadFamily() {
   setTimeout(loadFamily, 60 * 1000);
 }
 loadFamily();
+
+async function loadMesh() {
+  try {
+    var r = await fetch("/api/mesh/unread");
+    if (r.ok) {
+      var m = await r.json();
+      if (m.unread !== mesh.unread || String(m.from) !== String(mesh.from)) { mesh = m; renderWeather(); }
+    }
+  } catch (e) {}
+  setTimeout(loadMesh, 20 * 1000);
+}
+loadMesh();
 
 function applyCameras(cams) {
   var root = document.getElementById("grid");

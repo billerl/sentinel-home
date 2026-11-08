@@ -226,6 +226,12 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     channels, setting `mesh_alerts_enabled`, respects Pause. Pets' collars are left out of the radio list.
     Nicknames (table `nicknames`, node -> name; Sentinel-only, never sent to the mesh) replace the radio's name in
     chats, the radio list, thread senders and Telegram; `radio` / `nick` fields keep the radio's own name.
+    Unread (direct + private channels only): `unread()` -> /api/mesh/unread, polled every 20 s by grid.js, a
+    pulsing 📡 pill at the end of the weather tile's family row (`.wx-family a.mesh`; checked at 960x540 with 6-8
+    lights). Jarvis announces (`_announce`, setting `mesh_speak_enabled`, quiet 22-7, 2 min per sender) and
+    "read my mesh messages" (`read_command`, in the command registry: Telegram + voice) reads up to 5 and marks
+    them read. The wrong-login lockout for phones, setup links and the base station is now shared
+    (`WebContext.device_login_blocked/failed`).
   - Family timeline + personal logins (2026-10-31; restore point: tag `pre-timeline` +
     `../checkpoints/pre-timeline/`). `/timeline`: person chips, month calendar (days with points), the day's
     stops and drives (`sentinel/engine/timeline.py`: positions with acc <= 300 m clustered within 120 m;

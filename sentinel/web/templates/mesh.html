@@ -177,6 +177,8 @@
         <label class="check"><input type="checkbox" id="alerts"> Send new mesh messages to Telegram
           (direct messages and private channels; not the public channel)</label>
         <div class="msg" id="alerts-msg"></div>
+        <label class="check"><input type="checkbox" id="speak"> Jarvis says when one comes in (not 10 pm – 7 am)</label>
+        <div class="msg" id="speak-msg"></div>
       </div>
     </section>
   </main>
@@ -438,6 +440,11 @@
       catch (e) { say($("alerts-msg"), e.message, false); this.checked = !this.checked; }
     };
 
+    $("speak").onchange = async function () {
+      try { say($("speak-msg"), (await api("/api/mesh/speak", { on: this.checked })).message, true); }
+      catch (e) { say($("speak-msg"), e.message, false); this.checked = !this.checked; }
+    };
+
     var first = true;
     async function load() {
       try { data = await api("/api/mesh"); } catch (e) { $("status").textContent = "Couldn't reach Sentinel: " + e.message; return; }
@@ -446,6 +453,7 @@
       renderInvites();
       renderNodes();
       $("alerts").checked = data.alerts;
+      $("speak").checked = data.speak;
       if (document.activeElement !== $("base-name") && document.activeElement !== $("base-short") && !$("base-name").value) {
         $("base-name").value = data.base.name || "";
         $("base-short").value = data.base.short || "";

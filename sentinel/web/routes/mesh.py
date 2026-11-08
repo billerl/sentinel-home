@@ -9,7 +9,6 @@ from functools import lru_cache
 import segno
 from flask import Flask, Response, jsonify, render_template, request
 
-from sentinel.logging_utils import app_logger
 from sentinel.web.auth import _client_ip
 from sentinel.web.context import WebContext
 
@@ -26,14 +25,16 @@ def register(app: Flask, ctx: WebContext) -> None:
     @app.route("/mesh/bridge", methods=["POST"])
     def mesh_bridge():
         # The base station, not a browser: HTTP Basic with a pet tracker's login (the one it already has).
+        ip = _client_ip(request.remote_addr or "", request.headers)
         if engine is None:
             return jsonify({}), 503
+        if ctx.device_login_blocked(ip):
+            return jsonify({}), 429
         creds = request.authorization
         reply = engine.mesh.bridge_checkin(creds.username if creds else "", creds.password if creds else "",
                                            request.get_json(silent=True, force=True))
         if reply is None:
-            app_logger.log("warning", "mesh_bridge_auth_failed", ip=_client_ip(request.remote_addr or "", request.headers),
-                           component="web_server", action="mesh")
+            ctx.device_login_failed(ip, "mesh base station")
             return Response("{}", status=401, mimetype="application/json",
                             headers={"WWW-Authenticate": 'Basic realm="Sentinel"'})
         return jsonify(reply)
@@ -97,6 +98,21 @@ def register(app: Flask, ctx: WebContext) -> None:
             return err
         body = request.get_json(silent=True) or {}
         return _result(*engine.mesh.set_nickname(body.get("node"), body.get("name")))
+
+    @app.route("/api/mesh/unread")
+    def api_mesh_unread():
+        # the Live page's 📡 (a TV: asked every 20 s)
+        redir = _require_session()
+        if redir:
+            return jsonify({"error": "unauthorized"}), 401
+        return jsonify(engine.mesh.unread() if engine is not None else {"unread": 0, "from": []})
+
+    @app.route("/api/mesh/speak", methods=["POST"])
+    def api_mesh_speak():
+        err = _config_guard()
+        if err:
+            return err
+        return _result(*engine.mesh.set_speak((request.get_json(silent=True) or {}).get("on")))
 
     @app.route("/api/mesh/alerts", methods=["POST"])
     def api_mesh_alerts():

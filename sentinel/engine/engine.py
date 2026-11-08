@@ -191,7 +191,8 @@ class Engine:
 
         self.mesh = MeshChat(  # chat over the LoRa mesh, through the pets' base station (the Mesh page)
             VIDEO_DIR, self.settings, self.settings_manager, self.locations.authenticate, self.telegram,
-            trackers=lambda: [p.tracker for p in self.locations.people() if p.tracker])
+            trackers=lambda: [p.tracker for p in self.locations.people() if p.tracker],
+            speak=lambda text: self.audio.speak(text) if self.audio is not None else None)
         from sentinel.engine.news import HouseNews
 
         self.news = HouseNews(  # package news, the morning recap, routine and weather messages
@@ -612,6 +613,7 @@ class Engine:
         """What both Telegram and voice understand, each once, in the order Telegram checks them."""
         from sentinel.audio.voice import to_speech
         from sentinel.engine.location import beep_command, outing_command
+        from sentinel.engine.mesh import read_command
         from sentinel.engine.packages import TAKEN_IN
         from sentinel.engine.questions import household_question
         from sentinel.engine.recap import RECAP
@@ -637,6 +639,9 @@ class Engine:
         commands.add(Command(
             "beep pets", lambda t: beep_command(t, self.locations.people()),
             lambda m, _t: self.family.beep_pets(m), speak=lambda said: said, prefix="🐕 "))
+        commands.add(Command(
+            "mesh messages", read_command, lambda _m, _t: self.mesh.read_unread(),
+            speak=lambda said: to_speech(said, max_lines=20, max_chars=1200), prefix="📡 "))
         commands.add(Command(
             "location", self.family.location_question, lambda m, _t: self.family.answer_location_question(m)[0],
             speak=to_speech, voice_stage="late", telegram=send_location_reply,

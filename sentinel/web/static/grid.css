@@ -93,6 +93,11 @@ h1 { font-size: 0.9rem; margin: 0; flex: 1; }
 .wx-family .dot.home { background: #3f3; box-shadow: 0 0 0.4em #3f3; }
 .wx-family .dot.out { background: #fb3; box-shadow: 0 0 0.4em #fb3; }
 .wx-family .dot.off { background: #555; }
+/* Unread mesh messages: a pill at the end of the family row, gently pulsing until they're read. */
+.wx-family a.mesh { color: #001; background: #00e5ff; border-radius: 1em; padding: 0 0.55em; font-weight: 700;
+                    animation: mesh-pulse 2s ease-in-out infinite; }
+.wx-family a.mesh .who { font-weight: 400; }
+@keyframes mesh-pulse { 0%, 100% { box-shadow: 0 0 0.2em #00e5ff; } 50% { box-shadow: 0 0 0.9em #00e5ff; } }
 /* With the family row, tighten the weather so everything still fits the tile. */
 .tile.weather.fam { gap: 1.6cqh; padding-top: 7.5cqh; padding-bottom: 2cqh; }
 .tile.weather.fam .wx-icon { font-size: 12cqh; }

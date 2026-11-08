@@ -5,10 +5,12 @@ What every area's routes (sentinel/web/routes/) share: Sentinel's parts and the 
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any, Dict, Optional
+import time
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from flask import jsonify, redirect, request, url_for
 
+from sentinel.logging_utils import app_logger
 from sentinel.web.auth import _client_ip
 
 if TYPE_CHECKING:
@@ -32,6 +34,19 @@ class WebContext:
         self.auth = server._auth
         self.limiter = server._limiter
         self.auth_cfg = auth_cfg  # as read at start (session length)
+        self._device_failures: Dict[str, List[float]] = {}  # ip -> recent wrong logins (phones, base station, links)
+
+    def device_login_blocked(self, ip: str) -> bool:
+        """Too many wrong phone / base station logins or setup links from one address: refuse for a while."""
+        now = time.time()
+        recent = [t for t in self._device_failures.get(ip, []) if now - t < 600]
+        self._device_failures[ip] = recent
+        return len(recent) >= 20
+
+    def device_login_failed(self, ip: str, what: str) -> None:
+        self._device_failures.setdefault(ip, []).append(time.time())
+        app_logger.log("warning", "location_auth_failed", what=what, ip=ip, component="web_server",
+                       action="location")
 
     def session_token(self) -> Optional[str]:
         return request.cookies.get("sentinel_session")

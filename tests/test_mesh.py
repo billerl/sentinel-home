@@ -105,6 +105,46 @@ class TestMeshChat(unittest.TestCase):
         self.chat.set_nickname("!b2079b56", "")
         self.assertEqual(self.chat.thread("#2")[0]["name"], "KD1ABC")
 
+    def test_read_command(self):
+        for said in ["Read my mesh messages", "read me my messages", "Any new mesh messages?", "do I have any mesh messages",
+                     "check mesh", "Read my mash messages please", "mesh messages"]:
+            self.assertTrue(M.read_command(said), said)
+        for said in ["read the weather", "send a mesh message", "messages on", "enable messages", "what's a mesh network"]:
+            self.assertIsNone(M.read_command(said), said)
+
+    def test_jarvis_reads_unread_messages_and_skips_public_chatter(self):
+        self.assertEqual(self.chat.read_unread(), "No new mesh messages.")
+        self.chat.set_nickname("!b2079b56", "Uncle Ben")
+        self.checkin(received=[
+            {"packet": 1, "from": "!11112222", "to": "^all", "channel": 1, "name": "Stranger", "text": "test", "ts": 1},
+            {"packet": 2, "from": "!b2079b56", "to": "!3248f6ed", "name": "KD1ABC", "text": "Dinner at 6?", "ts": 2},
+            {"packet": 3, "from": "!22223333", "to": "^all", "channel": 2, "name": "Kate", "text": "On my\nway!", "ts": 3}])
+        self.assertEqual(self.chat.unread(), {"unread": 2, "from": ["Kate", "Uncle Ben"]})
+        self.assertEqual(self.chat.read_unread(), "2 new mesh messages. Uncle Ben says: Dinner at 6. "
+                                                  "Kate on the Family channel says: On my way.")
+        self.assertEqual(self.chat.unread()["unread"], 0)
+        self.assertEqual(self.chat.read_unread(), "No new mesh messages.")
+
+    def test_jarvis_announces_by_day_once_per_burst(self):
+        said = []
+        self.chat._speak = said.append
+        noon = time.mktime(time.strptime("2026-11-08 12:00", "%Y-%m-%d %H:%M"))
+        self.chat._announce("!b2079b56", "Uncle Ben", "", now=noon)
+        self.chat._announce("!b2079b56", "Uncle Ben", "", now=noon + 30)  # the next message of the same burst
+        self.chat._announce("!22223333", "Kate", " on the Family channel", now=noon + 40)
+        self.chat._announce("!44445555", "Grace", "", now=noon + 11 * 3600)  # 11 pm: quiet
+        self.chat._announce("!55556666", "Alex", "", now=noon - 6 * 3600)  # 6 am: still quiet
+        deadline = time.time() + 2
+        while len(said) < 2 and time.time() < deadline:
+            time.sleep(0.01)
+        time.sleep(0.05)
+        self.assertEqual(sorted(said), ["You have a mesh message from Kate on the Family channel.",
+                                        "You have a mesh message from Uncle Ben."])
+        self.assertTrue(self.chat.set_speak(False)[0])
+        self.chat._announce("!33334444", "Liz", "", now=noon + 600)
+        time.sleep(0.05)
+        self.assertEqual(len(said), 2)
+
     def test_alerts_can_be_turned_off(self):
         self.assertTrue(self.chat.set_alerts(False)[0])
         self.checkin(received=[{"packet": 9, "from": "!b2079b56", "to": "!3248f6ed", "text": "hi", "ts": 1}])
@@ -155,6 +195,28 @@ class TestMeshChat(unittest.TestCase):
         reply = self.chat.bridge_checkin("grace", "secret", {"base": base})
         self.assertNotIn("make_channel", reply)
         self.assertNotIn("rename", reply)
+
+
+class TestBridgeLogin(unittest.TestCase):
+    def test_wrong_logins_lock_out_phones_and_the_base_station_alike(self):
+        from flask import Flask
+
+        from sentinel.web.context import WebContext
+        from sentinel.web.routes import family, mesh
+
+        engine = SimpleNamespace(mesh=SimpleNamespace(bridge_checkin=lambda u, p, b: None),
+                                 family=SimpleNamespace(owntracks_post=lambda u, p, b: None))
+        server = SimpleNamespace(_settings=None, _broker=None, _recordings=None, _engine=engine, _auth=None, _limiter=None)
+        app = Flask(__name__)
+        ctx = WebContext(server, {})
+        family.register(app, ctx)
+        mesh.register(app, ctx)
+        client = app.test_client()
+        for _ in range(10):
+            self.assertEqual(client.post("/mesh/bridge", json={}).status_code, 401)
+            self.assertEqual(client.post("/owntracks", json={}).status_code, 401)
+        self.assertEqual(client.post("/mesh/bridge", json={}).status_code, 429)
+        self.assertEqual(client.post("/owntracks", json={}).status_code, 429)
 
 
 if __name__ == "__main__":

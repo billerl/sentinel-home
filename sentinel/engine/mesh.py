@@ -4,7 +4,8 @@ collars (tools/meshtastic_bridge.py). The Mesh page lists who the base hears, ho
 per person messaged directly, one per channel) and makes the invites: a QR that adds the base station to
 someone's Meshtastic app as a contact (direct messages, end-to-end encrypted once both radios know each
 other's key), and one that adds the private "Family" group channel. New messages to the house come to
-Telegram; chatter on the public channel doesn't.
+Telegram, Jarvis says who sent one (not at night), and the Live page shows a 📡 count until they're read;
+chatter on the public channel does none of that. "Read my mesh messages" (Jarvis or Telegram) reads them out.
 
 The base station can't be reached from here (it sits behind the home network's Wi-Fi and its radio takes one
 connection), so it checks in every few seconds instead: it brings what it heard, its node list and invite
@@ -13,6 +14,7 @@ has. Messages are kept in mesh.db; the node list lives in memory (the base sends
 """
 
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -29,6 +31,21 @@ NODES_FRESH_S = 60  # how often the base sends its (possibly long) node list
 SEND_EXPIRE_S = 10 * 60  # a message the base never picked up gives up after this
 FAMILY_CHANNEL = "Family"
 BROADCAST = "^all"
+QUIET_HOURS = (22, 7)  # Jarvis doesn't announce messages from 10 pm to 7 am (Telegram still gets them)
+ANNOUNCE_GAP_S = 120  # one announcement per sender this often (a burst of short messages is one heads-up)
+READ_MAX = 5  # messages Jarvis reads in one go
+
+# "read my mesh messages", "any new mesh messages?", "read me my messages", "check mesh" (Whisper: mash, mess)
+_MESH = r"(?:mesh|mash|mess)"
+READ_COMMAND = re.compile(
+    r"^(?:(?:can you |could you |please )?read (?:me )?(?:my |the |any )?(?:new |unread |latest )?(?:" + _MESH +
+    r" )?messages?|(?:do i have |have i got |are there |did i get |i have )?(?:any )?(?:new |unread )?" + _MESH +
+    r" messages?|check (?:my |the )?" + _MESH + r"(?: messages?)?)(?: please)?[?.!]*$", re.IGNORECASE)
+
+
+def read_command(text: str) -> Optional[bool]:
+    """True when the text asks for the mesh messages (the command registry's match: None = not this)."""
+    return True if READ_COMMAND.match(" ".join(str(text or "").strip().split())) else None
 
 
 def _clip(text: Any, limit: int) -> str:
@@ -46,7 +63,7 @@ def _node_id(value: Any) -> str:
 class MeshChat:
     def __init__(self, root: str, settings: Dict[str, Any], settings_manager,
                  authenticate: Callable[[str, str], Any], telegram,
-                 trackers: Callable[[], List[str]] = lambda: []) -> None:
+                 trackers: Callable[[], List[str]] = lambda: [], speak: Callable[[str], Any] = lambda _t: None) -> None:
         self.db_path = os.path.join(os.path.abspath(root), DB_NAME)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self.settings = settings
@@ -54,6 +71,8 @@ class MeshChat:
         self._authenticate = authenticate
         self.telegram = telegram
         self._trackers = trackers  # the pets' collars: radios too, but not ones to chat with
+        self._speak = speak  # Jarvis, out loud in the house
+        self._announced: Dict[str, float] = {}  # sender -> last time Jarvis said they wrote
         self._lock = threading.RLock()
         self._base: Dict[str, Any] = {}  # the base's last check-in: id, name, short, channels, invites
         self._checked_in = 0.0
@@ -144,13 +163,26 @@ class MeshChat:
         app_logger.log("info", "mesh_message_heard", direct=channel is None, channel=channel,
                        component="engine", action="mesh")
         info = self._channel(channel) if channel is not None else {}
-        if info.get("public") or not self.settings.get("mesh_alerts_enabled", True):
+        if info.get("public"):
             return
+        who = self.nicknames().get(sender) or name
         where = "" if channel is None else f" in {info.get('name') or 'a channel'}"
-        text = f"📡 {self.nicknames().get(sender) or name}{where} (mesh): {text}"
-        for chat_id in self.telegram.unpaused_chats():
-            threading.Thread(target=self.telegram.reply_to_chat, args=(chat_id, text),
-                             name="mesh-alert", daemon=True).start()
+        if self.settings.get("mesh_alerts_enabled", True):
+            text = f"📡 {who}{where} (mesh): {text}"
+            for chat_id in self.telegram.unpaused_chats():
+                threading.Thread(target=self.telegram.reply_to_chat, args=(chat_id, text),
+                                 name="mesh-alert", daemon=True).start()
+        self._announce(sender, who, "" if channel is None else f" on the {info.get('name') or 'group'} channel")
+
+    def _announce(self, sender: str, who: str, where: str, now: Optional[float] = None) -> None:
+        now = time.time() if now is None else now
+        hour = time.localtime(now).tm_hour
+        if (not self.settings.get("mesh_speak_enabled", True) or hour >= QUIET_HOURS[0] or hour < QUIET_HOURS[1]
+                or now - self._announced.get(sender, 0) < ANNOUNCE_GAP_S):
+            return
+        self._announced[sender] = now
+        threading.Thread(target=self._speak, args=(f"You have a mesh message from {who}{where}.",),
+                         name="mesh-announce", daemon=True).start()
 
     def _result(self, item: Dict[str, Any]) -> None:
         status = item.get("status")
@@ -232,6 +264,7 @@ class MeshChat:
                         "family": (base.get("invites") or {}).get(str(family["index"])) if family else None},
             "family_channel": bool(family), "making_channel": self._make_channel,
             "alerts": bool(self.settings.get("mesh_alerts_enabled", True)), "text_max": TEXT_MAX_BYTES,
+            "speak": bool(self.settings.get("mesh_speak_enabled", True)),
         }
 
     def thread(self, peer: str, limit: int = 200) -> List[Dict[str, Any]]:
@@ -287,6 +320,38 @@ class MeshChat:
             self._rename = {"long": long_name, "short": short_name}
         return True, "Renaming the base station… everyone on the mesh will see the new name."
 
+    def _unread_rows(self) -> List[sqlite3.Row]:
+        """Unread messages to the house: direct ones and private channels' (not the public chatter), oldest first."""
+        public = {f"#{c['index']}" for c in self._base.get("channels") or [] if c.get("public")}
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM messages WHERE inbound = 1 AND read = 0 ORDER BY id").fetchall()
+        return [r for r in rows if r["peer"] not in public]
+
+    def unread(self) -> Dict[str, Any]:
+        """For the Live page's 📡: how many, and from whom."""
+        rows, nicks = self._unread_rows(), self.nicknames()
+        senders = list(dict.fromkeys(nicks.get(r["sender"]) or r["sender_name"] for r in reversed(rows)))
+        return {"unread": len(rows), "from": senders[:3]}
+
+    def read_unread(self) -> str:
+        """Jarvis / Telegram: read the unread messages (oldest first) and mark them read."""
+        rows, nicks = self._unread_rows(), self.nicknames()
+        if not rows:
+            return "No new mesh messages."
+        names = {f"#{c['index']}": c.get("name") for c in self._base.get("channels") or []}
+        shown = rows[:READ_MAX]
+        lines = []
+        for r in shown:
+            who = nicks.get(r["sender"]) or r["sender_name"]
+            where = f" on the {names.get(r['peer']) or 'group'} channel" if r["peer"].startswith("#") else ""
+            lines.append(f"{who}{where} says: {' '.join(r['text'].split()).rstrip('.!? ')}.")
+        with self._lock, self._connect() as conn:
+            conn.executemany("UPDATE messages SET read = 1 WHERE id = ?", [(r["id"],) for r in shown])
+        head = "One new mesh message." if len(rows) == 1 else f"{len(rows)} new mesh messages."
+        more = len(rows) - len(shown)
+        tail = f" {more} more on the Mesh page." if more else ""
+        return " ".join([head] + lines) + tail
+
     def nicknames(self) -> Dict[str, str]:
         with self._connect() as conn:
             return {r["node"]: r["name"] for r in conn.execute("SELECT node, name FROM nicknames")}
@@ -302,6 +367,13 @@ class MeshChat:
             else:
                 conn.execute("DELETE FROM nicknames WHERE node = ?", (node,))
         return True, f"Nickname saved: {name}." if name else "Nickname removed."
+
+    def set_speak(self, on: Any) -> Tuple[bool, str]:
+        if not isinstance(on, bool):
+            return False, "expected true or false"
+        self.settings["mesh_speak_enabled"] = on
+        self.settings_manager.save_settings(force=True)
+        return True, "Jarvis will " + ("say when a mesh message comes in." if on else "stay quiet about mesh messages.")
 
     def set_alerts(self, on: Any) -> Tuple[bool, str]:
         if not isinstance(on, bool):
