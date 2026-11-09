@@ -176,8 +176,8 @@
       $("status").className = "status" + (p.lost_since ? " searching" : "");
       $("search-on").hidden = !p.lost_since;
       if (p.lost_since) {
-        $("search-on").textContent = "Searching since " + clock(p.lost_since) + ". The collar is asked for its position every "
-          + data.poll_seconds + " seconds, and everyone on Telegram gets a new map pin when " + p.name + " moves.";
+        $("search-on").textContent = "Searching since " + clock(p.lost_since) + ". The collar reports about every " + data.poll_seconds + " seconds while " + p.name
+          + " is moving, and every 3 minutes or so when still. Everyone on Telegram gets a new map pin when " + p.name + " moves.";
       }
       $("start").hidden = !!p.lost_since;
       $("start").textContent = "🚨 " + p.name + " is lost: start the search";
@@ -289,8 +289,8 @@
 
     async function startSearch() {
       var p = pet();
-      if (!confirm("Mark " + p.name + " as lost? Everyone on Telegram gets the live map link, and the collar is asked for its position every "
-                   + data.poll_seconds + " seconds until you tap Found.")) return;
+      if (!confirm("Mark " + p.name + " as lost? Everyone on Telegram gets the live map link, and the collar reports as often as it can "
+                   + "(about every " + data.poll_seconds + " seconds while moving) until you tap Found.")) return;
       var res = await post("/api/lost/start", { ids: [p.id] });
       say(res.ok ? res.data.message : res.data.error, !res.ok);
       load();

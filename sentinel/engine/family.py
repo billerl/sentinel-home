@@ -162,7 +162,8 @@ class Family:
         link = f"Live map: {url}/lost" if url else "Live map: Sentinel's Home page → Lost dog."
         many = len(changed) > 1
         text = (f"🚨 {changed_names} {'are' if many else 'is'} lost. {'Their collars are' if many else 'The collar is'} "
-                f"asked for a position every {OUTING_POLL_SECONDS} seconds until you say found.\n{link}")
+                f"reporting about every {OUTING_POLL_SECONDS} seconds while moving (every 3 minutes or so when still) until you say "
+                f"found.\n{link}")
         fixes = [(p, self.locations.fix(p.id)) for p in changed]
         for chat_id in self.telegram.unpaused_chats():
             def send(chat=chat_id):
@@ -173,7 +174,7 @@ class Family:
             threading.Thread(target=send, name="pet-lost", daemon=True).start()
         self._speak(f"{changed_names} {'are' if many else 'is'} lost. The live map is on Sentinel's lost dog page.")
         return (f"Okay, {changed_names} marked lost. Everyone on Telegram got the live map link, and "
-                f"{'their collars' if many else 'the collar'} will report every {OUTING_POLL_SECONDS} seconds.")
+                f"{'their collars' if many else 'the collar'} will report as often as {'they' if many else 'it'} can.")
 
     def _lost_pin(self, person, fix: Optional[Dict[str, Any]]) -> None:
         """A lost pet moved: a fresh map pin for the family out looking (at most every few minutes)."""
