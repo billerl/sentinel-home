@@ -1,12 +1,13 @@
 """
-Smart plugs and switches (sentinel/engine/switches.py) and the TV remote (sentinel/engine/samsung_tv.py).
+Smart plugs and switches (sentinel/engine/switches.py), the TV remote (sentinel/engine/samsung_tv.py) and the
+learned remotes (sentinel/engine/remotes.py).
 """
 
 from __future__ import annotations
 
 import time
 
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, jsonify, render_template, request
 
 from sentinel.web.auth import _client_ip
 from sentinel.web.context import WebContext
@@ -129,4 +130,44 @@ def register(app: Flask, ctx: WebContext) -> None:
             return _result(*engine.switches.tv_live(tv_id, body.get("reload") is True))
         if action == "tap":
             return _result(*engine.switches.tv_tap(tv_id, body.get("x"), body.get("y")))
+        return jsonify({"error": "unknown action"}), 404
+
+    # ---- learned remotes: buttons taught to a BroadLink (sentinel/engine/remotes.py) ----
+    @app.route("/remotes")
+    def remotes_page():
+        redir = _require_session()
+        if redir:
+            return redir
+        return render_template("remotes.html")
+
+    @app.route("/api/remotes")
+    def api_remotes():
+        redir = _require_session()
+        if redir:
+            return jsonify({"error": "unauthorized"}), 401
+        if engine is None:
+            return jsonify({"hub": None, "connected": False, "error": "", "remotes": [], "learning": {}})
+        return jsonify(engine.remotes.view())
+
+    @app.route("/api/remotes/<action>", methods=["POST"])
+    def api_remotes_action(action):
+        err = _config_guard()
+        if err:
+            return err
+        body = request.get_json(silent=True) or {}
+        remote, button = str(body.get("remote") or "")[:60], str(body.get("button") or "")[:60]
+        remotes = engine.remotes
+        if action == "press":
+            return _result(*remotes.press(remote, button, source="web"))
+        if action == "learn":
+            return _result(*remotes.learn(remote, button, str(body.get("kind") or "ir")))
+        if action == "cancel":
+            remotes.cancel()
+            return _result(True, "cancelled")
+        if action == "rename":
+            return _result(*remotes.rename(remote, button or None, str(body.get("name") or "")[:60]))
+        if action == "delete":
+            return _result(*remotes.delete(remote, button or None))
+        if action == "find":
+            return _result(*remotes.find_hub())
         return jsonify({"error": "unknown action"}), 404

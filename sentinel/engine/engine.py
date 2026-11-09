@@ -159,6 +159,10 @@ class Engine:
         from sentinel.engine.switches import SmartSwitches
 
         self.switches = SmartSwitches(VIDEO_DIR)  # Kasa smart plugs/switches on the home network
+        from sentinel.engine.remotes import Remotes
+
+        self.remotes = Remotes(VIDEO_DIR)  # IR/RF buttons taught to a BroadLink (heater, soundbar, fans)
+        self.switches.remotes = self.remotes
         from sentinel.engine.wifi_motion import WifiMotion
 
         self.wifi_motion = WifiMotion(VIDEO_DIR)  # ESP32 boards that sense movement through the Wi-Fi signal

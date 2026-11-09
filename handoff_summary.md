@@ -419,6 +419,17 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   immediately; Claude's suggestions ask yes first / show a ✅ button). New makes = another driver class
   with `discover/status/set/rename` (Shelly and Tasmota have local HTTP APIs). Newer KLAP-only Kasa/Tapo
   devices don't answer on 9999 and aren't supported. No automations yet (e.g. lights on for a person at night).
+- **Learned remotes** (`sentinel/engine/remotes.py`, page `/remotes`, `/api/remotes*`, codes in
+  `recorded_videos/remotes.json`): IR and RF buttons of things with only a remote (heater, soundbar, ceiling fans),
+  sent by a BroadLink RM4 Pro/mini through python-broadlink (local encrypted protocol; "Lock device" must be off in
+  the BroadLink app, which is only needed for Wi-Fi setup). Teaching runs on a thread the page polls: IR =
+  `enter_learning` + `check_data`; RF = `sweep_frequency`/`check_frequency` (hold the button), then
+  `find_rf_packet` + `check_data` (press again). The BroadLink is found at its saved address, else by broadcast
+  (and again when a send fails, so a new address is picked up); after a miss it waits 60 s before searching again.
+  Words: what's left after fillers must be exactly a remote's name plus one of its buttons ("soundbar volume up 3
+  times", "power on the soundbar"; "turn the soundbar up" = Volume up). SmartSwitches hands over to it when no
+  switch or TV matches, so Telegram, voice and Claude's suggestions all reach it. Toggle-only Power buttons are
+  never sent for "turn on/off" (Sentinel can't see the state).
 - **Wi-Fi motion sensors** (`sentinel/engine/wifi_motion.py`, firmware in `firmware/`, page `/sensors`,
   `/api/wifi_motion*`, known boards in `recorded_videos/wifi_sensors.json`, every score in
   `recorded_videos/wifi_motion/YYYY-MM-DD.csv` for 14 days). An ESP32-S3 measures CSI (52 sub-carrier amplitudes,

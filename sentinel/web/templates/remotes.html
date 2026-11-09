@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <meta name="theme-color" content="#001525">
+  <title>Sentinel — Remotes</title>
+  <style>
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; }
+    a { color: #00ffff; }
+    [hidden] { display: none !important; }
+    header { position: sticky; top: 0; z-index: 10; background: #1a1a1a; border-bottom: 1px solid #033; }
+    .bar { display: flex; align-items: center; gap: 12px; padding: 0 1rem; height: 44px; }
+    .bar a { text-decoration: none; font-size: 0.85rem; }
+    h1 { font-size: 0.95rem; margin: 0; flex: 1; color: #00ffff; }
+    h2 { font-size: 0.95rem; color: #00ffff; margin: 22px 0 8px; }
+    main { max-width: 860px; margin: 0 auto; padding: 14px 16px 60px; }
+    .intro { font-size: 0.88rem; line-height: 1.6; color: #9cc; margin: 4px 0 14px; }
+    button {
+      background: rgba(0,255,255,0.12); color: #00ffff; border: 1px solid #00a8a8; padding: 7px 12px;
+      border-radius: 8px; cursor: pointer; font: inherit; font-size: 0.85rem;
+    }
+    button.ghost { background: none; border-color: #1d3a44; color: #9cc; }
+    button.danger { background: none; border-color: #5a2a2a; color: #f99; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    button:focus-visible, input:focus-visible { outline: 3px solid #fff; outline-offset: 1px; }
+    .card { background: linear-gradient(180deg, #0c151c, #091015); border: 1px solid #16303a; border-radius: 14px;
+            padding: 14px 16px; margin-bottom: 12px; }
+    .top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .name { flex: 1; min-width: 0; font-weight: 600; color: #fff; font-size: 1rem; }
+    .muted { font-size: 0.8rem; color: #6f97a5; line-height: 1.5; }
+    .hub { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 0.88rem; }
+    .hub .dot { width: 10px; height: 10px; border-radius: 50%; background: #555; flex: none; }
+    .hub .dot.ok { background: #7fe0a0; }
+    .hub .dot.bad { background: #ff8080; }
+    .hub .txt { flex: 1; min-width: 200px; line-height: 1.5; }
+    .keys { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; margin-top: 12px; }
+    .keys button { padding: 14px 8px; font-size: 0.95rem; min-height: 52px; word-break: break-word; }
+    .keys button.sent { background: rgba(127,224,160,0.25); border-color: #7fe0a0; color: #fff; }
+    .keys button.failed { background: rgba(255,128,128,0.2); border-color: #ff8080; color: #fff; }
+    .keys small { display: block; font-size: 0.68rem; color: #6f97a5; margin-top: 2px; }
+    .edit-row { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid #16303a; flex-wrap: wrap; }
+    .edit-row:first-child { border-top: 0; }
+    .edit-row input { flex: 1; min-width: 120px; }
+    input[type=text] { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid #1d3a44;
+                       background: #050b0f; color: #fff; width: 100%; }
+    label { display: block; font-size: 0.85rem; color: #cfe; margin: 10px 0 4px; }
+    .kinds { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+    .kinds label { display: flex; gap: 8px; align-items: flex-start; margin: 0; font-size: 0.85rem; line-height: 1.4; }
+    .kinds input { margin-top: 3px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .learn-box { margin-top: 12px; padding: 14px; border-radius: 10px; border: 1px solid #ffc94d; background: #1a1505; }
+    .learn-box.done { border-color: #7fe0a0; background: #06180d; }
+    .learn-box.failed { border-color: #ff8080; background: #1a0808; }
+    .learn-box .say { font-size: 1.05rem; color: #fff; line-height: 1.5; }
+    .msg { font-size: 0.82rem; margin-top: 8px; min-height: 1em; color: #9cc; }
+    .msg.err { color: #f99; }
+    .empty { text-align: center; padding: 26px 16px; border: 1px dashed #1d3a44; border-radius: 14px; color: #8fb6c4; line-height: 1.6; }
+    .pulse { animation: pulse 1.2s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: 0.55; } }
+    @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <a href="{{ url_for('index') }}">← Home</a>
+      <h1>Remotes</h1>
+      <a href="{{ url_for('live_page') }}#remote">TV remote</a>
+    </div>
+  </header>
+
+  <main>
+    <p class="intro">Buttons from the remotes of things that aren't on the network, like a heater, a soundbar or ceiling
+      fans, sent by a BroadLink. Teach each button once below. Then tap it here, or say it:
+      “Hey Jarvis, soundbar volume up 3 times” (on Telegram too).</p>
+
+    <div class="card">
+      <div class="hub">
+        <span class="dot" id="hub-dot"></span>
+        <span class="txt" id="hub-txt">Checking…</span>
+        <button type="button" class="ghost" id="hub-find" onclick="findHub()">Look for it</button>
+      </div>
+    </div>
+
+    <div id="remotes"></div>
+
+    <h2>Teach a button</h2>
+    <div class="card">
+      <label for="l-remote">Which remote</label>
+      <input type="text" id="l-remote" list="remote-names" maxlength="30" placeholder="Soundbar, Heater, Bedroom fan…" autocomplete="off">
+      <datalist id="remote-names"></datalist>
+      <label for="l-button">Button name (what you'll tap or say)</label>
+      <input type="text" id="l-button" list="button-names" maxlength="30" placeholder="Power, Volume up, Fan high…" autocomplete="off">
+      <datalist id="button-names">
+        <option value="Power"><option value="On"><option value="Off"><option value="Volume up"><option value="Volume down">
+        <option value="Mute"><option value="Input"><option value="Temperature up"><option value="Temperature down">
+        <option value="High"><option value="Low"><option value="Eco"><option value="Timer"><option value="Fan high">
+        <option value="Fan medium"><option value="Fan low"><option value="Fan off"><option value="Light">
+      </datalist>
+      <label>What kind of remote</label>
+      <div class="kinds">
+        <label><input type="radio" name="kind" value="ir" checked> Infrared: you point it at the thing (TV, soundbar, heater, most remotes)</label>
+        <label id="kind-rf-label"><input type="radio" name="kind" value="rf"> Radio (RF): works through walls (most ceiling fans). Needs the RM4 Pro.</label>
+      </div>
+      <div class="row">
+        <button type="button" id="learn-btn" onclick="learn()">Learn this button</button>
+      </div>
+      <div class="msg" id="learn-msg" role="status"></div>
+      <div class="learn-box" id="learn-box" hidden aria-live="polite">
+        <div class="say" id="learn-say"></div>
+        <div class="row">
+          <button type="button" class="ghost" id="learn-cancel" onclick="cancelLearn()">Cancel</button>
+          <button type="button" id="learn-next" onclick="nextButton()" hidden>Teach another button</button>
+        </div>
+      </div>
+      <p class="muted" style="margin: 12px 0 0;">Hold the remote about 15 cm (6 in) from the BroadLink. Teaching the same
+        button name again replaces it.</p>
+    </div>
+  </main>
+
+  <script>
+    var state = { remotes: [] }, editing = {}, polling = null, dismissed = "";
+
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+      });
+    }
+    async function post(path, body) {
+      var r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+                                  body: JSON.stringify(body || {}) });
+      if (r.status === 401) { location.href = "/login"; return { ok: false, data: {} }; }
+      var d = {}; try { d = await r.json(); } catch (e) {}
+      return { ok: r.ok, data: d };
+    }
+
+    async function load() {
+      try {
+        var r = await fetch("/api/remotes");
+        if (r.status === 401) { location.href = "/login"; return; }
+        state = await r.json();
+      } catch (e) { return; }
+      showHub();
+      showRemotes();
+      showLearning();
+    }
+
+    function showHub() {
+      var hub = state.hub, dot = document.getElementById("hub-dot"), txt = document.getElementById("hub-txt");
+      var find = document.getElementById("hub-find");
+      if (state.error) {
+        dot.className = "dot bad";
+        txt.textContent = state.error;
+        find.textContent = "Look again";
+      } else if (hub) {
+        dot.className = "dot ok";
+        txt.textContent = hub.model + " at " + hub.host + (hub.rf ? " · infrared and radio" : " · infrared only");
+        find.textContent = "Look again";
+      } else {
+        dot.className = "dot";
+        txt.textContent = "No BroadLink yet. Set it up in the BroadLink app first (2.4 GHz Wi-Fi, and turn off "
+          + "“Lock device” in its settings), then tap Look for it.";
+        find.textContent = "Look for it";
+      }
+      document.getElementById("kind-rf-label").hidden = !!(hub && hub.rf === false);
+    }
+
+    function showRemotes() {
+      var box = document.getElementById("remotes"), names = document.getElementById("remote-names");
+      names.innerHTML = state.remotes.map(function (r) { return '<option value="' + esc(r.name) + '">'; }).join("");
+      if (!state.remotes.length) {
+        box.innerHTML = '<div class="empty">No buttons taught yet. Teach the first one below.</div>';
+        return;
+      }
+      box.innerHTML = state.remotes.map(function (r, ri) {
+        var head = '<div class="top"><span class="name">' + esc(r.name) + '</span>'
+          + '<button type="button" class="ghost" onclick="toggleEdit(' + ri + ')">' + (editing[r.name] ? "Done" : "✎ Edit") + '</button></div>';
+        if (editing[r.name]) {
+          var rows = '<div class="edit-row"><input type="text" maxlength="30" value="' + esc(r.name) + '" id="rn-' + ri + '" aria-label="Remote name">'
+            + '<button type="button" onclick="rename(' + ri + ', -1)">Rename remote</button>'
+            + '<button type="button" class="danger" onclick="del(' + ri + ', -1)">Delete remote</button></div>';
+          rows += r.buttons.map(function (b, bi) {
+            return '<div class="edit-row"><input type="text" maxlength="30" value="' + esc(b.name) + '" id="bn-' + ri + '-' + bi + '" aria-label="Button name">'
+              + '<button type="button" onclick="rename(' + ri + ', ' + bi + ')">Rename</button>'
+              + '<button type="button" class="ghost" onclick="reteach(' + ri + ', ' + bi + ')">Teach again</button>'
+              + '<button type="button" class="danger" onclick="del(' + ri + ', ' + bi + ')">Delete</button></div>';
+          }).join("");
+          return '<div class="card">' + head + '<div style="margin-top:8px">' + rows + '</div><div class="msg" id="rmsg-' + ri + '"></div></div>';
+        }
+        var keys = r.buttons.map(function (b, bi) {
+          return '<button type="button" id="k-' + ri + '-' + bi + '" onclick="press(' + ri + ', ' + bi + ')">' + esc(b.name)
+            + (b.kind === "rf" ? '<small>radio</small>' : '') + '</button>';
+        }).join("");
+        return '<div class="card">' + head + '<div class="keys">' + keys + '</div><div class="msg" id="rmsg-' + ri + '"></div></div>';
+      }).join("");
+    }
+
+    function toggleEdit(ri) {
+      var name = state.remotes[ri].name;
+      editing[name] = !editing[name];
+      showRemotes();
+    }
+
+    async function press(ri, bi) {
+      var r = state.remotes[ri], b = r.buttons[bi], el = document.getElementById("k-" + ri + "-" + bi);
+      var msg = document.getElementById("rmsg-" + ri);
+      el.disabled = true;
+      var res = await post("/api/remotes/press", { remote: r.name, button: b.name });
+      el.disabled = false;
+      el.classList.add(res.ok ? "sent" : "failed");
+      setTimeout(function () { el.classList.remove("sent", "failed"); }, 700);
+      msg.className = "msg" + (res.ok ? "" : " err");
+      msg.textContent = res.ok ? "" : (res.data.error || "That didn't work.");
+    }
+
+    async function rename(ri, bi) {
+      var r = state.remotes[ri], input = document.getElementById(bi < 0 ? "rn-" + ri : "bn-" + ri + "-" + bi);
+      var res = await post("/api/remotes/rename", { remote: r.name, button: bi < 0 ? "" : r.buttons[bi].name, name: input.value });
+      if (res.ok && bi < 0) { delete editing[r.name]; editing[input.value.trim()] = true; }
+      if (!res.ok) { var m = document.getElementById("rmsg-" + ri); m.className = "msg err"; m.textContent = res.data.error || "Couldn't rename."; return; }
+      load();
+    }
+
+    async function del(ri, bi) {
+      var r = state.remotes[ri];
+      var what = bi < 0 ? "the whole " + r.name + " remote and all its buttons" : r.name + " " + r.buttons[bi].name;
+      if (!confirm("Delete " + what + "?")) return;
+      await post("/api/remotes/delete", { remote: r.name, button: bi < 0 ? "" : r.buttons[bi].name });
+      load();
+    }
+
+    function reteach(ri, bi) {
+      var r = state.remotes[ri], b = r.buttons[bi];
+      document.getElementById("l-remote").value = r.name;
+      document.getElementById("l-button").value = b.name;
+      document.querySelector('input[name=kind][value="' + (b.kind || "ir") + '"]').checked = true;
+      document.getElementById("l-button").scrollIntoView({ behavior: "smooth", block: "center" });
+      learn();
+    }
+
+    async function findHub() {
+      var btn = document.getElementById("hub-find"), txt = document.getElementById("hub-txt");
+      btn.disabled = true;
+      txt.textContent = "Looking on the home network…";
+      await post("/api/remotes/find", {});
+      btn.disabled = false;
+      load();
+    }
+
+    async function learn() {
+      var msg = document.getElementById("learn-msg");
+      var body = { remote: document.getElementById("l-remote").value, button: document.getElementById("l-button").value,
+                   kind: document.querySelector("input[name=kind]:checked").value };
+      if (!body.remote.trim() || !body.button.trim()) { msg.className = "msg err"; msg.textContent = "Fill in the remote and the button name."; return; }
+      msg.textContent = "";
+      var res = await post("/api/remotes/learn", body);
+      if (!res.ok) { msg.className = "msg err"; msg.textContent = res.data.error || "Couldn't start."; return; }
+      startPolling();
+      load();
+    }
+
+    function startPolling() {
+      if (polling) return;
+      polling = setInterval(async function () {
+        await load();
+        var l = state.learning || {};
+        if (!l.step || l.step === "done" || l.step === "failed") { clearInterval(polling); polling = null; }
+      }, 1000);
+    }
+
+    function showLearning() {
+      var l = state.learning || {}, box = document.getElementById("learn-box");
+      var busy = l.step && l.step !== "done" && l.step !== "failed";
+      document.getElementById("learn-btn").disabled = !!busy;
+      if (!l.step || (!busy && dismissed === l.remote + "|" + l.button + "|" + l.step)) { box.hidden = true; return; }
+      box.hidden = false;
+      box.className = "learn-box" + (l.step === "done" ? " done" : l.step === "failed" ? " failed" : "");
+      var say = document.getElementById("learn-say");
+      say.textContent = (busy ? l.remote + " · " + l.button + ": " : "") + l.message;
+      say.classList.toggle("pulse", busy && l.step !== "connecting");
+      document.getElementById("learn-cancel").hidden = !busy;
+      document.getElementById("learn-next").hidden = l.step !== "done";
+      if (busy) startPolling();
+    }
+
+    async function cancelLearn() {
+      dismissed = "";
+      await post("/api/remotes/cancel", {});
+      load();
+    }
+
+    function nextButton() {
+      var b = document.getElementById("l-button"), l = state.learning || {};
+      dismissed = l.remote + "|" + l.button + "|" + l.step;
+      b.value = "";
+      document.getElementById("learn-box").hidden = true;
+      b.focus();
+    }
+
+    load();
+  </script>
+</body>
+</html>

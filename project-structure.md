@@ -58,6 +58,7 @@ sentinel-home/                         # repository root
     │   ├── reminders.py               # "Remind me ..." -> Telegram message at that time (reminders.db)
     │   ├── switches.py                # Smart plugs/switches (Kasa, local protocol): Live page panel, voice, Telegram
     │   ├── samsung_tv.py              # Samsung TVs as a switch (Wake-on-LAN + power key), apps, volume, mute
+    │   ├── remotes.py                 # Learned IR/RF remote buttons sent by a BroadLink RM4 (Remotes page, voice, Telegram)
     │   ├── fire_tv.py                 # Fire TVs over ADB: switch, remote, apps, "put the cameras on the TV"
     │   ├── tv_mirror.py               # the remote's live picture of a Fire TV's screen (screenrecord -> JPEGs)
     │   ├── tasmota.py                 # plugs running Tasmota firmware as switches (local HTTP; network sweep)
@@ -102,7 +103,8 @@ sentinel-home/                         # repository root
     │                                  #   people (Family page), join (setup link opened on a family phone),
     │                                  #   timeline (Family timeline), account (a person picks their own password),
     │                                  #   mesh (Mesh chat: conversations, invite QR codes, radios heard),
-    │                                  #   recipes (recipe box, one recipe, cooking mode)
+    │                                  #   recipes (recipe box, one recipe, cooking mode),
+    │                                  #   remotes (learned IR/RF buttons: teach, press, rename)
     ├── notifications/
     │   └── telegram_notifier.py       # HTTPS Bot API, commands, clips
     ├── audio/

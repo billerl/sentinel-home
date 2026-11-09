@@ -13,3 +13,4 @@ rapidocr-onnxruntime>=1.4  # recipes: text shown in a cooking video, when it isn
 openwakeword>=0.4  # voice assistant: "Hey Jarvis" wake word
 kokoro-onnx>=0.6  # most natural spoken replies ("Heart" voice); model in models/kokoro/
 adb-shell>=0.4.4  # Fire TV control over ADB (pure Python, Apache-2.0); without it Fire TVs are skipped
+broadlink>=0.19  # learned IR/RF remotes through a BroadLink RM4 (local protocol, MIT); without it the Remotes page says so
