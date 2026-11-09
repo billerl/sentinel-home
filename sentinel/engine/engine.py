@@ -378,7 +378,8 @@ class Engine:
                 self.settings, cameras=lambda: [p for p in self.cameras.values() if p.connected],
                 detector=detector, checker=PackageChecker(classifier), notify=self.news.package_message,
                 sunset=self.news.sunset_today, nobody_home=self.family.nobody_home, on_left=self.news.on_package,
-                on_waiting=self.routines.package_waiting, on_gone=self.routines.package_gone)
+                on_waiting=self.routines.package_waiting, on_gone=self.routines.package_gone,
+                state_dir=os.path.join(VIDEO_DIR, ".packages"))
             self.detection_worker.packages = self.packages
         app_logger.log("info", "object_detector_ready", model=os.path.basename(model), device=detector.device,
                        vehicle_types=classifier is not None,
@@ -456,6 +457,8 @@ class Engine:
             self.detection_worker.stop()
         if self.presence is not None:
             self.presence.stop()
+        if self.packages is not None:
+            self.packages.stop()  # keeps the porch's quiet picture for the restart
         self.camera_lights.stop()
         self.switches.stop()
         self.wifi_motion.stop()

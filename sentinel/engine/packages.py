@@ -9,6 +9,8 @@ package on the next quiet snapshot, in the same place, is reported. A delivery t
 snapshot may never see the driver: it doesn't need to.
 """
 
+import json
+import os
 import re
 import threading
 import time
@@ -41,6 +43,11 @@ TAKEN_IN = re.compile(r"^(?:ok(?:ay)?,? )?(?:(?:i|we)(?: have| 've|'ve)? (?:got|
 # Front Door clips: 21 false alerts, 2 real deliveries).
 VISIT_WINDOW = 180.0
 GONE_QUIET = 20.0  # ... and once they've gone: someone sitting by the door isn't a parcel
+# The quiet picture is saved when Sentinel stops and used again after a restart (a deploy takes ~40 s
+# before the first snapshot). Without it, the first picture after a restart became the reference, and a
+# parcel left during the restart was part of it: never new, never reported (2026-11-08, 5:25pm).
+REFERENCE_KEEP = 600.0  # older than this (Sentinel was off a while): the light has changed, start afresh
+REFERENCE_INDEX = "references.json"
 
 
 def changes(before: np.ndarray, after: np.ndarray) -> List[Tuple[int, int, int, int]]:
@@ -102,6 +109,7 @@ class Package:
 @dataclass
 class _Door:
     reference: Optional[np.ndarray] = None
+    restored: bool = False  # looked for a saved reference already
     pending: List[Tuple[Tuple[int, int, int, int], float]] = field(default_factory=list)  # (box, probability)
     packages: List[Package] = field(default_factory=list)
 
@@ -111,7 +119,8 @@ class PackageWatch:
                  notify: Callable[..., None], sunset: Callable[[float], Optional[float]],
                  nobody_home: Callable[[], bool], clock: Callable[[], float] = time.time,
                  on_left: Optional[Callable[[str, str, str, Optional[bytes]], None]] = None,
-                 on_waiting: Optional[Callable[[str], None]] = None, on_gone: Optional[Callable[[str], None]] = None) -> None:
+                 on_waiting: Optional[Callable[[str], None]] = None, on_gone: Optional[Callable[[str], None]] = None,
+                 state_dir: Optional[str] = None) -> None:
         self.settings = settings
         self.cameras = cameras  # -> connected pipelines (display_name, host, snapshot())
         self.detector = detector
@@ -123,6 +132,7 @@ class PackageWatch:
         self.on_left = on_left  # (camera key, camera name, sentence, jpeg): the history and routines
         self.on_waiting = on_waiting  # (camera key): a parcel is still there (each quiet snapshot): repeating routines
         self.on_gone = on_gone  # (camera key): no parcel there any more (taken in, or "Got it")
+        self.state_dir = state_dir  # the doors' last quiet pictures, kept through a restart
         self._hosts: Dict[str, str] = {}  # camera name -> its key (routines and the events table use keys)
         self._doors: Dict[str, _Door] = {}
         self._visits: Dict[str, float] = {}  # camera name -> when the camera last saw a person
@@ -135,6 +145,42 @@ class PackageWatch:
 
     def stop(self) -> None:
         self._stop.set()
+        self.save()
+
+    def save(self) -> None:
+        """Keep each door's quiet picture for the next start (see REFERENCE_KEEP)."""
+        if not self.state_dir:
+            return
+        with self._lock:
+            refs = {k: d.reference for k, d in self._doors.items() if d.reference is not None}
+        index = {}
+        try:
+            os.makedirs(self.state_dir, exist_ok=True)
+            for name, ref in refs.items():
+                file = re.sub(r"[^\w-]+", "_", name) + ".png"
+                if cv2.imwrite(os.path.join(self.state_dir, file), ref):
+                    index[name] = {"file": file, "saved": self.clock()}
+            with open(os.path.join(self.state_dir, REFERENCE_INDEX), "w") as f:
+                json.dump(index, f)
+        except Exception as e:
+            app_logger.log("error", "package_reference_failed", error_message=str(e)[:200], component="packages",
+                           action="save")
+
+    def _restore(self, name: str, door: _Door, now: float) -> None:
+        door.restored = True
+        try:
+            with open(os.path.join(self.state_dir, REFERENCE_INDEX)) as f:
+                entry = json.load(f).get(name) or {}
+            saved = float(entry.get("saved", 0))
+            if not 0 <= now - saved <= REFERENCE_KEEP:
+                return
+            ref = cv2.imread(os.path.join(self.state_dir, os.path.basename(str(entry.get("file", "")))))
+        except (OSError, ValueError, AttributeError):
+            return
+        if ref is not None:
+            door.reference = ref
+            # Nobody watched the porch while Sentinel was off: someone may have come by.
+            self._visits[name] = max(saved, self._visits.get(name, 0.0))
 
     def _run(self) -> None:
         self._stop.wait(30)  # let cameras connect
@@ -194,6 +240,8 @@ class PackageWatch:
     def look(self, name: str, frame: np.ndarray, now: float) -> None:
         with self._lock:
             door = self._doors.setdefault(name, _Door())
+        if not door.restored and self.state_dir:
+            self._restore(name, door, now)
         people = [d.box for d in self.detector.detect(frame, min_score=0.3) if d.group in ("person", "animal")]
         if people or now - self._visits.get(name, -1e9) < GONE_QUIET:
             door.pending = []

@@ -2,6 +2,7 @@
 
 import _test_env  # noqa: F401  (isolates the event log)
 
+import tempfile
 import types
 import unittest
 
@@ -81,6 +82,34 @@ class TestPackages(unittest.TestCase):
         for text in ("I got the package", "the package is in", "got it"):
             self.assertTrue(P.TAKEN_IN.match(text), text)
         self.assertFalse(P.TAKEN_IN.match("did I get a package?"))
+
+    def test_a_delivery_during_a_restart(self):
+        """The quiet picture from before the restart is the reference: a parcel left meanwhile is new."""
+        with tempfile.TemporaryDirectory() as d:
+            self.watch.state_dir = d
+            self.watch.clock = lambda: self.t
+            self.look(porch())
+            self.watch.stop()
+            later = P.PackageWatch({}, lambda: [], self.watch.detector, FakeChecker(),
+                                   lambda text, jpeg, ask_done=False: self.sent.append(text), lambda now: None,
+                                   lambda: False, clock=lambda: self.t, state_dir=d)
+            self.watch = later
+            self.look(porch(parcel=True), 40)  # first snapshot after the restart: nobody seen yet
+            self.look(porch(parcel=True))
+            self.assertEqual(self.sent, ["📦 A package was left at the Front Door."])
+
+    def test_an_old_saved_picture_is_not_used(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.watch.state_dir = d
+            self.watch.clock = lambda: self.t
+            self.look(porch())
+            self.watch.stop()
+            self.watch = P.PackageWatch({}, lambda: [], self.watch.detector, FakeChecker(),
+                                        lambda text, jpeg, ask_done=False: self.sent.append(text), lambda now: None,
+                                        lambda: False, state_dir=d)
+            self.look(porch(parcel=True), P.REFERENCE_KEEP + 60)
+            self.look(porch(parcel=True))
+            self.assertEqual(self.sent, [])
 
     def test_nothing_without_someone_at_the_door(self):
         """A cat across the mat at night, sun shadows, a bug on the lens: no person, no parcel."""

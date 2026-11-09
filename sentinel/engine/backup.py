@@ -37,7 +37,7 @@ FILESYSTEMS = {"vfat", "exfat", "ext4", "ext3", "ext2", "ntfs", "ntfs3", "btrfs"
 DAY_DIR = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 BIG = {"wifi_motion"}  # data folders that go to mirror/ (hundreds of MB), not into every night's snapshot
 # Recreated on their own, or temporary: never backed up.
-SKIP_NAMES = {".web_cache", "__pycache__", ".pio", STATE_FILE}
+SKIP_NAMES = {".web_cache", ".packages", "__pycache__", ".pio", STATE_FILE}
 SKIP_FILE = re.compile(r"(?:\.bak(?:-\d+)?|-wal|-shm|-journal)$")
 SKIP_DIR = re.compile(r"^build(?:-.*)?$")  # firmware build output
 REMOTE_HOST = re.compile(r"^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9.-]*$")

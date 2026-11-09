@@ -205,7 +205,9 @@ class TestDescribe(unittest.TestCase):
         self.assertEqual(describe(still, "Garage", "Driveway", GREY, W), "🚶 Someone is in the Driveway.")
         self.assertEqual(describe(still, "Front Door", None, GREY, W, companions=1), "🚶 2 people are at the Front Door.")
         walking = self._track("person", "person", [(100, 100, 40, 120), (300, 100, 40, 120)])
-        self.assertEqual(describe(walking, "Front Door", None, GREY, W), "🚶 Someone is walking past the Front Door.")
+        self.assertEqual(describe(walking, "Front Door", None, GREY, W), "🚶 Someone is at the Front Door.")
+        self.assertEqual(describe(walking, "Garage", "Driveway", GREY, W), "🚶 Someone is walking past the Driveway.")
+        self.assertEqual(describe(walking, "Garage", None, GREY, W), "🚶 Someone is walking past the Garage.")
 
     def test_vehicle_arriving_with_colour(self):
         frame = np.zeros((H, W, 3), dtype=np.uint8)

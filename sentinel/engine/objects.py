@@ -266,6 +266,8 @@ def vehicle_phrase(track: Track, frame: np.ndarray) -> Tuple[str, str]:
 
 _IN_PLACES = {"yard", "backyard", "driveway", "drive", "garden", "garage", "lawn", "carport", "field", "lot"}
 _ON_PLACES = {"porch", "deck", "patio", "street", "road", "sidewalk", "steps", "stoop", "walkway", "path"}
+# Nobody "walks past" a door: a driver leaving a parcel was "walking past the Front Door" (2026-11-08).
+_DOOR_PLACES = {"door", "porch", "entry", "entrance", "doorstep", "steps", "stoop"}
 
 
 def _place(zone_name: Optional[str], camera_name: str) -> str:
@@ -300,7 +302,9 @@ def describe(track: Track, camera_name: str, zone_name: Optional[str], frame: np
             who, be = f"{companions + 1} people", "are"
         else:
             who, be = "Someone", "is"
-        return f"{emoji} {who} {be} walking past {past}." if moving else f"{emoji} {who} {be} {at}."
+        words = (zone_name or camera_name).lower().split()
+        at_door = bool(words) and words[-1] in _DOOR_PLACES
+        return f"{emoji} {who} {be} walking past {past}." if moving and not at_door else f"{emoji} {who} {be} {at}."
 
     if track.group == "vehicle":
         if track.label == "bicycle":
