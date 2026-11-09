@@ -161,6 +161,7 @@ class SettingsManager:
             # Shown in the Help page and the Telegram "access" reply
             "remote_web_url": "",
             "remote_rdp_user": "",
+            "lost_pets": {},  # pet id -> when the search started ("Xena is lost"); cleared by "found"
             "min_contour_area": MIN_CONTOUR_AREA,
             "var_threshold": VAR_THRESHOLD,
             "active_zones": copy.deepcopy(DEFAULT_ACTIVE_ZONES),

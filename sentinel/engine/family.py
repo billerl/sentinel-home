@@ -13,6 +13,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from sentinel.logging_utils import app_logger
 
 LOCATION_STALE_S = 10 * 60  # a family phone's position older than this: ask the phone for a fresh one
+LOST_PIN_SECONDS = 300  # a lost pet: a fresh Telegram map pin at most this often ...
+LOST_PIN_METRES = 30  # ... and only once it has moved this far
 
 
 class Family:
@@ -39,6 +41,7 @@ class Family:
         self._location_asked: Dict[int, float] = {}  # person -> last time we asked their phone for a fresh fix
         self._outings: Dict[int, float] = {}  # pet -> until when its tracker is asked often ("the dogs are going out")
         self._beeps: Dict[int, float] = {}  # pet -> when "recall Xena" was asked (the LoRa base picks it up)
+        self._lost_pinned: Dict[int, Tuple[float, float, float]] = {}  # lost pet -> last pin sent (ts, lat, lon)
 
     def location_question(self, text: str):
         from sentinel.engine.location import location_question
@@ -114,6 +117,102 @@ class Family:
         app_logger.log("info", "pet_beep", pets=names, component="engine", action="location")
         return f"Beeping {names}'s collar{'s' if len(pets) > 1 else ''}."
 
+    # ---- a lost pet: the collar is asked for a position every 30 s until it's found; the Lost dog page
+    def lost(self) -> Dict[int, float]:
+        """Pets being searched for: id -> since. Kept in the settings, so a restart doesn't end the search."""
+        out = {}
+        for key, since in (self.settings.get("lost_pets") or {}).items():
+            try:
+                out[int(key)] = float(since)
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def pets(self, ids=None) -> list:
+        """The people with a collar tracker (all, or those with these ids)."""
+        return [p for p in self.locations.people() if p.tracker and (ids is None or p.id in ids)]
+
+    def set_lost(self, kind: str, pets) -> str:
+        """"Xena is lost": every chat gets the news with the live map's link, the collar is asked for its
+        position every OUTING_POLL_SECONDS until "we found Xena". The reply."""
+        from sentinel.engine.location import OUTING_POLL_SECONDS
+
+        lost, now = self.lost(), time.time()
+        changed = [p for p in pets if (p.id in lost) != (kind == "lost")]
+        names = " and ".join(p.name for p in pets)
+        be = "are" if len(pets) > 1 else "is"
+        if not changed:
+            return f"{names} {be} already marked lost." if kind == "lost" else f"{names} wasn't marked lost."
+        for p in changed:
+            if kind == "lost":
+                lost[p.id] = now
+            else:
+                lost.pop(p.id, None)
+                self._outings.pop(p.id, None)
+                self._lost_pinned.pop(p.id, None)
+        self.settings["lost_pets"] = {str(k): v for k, v in lost.items()}
+        self.settings_manager.save_settings(force=True)
+        changed_names = " and ".join(p.name for p in changed)
+        app_logger.log("info", "pet_lost" if kind == "lost" else "pet_found", pets=changed_names, component="engine",
+                       action="location")
+        if kind == "found":
+            self._send_location_alert(f"✅ {changed_names} found. Back to normal checking.")
+            return f"Good news. {changed_names} marked found."
+        url = str(self.settings.get("remote_web_url") or "").strip().rstrip("/")
+        link = f"Live map: {url}/lost" if url else "Live map: Sentinel's Home page → Lost dog."
+        many = len(changed) > 1
+        text = (f"🚨 {changed_names} {'are' if many else 'is'} lost. {'Their collars are' if many else 'The collar is'} "
+                f"asked for a position every {OUTING_POLL_SECONDS} seconds until you say found.\n{link}")
+        fixes = [(p, self.locations.fix(p.id)) for p in changed]
+        for chat_id in self.telegram.unpaused_chats():
+            def send(chat=chat_id):
+                self.telegram.reply_to_chat(chat, text)
+                for _p, fix in fixes:
+                    if fix:
+                        self.telegram.send_location(chat, fix["lat"], fix["lon"])
+            threading.Thread(target=send, name="pet-lost", daemon=True).start()
+        self._speak(f"{changed_names} {'are' if many else 'is'} lost. The live map is on Sentinel's lost dog page.")
+        return (f"{changed_names} marked lost. Everyone on Telegram got the live map link, and "
+                f"{'their collars' if many else 'the collar'} will report every {OUTING_POLL_SECONDS} seconds.")
+
+    def _lost_pin(self, person, fix: Optional[Dict[str, Any]]) -> None:
+        """A lost pet moved: a fresh map pin for the family out looking (at most every few minutes)."""
+        from sentinel.engine.location import distance_m
+
+        if not fix:
+            return
+        last = self._lost_pinned.get(person.id)
+        if last and (fix["ts"] - last[0] < LOST_PIN_SECONDS or distance_m(last[1], last[2], fix["lat"], fix["lon"]) < LOST_PIN_METRES):
+            return
+        self._lost_pinned[person.id] = (fix["ts"], fix["lat"], fix["lon"])
+        if last is None:
+            return  # the first position after "lost" only sets the start: the alert had its pin
+        text = f"🐕 {person.name} is here now ({time.strftime('%-I:%M %p', time.localtime(fix['ts']))})."
+        for chat_id in self.telegram.unpaused_chats():
+            def send(chat=chat_id):
+                self.telegram.reply_to_chat(chat, text)
+                self.telegram.send_location(chat, fix["lat"], fix["lon"])
+            threading.Thread(target=send, name="pet-lost-pin", daemon=True).start()
+
+    def lost_view(self) -> Dict[str, Any]:
+        """The Lost dog page: each collar's last position, its trail and whether it's being searched for."""
+        from sentinel.engine.location import OUTING_POLL_SECONDS
+
+        lost, now = self.lost(), time.time()
+        pets = []
+        for p in self.pets():
+            fix = self.locations.fix(p.id) or {}
+            since = lost.get(p.id)
+            start = max(now - 3 * 3600, since - 15 * 60 if since else now - 30 * 60)
+            trail = [[round(lat, 6), round(lon, 6), round(ts)] for ts, lat, lon, _acc, _vel
+                     in self.locations.points(p.id, start, now + 60)]
+            pets.append({"id": p.id, "name": p.name, "lost_since": since, "lat": fix.get("lat"), "lon": fix.get("lon"),
+                         "ts": fix.get("ts"), "acc": fix.get("acc"), "batt": fix.get("batt"),
+                         "in_yard": None if fix.get("in_yard") is None else bool(fix.get("in_yard")), "trail": trail})
+        home = next((pl for pl in self.locations.places() if pl.is_home), None)
+        return {"pets": pets, "yard": self.locations.yard(), "home": [home.lat, home.lon] if home else None,
+                "poll_seconds": OUTING_POLL_SECONDS, "now": now}
+
     def owntracks_post(self, username: str, password: str, payload: Any) -> Optional[List[Dict[str, Any]]]:
         """A message from a family phone. Returns what to send back to the phone, or None if the
         login is wrong. A phone left alone mostly re-sends its last position (its 15-minute check-in
@@ -135,7 +234,7 @@ class Family:
         if person.tracker:  # the LoRa base checks in every 5 s: "ping or beep the collar now?"
             from sentinel.engine.location import OUTING_POLL_SECONDS
 
-            if (self._outings.get(person.id, 0) > now and (fix is None or now - fix["ts"] >= OUTING_POLL_SECONDS - 5)
+            if ((self._outings.get(person.id, 0) > now or person.id in self.lost()) and (fix is None or now - fix["ts"] >= OUTING_POLL_SECONDS - 5)
                     and now - self._location_asked.get(person.id, 0) >= OUTING_POLL_SECONDS - 5):
                 self._location_asked[person.id] = now
                 reply = [{"_type": "cmd", "action": "reportLocation"}]
@@ -151,6 +250,8 @@ class Family:
         app_logger.log("info", "location_post", person=person.name, kind=msg.get("_type"), trigger=msg.get("t"),
                        age_s=age, fix_age_s=round(now - fix["ts"]) if fix else None, asked=bool(reply),
                        component="engine", action="location")
+        if person.tracker and msg.get("_type") == "location" and person.id in self.lost():
+            self._lost_pin(person, fix)
         if changes:
             statuses = self._vehicle_statuses()[0] if self._presence() is not None else {}
             for change in changes:
@@ -188,6 +289,9 @@ class Family:
             return  # nosing along the fence: one message is enough
         self._location_alerted[key] = time.time()
         text = change_message(change, [])
+        url = str(self.settings.get("remote_web_url") or "").strip().rstrip("/")
+        if change.kind == "left_yard" and url:
+            text += f"\nLive map: {url}/lost"
         for chat_id in self.telegram.unpaused_chats():
             def send(chat=chat_id):
                 self.telegram.reply_to_chat(chat, text)

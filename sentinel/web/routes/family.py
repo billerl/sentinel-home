@@ -1,9 +1,11 @@
 """
-Family locations: OwnTracks posts, setup links, personal logins, the People and Timeline pages
+Family locations: OwnTracks posts, setup links, personal logins, the People, Timeline and Lost dog pages
 (sentinel/engine/location.py).
 """
 
 from __future__ import annotations
+
+import time
 
 import segno
 from flask import Flask, Response, jsonify, redirect, render_template, request, url_for
@@ -178,6 +180,38 @@ def register(app: Flask, ctx: WebContext) -> None:
         if redir:
             return redir
         return render_template("people.html")
+
+    # ---- a lost pet: live map of the collar, search on/off, beep (sentinel/engine/family.py) ----
+    @app.route("/lost")
+    def lost_page():
+        redir = _require_session()
+        if redir:
+            return redir
+        return render_template("lost.html")
+
+    @app.route("/api/lost")
+    def api_lost():
+        redir = _require_session()
+        if redir:
+            return jsonify({"error": "unauthorized"}), 401
+        if engine is None:
+            return jsonify({"pets": [], "yard": [], "home": None, "poll_seconds": 30, "now": time.time()})
+        return jsonify(engine.family.lost_view())
+
+    @app.route("/api/lost/<action>", methods=["POST"])
+    def api_lost_action(action):
+        err = _config_guard()
+        if err:
+            return err
+        ids = (request.get_json(silent=True) or {}).get("ids")
+        pets = engine.family.pets({i for i in ids if isinstance(i, int)} if isinstance(ids, list) else None)
+        if not pets:
+            return jsonify({"error": "No pet with a collar tracker."}), 400
+        if action in ("start", "found"):
+            return _result(True, engine.family.set_lost("lost" if action == "start" else "found", pets))
+        if action == "beep":
+            return _result(True, engine.family.beep_pets(pets))
+        return jsonify({"error": "unknown action"}), 404
 
     @app.route("/api/family")
     def api_family():

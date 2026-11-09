@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <meta name="theme-color" content="#001525">
+  <title>Sentinel — Lost dog</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='leaflet/leaflet.css') }}">
+  <script src="{{ url_for('static', filename='leaflet/leaflet.js') }}"></script>
+  <style>
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; }
+    a { color: #00ffff; }
+    [hidden] { display: none !important; }
+    header { position: sticky; top: 0; z-index: 1000; background: #1a1a1a; border-bottom: 1px solid #033; }
+    .bar { display: flex; align-items: center; gap: 12px; padding: 0 1rem; height: 44px; }
+    .bar a { text-decoration: none; font-size: 0.85rem; }
+    h1 { font-size: 0.95rem; margin: 0; flex: 1; color: #00ffff; }
+    main { max-width: 900px; margin: 0 auto; padding: 10px 12px 40px; }
+    button, .btn {
+      background: rgba(0,255,255,0.12); color: #00ffff; border: 1px solid #00a8a8; padding: 10px 14px;
+      border-radius: 10px; cursor: pointer; font: inherit; font-size: 0.95rem; text-decoration: none;
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    }
+    button:disabled { opacity: 0.5; cursor: default; }
+    button:focus-visible, .btn:focus-visible { outline: 3px solid #fff; outline-offset: 1px; }
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .chips button { padding: 8px 14px; border-radius: 999px; background: none; border-color: #1d3a44; color: #9cc; }
+    .chips button.on { background: rgba(0,255,255,0.15); border-color: #00ffff; color: #fff; }
+    .chips button.lost { border-color: #ff6b6b; }
+    .status { background: linear-gradient(180deg, #0c151c, #091015); border: 1px solid #16303a; border-radius: 14px;
+              padding: 12px 14px; margin-bottom: 10px; }
+    .status.searching { border-color: #ff6b6b; box-shadow: 0 0 22px -10px #ff6b6b; }
+    .who { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .who b { font-size: 1.3rem; color: #fff; }
+    .heard { font-size: 1rem; font-weight: 600; }
+    .fresh { color: #7fe0a0; } .aging { color: #ffc94d; } .old { color: #ff8080; }
+    .lines { font-size: 0.88rem; color: #9cc; margin-top: 4px; line-height: 1.55; }
+    .lines .me { color: #8fd3ff; font-weight: 600; font-size: 0.98rem; }
+    .search-on { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: #2a0c0c; border: 1px solid #ff6b6b;
+                 color: #ffd6d6; font-size: 0.9rem; line-height: 1.5; }
+    .big { width: 100%; margin-top: 10px; padding: 14px; font-size: 1.05rem; font-weight: 600; }
+    .big.alarm { background: #c62828; border-color: #ff8080; color: #fff; }
+    .big.found { background: #1b6e3a; border-color: #7fe0a0; color: #fff; }
+    #map { height: 62vh; min-height: 320px; border-radius: 14px; border: 1px solid #16303a; background: #050b0f; }
+    .tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+    .tools .btn, .tools button { padding: 12px 6px; font-size: 0.9rem; }
+    .note { font-size: 0.8rem; color: #6f97a5; line-height: 1.5; margin: 10px 2px 0; }
+    .msg { font-size: 0.85rem; color: #9cc; margin-top: 8px; min-height: 1em; }
+    .msg.err { color: #f99; }
+    .empty { text-align: center; padding: 30px 16px; border: 1px dashed #1d3a44; border-radius: 14px; color: #8fb6c4; line-height: 1.6; }
+    .pet-pin { background: #ff8c1a; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 6px rgba(255,140,26,0.35); }
+    .me-pin { background: #2f9bff; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 5px rgba(47,155,255,0.3); }
+    .leaflet-tooltip.pet-label { background: #ff8c1a; color: #000; border: 0; font-weight: 700; box-shadow: none; }
+    .leaflet-tooltip.pet-label::before { display: none; }
+    #map.street .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9); }
+    .leaflet-control-attribution { background: rgba(0,0,0,0.6) !important; color: #6aa !important; }
+    .leaflet-control-attribution a { color: #8cc !important; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <a href="{{ url_for('index') }}">← Home</a>
+      <h1>Lost dog</h1>
+      <a href="{{ url_for('people_page') }}">Family</a>
+    </div>
+  </header>
+
+  <main>
+    <div id="none" class="empty" hidden>No pet has a collar tracker yet. Add the tracker's id to the pet on the
+      <a href="/people">Family</a> page.</div>
+    <div id="page" hidden>
+      <div class="chips" id="chips"></div>
+      <div class="status" id="status">
+        <div class="who"><b id="name"></b><span class="heard" id="heard"></span></div>
+        <div class="lines" id="lines"></div>
+        <div class="search-on" id="search-on" hidden></div>
+        <button type="button" class="big alarm" id="start" onclick="startSearch()"></button>
+        <button type="button" class="big found" id="found" onclick="markFound()" hidden></button>
+        <div class="msg" id="msg" role="status"></div>
+      </div>
+      <div id="map"></div>
+      <div class="tools">
+        <a class="btn" id="directions" target="_blank" rel="noopener">🧭 Directions</a>
+        <button type="button" onclick="beep()">🔔 Beep collar</button>
+        <button type="button" id="follow" onclick="followPet()">◎ Center</button>
+      </div>
+      <p class="note" id="range-note"></p>
+      <p class="note" id="me-note" hidden>To see where you are on the map too, open Sentinel through its remote web
+        address (the https:// one) and allow location when your phone asks.</p>
+    </div>
+  </main>
+
+  <script>
+    var data = null, petId = null, fetchedAt = 0, map = null, layers = null, follow = true, fitted = false;
+    var me = null, meLayer = null, watching = false;
+    try { petId = parseInt(localStorage.getItem("lostPet"), 10) || null; } catch (e) {}
+
+    function $(id) { return document.getElementById(id); }
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+      });
+    }
+    async function post(path, body) {
+      var r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+                                  body: JSON.stringify(body || {}) });
+      if (r.status === 401) { location.href = "/login"; return { ok: false, data: {} }; }
+      var d = {}; try { d = await r.json(); } catch (e) {}
+      return { ok: r.ok, data: d };
+    }
+    function pet() {
+      if (!data) return null;
+      return data.pets.filter(function (p) { return p.id === petId; })[0] || null;
+    }
+    function ago(s) {
+      s = Math.max(0, Math.round(s));
+      if (s < 60) return s + " s ago";
+      if (s < 3600) return Math.floor(s / 60) + " min ago";
+      if (s < 86400) return Math.floor(s / 3600) + " h " + Math.floor((s % 3600) / 60) + " min ago";
+      return Math.floor(s / 86400) + " days ago";
+    }
+    function clock(ts) { return new Date(ts * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+    function metres(a, b) {
+      var R = 6371000, r = Math.PI / 180, dLat = (b[0] - a[0]) * r, dLon = (b[1] - a[1]) * r;
+      var h = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      return 2 * R * Math.asin(Math.sqrt(h));
+    }
+    function heading(a, b) {
+      var r = Math.PI / 180, y = Math.sin((b[1] - a[1]) * r) * Math.cos(b[0] * r);
+      var x = Math.cos(a[0] * r) * Math.sin(b[0] * r) - Math.sin(a[0] * r) * Math.cos(b[0] * r) * Math.cos((b[1] - a[1]) * r);
+      var deg = (Math.atan2(y, x) / r + 360) % 360;
+      return ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"][Math.round(deg / 45) % 8];
+    }
+    function far(m) {
+      var ft = m * 3.281;
+      return ft < 1000 ? Math.round(ft / 10) * 10 + " ft" : (m / 1609.34).toFixed(m < 16093 ? 1 : 0) + " miles";
+    }
+
+    async function load() {
+      try {
+        var r = await fetch("/api/lost");
+        if (r.status === 401) { location.href = "/login"; return; }
+        data = await r.json();
+        fetchedAt = Date.now() / 1000;
+      } catch (e) { return; }
+      if (!data.pets.length) { $("none").hidden = false; $("page").hidden = true; return; }
+      $("page").hidden = false;
+      if (!pet()) {
+        var searching = data.pets.filter(function (p) { return p.lost_since; })[0];
+        petId = (searching || data.pets[0]).id;
+      }
+      show();
+    }
+
+    function choose(id) {
+      petId = id; fitted = false; follow = true;
+      try { localStorage.setItem("lostPet", String(id)); } catch (e) {}
+      show();
+    }
+
+    function show() {
+      var p = pet();
+      $("chips").hidden = data.pets.length < 2;
+      $("chips").innerHTML = data.pets.map(function (q) {
+        return '<button type="button" class="' + (q.id === petId ? "on " : "") + (q.lost_since ? "lost" : "") + '" onclick="choose(' + q.id + ')">'
+          + (q.lost_since ? "🚨 " : "🐕 ") + esc(q.name) + '</button>';
+      }).join("");
+      $("name").textContent = "🐕 " + p.name;
+      $("status").className = "status" + (p.lost_since ? " searching" : "");
+      $("search-on").hidden = !p.lost_since;
+      if (p.lost_since) {
+        $("search-on").textContent = "Searching since " + clock(p.lost_since) + ". The collar is asked for its position every "
+          + data.poll_seconds + " seconds, and everyone on Telegram gets a new map pin when " + p.name + " moves.";
+      }
+      $("start").hidden = !!p.lost_since;
+      $("start").textContent = "🚨 " + p.name + " is lost: start the search";
+      $("found").hidden = !p.lost_since;
+      $("found").textContent = "✅ Found " + p.name;
+      tick();
+      drawMap();
+    }
+
+    function tick() {
+      var p = pet();
+      if (!p) return;
+      var lines = [];
+      if (p.ts) {
+        var age = data.now - p.ts + (Date.now() / 1000 - fetchedAt);
+        $("heard").textContent = "heard " + ago(age);
+        $("heard").className = "heard " + (age < 120 ? "fresh" : age < 600 ? "aging" : "old");
+        if (p.in_yard !== null) lines.push(p.in_yard ? "In the yard" : "Outside the yard");
+        if (p.batt != null) lines.push("collar battery " + p.batt + "%");
+        $("range-note").textContent = age > 180
+          ? "Sentinel only hears the collar near the house (through the LoRa base) or through other Meshtastic radios nearby. "
+            + "If " + p.name + " is out of range, start looking where the map last shows the collar."
+          : "";
+      } else {
+        $("heard").textContent = "no position yet";
+        $("heard").className = "heard old";
+      }
+      var html = esc(lines.join(" · "));
+      if (me && p.lat != null) {
+        var d = metres(me, [p.lat, p.lon]);
+        html = '<span class="me">' + (d < 15 ? "You're right there." : "You're " + far(d) + " away. Head " + heading(me, [p.lat, p.lon]) + ".")
+          + "</span>" + (html ? "<br>" + html : "");
+      }
+      $("lines").innerHTML = html;
+    }
+
+    function drawMap() {
+      var p = pet();
+      if (!map) {
+        map = L.map("map", { zoomControl: true });
+        var photo = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+          maxZoom: 21, maxNativeZoom: 19, referrerPolicy: "strict-origin-when-cross-origin",
+          attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics"
+        }).addTo(map);
+        var street = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 21, maxNativeZoom: 19, referrerPolicy: "strict-origin-when-cross-origin",
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'
+        });
+        L.control.layers({ "Satellite": photo, "Map": street }, null, { collapsed: false }).addTo(map);
+        map.on("baselayerchange", function (e) { $("map").classList.toggle("street", e.layer === street); });
+        map.on("dragstart", function () { follow = false; });
+        layers = L.layerGroup().addTo(map);
+        meLayer = L.layerGroup().addTo(map);
+        if (data.home) map.setView(data.home, 18);
+        else map.setView([39.8, -98.6], 4);
+      }
+      layers.clearLayers();
+      if (data.yard && data.yard.length >= 3) L.polygon(data.yard, { color: "#7fe8c8", weight: 2, fillOpacity: 0.08, interactive: false }).addTo(layers);
+      if (p.trail.length > 1) {
+        L.polyline(p.trail.map(function (t) { return [t[0], t[1]]; }), { color: "#ff8c1a", weight: 3, opacity: 0.75 }).addTo(layers);
+        p.trail.forEach(function (t, i) {
+          if (i === p.trail.length - 1) return;
+          L.circleMarker([t[0], t[1]], { radius: 3, color: "#ff8c1a", fillOpacity: 0.8, weight: 1 }).bindTooltip(clock(t[2])).addTo(layers);
+        });
+      }
+      if (p.lat != null) {
+        var here = [p.lat, p.lon];
+        if (p.acc && p.acc > 10) L.circle(here, { radius: p.acc, color: "#ff8c1a", weight: 1, fillOpacity: 0.08, interactive: false }).addTo(layers);
+        L.marker(here, { icon: L.divIcon({ className: "pet-pin", iconSize: [20, 20] }) })
+          .bindTooltip(p.name, { permanent: true, direction: "top", offset: [0, -12], className: "pet-label" }).addTo(layers);
+        if (me) L.polyline([me, here], { color: "#8fd3ff", weight: 2, dashArray: "6 8", interactive: false }).addTo(layers);
+        $("directions").href = "https://www.google.com/maps/dir/?api=1&travelmode=walking&destination=" + p.lat + "," + p.lon;
+        $("directions").hidden = false;
+        if (!fitted) {
+          var pts = p.trail.map(function (t) { return [t[0], t[1]]; }).concat([here]);
+          if (pts.length > 1) map.fitBounds(pts, { padding: [40, 40], maxZoom: 19 });
+          else map.setView(here, 19);
+          fitted = true;
+        } else if (follow && !map.getBounds().pad(-0.2).contains(here)) {
+          map.panTo(here);  // only once the dog nears the edge, so you stay in view too
+        }
+      } else {
+        $("directions").hidden = true;
+      }
+    }
+
+    function followPet() {
+      var p = pet();
+      follow = true;
+      if (p && p.lat != null) map.setView([p.lat, p.lon], Math.max(map.getZoom(), 18));
+    }
+
+    function watchMe() {
+      if (!map) return;
+      if (!window.isSecureContext || !navigator.geolocation) { $("me-note").hidden = false; return; }
+      if (watching) return;
+      watching = true;
+      navigator.geolocation.watchPosition(function (pos) {
+        var first = !me, p = pet();
+        me = [pos.coords.latitude, pos.coords.longitude];
+        if (first && p && p.lat != null) map.fitBounds([me, [p.lat, p.lon]], { padding: [50, 50], maxZoom: 19 });
+        meLayer.clearLayers();
+        if (pos.coords.accuracy > 15) L.circle(me, { radius: pos.coords.accuracy, color: "#2f9bff", weight: 1, fillOpacity: 0.08, interactive: false }).addTo(meLayer);
+        L.marker(me, { icon: L.divIcon({ className: "me-pin", iconSize: [16, 16] }), interactive: false }).addTo(meLayer);
+        tick();
+        drawMap();
+      }, function () { $("me-note").hidden = false; }, { enableHighAccuracy: true, maximumAge: 5000 });
+    }
+
+    async function startSearch() {
+      var p = pet();
+      if (!confirm("Mark " + p.name + " as lost? Everyone on Telegram gets the live map link, and the collar is asked for its position every "
+                   + data.poll_seconds + " seconds until you tap Found.")) return;
+      var res = await post("/api/lost/start", { ids: [p.id] });
+      say(res.ok ? res.data.message : res.data.error, !res.ok);
+      load();
+    }
+
+    async function markFound() {
+      var p = pet();
+      var res = await post("/api/lost/found", { ids: [p.id] });
+      say(res.ok ? res.data.message : res.data.error, !res.ok);
+      load();
+    }
+
+    async function beep() {
+      var res = await post("/api/lost/beep", { ids: [pet().id] });
+      say(res.ok ? res.data.message + " (only within range of the base)" : res.data.error, !res.ok);
+    }
+
+    function say(text, bad) { $("msg").textContent = text || ""; $("msg").className = "msg" + (bad ? " err" : ""); }
+
+    load().then(watchMe);
+    setInterval(load, 5000);
+    setInterval(tick, 1000);
+  </script>
+</body>
+</html>

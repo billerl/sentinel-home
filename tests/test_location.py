@@ -18,7 +18,7 @@ import bcrypt
 from sentinel.engine.household import Vehicle
 from sentinel.engine.location import (
     CarLine, LocationQuestion, LocationStore, Person, PersonView, answer_location, change_message, distance_m,
-    location_question, beep_command, outing_command, owntracks_config, owntracks_link, parse_coordinates, resolve_map_link,
+    location_question, beep_command, lost_command, outing_command, owntracks_config, owntracks_link, parse_coordinates, resolve_map_link,
 )
 
 HOME = (41.1145, -88.1780)
@@ -213,6 +213,27 @@ class TestOuting(unittest.TestCase):
         self.assertEqual([p.name for p in beep_command("beep Grace's collar", people)], ["Grace"])
         for not_it in ("beep Alex", "recall the last message", "beep"):
             self.assertIsNone(beep_command(not_it, people), not_it)
+
+    def test_lost_phrases(self):
+        people = [Person(1, "Alex"), Person(2, "Grace", tracker="!a"), Person(3, "Ben", tracker="!b")]
+
+        def said(text):
+            r = lost_command(text, people)
+            return r and (r[0], [p.name for p in r[1]])
+
+        self.assertEqual(said("Grace is lost"), ("lost", ["Grace"]))
+        self.assertEqual(said("The dogs are lost!"), ("lost", ["Grace", "Ben"]))
+        self.assertEqual(said("Grace got out"), ("lost", ["Grace"]))  # loose, not "let her out"
+        self.assertEqual(said("Grace's missing"), ("lost", ["Grace"]))
+        self.assertEqual(said("Ben ran off"), ("lost", ["Ben"]))
+        self.assertEqual(said("I can't find Grace"), ("lost", ["Grace"]))
+        self.assertEqual(said("lost dogs"), ("lost", ["Grace", "Ben"]))
+        self.assertEqual(said("We found Grace"), ("found", ["Grace"]))
+        self.assertEqual(said("found the dogs"), ("found", ["Grace", "Ben"]))
+        self.assertEqual(said("Grace is safe"), ("found", ["Grace"]))
+        for not_it in ("is Grace lost?", "is Grace lost", "where is Grace", "Alex is lost", "I lost my keys",
+                       "Grace is back inside", "found a recipe for chili"):
+            self.assertIsNone(said(not_it), not_it)
 
 
 class TestHelpers(unittest.TestCase):
@@ -445,6 +466,57 @@ class TestEndpoints(unittest.TestCase):
         self.wait_for(2)
         self.assertIn("👋 Elizabeth left home.", self.sent)
         self.assertIn("Elizabeth is about", self.engine.family.answer_location_question(self.engine.family.location_question("where is elizabeth"))[0])
+
+    def test_lost_dog(self):
+        loc = self.engine.locations
+        dog = loc.person(loc.save_person("Grace"))
+        loc.set_tracker(dog.id, "!a1cacb2a")
+        pins = []
+        patcher = patch.object(type(self.engine.telegram), "send_location",
+                               lambda _self, chat, lat, lon: pins.append((lat, lon)) or True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        ask = [{"_type": "cmd", "action": "reportLocation"}]
+        now = time.time()
+        self.post(dog.username, dog.token, fix(*HOME, now - 600))
+        self.assertEqual(self.post(dog.username, dog.token, {"_type": "checkin"}).get_json(), [])  # the base, every 5 s
+
+        house = self.server._app.test_client()
+        house.post("/login", data={"username": "alex", "password": "pw", "remember": "1"})
+        r = house.post("/api/lost/start", json={"ids": [dog.id]}, headers={"X-Sentinel-Request": "1"})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.wait_for(2)
+        alert = next(t for t in self.sent if t.startswith("🚨"))
+        self.assertIn("Grace is lost", alert)
+        self.assertIn("https://sentinel.example.org/lost", alert)
+        for _ in range(50):
+            if pins:
+                break
+            time.sleep(0.02)
+        self.assertEqual(pins, [HOME])  # where she was last heard
+        view = house.get("/api/lost").get_json()
+        self.assertEqual((view["pets"][0]["name"], bool(view["pets"][0]["lost_since"])), ("Grace", True))
+        self.assertEqual(self.engine.family.settings["lost_pets"], {str(dog.id): view["pets"][0]["lost_since"]})  # kept
+        self.assertEqual(self.post(dog.username, dog.token, {"_type": "checkin"}).get_json(), ask)  # ping the collar
+
+        # she moves: the family out looking gets a fresh pin (not for every small step)
+        n = len(self.sent)
+        self.post(dog.username, dog.token, fix(HOME[0] + 0.0005, HOME[1], now - 500))
+        self.post(dog.username, dog.token, fix(HOME[0] + 0.0006, HOME[1], now - 450))
+        far = (HOME[0] + 0.003, HOME[1])
+        self.post(dog.username, dog.token, fix(*far, now - 60))
+        self.wait_for(n + 1)
+        self.assertTrue(any(t.startswith("🐕 Grace is here now") for t in self.sent[n:]), self.sent[n:])
+        self.assertEqual(len(house.get("/api/lost").get_json()["pets"][0]["trail"]), 4)
+
+        r = house.post("/api/lost/found", json={"ids": [dog.id]}, headers={"X-Sentinel-Request": "1"})
+        self.assertIn("marked found", r.get_json()["message"])
+        self.wait_for(len(self.sent) + 1)
+        self.assertIn("✅ Grace found. Back to normal checking.", self.sent)
+        self.assertEqual(self.engine.family.settings["lost_pets"], {})
+        self.engine.family._location_asked.clear()
+        self.assertEqual(self.post(dog.username, dog.token, {"_type": "checkin"}).get_json(), [])
+        self.assertIn("wasn't marked lost", self.engine.family.set_lost("found", [loc.person(dog.id)]))
 
     def test_stale_position_asks_phone_for_a_fresh_one(self):
         ask = [{"_type": "cmd", "action": "reportLocation"}]

@@ -629,7 +629,7 @@ class Engine:
     def _build_commands(self) -> Commands:
         """What both Telegram and voice understand, each once, in the order Telegram checks them."""
         from sentinel.audio.voice import to_speech
-        from sentinel.engine.location import beep_command, outing_command
+        from sentinel.engine.location import beep_command, lost_command, outing_command
         from sentinel.engine.mesh import read_command
         from sentinel.engine.packages import TAKEN_IN
         from sentinel.engine.questions import household_question
@@ -651,6 +651,9 @@ class Engine:
             speak=lambda said: said.replace("✅ ", ""),
             voice_if=lambda t: not t.strip().startswith(("got it", "ok")),
             claim_if=lambda: self.packages is not None and bool(self.packages.packages())))
+        commands.add(Command(  # before "going out": "Xena got out" means she's loose
+            "pet lost", lambda t: lost_command(t, self.locations.people()),
+            lambda m, _t: self.family.set_lost(*m), speak=lambda said: said, prefix="🐕 "))
         commands.add(Command(
             "pets going out", lambda t: outing_command(t, self.locations.people()),
             lambda m, _t: self.family.start_outing(*m), speak=lambda said: said, prefix="🐕 "))

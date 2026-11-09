@@ -45,6 +45,8 @@
     .tile .ic { font-size: 1.6rem; line-height: 1; }
     .tile .t { font-weight: 600; font-size: 0.98rem; }
     .tile .s { font-size: 0.78rem; color: #6f97a5; line-height: 1.35; }
+    .tile.alarm { border-color: #ff6b6b; box-shadow: 0 0 18px -8px #ff6b6b; }
+    .tile.alarm .s { color: #ffb3b3; }
     .tile .s.alert { color: #ffc94d; }
     .tile.big { grid-column: span 2; background: linear-gradient(135deg, #062330, #091015); border-color: #0b4a5a; }
     .tile.big .ic { font-size: 2rem; }
@@ -87,6 +89,8 @@
         <span class="ic">📹</span><span class="t">Cameras</span><span class="s" id="s-cams">Live view, timeline and clips</span></a>
       <a class="tile big" href="{{ url_for('sensors_page') }}">
         <span class="ic">📶</span><span class="t">Movement inside</span><span class="s" id="s-sensors">Wi-Fi motion sensors</span></a>
+      <a class="tile" href="{{ url_for('lost_page') }}" id="t-lost">
+        <span class="ic">🐕</span><span class="t">Lost dog</span><span class="s" id="s-lost">Live map of the dogs' collars</span></a>
       <a class="tile" href="{{ url_for('house_page') }}">
         <span class="ic">🏠</span><span class="t">House</span><span class="s">3D map: sensors, switches, cameras</span></a>
       <a class="tile" href="{{ url_for('live_page') }}#switches">
@@ -165,6 +169,14 @@
       }).join("");
     }
 
+    async function loadLost() {
+      try { var d = await getJson("/api/lost"); } catch (e) { return; }
+      var lost = d.pets.filter(function (p) { return p.lost_since; });
+      document.getElementById("t-lost").classList.toggle("alarm", lost.length > 0);
+      if (lost.length) setText("s-lost", "🚨 Searching for " + lost.map(function (p) { return p.name; }).join(" and "));
+      else setText("s-lost", d.pets.length ? "Live map of the dogs' collars" : "No collar trackers yet");
+    }
+
     async function loadStatus() {
       try {
         var cams = await getJson("/api/cameras");
@@ -188,7 +200,7 @@
       setText("s-remotes", tvs.length ? tvs.map(function (s) { return s.name; }).join(", ") : "No TVs found yet");
     }
 
-    function refresh() { loadPeople(); loadStatus(); loadSwitches(); }
+    function refresh() { loadPeople(); loadStatus(); loadSwitches(); loadLost(); }
     clock(); setInterval(clock, 15000);
     loadWeather(); setInterval(loadWeather, 10 * 60 * 1000);
     // Severe weather warnings: a banner across the top while one is in effect (checked every minute).

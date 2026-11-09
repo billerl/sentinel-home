@@ -667,6 +667,31 @@ def beep_command(text: str, people: List[Person]) -> Optional[List[Person]]:
     return (_pets_named(m.group("s"), pets) or None) if pets and m else None
 
 
+def lost_command(text: str, people: List[Person]) -> Optional[Tuple[str, List[Person]]]:
+    """("lost" | "found", the pets) for "Xena is lost", "the dogs got out", "I can't find Xena", "we found Xena",
+    "Xena is safe"; None otherwise. Questions are left alone."""
+    low = re.sub(r"[.!]+$", "", text.strip().lower()).replace("\u2019", "'")
+    pets = [p for p in people if p.tracker]
+    if not pets or low.endswith("?") or re.match(r"(is|are|where|did|has|have|when|was|were)\b", low):
+        return None
+    lost = r"(?:lost|missing|loose|gone|run\s+off|ran\s+off|run\s+away|ran\s+away|got\s+out|got\s+loose|escaped)"
+    for kind, pattern in (
+            ("lost", rf"(?:oh\s+no,?\s+)?(?P<s>.+?)\s*(?:\s(?:is|are|has|have|got)|'s|'re)?\s+(?:been\s+|gone\s+)?{lost}"
+                     rf"(?:\s+again)?$"),
+            ("lost", r"(?:i|we)\s+can'?t\s+find\s+(?P<s>.+)$"),
+            ("lost", rf"(?:{_PETS}\s+)?(?:(?P<s>.+?)\s+)?lost\s+mode(?:\s+on)?$|lost\s+(?P<s2>{_PETS})$"),
+            ("found", r"(?:(?:i|we)\s+)?found\s+(?P<s>.+)$"),
+            ("found", r"(?P<s>.+?)\s*(?:\s(?:is|are|was|were)|'s|'re)\s+(?:found|safe)(?:\s+now)?$")):
+        m = re.match(pattern, low)
+        if not m:
+            continue
+        subject = m.groupdict().get("s") or m.groupdict().get("s2") or "dogs"
+        named = _pets_named(subject, pets)
+        if named:
+            return kind, named
+    return None
+
+
 def initials(name: str) -> str:
     """OwnTracks shows a two-letter tag on its map."""
     letters = [w[0] for w in re.findall(r"[A-Za-z0-9]+", name)]

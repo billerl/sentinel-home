@@ -419,6 +419,14 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   immediately; Claude's suggestions ask yes first / show a ✅ button). New makes = another driver class
   with `discover/status/set/rename` (Shelly and Tasmota have local HTTP APIs). Newer KLAP-only Kasa/Tapo
   devices don't answer on 9999 and aren't supported. No automations yet (e.g. lights on for a person at night).
+- **Lost dog** (`Family.set_lost/lost_view` in `sentinel/engine/family.py`, `lost_command` in location.py, page
+  `/lost`, `/api/lost*`): "Grace is lost" (page button, voice, Telegram) = every unpaused chat gets the news, the
+  `remote_web_url` + `/lost` link and the last fix as a pin; the base's check-ins then ask the collar every
+  OUTING_POLL_SECONDS (as an outing, but with no end) and a new pin goes out when the pet has moved >= 30 m, at most
+  every 5 min. The search is kept in settings `lost_pets` (id -> since) so a deploy doesn't end it; "found" clears
+  it. The page polls `/api/lost` every 5 s (fix, last 30 min of points, or since 15 min before the search) and shows
+  the viewer's own position via `watchPosition` (https only, i.e. through the tunnel) with distance and heading.
+  "lost" is registered before "going out" ("Grace got out" = loose). The yard alert carries the link too.
 - **Learned remotes** (`sentinel/engine/remotes.py`, page `/remotes`, `/api/remotes*`, codes in
   `recorded_videos/remotes.json`): IR and RF buttons of things with only a remote (heater, soundbar, ceiling fans),
   sent by a BroadLink RM4 Pro/mini through python-broadlink (local encrypted protocol; "Lock device" must be off in
