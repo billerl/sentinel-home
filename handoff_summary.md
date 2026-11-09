@@ -427,6 +427,15 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   it. The page polls `/api/lost` every 5 s (fix, last 30 min of points, or since 15 min before the search) and shows
   the viewer's own position via `watchPosition` (https only, i.e. through the tunnel) with distance and heading.
   "lost" is registered before "going out" ("Grace got out" = loose). The yard alert carries the link too.
+- **Heater thermostat** (`sentinel/engine/heater.py`, card on `/remotes`, `/api/heater*`, state in
+  `recorded_videos/heater.json`): holds a target with a remote-only heater (EdenPURE: 13-step setting, Auto/High
+  mode, Power) by stepping its setting with the learned Temp up/down buttons from the BroadLink's HTS2 thermometer
+  (`Remotes.climate`, smoothed). The setting is counted (STEPS+1 presses down, then up) on start, after a failed
+  press and every 6 h. One step per 15 min; >3°F short = top step until within 1°F, then back to the step that held
+  the target last time. Never presses Power or Mode (toggles, no feedback); every safety action is "all the way
+  down" (>= 78°F, no reading for 10 min); bottom step and still 3°F over for 45 min = "may be on High" message.
+  A power-monitoring plug (to see on/off; tabled) must allow for the fan running 1-5 min after Power off.
+  SmartSwitches.extras = [heater, remotes] get the words no switch or TV took.
 - **Learned remotes** (`sentinel/engine/remotes.py`, page `/remotes`, `/api/remotes*`, codes in
   `recorded_videos/remotes.json`): IR and RF buttons of things with only a remote (heater, soundbar, ceiling fans),
   sent by a BroadLink RM4 Pro/mini through python-broadlink (local encrypted protocol; "Lock device" must be off in

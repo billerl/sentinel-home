@@ -1,6 +1,6 @@
 """
 Smart plugs and switches (sentinel/engine/switches.py), the TV remote (sentinel/engine/samsung_tv.py) and the
-learned remotes (sentinel/engine/remotes.py).
+learned remotes (sentinel/engine/remotes.py) with the heater thermostat (sentinel/engine/heater.py).
 """
 
 from __future__ import annotations
@@ -170,4 +170,33 @@ def register(app: Flask, ctx: WebContext) -> None:
             return _result(*remotes.delete(remote, button or None))
         if action == "find":
             return _result(*remotes.find_hub())
+        return jsonify({"error": "unknown action"}), 404
+
+    # ---- the heater thermostat: a target held by stepping the heater's setting (sentinel/engine/heater.py) ----
+    @app.route("/api/heater")
+    def api_heater():
+        redir = _require_session()
+        if redir:
+            return jsonify({"error": "unauthorized"}), 401
+        if engine is None:
+            return jsonify({"enabled": False, "buttons": None, "remotes": {}})
+        return jsonify(engine.heater.view())
+
+    @app.route("/api/heater/<action>", methods=["POST"])
+    def api_heater_action(action):
+        err = _config_guard()
+        if err:
+            return err
+        body = request.get_json(silent=True) or {}
+        heater = engine.heater
+        if action == "hold":
+            target = body.get("target_f")
+            if target is not None and not isinstance(target, (int, float)):
+                return jsonify({"error": "target must be a number"}), 400
+            return _result(*heater.hold(target))
+        if action == "release":
+            return _result(*heater.release())
+        if action == "buttons":
+            return _result(*heater.choose_buttons(str(body.get("remote") or "")[:60], str(body.get("up") or "")[:60],
+                                                  str(body.get("down") or "")[:60]))
         return jsonify({"error": "unknown action"}), 404

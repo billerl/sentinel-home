@@ -162,7 +162,12 @@ class Engine:
         from sentinel.engine.remotes import Remotes
 
         self.remotes = Remotes(VIDEO_DIR)  # IR/RF buttons taught to a BroadLink (heater, soundbar, fans)
-        self.switches.remotes = self.remotes
+        from sentinel.engine.heater import HeaterControl
+
+        # A heater with only a remote, held at a temperature from the BroadLink's thermometer
+        self.heater = HeaterControl(VIDEO_DIR, self.remotes, self.settings, notify=lambda text: [
+            self.telegram.reply_to_chat(c, text) for c in self.telegram.unpaused_chats()])
+        self.switches.extras = [self.heater, self.remotes]
         from sentinel.engine.wifi_motion import WifiMotion
 
         self.wifi_motion = WifiMotion(VIDEO_DIR)  # ESP32 boards that sense movement through the Wi-Fi signal
@@ -425,6 +430,7 @@ class Engine:
             self.presence.start()
         if self.packages is not None:
             self.packages.start()
+        self.heater.start()
         self.camera_lights.start()
         self.switches.start()
         self.wifi_motion.start()
@@ -463,6 +469,7 @@ class Engine:
             self.presence.stop()
         if self.packages is not None:
             self.packages.stop()  # keeps the porch's quiet picture for the restart
+        self.heater.stop()
         self.camera_lights.stop()
         self.switches.stop()
         self.wifi_motion.stop()

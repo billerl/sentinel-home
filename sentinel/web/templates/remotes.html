@@ -62,6 +62,19 @@
     .msg { font-size: 0.82rem; margin-top: 8px; min-height: 1em; color: #9cc; }
     .msg.err { color: #f99; }
     .empty { text-align: center; padding: 26px 16px; border: 1px dashed #1d3a44; border-radius: 14px; color: #8fb6c4; line-height: 1.6; }
+    .heat .hrow { display: flex; align-items: flex-end; gap: 14px; margin-top: 12px; }
+    .heat .cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .heat .cell small { font-size: 0.75rem; color: #6f97a5; }
+    .heat .cell b { font-size: 1.8rem; color: #fff; font-weight: 700; line-height: 1.1; }
+    .heat .stepper { display: flex; align-items: center; gap: 8px; }
+    .heat .stepper button { width: 40px; height: 40px; padding: 0; font-size: 1.3rem; }
+    .heat .col { display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 2px; margin-left: auto; flex: none; }
+    .heat .col i { display: block; height: 5px; border-radius: 2px; background: #1d2a30; }
+    .heat .col i.on { background: #ff5a3c; box-shadow: 0 0 6px #ff5a3c88; }
+    .heat .state { font-size: 0.8rem; padding: 3px 9px; border-radius: 999px; border: 1px solid #1d3a44; color: #9cc; }
+    .heat .state.on { border-color: #ff8a4c; color: #ffb38a; }
+    .heat details { margin-top: 10px; font-size: 0.85rem; color: #9cc; }
+    .heat details select { font: inherit; padding: 7px; border-radius: 8px; border: 1px solid #1d3a44; background: #050b0f; color: #fff; width: 100%; }
     .pulse { animation: pulse 1.2s ease-in-out infinite; }
     @keyframes pulse { 50% { opacity: 0.55; } }
     @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
@@ -87,6 +100,28 @@
         <span class="txt" id="hub-txt">Checking…</span>
         <button type="button" class="ghost" id="hub-find" onclick="findHub()">Look for it</button>
       </div>
+    </div>
+
+    <div class="card heat" id="heat" hidden>
+      <div class="top"><span class="name">🔥 Heater thermostat</span><span class="state" id="h-state"></span></div>
+      <div class="hrow">
+        <div class="cell"><small>Room</small><b id="h-room">–</b><small id="h-hum"></small></div>
+        <div class="cell"><small>Hold at</small>
+          <div class="stepper"><button type="button" class="ghost" onclick="bump(-1)" aria-label="Cooler">−</button>
+            <b id="h-target"></b><button type="button" class="ghost" onclick="bump(1)" aria-label="Warmer">+</button></div></div>
+        <div class="col" id="h-col" title="The heater's setting (its column of lights)"></div>
+      </div>
+      <div class="row"><button type="button" id="h-go" onclick="holdToggle()">Start holding</button></div>
+      <div class="msg" id="h-status"></div>
+      <details id="h-setup"><summary>Which buttons</summary>
+        <label for="h-remote">Heater remote</label><select id="h-remote" onchange="fillHeaterButtons()"></select>
+        <label for="h-up">Warmer (Temp up)</label><select id="h-up"></select>
+        <label for="h-down">Cooler (Temp down)</label><select id="h-down"></select>
+        <div class="row"><button type="button" onclick="saveHeaterButtons()">Save</button></div>
+        <p class="muted">Sentinel only presses these two. It never presses Power or Mode by itself: with no way to see
+          the heater, a press could turn it on, or to High, by mistake.</p>
+      </details>
+      <div class="msg" id="h-msg"></div>
     </div>
 
     <div id="remotes"></div>
@@ -150,7 +185,92 @@
       showHub();
       showRemotes();
       showLearning();
+      if (!heat || Object.keys(heat.remotes || {}).length !== state.remotes.length) loadHeater();  // a remote came or went
     }
+
+    // ---- the heater thermostat ----
+    var heat = null, heatTimer = null;
+    async function loadHeater() {
+      try {
+        var r = await fetch("/api/heater");
+        if (!r.ok) return;
+        heat = await r.json();
+      } catch (e) { return; }
+      showHeater();
+    }
+    function deg(f) {
+      if (f == null) return "–";
+      return heat.celsius ? ((f - 32) * 5 / 9).toFixed(1) + "°C" : f.toFixed(f % 1 ? 1 : 0) + "°F";
+    }
+    function showHeater() {
+      var box = document.getElementById("heat");
+      box.hidden = !Object.keys(heat.remotes || {}).length;
+      if (box.hidden) return;
+      document.getElementById("h-room").textContent = deg(heat.room_f);
+      document.getElementById("h-hum").textContent = heat.room_f == null ? "No reading from the BroadLink's thermometer"
+        : (heat.humidity ? Math.round(heat.humidity) + "% humidity" : "");
+      document.getElementById("h-target").textContent = deg(heat.target_f);
+      var st = document.getElementById("h-state");
+      st.textContent = heat.enabled ? "Holding" : "Off";
+      st.className = "state" + (heat.enabled ? " on" : "");
+      var col = "";
+      for (var i = 1; i <= heat.steps; i++) col += '<i class="' + (heat.level && i <= heat.level ? "on" : "") + '" style="width:' + (10 + i * 2) + 'px"></i>';
+      document.getElementById("h-col").innerHTML = col;
+      document.getElementById("h-col").title = heat.level ? "The heater's setting: " + heat.level + " of " + heat.steps : "Setting not counted yet";
+      document.getElementById("h-go").textContent = heat.enabled ? "Stop holding" : "Start holding";
+      document.getElementById("h-go").disabled = !heat.buttons;
+      document.getElementById("h-status").textContent = heat.buttons ? (heat.status || "")
+        : "Teach the heater's Temp up and Temp down buttons below, then choose them under Which buttons.";
+      var sel = document.getElementById("h-remote"), names = Object.keys(heat.remotes);
+      if (document.activeElement && document.activeElement.closest && document.activeElement.closest("#h-setup")) return;
+      sel.innerHTML = names.map(function (n) { return '<option>' + esc(n) + '</option>'; }).join("");
+      if (heat.buttons) sel.value = heat.buttons.remote;
+      fillHeaterButtons();
+      if (!heat.buttons) document.getElementById("h-setup").open = true;
+    }
+    function fillHeaterButtons() {
+      var r = document.getElementById("h-remote").value, list = (heat.remotes[r] || []);
+      ["h-up", "h-down"].forEach(function (id, k) {
+        var el = document.getElementById(id);
+        el.innerHTML = list.map(function (b) { return '<option>' + esc(b) + '</option>'; }).join("");
+        var chosen = heat.buttons && heat.buttons.remote === r ? (k ? heat.buttons.down : heat.buttons.up) : null;
+        if (chosen) el.value = chosen;
+        else { var guess = list.filter(function (b) { return k ? /down|cool/i.test(b) : /up|warm/i.test(b); })[0]; if (guess) el.value = guess; }
+      });
+    }
+    async function saveHeaterButtons() {
+      var res = await post("/api/heater/buttons", { remote: document.getElementById("h-remote").value,
+        up: document.getElementById("h-up").value, down: document.getElementById("h-down").value });
+      heatMsg(res.ok ? "Saved." : (res.data.error || "Couldn't save."), !res.ok);
+      if (res.ok) document.getElementById("h-setup").open = false;
+      loadHeater();
+    }
+    function bump(d) {
+      heat.target_f = Math.max(heat.range[0], Math.min(heat.range[1], heat.target_f + (heat.celsius ? d * 0.9 : d)));
+      if (heat.celsius) heat.target_f = Math.round(heat.target_f * 2) / 2;
+      showHeater();
+      if (!heat.enabled) return;
+      clearTimeout(heatTimer);
+      heatTimer = setTimeout(async function () {
+        var res = await post("/api/heater/hold", { target_f: heat.target_f });
+        heatMsg(res.ok ? res.data.message : res.data.error, !res.ok);
+        loadHeater();
+      }, 900);
+    }
+    async function holdToggle() {
+      if (heat.enabled) {
+        var off = await post("/api/heater/release", {});
+        heatMsg(off.ok ? off.data.message : off.data.error, !off.ok);
+        return loadHeater();
+      }
+      if (!confirm("Check the heater first: it should be on, with the Auto light lit (not High).\n\nSentinel will press "
+                   + "Temp down 14 times to find the bottom of its setting, then step it toward " + deg(heat.target_f)
+                   + " every 15 minutes. It never presses Power or Mode.")) return;
+      var res = await post("/api/heater/hold", { target_f: heat.target_f });
+      heatMsg(res.ok ? res.data.message : res.data.error, !res.ok);
+      loadHeater();
+    }
+    function heatMsg(text, bad) { var m = document.getElementById("h-msg"); m.textContent = text || ""; m.className = "msg" + (bad ? " err" : ""); }
 
     function showHub() {
       var hub = state.hub, dot = document.getElementById("hub-dot"), txt = document.getElementById("hub-txt");
@@ -305,6 +425,7 @@
     }
 
     load();
+    setInterval(loadHeater, 30000);
   </script>
 </body>
 </html>

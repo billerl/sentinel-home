@@ -59,6 +59,7 @@ sentinel-home/                         # repository root
     │   ├── switches.py                # Smart plugs/switches (Kasa, local protocol): Live page panel, voice, Telegram
     │   ├── samsung_tv.py              # Samsung TVs as a switch (Wake-on-LAN + power key), apps, volume, mute
     │   ├── remotes.py                 # Learned IR/RF remote buttons sent by a BroadLink RM4 (Remotes page, voice, Telegram)
+    │   ├── heater.py                  # Heater thermostat: steps a remote-only heater's setting toward a target
     │   ├── fire_tv.py                 # Fire TVs over ADB: switch, remote, apps, "put the cameras on the TV"
     │   ├── tv_mirror.py               # the remote's live picture of a Fire TV's screen (screenrecord -> JPEGs)
     │   ├── tasmota.py                 # plugs running Tasmota firmware as switches (local HTTP; network sweep)

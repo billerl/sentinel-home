@@ -199,7 +199,7 @@ class TestRemotes(unittest.TestCase):
 
         self.teach("Soundbar", "Mute")
         switches = SmartSwitches(self.tmp.name, drivers=[])
-        switches.remotes = self.remotes
+        switches.extras.append(self.remotes)
         self.assertTrue(switches.understands("soundbar mute"))
         self.assertEqual(switches.command("soundbar mute", "telegram"), "Okay, Soundbar Mute.")
         self.assertIn("Soundbar remote buttons", switches.summary())

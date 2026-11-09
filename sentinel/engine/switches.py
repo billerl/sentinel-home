@@ -288,7 +288,8 @@ class SmartSwitches:
         self._mirrors: Dict[str, Any] = {}  # TV switch id -> TVMirror (the remote's screen mirror)
         self._tv_apps: Tuple[float, List[str]] = (0.0, [])
         self._tv_apps_busy = False
-        self.remotes: Any = None  # learned remotes (remotes.py): "soundbar volume up" when no switch or TV matches
+        # When no switch or TV matches: the heater thermostat (heater.py), then learned remote buttons (remotes.py).
+        self.extras: List[Any] = []
         self.scanning = False
         self._scan_wanted = False
         self._stopped = threading.Event()
@@ -869,15 +870,17 @@ class SmartSwitches:
     def understands(self, text: str) -> bool:
         """A switch or TV command (for routing Telegram messages and Claude's suggestions)."""
         return (self.parse(text) is not None or self.tv_parse(text) is not None
-                or (self.remotes is not None and self.remotes.understands(text)))
+                or any(extra.understands(text) for extra in self.extras))
 
     def command(self, text: str, source: str) -> Optional[str]:
         """Do a parsed switch (or TV) command and say what happened; None when the words aren't one."""
         parsed = self.parse(text)
         if parsed is None:
             said = self.tv_command(text, source)
-            if said is None and self.remotes is not None:
-                said = self.remotes.command(text, source)
+            for extra in self.extras:
+                if said is not None:
+                    break
+                said = extra.command(text, source)
             return said
         on, found = parsed
         if on is None:
@@ -895,6 +898,5 @@ class SmartSwitches:
             apps = sorted(set(re.split(r"\s[-:]\s|:", n)[0] for n in driver.apps(host).values()))
             if apps:
                 lines.append(f"{sw.name} apps (say 'open <app>'): {', '.join(apps)}")
-        if self.remotes is not None and self.remotes.summary():
-            lines.append(self.remotes.summary())
+        lines += [extra.summary() for extra in self.extras if extra.summary()]
         return "\n".join(lines)

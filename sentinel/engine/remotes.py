@@ -296,14 +296,39 @@ class Remotes:
         return self._wait(dev.check_data)
 
     # ------------------------------------------------------------ pressing buttons
-    def press(self, remote: str, button: str, times: int = 1, source: str = "web") -> Tuple[bool, str]:
+    def climate(self) -> Optional[Dict[str, float]]:
+        """The BroadLink's thermometer (the RM4's HTS2 sensor cable): {"temperature": °C, "humidity": %}, or None."""
+        if not self.hub:
+            return None  # never found one: no network search every minute
+        with self._io:
+            dev = self._connect()
+            if dev is None or not hasattr(dev, "check_sensors"):
+                return None
+            try:
+                got = dev.check_sensors()
+            except Exception:
+                self._device = None
+                return None
+        if not isinstance(got, dict) or got.get("temperature") is None:
+            return None
+        if not got.get("temperature") and not got.get("humidity"):
+            return None  # no sensor cable: it answers zeros
+        return got
+
+    def buttons(self) -> Dict[str, List[str]]:
+        """Remote name -> its button names."""
+        with self._lock:
+            return {r["name"]: [b["name"] for b in r.get("buttons", [])] for r in self.remotes}
+
+    def press(self, remote: str, button: str, times: int = 1, source: str = "web",
+              gap: float = PRESS_GAP) -> Tuple[bool, str]:
         with self._lock:
             r = self._remote(remote)
             b = self._button(r, button) if r else None
             if b is None:
                 return False, "I don't know that button."
             name, code = f"{r['name']} {b['name']}", base64.b64decode(b["code"])
-        times = max(1, min(MAX_TIMES, int(times)))
+        times = max(1, min(MAX_TIMES, int(times)))  # (the heater's 14-press recount fits)
         with self._io:
             for attempt in (0, 1):  # once more after finding the BroadLink again (a new address)
                 dev = self._connect(force=attempt == 1)
@@ -312,7 +337,7 @@ class Remotes:
                 try:
                     for i in range(times):
                         if i:
-                            self._sleep(PRESS_GAP)
+                            self._sleep(gap)
                         dev.send_data(code)
                     break
                 except Exception as e:
