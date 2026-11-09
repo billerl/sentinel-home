@@ -13,12 +13,13 @@ changes settings is only done after a spoken "yes".
 
 import os
 import queue
+import random
 import re
 import subprocess
 import threading
 import time
 from dataclasses import dataclass
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Sequence
 
 import numpy as np
 
@@ -200,6 +201,20 @@ def is_confused(text: str) -> bool:
 def is_yes(text: str) -> bool:
     return bool(re.match(r"^\W*(yes|yeah|yep|yup|sure|ok|okay|do it|go ahead|please|correct|absolutely)\b",
                          text or "", re.IGNORECASE))
+
+
+def first_sentence(text: str) -> str:
+    """Just the gist out loud ("Okay, watching Xena."); Telegram gets the rest."""
+    m = re.match(r"(.+?[.!?])(?:\s|$)", re.sub(r"[\U0001F000-\U0001FFFF☀-➿️‍]", "", text or "").strip(), re.S)
+    return m.group(1) if m else (text or "").strip()
+
+
+OKAYS = ("Okay, ", "Okay, ", "Sure, ", "Alright, ")
+
+
+def casual(text: str, pick: Callable[[Sequence[str]], str] = random.choice) -> str:
+    """Not the same "Okay, ..." every time."""
+    return pick(OKAYS) + text[6:] if text.startswith("Okay, ") else text
 
 
 def to_speech(text: str, max_lines: int = 4, max_chars: int = 400) -> str:
@@ -505,7 +520,7 @@ class VoiceAssistant:
             if not follow_up:
                 self._say(reply.text)
             return False
-        self._say(reply.text)
+        self._say(casual(reply.text))
         if reply.dictate is not None:
             self.speaker.tone("listen")
             said = self._hear(wait=DICTATE_WAIT, silence=DICTATE_SILENCE, max_len=DICTATE_MAX, prompt=DICTATE_PROMPT)

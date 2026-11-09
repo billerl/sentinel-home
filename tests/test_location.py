@@ -510,7 +510,7 @@ class TestEndpoints(unittest.TestCase):
         self.assertEqual(len(house.get("/api/lost").get_json()["pets"][0]["trail"]), 4)
 
         r = house.post("/api/lost/found", json={"ids": [dog.id]}, headers={"X-Sentinel-Request": "1"})
-        self.assertIn("marked found", r.get_json()["message"])
+        self.assertIn("is found", r.get_json()["message"])
         self.wait_for(len(self.sent) + 1)
         self.assertIn("✅ Grace found. Back to normal checking.", self.sent)
         self.assertEqual(self.engine.family.settings["lost_pets"], {})

@@ -661,11 +661,11 @@ class SmartSwitches:
                 return f"The {sw.name} is off."
             if what == "volume":
                 driver.press(host, *(["KEY_VOLUP" if detail[1] == "up" else "KEY_VOLDOWN"] * VOLUME_STEPS))
-                return f"Okay, {sw.name} {'louder' if detail[1] == 'up' else 'quieter'}."
+                return f"Okay, turning the {sw.name} {detail[1]}."
             if what == "play":
                 pause = detail[1] == "pause"
                 driver.press(host, "KEY_PAUSE" if pause else "KEY_PLAY")
-                return f"Okay, {sw.name} {'paused' if pause else 'playing'}."
+                return "Okay, paused." if pause else "Okay, playing."
             if what == "seek":
                 # One arrow press skips SEEK_STEP seconds in the TV apps; the presses are sent in the background
                 # (a third of a second apart: 5 minutes takes 10 s). The apps then wait on the new spot (the
@@ -693,8 +693,8 @@ class SmartSwitches:
             if what == "mute_for":
                 self._unmute[sw.id] = self._after(detail[1], lambda: self._press_later(
                     sw, driver, host, ["KEY_MUTE"], "unmute", source, only=self._unmute.pop(sw.id, None)))
-                return f"Okay, {sw.name} muted for {say_duration(detail[1])}."
-            return f"Okay, {sw.name} {'muted' if detail[1] == 'mute' else 'unmuted'}."
+                return f"Okay, muting the {sw.name} for {say_duration(detail[1])}."
+            return f"Okay, {'muting' if detail[1] == 'mute' else 'unmuting'} the {sw.name}."
         except (OSError, ValueError) as e:
             app_logger.log("warning", "tv_failed", what=what, error_message=str(e), source=source,
                            component="switches", action="tv")
@@ -888,7 +888,7 @@ class SmartSwitches:
                             f"{'not answering' if not s.online else ('on' if s.on else 'off')}." for s in found)
         results = [self.set(s.id, on, source) for s in found]
         if all(ok for ok, _ in results):
-            return "Okay, " + " and ".join(s.name for s in found) + (" on." if on else " off.")
+            return f"Okay, turning {'on' if on else 'off'} the " + " and the ".join(s.name for s in found) + "."
         return " ".join(msg for _, msg in results)
 
     def summary(self) -> str:

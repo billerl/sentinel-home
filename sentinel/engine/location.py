@@ -635,6 +635,12 @@ def outing_command(text: str, people: List[Person]) -> Optional[Tuple[str, List[
     pets = [p for p in people if p.tracker]
     if not pets or low.endswith("?") or re.match(r"(is|are|where|did|has|have|when|was|were)\b", low):
         return None
+    m = re.match(r"(?:please\s+)?(?:keep\s+(?:an\s+eye|watch|tabs)\s+on|watch|track|follow)\s+(?P<s>.+?)(?:\s+(?:now|please|for me))?$",
+                 low)  # "keep an eye on Xena", "watch the dogs": the same as letting them out (2026-11-09)
+    if m:
+        named = _pets_named(m.group("s"), pets)
+        if named:
+            return "out", named
     for kind, word in (("out", r"out(?:side)?"), ("in", r"(?:back\s+)?in(?:side)?")):
         m = (re.match(rf"(?:i'?m\s+|we'?re\s+)?(?:let(?:ting)?|put(?:ting)?|tak(?:e|ing)|took|bring(?:ing)?|brought)"
                       rf"\s+(?P<s>.+?)\s+{word}$", low)
@@ -674,7 +680,7 @@ def lost_command(text: str, people: List[Person]) -> Optional[Tuple[str, List[Pe
     pets = [p for p in people if p.tracker]
     if not pets or low.endswith("?") or re.match(r"(is|are|where|did|has|have|when|was|were)\b", low):
         return None
-    lost = r"(?:lost|missing|loose|gone|run\s+off|ran\s+off|run\s+away|ran\s+away|got\s+out|got\s+loose|escaped)"
+    lost =r"(?:lost|missing|loose|gone|run\s+off|ran\s+off|run\s+away|ran\s+away|got\s+out|got\s+loose|escaped)"
     for kind, pattern in (
             ("lost", rf"(?:oh\s+no,?\s+)?(?P<s>.+?)\s*(?:\s(?:is|are|has|have|got)|'s|'re)?\s+(?:been\s+|gone\s+)?{lost}"
                      rf"(?:\s+again)?$"),

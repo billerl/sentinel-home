@@ -118,11 +118,13 @@ class TestOnTheEngine(unittest.TestCase):
     def test_pets(self):
         self.assertTrue(self.engine.commands.claims("The dogs are going out"))
         self.engine.answer_question("111", "The dogs are going out")
-        self.assertTrue(self.engine.telegram.texts[-1].startswith("🐕 OK, I'll keep a close eye on Xena"))
+        self.assertTrue(self.engine.telegram.texts[-1].startswith("🐕 Okay, watching Xena. I'll check on Xena every 30"))
         self.assertIn(self.xena, self.engine.family._outings)
-        self.assertTrue(self.voice("the dogs are in").startswith("OK, Xena is in."))
+        self.assertEqual(self.voice("the dogs are in"), "Okay, Xena is in.")
         self.assertNotIn(self.xena, self.engine.family._outings)
-        self.assertEqual(self.voice("Recall Xena"), "Beeping Xena's collar.")
+        self.assertEqual(self.voice("keep an eye on Xena"), "Okay, watching Xena.")
+        self.assertIn(self.xena, self.engine.family._outings)
+        self.assertEqual(self.voice("Recall Xena"), "Okay, beeping Xena's collar.")
         self.assertIn(self.xena, self.engine.family._beeps)
 
     def test_package_taken_in(self):

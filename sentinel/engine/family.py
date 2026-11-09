@@ -103,10 +103,10 @@ class Family:
                 self._outings.pop(p.id, None)
         app_logger.log("info", "pet_outing", kind=kind, pets=names, component="engine", action="location")
         if kind == "in":
-            return f"OK, {names} {'are' if len(pets) > 1 else 'is'} in. Back to normal checking."
+            return f"Okay, {names} {'are' if len(pets) > 1 else 'is'} in. Back to normal checking."
         yard = "" if self.locations.yard() else " (Draw the yard on the Family page so I can tell you if they leave it.)"
-        return (f"OK, I'll keep a close eye on {names}: a position every {OUTING_POLL_SECONDS} seconds for the next "
-                f"hour, or until you say they're in.{yard}")
+        return (f"Okay, watching {names}. I'll check on {'them' if len(pets) > 1 else names} every "
+                f"{OUTING_POLL_SECONDS} seconds for the next hour, or until you say they're in.{yard}")
 
     def beep_pets(self, pets) -> str:
         """"Recall Xena" / "beep the dogs": the collar's buzzer sounds (the LoRa base sends it an alert-bell
@@ -115,7 +115,7 @@ class Family:
             self._beeps[p.id] = time.time()
         names = " and ".join(p.name for p in pets)
         app_logger.log("info", "pet_beep", pets=names, component="engine", action="location")
-        return f"Beeping {names}'s collar{'s' if len(pets) > 1 else ''}."
+        return f"Okay, beeping {names}'s collar{'s' if len(pets) > 1 else ''}."
 
     # ---- a lost pet: the collar is asked for a position every 30 s until it's found; the Lost dog page
     def lost(self) -> Dict[int, float]:
@@ -157,7 +157,7 @@ class Family:
                        action="location")
         if kind == "found":
             self._send_location_alert(f"✅ {changed_names} found. Back to normal checking.")
-            return f"Good news. {changed_names} marked found."
+            return f"Good news, {changed_names} {'are' if len(changed) > 1 else 'is'} found. Back to normal checking."
         url = str(self.settings.get("remote_web_url") or "").strip().rstrip("/")
         link = f"Live map: {url}/lost" if url else "Live map: Sentinel's Home page → Lost dog."
         many = len(changed) > 1
@@ -172,7 +172,7 @@ class Family:
                         self.telegram.send_location(chat, fix["lat"], fix["lon"])
             threading.Thread(target=send, name="pet-lost", daemon=True).start()
         self._speak(f"{changed_names} {'are' if many else 'is'} lost. The live map is on Sentinel's lost dog page.")
-        return (f"{changed_names} marked lost. Everyone on Telegram got the live map link, and "
+        return (f"Okay, {changed_names} marked lost. Everyone on Telegram got the live map link, and "
                 f"{'their collars' if many else 'the collar'} will report every {OUTING_POLL_SECONDS} seconds.")
 
     def _lost_pin(self, person, fix: Optional[Dict[str, Any]]) -> None:

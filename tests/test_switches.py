@@ -140,7 +140,7 @@ class TestSwitches(unittest.TestCase):
             self.assertIsNone(self.sw.parse(other), other)
 
     def test_command_reply(self):
-        self.assertEqual(self.sw.command("turn on the patio lights", "voice"), "Okay, patio lights on.")
+        self.assertEqual(self.sw.command("turn on the patio lights", "voice"), "Okay, turning on the patio lights.")
         self.assertEqual(self.sw.command("are the patio lights on", "voice"), "patio lights are on.")
         self.assertEqual(self.sw.command("is the porch lamp on", "voice"), "Porch lamp is off.")
         self.assertIsNone(self.sw.command("what time is it", "voice"))
@@ -176,7 +176,7 @@ class TestEngine(unittest.TestCase):
 
     def test_voice_switches_straight_away(self):
         reply = self.engine.answer_voice("Turn on the patio lights.", lambda _s: None)
-        self.assertEqual(reply.text, "Okay, patio lights on.")
+        self.assertEqual(reply.text, "Okay, turning on the patio lights.")
         self.assertIsNone(reply.confirm)
         self.assertEqual(self.kasa.calls, [("192.168.1.40", "80060000", True)])
 
@@ -190,11 +190,11 @@ class TestEngine(unittest.TestCase):
         self.engine.switches._after = lambda seconds, fn: fn() or mock.Mock()
         with mock.patch.object(self.engine.spotify, "connected", return_value=True), \
                 mock.patch.object(self.engine.spotify, "command", return_value="Paused.") as spotify:
-            for text, said, key in (("Pause the TV.", "Okay, TV paused.", "KEY_PAUSE"),
-                                    ("Pause.", "Okay, TV paused.", "KEY_PAUSE"),
-                                    ("Play.", "Okay, TV playing.", "KEY_PLAY"),
+            for text, said, key in (("Pause the TV.", "Okay, paused.", "KEY_PAUSE"),
+                                    ("Pause.", "Okay, paused.", "KEY_PAUSE"),
+                                    ("Play.", "Okay, playing.", "KEY_PLAY"),
                                     ("Rewind 30 seconds.", "Okay, back 30 seconds.", "KEY_PLAY"),  # after the arrows
-                                    ("Mute for 2 minutes.", "Okay, TV muted for 2 minutes.", "KEY_MUTE")):
+                                    ("Mute for 2 minutes.", "Okay, muting the TV for 2 minutes.", "KEY_MUTE")):
                 self.assertEqual(self.engine.answer_voice(text, lambda _s: None).text, said, text)
                 self.assertEqual(tv.calls[-1][1], key, text)
             spotify.assert_not_called()
@@ -208,7 +208,7 @@ class TestEngine(unittest.TestCase):
             reply = self.engine.answer_voice("it's dark at the front door", lambda _s: None)
         self.assertIn("Should I do that?", reply.text)
         self.assertEqual(self.kasa.calls, [])
-        self.assertEqual(reply.confirm(), "Okay, Porch lamp on.")
+        self.assertEqual(reply.confirm(), "Okay, turning on the Porch lamp.")
 
     def test_telegram(self):
         t = self.engine.telegram
@@ -217,7 +217,7 @@ class TestEngine(unittest.TestCase):
         self.assertEqual(t.consume_questions(), [])
         for chat, text in t.consume_switch_commands():
             self.engine._switch_reply(chat, text)
-        self.assertEqual(self.sent, [("111", "💡 patio lights are off."), ("111", "💡 Okay, patio outlet off.")])
+        self.assertEqual(self.sent, [("111", "💡 patio lights are off."), ("111", "💡 Okay, turning off the patio outlet.")])
         self.assertTrue(TelegramNotifier.is_command("Turn on patio lights"))  # Claude may offer it as a button
         self.assertFalse(TelegramNotifier.is_command("turn on the oven and burn the house down; rm -rf"))
 
@@ -329,7 +329,7 @@ class TestTV(unittest.TestCase):
     def test_a_tv_is_a_switch(self):
         tv = next(s for s in self.sw.switches() if s.name == "TV")
         self.assertEqual(tv.icon, "tv")
-        self.assertEqual(self.sw.command("turn on the TV", "voice"), "Okay, TV on.")
+        self.assertEqual(self.sw.command("turn on the TV", "voice"), "Okay, turning on the TV.")
         self.assertEqual(self.tv.calls, [("power", True)])
         self.assertEqual(self.sw.command("is the tv on", "telegram"), "TV is on.")
 
@@ -350,7 +350,7 @@ class TestTV(unittest.TestCase):
         self.assertEqual(self.tv.calls[:2], [("power", True), ("launch", "11101200001")])
         said = self.sw.command("turn on the TV to Judge Judy", "voice")
         self.assertTrue(said.startswith("I couldn't find Judge Judy on the TV. I can open its apps, like Netflix"), said)
-        self.assertEqual(self.sw.command("turn the TV on", "voice"), "Okay, TV on.")  # no app: just power
+        self.assertEqual(self.sw.command("turn the TV on", "voice"), "Okay, turning on the TV.")  # no app: just power
         self.assertNotIn("Gallery", self.sw._list_tv_apps())
 
     def test_open_spotify_for_play_on_the_tv(self):
@@ -365,9 +365,9 @@ class TestTV(unittest.TestCase):
         self.assertEqual(self.sw.command("tv volume up", "voice"), "The TV is off.")
         self.tv.on = True
         self.sw.poll()
-        self.assertEqual(self.sw.command("turn the tv down", "voice"), "Okay, TV quieter.")
+        self.assertEqual(self.sw.command("turn the tv down", "voice"), "Okay, turning the TV down.")
         self.assertEqual(self.tv.calls[-1], ("press", "KEY_VOLDOWN", "KEY_VOLDOWN", "KEY_VOLDOWN"))
-        self.assertEqual(self.sw.command("mute the TV", "telegram"), "Okay, TV muted.")
+        self.assertEqual(self.sw.command("mute the TV", "telegram"), "Okay, muting the TV.")
         self.assertEqual(self.tv.calls[-1], ("press", "KEY_MUTE"))
 
     def test_pause_play_and_skip(self):
@@ -375,9 +375,9 @@ class TestTV(unittest.TestCase):
         self.sw.poll()
         later = []
         self.sw._after = lambda seconds, fn: later.append((seconds, fn)) or mock.Mock()
-        self.assertEqual(self.sw.command("pause the TV", "telegram"), "Okay, TV paused.")
+        self.assertEqual(self.sw.command("pause the TV", "telegram"), "Okay, paused.")
         self.assertEqual(self.tv.calls[-1], ("press", "KEY_PAUSE"))
-        self.assertEqual(self.sw.command("resume the tv", "voice"), "Okay, TV playing.")
+        self.assertEqual(self.sw.command("resume the tv", "voice"), "Okay, playing.")
         self.assertEqual(self.tv.calls[-1], ("press", "KEY_PLAY"))
         for text, said, keys in (("rewind 30 seconds", "Okay, back 30 seconds.", ["KEY_LEFT"] * 3),
                                  ("fast forward the TV 2 minutes", "Okay, ahead 2 minutes.", ["KEY_RIGHT"] * 12),
@@ -397,8 +397,8 @@ class TestTV(unittest.TestCase):
         self.tv.on = True
         self.sw.poll()
         self.sw._after = lambda seconds, fn: mock.Mock()
-        self.assertEqual(self.sw.command("pause", "voice"), "Okay, TV paused.")
-        self.assertEqual(self.sw.command("mute", "voice"), "Okay, TV muted.")
+        self.assertEqual(self.sw.command("pause", "voice"), "Okay, paused.")
+        self.assertEqual(self.sw.command("mute", "voice"), "Okay, muting the TV.")
         self.assertIsNone(self.sw.command("pause", "telegram"))  # Telegram's "pause" pauses the alerts
         for text in ("pause the music", "pause spotify", "play some Tom Petty", "play on the TV", "go back", "skip",
                      "skip ahead", "go back to the beginning"):
@@ -409,14 +409,14 @@ class TestTV(unittest.TestCase):
         self.sw.poll()
         timers = []
         self.sw._after = lambda seconds, fn: timers.append((seconds, fn, mock.Mock())) or timers[-1][2]
-        self.assertEqual(self.sw.command("mute the TV for 2 minutes", "voice"), "Okay, TV muted for 2 minutes.")
+        self.assertEqual(self.sw.command("mute the TV for 2 minutes", "voice"), "Okay, muting the TV for 2 minutes.")
         self.assertEqual(self.tv.calls[-1], ("press", "KEY_MUTE"))
         self.assertEqual(timers[-1][0], 120)
         timers[-1][1]()  # 2 minutes later: sound back on
         self.assertEqual(self.tv.calls[-2:], [("press", "KEY_MUTE"), ("press", "KEY_MUTE")])
         presses = len(self.tv.calls)
         self.sw.command("mute for 30 seconds", "voice")
-        self.assertEqual(self.sw.command("unmute the TV", "voice"), "Okay, TV unmuted.")
+        self.assertEqual(self.sw.command("unmute the TV", "voice"), "Okay, unmuting the TV.")
         self.assertTrue(timers[-1][2].cancel.called)
         self.assertEqual(len(self.tv.calls), presses + 2)  # muted, unmuted: the timer won't press again
         self.sw.command("mute for 30 seconds", "voice")
@@ -436,7 +436,7 @@ class TestTV(unittest.TestCase):
             self.assertEqual(tv_duration(words), seconds, words)
 
     def test_other_words_are_left_alone(self):
-        self.assertEqual(self.sw.command("turn on the patio lights", "voice"), "Okay, patio lights on.")
+        self.assertEqual(self.sw.command("turn on the patio lights", "voice"), "Okay, turning on the patio lights.")
         self.assertNotIn(("launch",), [c[:1] for c in self.tv.calls])
         for text in ("put on some music", "play some Tom Petty", "open the garage", "turn on alerts"):
             self.assertIsNone(self.sw.command(text, "voice"), text)
@@ -749,7 +749,7 @@ class TestFireTV(unittest.TestCase):
         fire = next(s for s in self.sw.switches() if s.id == self.fire_id)
         self.assertEqual((fire.name, fire.icon, fire.on, fire.model), ("Sentinel TV", "tv", True, "Fire TV AFTEAMR311"))
         self.assertTrue(self.fire_id.startswith("firetv-") and len(self.fire_id) == len("firetv-") + 12)
-        self.assertEqual(self.sw.command("turn off the sentinel tv", "voice"), "Okay, Sentinel TV off.")
+        self.assertEqual(self.sw.command("turn off the sentinel tv", "voice"), "Okay, turning off the Sentinel TV.")
         self.assertIn("input keyevent KEYCODE_SLEEP", self.shell.commands)
         self.assertFalse(next(s for s in self.sw.switches() if s.id == self.fire_id).on)
         self.assertEqual(oct(os.stat(os.path.join(self.dir, "fire_tv.json")).st_mode & 0o777), "0o600")
@@ -802,7 +802,7 @@ class TestFireTV(unittest.TestCase):
         self.assertIn("monkey -p com.amazon.avod", self.shell.commands[-1])
         self.assertEqual(self.sw.command("put on Netflix", "voice"), "Okay, Netflix on the TV.")  # the plain TV: the Samsung
         self.assertEqual(self.tv.calls[-1], ("launch", "11101200001"))
-        self.assertEqual(self.sw.command("turn the fire tv down", "voice"), "Okay, Sentinel TV quieter.")
+        self.assertEqual(self.sw.command("turn the fire tv down", "voice"), "Okay, turning the Sentinel TV down.")
         self.assertEqual(self.shell.commands[-1].count(" 1 114 1;"), 3)  # volume down x3, straight to its input device
         self.assertEqual(self.sw.command("what's on the sentinel tv", "telegram"), "Sentinel live view is on the Sentinel TV.")
 
@@ -924,7 +924,7 @@ class TestTasmota(unittest.TestCase):
         self.assertIn(("192.168.1.77", "Power2 On"), self.fake.commands)
         self.assertEqual(self.sw.rename("tasmota-dc4f22000001", "Desk lamp"), (True, "Desk lamp"))
         self.assertEqual(self.fake.devices["192.168.1.76"]["names"][0], "Desk lamp")
-        self.assertEqual(self.sw.command("turn off the desk lamp", "voice"), "Okay, Desk lamp off.")
+        self.assertEqual(self.sw.command("turn off the desk lamp", "voice"), "Okay, turning off the Desk lamp.")
 
     def test_network_swept_only_when_needed(self):
         self.assertEqual(len(self.scans), 1)  # nothing known yet
