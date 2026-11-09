@@ -28,7 +28,7 @@
 #include "lwip/ip_addr.h"
 #include "secrets.h"  // #define OTA_PASSWORD "..." (copy secrets.example.h)
 
-#define FW_VERSION "2.0.1"
+#define FW_VERSION "2.1.0"
 #define HELLO_PORT 47301          // UDP broadcast so Sentinel can find the board
 #define PING_INTERVAL_MS 20       // 50 pings/s: each reply carries one CSI reading
 #define SEND_INTERVAL_MS 20       // 50 frames/s for the other boards to measure
@@ -37,6 +37,10 @@
 #define NSUB 52                   // usable HT20 sub-carriers (1..26, 38..63)
 #define BOOT_PIN 0
 #define MAX17048_ADDR 0x36
+// Stack sizes: the boards crashed every 1-3 min with "Stack canary watchpoint triggered" once 5-7 boards were
+// talking (2026-11-09). /status reports how much of each stayed unused ("stack_free_*").
+#define SEND_STACK 6144
+#define LOOP_STACK (16 * 1024)
 
 static Preferences prefs;
 static WebServer server(80);
@@ -51,7 +55,7 @@ static bool no11b = false;  // connected without 802.11b (see setup())
 // send-only firmware/wifi_motion_beacon), each broadcasting 50 fixed-rate 802.11n frames a second. Each link
 // is a separate line through the house, so each gets its own score. The router link is used only while no
 // other board is heard: routers fall back to 802.11b on a weak link, which carries no CSI.
-#define MAX_LINKS 6
+#define MAX_LINKS 8  // the router + 7 other boards (was 6: the 7th board of 2026-11-09 left one line out)
 #define BEACON_GONE_MS 3000      // a beacon not heard for this long is "not active"
 #define BEACON_FORGET_MS 60000   // ...and after this long it's left out of /status
 
@@ -105,17 +109,13 @@ static void noteBeacon(const uint8_t *mac) {
   linksFull++;
 }
 
-static void promiscCallback(void *buf, wifi_promiscuous_pkt_type_t type) {
-  const wifi_promiscuous_pkt_t *pkt = (const wifi_promiscuous_pkt_t *)buf;
-  // The beacons' ESP-NOW frames are management (action) frames with our marker in the body.
-  if (type == WIFI_PKT_MGMT && pkt->rx_ctrl.sig_len > 30 &&
-      memmem(pkt->payload + 24, pkt->rx_ctrl.sig_len - 24, "SNTLB1", 6)) {
-    noteBeacon(pkt->payload + 10);
-    beaconRaw++;
-    return;
-  }
-  if (pkt->rx_ctrl.sig_len < 16 || memcmp(pkt->payload + 10, links[0].mac, 6) != 0) return;
-  if (pkt->rx_ctrl.sig_mode) rxN++; else if (pkt->rx_ctrl.rate < 8) rxB++; else rxG++;
+// The other boards' frames arrive as ESP-NOW broadcasts. (Until 2.1.0 they were picked out of promiscuous
+// mode, which hands the code every frame on the channel: with 5-7 boards sending 50/s each, the Wi-Fi driver's
+// sniffer path corrupted memory and every board crashed every 1-3 minutes, 2026-11-09.)
+static void espNowReceived(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  if (!info || !data || len < 6 || memcmp(data, "SNTLB1", 6) != 0) return;
+  noteBeacon(info->src_addr);
+  beaconRaw++;
 }
 
 static void csiCallback(void *ctx, wifi_csi_info_t *info) {
@@ -127,6 +127,7 @@ static void csiCallback(void *ctx, wifi_csi_info_t *info) {
     if (links[i].used && memcmp(info->mac, links[i].mac, 6) == 0) { which = i; break; }
   }
   if (which < 0) return;
+  if (which == 0) { if (info->rx_ctrl.sig_mode) rxN++; else rxG++; }  // (11b frames carry no CSI: rx_b stays 0)
   // From another board, only its 50/s pulses (HT20 MCS0): its ordinary Wi-Fi traffic (replies to Sentinel,
   // pings) comes at other rates and in bursts, and would add readings that aren't comparable.
   if (which > 0 && !(info->rx_ctrl.sig_mode == 1 && info->rx_ctrl.mcs == 0 && info->rx_ctrl.cwb == 0)) {
@@ -229,10 +230,6 @@ static void startCsi() {
   esp_wifi_set_csi_config(&cfg);
   esp_wifi_set_csi_rx_cb(csiCallback, nullptr);
   esp_wifi_set_csi(true);
-  wifi_promiscuous_filter_t filter = {.filter_mask = WIFI_PROMIS_FILTER_MASK_DATA | WIFI_PROMIS_FILTER_MASK_MGMT};
-  esp_wifi_set_promiscuous_filter(&filter);
-  esp_wifi_set_promiscuous_rx_cb(promiscCallback);
-  esp_wifi_set_promiscuous(true);
 }
 
 // ---- battery (MAX17048 fuel gauge on the Feather) ----
@@ -290,6 +287,7 @@ struct __attribute__((packed)) BeaconFrame {
 static const uint8_t BROADCAST[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 static volatile bool sending = false;
 static volatile uint32_t framesSent = 0, sendFailed = 0;
+static TaskHandle_t sendHandle = nullptr;
 
 static void startSending() {
   if (sending) return;
@@ -299,6 +297,7 @@ static void startSending() {
   peer.channel = 0;  // = the channel the home Wi-Fi is on
   peer.ifidx = WIFI_IF_STA;
   esp_now_add_peer(&peer);
+  esp_now_register_recv_cb(espNowReceived);
   esp_now_rate_config_t rate = {};
   rate.phymode = WIFI_PHY_MODE_HT20;
   rate.rate = WIFI_PHY_RATE_MCS0_LGI;  // 802.11n: carries the channel information the others need
@@ -369,7 +368,10 @@ static void handleStatus() {
         ",\"no11b\":" + String(no11b ? "true" : "false") + ",\"rx_b\":" + String(rxB) +
         ",\"rx_g\":" + String(rxG) + ",\"rx_n\":" + String(rxN) +
         ",\"sent\":" + String(framesSent) + ",\"send_failed\":" + String(sendFailed) +
-        ",\"reset_reason\":" + String((int)esp_reset_reason()) + "}";
+        ",\"reset_reason\":" + String((int)esp_reset_reason()) +
+        ",\"stack_free_loop\":" + String(uxTaskGetStackHighWaterMark(nullptr)) +
+        ",\"stack_free_send\":" + String(sendHandle ? uxTaskGetStackHighWaterMark(sendHandle) : 0) +
+        ",\"heap_free_min\":" + String(ESP.getMinFreeHeap()) + "}";
   js += ",\"battery\":" + batteryJson();
   // One entry per line being measured: the boards heard in the last minute, or the router when there are none.
   bool beacons = anyBeaconActive();
@@ -486,6 +488,8 @@ static void checkBootButton() {
   }
 }
 
+SET_LOOP_TASK_STACK_SIZE(LOOP_STACK);  // (here, not at the top: it's a function, and Arduino puts its prototypes before the first one)
+
 void setup() {
   Serial.begin(115200);
   pinMode(BOOT_PIN, INPUT_PULLUP);
@@ -552,7 +556,7 @@ void setup() {
   startCsi();
   startPing();
   startSending();
-  xTaskCreate(sendTask, "beacon", 3072, nullptr, 2, nullptr);
+  xTaskCreate(sendTask, "beacon", SEND_STACK, nullptr, 2, &sendHandle);
   lastScoreMs = millis();
 }
 
