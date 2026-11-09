@@ -387,8 +387,9 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   built by tools/build_vehicle_prompts.py) on two snapshots in a row is reported with a photo, stored as a
   "package" event (visit headline, delivery questions, recap) and fires "seen: package" routines. Sunset reminder if
   still there; "gone" message only when nobody is home. Replay of 18 days of Front Door clips: see the commit.
-  The quiet picture is saved on stop (`recorded_videos/.packages/`) and reused after a restart if under 10 min old,
-  counting the downtime as a visit: otherwise a parcel left during a deploy became the new reference (2026-11-08).
+  The quiet picture is saved on stop (`recorded_videos/.packages/`) and reused after a restart if under 3 min old:
+  otherwise a parcel left during a deploy became the new reference (2026-11-08). The restart itself is NOT a visit
+  (that turned shadows moving during deploys into two false parcels, 2026-11-09): a person must still be seen.
 - **Morning recap** (`sentinel/engine/recap.py`): at `recap_time` (07:00; skipped if Sentinel was down past 9:00)
   every unpaused chat gets the night since `recap_since` (21:00) from the events table (people, deliveries, animals,
   cars that stopped, a count of cars driving past, family cars, then parcels waiting, warnings and the weather) and

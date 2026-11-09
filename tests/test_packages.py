@@ -94,9 +94,24 @@ class TestPackages(unittest.TestCase):
                                    lambda text, jpeg, ask_done=False: self.sent.append(text), lambda now: None,
                                    lambda: False, clock=lambda: self.t, state_dir=d)
             self.watch = later
-            self.look(porch(parcel=True), 40)  # first snapshot after the restart: nobody seen yet
+            self.watch.visit("Front Door", self.t + 15)  # the camera saw the driver just after the restart
+            self.look(porch(parcel=True), 40)  # first quiet snapshot after the restart
             self.look(porch(parcel=True))
             self.assertEqual(self.sent, ["📦 A package was left at the Front Door."])
+
+    def test_a_restart_alone_is_not_a_visit(self):
+        """Sun shadows move while Sentinel restarts: with nobody seen, a change isn't a parcel (2026-11-09)."""
+        with tempfile.TemporaryDirectory() as d:
+            self.watch.state_dir = d
+            self.watch.clock = lambda: self.t
+            self.look(porch())
+            self.watch.stop()
+            self.watch = P.PackageWatch({}, lambda: [], self.watch.detector, FakeChecker(),
+                                        lambda text, jpeg, ask_done=False: self.sent.append(text), lambda now: None,
+                                        lambda: False, clock=lambda: self.t, state_dir=d)
+            for _ in range(4):
+                self.look(porch(parcel=True), 40)
+            self.assertEqual(self.sent, [])
 
     def test_an_old_saved_picture_is_not_used(self):
         with tempfile.TemporaryDirectory() as d:

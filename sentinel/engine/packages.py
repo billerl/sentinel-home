@@ -45,8 +45,10 @@ VISIT_WINDOW = 180.0
 GONE_QUIET = 20.0  # ... and once they've gone: someone sitting by the door isn't a parcel
 # The quiet picture is saved when Sentinel stops and used again after a restart (a deploy takes ~40 s
 # before the first snapshot). Without it, the first picture after a restart became the reference, and a
-# parcel left during the restart was part of it: never new, never reported (2026-11-08, 5:25pm).
-REFERENCE_KEEP = 600.0  # older than this (Sentinel was off a while): the light has changed, start afresh
+# parcel left during the restart was part of it: never new, never reported (2026-11-08, 5:25pm). As always, only a
+# person the camera sees makes changes count: counting the restart itself as a visit turned sun shadows that moved
+# during it into two "packages" (2026-11-09).
+REFERENCE_KEEP = 180.0  # older than this (Sentinel was off a while): the light has changed, start afresh
 REFERENCE_INDEX = "references.json"
 
 
@@ -179,8 +181,6 @@ class PackageWatch:
             return
         if ref is not None:
             door.reference = ref
-            # Nobody watched the porch while Sentinel was off: someone may have come by.
-            self._visits[name] = max(saved, self._visits.get(name, 0.0))
 
     def _run(self) -> None:
         self._stop.wait(30)  # let cameras connect
