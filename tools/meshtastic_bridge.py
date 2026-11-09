@@ -199,9 +199,14 @@ def main() -> None:
             print(f"{node}: couldn't beep: {e}", flush=True)
 
     def ask(node: str) -> None:
-        """Ask the collar for its position now (it answers in a few seconds; the answer comes in as a packet)."""
+        """Ask the collar for its position now (it answers in a few seconds; the answer comes in as a packet).
+        Not radio.sendPosition: with wantResponse it waits up to 5 min for the answer, and the check-ins (a "recall
+        Xena" beep among them) waited with it (2026-11-09)."""
+        from meshtastic.protobuf import mesh_pb2, portnums_pb2
+
         try:
-            radio.sendPosition(destinationId=node, wantResponse=True, channelIndex=0)
+            radio.sendData(mesh_pb2.Position(), destinationId=node, portNum=portnums_pb2.PortNum.POSITION_APP,
+                           wantResponse=True, channelIndex=0)
             print(f"{node}: asked for its position", flush=True)
         except Exception as e:  # the radio library raises its own kinds
             print(f"{node}: couldn't ask: {e}", flush=True)
