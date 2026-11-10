@@ -78,6 +78,7 @@ class SamsungTVDriver:
         self.path = os.path.join(os.path.abspath(root), STATE_FILE)
         self.timeout = timeout
         self.live_url: Optional[str] = None  # Sentinel's page on the home network (SmartSwitches.set_live_url)
+        self._before_live: Dict[str, str] = {}  # TV address -> the app that was on when the cameras came up
         self._lock = threading.Lock()
         self._tvs: Dict[str, Dict[str, Any]] = {}  # mac -> {host, token, name, model, apps, apps_at, on_since}
         self._off_at: Dict[str, float] = {}  # host -> when we pressed power to turn it off
@@ -508,6 +509,16 @@ class SamsungTVDriver:
         return found or dict(tv.get("apps") or {})
 
     def launch(self, host: str, app_id: str) -> None:
+        """Open an app. One already running behind another is brought back where it was (the way the TV's own app
+        bar does it); starting it over the REST API instead began it again from its first screen (2026-11-10)."""
+        try:
+            running = self._rest(host, f"applications/{app_id}").get("running")
+        except (OSError, ValueError):
+            running = False
+        if running:
+            self._send(host, [{"method": "ms.channel.emit", "params": {"event": "ed.apps.launch", "to": "host",
+                                                                       "data": {"appId": app_id, "action_type": "DEEP_LINK"}}}])
+            return
         self._rest(host, f"applications/{app_id}", method="POST", timeout=5.0)
 
     def live_app(self, host: str) -> Optional[str]:
@@ -516,11 +527,37 @@ class SamsungTVDriver:
 
     def show_live(self, host: str, reload: bool = False) -> None:
         """Sentinel's camera page in the TV's browser. Opening the address again loads it afresh, so a reload is
-        the same (signed in once with the QR code, the browser keeps it)."""
+        the same (signed in once with the QR code, the browser keeps it). The app that was on is remembered for
+        live_back: it keeps running behind the browser."""
         if not self.live_url:
             raise ValueError("Sentinel's web page isn't on the home network")
+        before = self._visible_app(host)  # (the browser itself isn't one of the TV's listed apps)
+        if before:
+            self._before_live[host] = before
         self._send(host, [{"method": "ms.channel.emit", "params": {"event": "ed.apps.launch", "to": "host", "data": {
             "appId": BROWSER_APP, "action_type": "NATIVE_LAUNCH", "metaTag": self.live_url}}}])
+
+    def live_return(self, host: str) -> Optional[str]:
+        """The app the cameras covered, while it's still running behind them, else None."""
+        app_id = self._before_live.get(host)
+        if not app_id:
+            return None
+        try:
+            state = self._rest(host, f"applications/{app_id}")
+        except (OSError, ValueError):
+            return None
+        if not state.get("running"):
+            self._before_live.pop(host, None)
+            return None
+        return None if state.get("visible") else self.apps(host).get(app_id, app_id)
+
+    def live_back(self, host: str) -> str:
+        """Back to the app the cameras covered, where it was. Returns its name."""
+        app_id = self._before_live.pop(host, None)
+        if not app_id:
+            raise ValueError("nothing was on before the cameras")
+        self.launch(host, app_id)
+        return self.apps(host).get(app_id, app_id)
 
     def close(self, host: str, app_id: str) -> None:
         """Quit an app, so the next launch starts at its first screen (a TV shortcut needs that)."""
@@ -528,10 +565,14 @@ class SamsungTVDriver:
 
     def showing(self, host: str) -> Optional[str]:
         """The app on screen, if any (None: the home screen, an input like cable, or off)."""
-        for app_id, name in self.apps(host).items():
+        app_id = self._visible_app(host)
+        return self.apps(host).get(app_id) if app_id else None
+
+    def _visible_app(self, host: str) -> Optional[str]:
+        for app_id in self.apps(host):
             try:
                 if self._rest(host, f"applications/{app_id}").get("visible"):
-                    return name
+                    return app_id
             except (OSError, ValueError):
                 continue
         return None

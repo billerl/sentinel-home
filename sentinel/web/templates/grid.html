@@ -116,6 +116,9 @@
         <button type="button" class="tvr-btn" onclick="remoteLive(false)">📹 Show cameras</button>
         <button type="button" class="tvr-btn" onclick="remoteLive(true)">↻ Reload cameras</button>
       </div>
+      <div class="tvr-row" id="tvr-live-back" hidden>
+        <button type="button" class="tvr-btn" onclick="remoteLive(false, true)"></button>
+      </div>
       <div class="tvr-row">
         <button type="button" class="tvr-btn" data-key="source">⇄ Input</button>
         <button type="button" class="tvr-btn" data-key="home" data-hold="home_hold" title="Hold for the quick menu">⌂ Home</button>

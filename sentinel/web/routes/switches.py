@@ -137,7 +137,7 @@ def register(app: Flask, ctx: WebContext) -> None:
         if action == "type":
             return _result(*engine.switches.tv_type(tv_id, str(body.get("text") or "")[:100], body.get("grid") is True))
         if action == "live":
-            return _result(*engine.switches.tv_live(tv_id, body.get("reload") is True))
+            return _result(*engine.switches.tv_live(tv_id, body.get("reload") is True, body.get("back") is True))
         if action == "tap":
             return _result(*engine.switches.tv_tap(tv_id, body.get("x"), body.get("y")))
         shortcut = str(body.get("id") or "")[:16]

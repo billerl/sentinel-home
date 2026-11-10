@@ -780,6 +780,7 @@ async function openRemote(id) {
     });
     document.getElementById("tvr-live").hidden = !v.live;
     document.getElementById("tvr-grid").hidden = !v.grid;
+    liveBackShow(v.live_back);
     loadShortcuts();
     screenShow(v.screen ? id : null);
     v.apps.forEach(function(a) {
@@ -905,10 +906,25 @@ async function remoteApp(a) {
   if (recording) loadShortcuts();
   if (tvState && !tvState.on) remoteShow(Object.assign({}, tvState, { on: true }));
 }
-async function remoteLive(reload) {
-  remoteMsg(reload ? "Reloading the cameras…" : "Showing the cameras…", true);
-  var res = await switchPost("/api/tv/" + encodeURIComponent(tvId) + "/live", { reload: reload });
-  remoteMsg(res.ok ? (reload ? "Reloaded ✓" : "Cameras on ✓") : (res.data.error || "That didn't work."), res.ok);
+async function remoteLive(reload, back) {
+  remoteMsg(back ? "Going back…" : reload ? "Reloading the cameras…" : "Showing the cameras…", true);
+  var res = await switchPost("/api/tv/" + encodeURIComponent(tvId) + "/live", { reload: reload, back: back === true });
+  remoteMsg(res.ok ? (back ? "Back to " + res.data.message + " ✓" : reload ? "Reloaded ✓" : "Cameras on ✓")
+                   : (res.data.error || "That didn't work."), res.ok);
+  if (res.ok) liveBackRefresh();
+}
+// "⏎ Back to Netflix": what the cameras covered on a Samsung, still running behind them
+function liveBackShow(name) {
+  var row = document.getElementById("tvr-live-back");
+  row.hidden = !name;
+  row.querySelector("button").textContent = "⏎ Back to " + (name || "");
+}
+async function liveBackRefresh() {
+  var id = tvId;
+  try {
+    var r = await fetch("/api/tv/" + encodeURIComponent(id));
+    if (r.ok && id === tvId) liveBackShow((await r.json()).live_back);
+  } catch (e) {}
 }
 async function remoteType(grid) {
   var box = document.getElementById("tvr-text");

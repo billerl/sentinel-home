@@ -500,6 +500,31 @@ class TestSamsungLiveView(unittest.TestCase):
         self.assertEqual(sent[0]["params"]["data"], {"appId": BROWSER_APP, "action_type": "NATIVE_LAUNCH",
                                                      "metaTag": "http://192.168.1.9:8088/"})
 
+    def test_back_to_what_the_cameras_covered_where_it_was(self):
+        from sentinel.engine.samsung_tv import SamsungTVDriver
+        drv, sent, posted = SamsungTVDriver(tempfile.mkdtemp(prefix="sentinel-tv-")), [], []
+        drv.live_url = "http://192.168.1.9:8088/"
+        apps = {"11101200001": {"running": True, "visible": True}, "111299001912": {"running": False, "visible": False}}
+        drv.apps = lambda host: {"11101200001": "Netflix", "111299001912": "YouTube"}
+        drv._send = lambda host, messages: sent.extend(messages)
+
+        def rest(host, path="", method="GET", timeout=None):
+            app_id = path.split("/")[-1]
+            if method == "POST":
+                posted.append(app_id)
+                apps[app_id].update(running=True, visible=True)
+            return dict(apps[app_id])
+        drv._rest = rest
+        drv.show_live("tv")  # Netflix was on
+        apps["11101200001"]["visible"] = False  # ...and keeps running behind the browser
+        self.assertEqual(drv.live_return("tv"), "Netflix")
+        self.assertEqual(drv.live_back("tv"), "Netflix")
+        self.assertEqual(sent[-1]["params"]["data"], {"appId": "11101200001", "action_type": "DEEP_LINK"})  # resumed
+        self.assertEqual(posted, [])  # not started over
+        self.assertIsNone(drv.live_return("tv"))  # once back, the button goes
+        drv.launch("tv", "111299001912")  # not running: started the usual way
+        self.assertEqual(posted, ["111299001912"])
+
 
 class TestSamsungDriver(unittest.TestCase):
     """The power dance: a TV that's off doesn't answer; the wake packet wakes only its network (picture

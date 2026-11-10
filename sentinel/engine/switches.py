@@ -790,6 +790,7 @@ class SmartSwitches:
                 "keys": [k for k, name in TV_KEYS.items() if supports(name)], "live": live,
                 "screen": hasattr(driver, "mirror_start"),
                 "grid": hasattr(driver, "type_on_grid"),
+                "live_back": driver.live_return(host) if hasattr(driver, "live_return") else None,
                 "apps": [a for a in apps if a["name"] not in TV_SYSTEM_APPS and not (live and a["name"] == "Sentinel live view")]}
 
     def tv_key(self, switch_id: str, key: str) -> Tuple[bool, str]:
@@ -862,11 +863,16 @@ class SmartSwitches:
             if hasattr(driver, "live_url"):
                 driver.live_url = url
 
-    def tv_live(self, switch_id: str, reload: bool) -> Tuple[bool, str]:
+    def tv_live(self, switch_id: str, reload: bool, back: bool = False) -> Tuple[bool, str]:
+        """Show (or reload) the cameras; with ``back``, return to what the cameras covered (Samsung)."""
         tv = self._tv_for(switch_id)
         if tv is None or not hasattr(tv[1], "show_live"):
             return False, "That TV has no Sentinel live view."
+        if back and not hasattr(tv[1], "live_back"):
+            return False, f"Use the {tv[0].name}'s Back button."
         try:
+            if back:
+                return True, tv[1].live_back(tv[2])
             tv[1].show_live(tv[2], reload=reload)
         except (OSError, ValueError) as e:
             return False, f"The {tv[0].name} didn't do it ({e})."
