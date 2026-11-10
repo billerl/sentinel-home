@@ -87,6 +87,7 @@ class TelegramNotifier:
             "- TV on / TV off; Put on Netflix / Turn on the TV to Hulu (any app on the TV); TV volume up / down; Mute the TV (for 2 minutes); Pause / Resume the TV; Rewind the TV 30 seconds / Fast forward the TV 2 minutes; What's on the TV?\n"
             "- Put the cameras on the Sentinel TV / Reload the cameras — the live view on a TV\n"
             "- Show me the front door (on the TV) — one camera full screen (the Samsung)\n"
+            "- Show me Kate's location / everyone's location — a map on the TV (pictures: Family page)\n"
             "- Soundbar volume up 3 times / Heater power — a button taught on the Remotes page (BroadLink)\n"
             "- Set the heater to 70 / How warm is it inside? / Stop holding the temperature — the heater thermostat\n\n"
             "Routines (when this happens, do that):\n"

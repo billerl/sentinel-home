@@ -497,14 +497,82 @@ class Family:
         now = time.time()
         out = []
         for v in self.person_views().values():
+            photo = self.locations.photo_version(v.person.id)
             if not v.fix:
-                out.append({"id": v.person.id, "name": v.person.name, "state": "off", "label": "not sharing location"})
+                out.append({"id": v.person.id, "name": v.person.name, "state": "off", "label": "not sharing location",
+                            "photo": photo})
                 continue
             home = v.place is not None and v.place.is_home
             out.append({"id": v.person.id, "name": v.person.name, "state": "home" if home else "out",
                         "label": whereabouts(v, places, now), "lat": round(v.fix["lat"], 6),
-                        "lon": round(v.fix["lon"], 6), "ts": v.fix["ts"]})
+                        "lon": round(v.fix["lon"], 6), "ts": v.fix["ts"], "photo": photo})
         return out
+
+    def set_photo(self, person_id: int, data_url: Any) -> Tuple[bool, str]:
+        """A profile picture from the People page (a data: URL; the page has already made it small), or None to
+        remove it. Re-encoded here as a square JPEG, so whatever was sent, only a plain picture is kept."""
+        import base64
+        import binascii
+
+        import cv2
+        import numpy as np
+
+        from sentinel.engine.location import PHOTO_SIZE
+
+        person = self.locations.person(person_id)
+        if person is None:
+            return False, "That person no longer exists."
+        if data_url is None:
+            self.locations.set_photo(person_id, None)
+            return True, "Picture removed."
+        m = re.match(r"^data:image/[\w.+-]+;base64,(.+)$", data_url, re.S) if isinstance(data_url, str) else None
+        try:
+            raw = base64.b64decode(m.group(1), validate=False) if m else b""
+        except (binascii.Error, ValueError):
+            raw = b""
+        img = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_COLOR) if raw else None
+        if img is None:
+            return False, "That doesn't look like a picture."
+        h, w = img.shape[:2]
+        side = min(h, w)
+        img = img[(h - side) // 2:(h - side) // 2 + side, (w - side) // 2:(w - side) // 2 + side]
+        img = cv2.resize(img, (PHOTO_SIZE, PHOTO_SIZE), interpolation=cv2.INTER_AREA)
+        ok, jpeg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        if not ok:
+            return False, "Couldn't save that picture."
+        self.locations.set_photo(person_id, jpeg.tobytes())
+        return True, f"Saved {person.name}'s picture."
+
+    def map_lookup(self, words: str) -> Optional[Tuple[str, str]]:
+        """"xena's location" / "where lincoln is" / "everyone on the map" -> ("Xena's location", "#map=3"), for
+        showing it on a TV the way a camera is shown; None when the words don't ask for a map."""
+        from sentinel.engine.location import _words_in
+
+        w = re.sub(r"\s+", " ", (words or "").lower()).strip()
+        m = (re.match(r"^(?:the )?(.+?)(?:'s|s')? (?:location|locations|position|whereabouts)$", w)
+             or re.match(r"^where (.+?) (?:is|are)(?: at| right now| now)?$", w)
+             or re.match(r"^(.+?) on (?:the |a )?map$", w))
+        who = m.group(1) if m else ("" if re.match(r"^(?:the )?(?:family )?map$", w) else None)
+        if who is None:
+            return None
+        if who in ("", "everyone", "everybody", "the family", "family", "all of us", "us", "the kids"):
+            return "everyone's location", "#map=all"
+        people = [p for p in self.locations.people() if _words_in(" " + who + " ", p.words())]
+        if not people:
+            return None
+        names = [p.name for p in people]
+        label = (names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]) + "'s location"
+        return label, "#map=" + ",".join(str(p.id) for p in people)
+
+    def map_view(self, which: str) -> Dict[str, Any]:
+        """The TV's location map: the people asked for ("all", or ids "3,5"), with home and the yard."""
+        ids = None if which == "all" else {int(x) for x in which.split(",") if x.strip().isdigit()}
+        pets = {p.id for p in self.pets()}
+        people = [dict(p, pet=p["id"] in pets, label=re.sub(r"^home\b", "at home", p["label"]))  # (beside a name)
+                  for p in self.family_lights() if ids is None or p["id"] in ids]
+        home = self.home_coords()
+        return {"people": people, "home": list(home) if home else None,
+                "yard": self.locations.yard() if any(p["pet"] for p in people) else [], "now": time.time()}
 
     def people_view(self, base_url: str) -> Dict[str, Any]:
         from sentinel.engine.location import car_name_words, whereabouts
@@ -525,7 +593,7 @@ class Family:
                 "lat": fix.get("lat"), "lon": fix.get("lon"), "cars": [c.name for c in v.cars],
                 "invite": {"url": self.join_url(base_url, invite[0]), "expires": invite[1]} if invite else None,
                 "username": p.username, "has_login": self.locations.has_web_login(p.id),
-                "tracker": p.tracker, "in_yard": fix.get("in_yard"),
+                "tracker": p.tracker, "in_yard": fix.get("in_yard"), "photo": self.locations.photo_version(p.id),
             })
         vehicles = self.household.vehicles()
         car_words = set(car_name_words(vehicles))

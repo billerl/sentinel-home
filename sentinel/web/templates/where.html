@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <title>Sentinel — Where</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='leaflet/leaflet.css') }}">
+  <script src="{{ url_for('static', filename='leaflet/leaflet.js') }}"></script>
+  <style>
+    /* Shown full screen on a TV (Samsung's browser is Chrome 56: no flex gap, no CSS grid) */
+    html, body { height: 100%; margin: 0; background: #000; color: #cfe; font-family: system-ui, sans-serif; }
+    #map { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: #050b0f; }
+    #map.street .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9); }
+    #panel { position: absolute; left: 2vw; bottom: 3vh; z-index: 1000; max-width: 70vw; padding: 1.2vh 1.6vw;
+             background: rgba(0, 10, 16, 0.86); border: 1px solid #16303a; border-radius: 14px; }
+    .row { font-size: 2.6vh; line-height: 1.45; color: #9cc; }
+    .row b { color: #fff; margin-right: 0.5em; }
+    .row .dot { display: inline-block; width: 1.6vh; height: 1.6vh; border-radius: 50%; margin-right: 0.6em; border: 2px solid #fff; }
+    .row .age { color: #6f97a5; margin-left: 0.4em; }
+    .row .age.old { color: #ffc94d; }
+    .empty { font-size: 2.6vh; color: #8fb6c4; }
+    .pin { border: 3px solid #fff; border-radius: 50%; }
+    .faces { white-space: nowrap; }
+    .faces .face { display: inline-block; width: 64px; height: 64px; margin: 0 2px; border-radius: 50%; border: 4px solid;
+                   box-shadow: 0 2px 10px rgba(0,0,0,0.7); background-size: cover; background-position: center; }
+    .row .dot.photo { width: 3.4vh; height: 3.4vh; vertical-align: middle; background-size: cover; background-position: center; }
+    .leaflet-tooltip.who { color: #000; border: 0; font-weight: 700; font-size: 2.2vh; box-shadow: none; padding: 2px 8px; }
+    .leaflet-tooltip.who:before { display: none; }
+    .leaflet-control-attribution { background: rgba(0,0,0,0.6) !important; color: #6aa !important; }
+    .leaflet-control-attribution a { color: #8cc !important; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="panel"><div class="empty">Loading…</div></div>
+  <script>
+    var COLORS = ["#ff8c1a", "#2f9bff", "#7fe0a0", "#ff6bc1", "#ffd84d", "#b58cff", "#4de0e0"];
+    var which = (/[?&]p=([\w,]+)/.exec(location.search) || [])[1] || "all";
+    var map = null, layers = null, fitted = false;
+
+    function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+    function ago(s) {
+      if (s < 90) return "just now";
+      if (s < 3600) return Math.round(s / 60) + " min ago";
+      if (s < 86400) return Math.round(s / 3600) + " h ago";
+      return Math.round(s / 86400) + " days ago";
+    }
+
+    function draw(data) {
+      var people = data.people || [];
+      var shown = people.filter(function (p) { return p.lat != null; });
+      var pets = shown.length && shown.every(function (p) { return p.pet; });
+      if (!map) {
+        map = L.map("map", { zoomControl: false, keyboard: false, zoomAnimation: false, fadeAnimation: false });
+        if (pets) {  // a dog in the yard: the aerial photo shows where
+          L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+            maxZoom: 21, maxNativeZoom: 19, referrerPolicy: "strict-origin-when-cross-origin",
+            attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics"
+          }).addTo(map);
+        } else {
+          document.getElementById("map").className = "street";
+          L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19, referrerPolicy: "strict-origin-when-cross-origin", attribution: "&copy; OpenStreetMap"
+          }).addTo(map);
+        }
+        layers = L.layerGroup().addTo(map);
+        if (data.home) map.setView(data.home, 15); else map.setView([39.8, -98.6], 4);
+      }
+      var rows = [], spots = [];
+      people.forEach(function (p, i) {
+        var color = COLORS[i % COLORS.length];
+        if (p.lat == null) {
+          rows.push('<div class="row"><b>' + esc(p.name) + "</b>isn't sharing a location yet</div>");
+          return;
+        }
+        var here = L.latLng(p.lat, p.lon), age = data.now - p.ts;
+        // People at the same spot (Luke and the dog at home) share one pin, or their labels pile up
+        var spot = spots.filter(function (s) { return s.at.distanceTo(here) < 60; })[0];
+        var who = { name: p.name, color: color, photo: p.photo ? "/person_photo/" + p.id + ".jpg?v=" + p.photo : "" };
+        if (spot) spot.who.push(who);
+        else spots.push({ at: here, color: color, who: [who] });
+        var face = who.photo ? ' photo" style="border-color:' + color + ";background-image:url('" + who.photo + "')"
+                             : '" style="background:' + color;
+        rows.push('<div class="row"><span class="dot' + face + '"></span><b>' + esc(p.name) + "</b>"
+          + esc(p.label) + '<span class="age' + (age > 3600 ? " old" : "") + '">· ' + ago(age) + "</span></div>");
+      });
+      document.getElementById("panel").innerHTML = rows.join("") || '<div class="empty">Nobody to show.</div>';
+      var pts = spots.map(function (s) { return s.at; });
+      if (pts.length && (!fitted || !pts.every(function (x) { return map.getBounds().pad(-0.1).contains(x); }))) {
+        // (no animation: the TV's old browser is slow at it, and it's a picture to look at, not to drag around)
+        if (pts.length === 1) map.setView(pts[0], pets ? 19 : 16, { animate: false });
+        else map.fitBounds(pts, { paddingTopLeft: [110, 110], maxZoom: pets ? 19 : 16, animate: false,
+                                  paddingBottomRight: [110, document.getElementById("panel").offsetHeight + 80] });  // (clear of the list)
+        fitted = true;
+      }
+
+      layers.clearLayers();
+      if (data.yard && data.yard.length >= 3) L.polygon(data.yard, { color: "#7fe8c8", weight: 2, fillOpacity: 0.08, interactive: false }).addTo(layers);
+      var home = data.home && L.latLng(data.home[0], data.home[1]);
+      var homeTaken = home && spots.some(function (s) { return s.at.distanceTo(home) < 60; });
+      if (home && !pets) {
+        L.circleMarker(home, { radius: 7, color: "#fff", weight: 2, fillColor: "#00a8a8", fillOpacity: 1, interactive: false })
+          .addTo(layers);
+        if (!homeTaken) spots.push({ at: home, color: "#e8f4f4", who: [{ name: "Home" }], home: true });
+      }
+      // Labels to the side away from a close neighbour (a few miles apart is only a few dots on a county-wide map)
+      var px = spots.map(function (s) { return map.latLngToContainerPoint(s.at); });
+      spots.forEach(function (s, i) {
+        var side = "top";
+        px.forEach(function (q, j) {
+          if (j !== i && Math.abs(q.y - px[i].y) < 60 && Math.abs(q.x - px[i].x) < 260) side = q.x < px[i].x ? "right" : "left";
+        });
+        // Their pictures (People page) as the pin, else a dot in their colour
+        var faces = s.who.some(function (w) { return w.photo; });
+        var half = faces ? [s.who.length * 34, 34] : [11, 11];
+        var offset = side === "top" ? [0, -half[1] - 4] : side === "right" ? [half[0] + 4, 0] : [-half[0] - 4, 0];
+        var label = esc(s.who.map(function (w) { return w.name; }).join(", "))
+          + (home && !pets && !s.home && s.at.distanceTo(home) < 60 ? " (home)" : "");
+        var icon = s.home ? L.divIcon({ className: "", iconSize: [0, 0], html: "" })
+          : faces ? L.divIcon({ className: "faces", iconSize: [half[0] * 2, half[1] * 2], html: s.who.map(function (w) {
+              return '<span class="face" style="border-color:' + w.color + ";background-color:" + w.color
+                + (w.photo ? ";background-image:url('" + w.photo + "')" : "") + '"></span>';
+            }).join("") })
+          : L.divIcon({ className: "pin", iconSize: [22, 22], html: "" });
+        var pin = L.marker(s.at, { icon: icon, interactive: false });
+        pin.bindTooltip(label, { permanent: true, direction: side, offset: offset, className: "who" }).addTo(layers);
+        if (!s.home && !faces) pin.getElement().style.background = s.color;
+        pin.getTooltip().getElement().style.background = s.color;
+      });
+    }
+
+    function load() {
+      // (XMLHttpRequest: the TV's old browser leaves the sign-in cookie off fetch() calls)
+      var xhr = new XMLHttpRequest();
+      xhr.open("GET", "/api/where?p=" + encodeURIComponent(which));
+      xhr.onload = function () {
+        if (xhr.status === 401) { location.reload(); return; }
+        if (xhr.status !== 200) return;
+        try { draw(JSON.parse(xhr.responseText)); } catch (e) {}
+      };
+      xhr.send();
+    }
+    load();
+    setInterval(load, 15000);
+  </script>
+</body>
+</html>

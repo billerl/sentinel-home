@@ -660,6 +660,9 @@ class SmartSwitches:
                 driver.show_live(host, path=path)
             except (OSError, ValueError) as e:
                 return f"The {sw.name} didn't do it ({e})."
+            if path.startswith("#map="):
+                app_logger.log("info", "tv_map", tv=sw.name, shown=name, source=source, component="switches", action="tv")
+                return f"Okay, {name} is on the {sw.name}."
             app_logger.log("info", "tv_camera", tv=sw.name, camera=name, source=source, component="switches", action="tv")
             return f"Okay, the {name} camera is on the {sw.name}."
         if what == "live":

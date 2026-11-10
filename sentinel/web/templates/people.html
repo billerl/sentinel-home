@@ -31,6 +31,7 @@
     .head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
     .head .name { font-weight: 600; color: #fff; font-size: 1rem; flex: 1; min-width: 8rem; display: flex; align-items: center; gap: 8px; }
     .meta { font-size: 0.8rem; color: #6aa; margin-top: 4px; line-height: 1.5; }
+    .avatar { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; border: 2px solid #066; flex: none; }
     .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex: none; }
     .dot.home { background: #3f3; box-shadow: 0 0 6px #3f3; }
     .dot.out { background: #fb3; box-shadow: 0 0 6px #fb3; }
@@ -163,6 +164,22 @@
       if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
       return d;
     }
+    // A phone photo is several MB: cut the middle square out and shrink it here, so only ~50 KB goes up
+    function squarePicture(f) {
+      return new Promise(function(resolve, reject) {
+        var img = new Image(), url = URL.createObjectURL(f);
+        img.onload = function() {
+          var side = Math.min(img.naturalWidth, img.naturalHeight), size = Math.min(400, side);
+          var c = document.createElement("canvas");
+          c.width = c.height = size;
+          c.getContext("2d").drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, size, size);
+          URL.revokeObjectURL(url);
+          resolve(c.toDataURL("image/jpeg", 0.85));
+        };
+        img.onerror = function() { URL.revokeObjectURL(url); reject(new Error("That file isn't a picture this browser can open.")); };
+        img.src = url;
+      });
+    }
     function say(node, text, ok) { node.textContent = text; node.className = "msg" + (ok === undefined ? "" : ok ? " ok" : " err"); }
     function ago(ts) {
       var m = Math.round((Date.now() / 1000 - ts) / 60);
@@ -190,6 +207,10 @@
         var card = el("div", "card");
         var head = el("div", "head");
         var name = el("span", "name");
+        if (p.photo) {
+          var face = el("img", "avatar"); face.src = "/person_photo/" + p.id + ".jpg?v=" + p.photo; face.alt = "";
+          name.appendChild(face);
+        }
         name.appendChild(el("span", "dot " + (!p.sharing ? "off" : p.home ? "home" : "out")));
         name.appendChild(document.createTextNode(p.name));
         head.appendChild(name);
@@ -241,12 +262,27 @@
         armed(pw, "Tap again: disconnect " + p.name + "'s phone", function() {
           api("/api/people/" + p.id + "/new-password", {}).then(load).catch(function(e) { say(msg, e.message, false); });
         });
+        // A picture: their pin on the TV's map ("show me everyone's location")
+        var pic = el("button", null, p.photo ? "📷 Change picture" : "📷 Add picture");
+        var file = el("input"); file.type = "file"; file.accept = "image/*"; file.hidden = true;
+        pic.onclick = function() { file.click(); };
+        file.onchange = async function() {
+          if (!file.files[0]) return;
+          say(msg, "Saving the picture…");
+          try { await api("/api/people/" + p.id + "/photo", { image: await squarePicture(file.files[0]) }); await load(); }
+          catch (e) { say(msg, e.message, false); }
+        };
+        var nopic = el("button", null, "Remove picture");
+        nopic.hidden = !p.photo;
+        armed(nopic, "Tap again: remove " + p.name + "'s picture", function() {
+          api("/api/people/" + p.id + "/photo", { image: null }).then(load).catch(function(e) { say(msg, e.message, false); });
+        });
         var del = el("button", "danger", "Delete");
         armed(del, "Tap again to delete " + p.name, function() {
           api("/api/people/" + p.id + "/delete", {}).then(load).catch(function(e) { say(msg, e.message, false); });
         });
-        (p.tracker ? [tl, edit, forget, del, msg]  // a pet: no phone setup, no login
-                   : [link, login, tl, edit, nologin, forget, pw, del, msg]).forEach(function(b) { row.appendChild(b); });
+        (p.tracker ? [tl, edit, pic, nopic, forget, del, msg, file]  // a pet: no phone setup, no login
+                   : [link, login, tl, edit, pic, nopic, nologin, forget, pw, del, msg, file]).forEach(function(b) { row.appendChild(b); });
         card.appendChild(row);
         card.dataset.person = p.id;
         root.appendChild(card);

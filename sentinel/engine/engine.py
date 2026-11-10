@@ -1132,7 +1132,11 @@ class Engine:
         }
 
     def _camera_page(self, words: str) -> Optional[Tuple[str, str]]:
-        """"front door" / "the garage camera" -> (camera name, "#cam=<its page id>"), for showing it on a TV."""
+        """"front door" / "the garage camera" -> (camera name, "#cam=<its page id>"), for showing it on a TV
+        ("Xena's location" -> her map, see Family.map_lookup)."""
+        shown = self.family.map_lookup(words)  # "show me Xena's location": her map instead of a camera
+        if shown is not None:
+            return shown
         name = re.sub(r"\s+", " ", re.sub(r"\bcam(?:era)?s?\b", "", words.lower())).strip()
         if not name or self.frame_broker is None:
             return None

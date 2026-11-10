@@ -198,6 +198,24 @@ def register(app: Flask, ctx: WebContext) -> None:
             return jsonify({"pets": [], "yard": [], "home": None, "poll_seconds": 30, "now": time.time()})
         return jsonify(engine.family.lost_view())
 
+    @app.route("/where")
+    def where_page():
+        # Full-screen map of where people are, for a TV ("show me Xena's location"); ?p=all or ?p=3,5
+        redir = _require_session()
+        if redir:
+            return redir
+        return render_template("where.html")
+
+    @app.route("/api/where")
+    def api_where():
+        redir = _require_session()
+        if redir:
+            return jsonify({"error": "unauthorized"}), 401
+        which = (request.args.get("p") or "all").strip()
+        if engine is None:
+            return jsonify({"people": [], "home": None, "yard": [], "now": time.time()})
+        return jsonify(engine.family.map_view(which))
+
     @app.route("/api/lost/<action>", methods=["POST"])
     def api_lost_action(action):
         err = _config_guard()
@@ -252,6 +270,31 @@ def register(app: Flask, ctx: WebContext) -> None:
         if err:
             return err
         return _result(*engine.family.people_action(person_id, action, _base_url()))
+
+    @app.route("/api/people/<int:person_id>/photo", methods=["POST"])
+    def api_people_photo(person_id: int):
+        # {"image": "data:image/jpeg;base64,..."} (made small by the page) or {"image": null} to remove it
+        err = _config_guard()
+        if err:
+            return err
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or "image" not in body:
+            return jsonify({"error": "expected {\"image\": ...}"}), 400
+        return _result(*engine.family.set_photo(person_id, body["image"]))
+
+    @app.route("/person_photo/<int:person_id>.jpg")
+    def person_photo(person_id: int):
+        redir = _require_session()
+        if redir:
+            return Response(status=401)
+        path = engine.locations.photo_path(person_id) if engine is not None else ""
+        try:
+            with open(path, "rb") as f:
+                jpeg = f.read()
+        except OSError:
+            return Response(status=404)
+        # (the page asks with ?v=<when it changed>, so a long cache is safe)
+        return Response(jpeg, mimetype="image/jpeg", headers={"Cache-Control": "private, max-age=31536000"})
 
     @app.route("/api/people/<int:person_id>/qr")
     def api_people_qr(person_id: int):

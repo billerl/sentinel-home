@@ -502,6 +502,46 @@ class TestEndpoints(unittest.TestCase):
         self.assertIn("👋 Elizabeth left home.", self.sent)
         self.assertIn("Elizabeth is about", self.engine.family.answer_location_question(self.engine.family.location_question("where is elizabeth"))[0])
 
+    def test_location_map_for_the_tv(self):
+        """"Show me Elizabeth's location" puts her on a map on the TV (#map=<id>), like a camera."""
+        lookup, liz = self.engine._camera_page, f"#map={self.liz.id}"
+        self.assertEqual(lookup("Elizabeth's location"), ("Elizabeth's location", liz))
+        self.assertEqual(lookup("where elizabeth is"), ("Elizabeth's location", liz))
+        self.assertEqual(lookup("elizabeth on the map"), ("Elizabeth's location", liz))
+        self.assertEqual(lookup("everyone's location"), ("everyone's location", "#map=all"))
+        self.assertEqual(lookup("map"), ("everyone's location", "#map=all"))
+        for not_it in ("weather", "front door", "grace's location", "elizabeth"):
+            self.assertIsNone(lookup(not_it), not_it)
+        self.post("elizabeth", self.liz.token, fix(*HOME, time.time()))
+        view = self.engine.family.map_view(str(self.liz.id))
+        self.assertEqual([(p["name"], p["label"], p["pet"]) for p in view["people"]], [("Elizabeth", "at home", False)])
+        self.assertEqual(view["home"], list(HOME))
+        self.assertEqual(len(self.engine.family.map_view("all")["people"]), 1)
+        self.assertEqual(self.engine.family.map_view("99")["people"], [])
+        self.assertEqual(self.client.get("/api/where?p=all").status_code, 401)  # signed in only
+
+    def test_profile_picture(self):
+        """People page "Add picture": kept as a small square JPEG, served to signed-in pages, gone with the person."""
+        import cv2
+        import numpy as np
+
+        family = self.engine.family
+        ok, jpeg = cv2.imencode(".png", np.full((300, 500, 3), 200, np.uint8))
+        url = "data:image/png;base64," + base64.b64encode(jpeg.tobytes()).decode()
+        self.assertEqual(family.set_photo(self.liz.id, url), (True, "Saved Elizabeth's picture."))
+        saved = cv2.imread(self.engine.locations.photo_path(self.liz.id))
+        self.assertEqual(saved.shape[:2], (256, 256))
+        self.assertIsNotNone(family.map_view("all")["people"][0]["photo"])
+        self.assertFalse(family.set_photo(self.liz.id, "data:image/png;base64,bm90IGEgcGljdHVyZQ==")[0])
+        self.assertFalse(family.set_photo(self.liz.id, "<svg onload=...>")[0])
+        self.assertFalse(family.set_photo(999, url)[0])
+        self.assertEqual(self.client.get(f"/person_photo/{self.liz.id}.jpg").status_code, 401)  # signed in only
+        self.assertEqual(family.set_photo(self.liz.id, None)[0], True)
+        self.assertIsNone(self.engine.locations.photo_version(self.liz.id))
+        family.set_photo(self.liz.id, url)
+        self.engine.locations.delete_person(self.liz.id)
+        self.assertIsNone(self.engine.locations.photo_version(self.liz.id))
+
     def test_lost_dog(self):
         loc = self.engine.locations
         dog = loc.person(loc.save_person("Grace"))

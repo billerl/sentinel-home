@@ -504,7 +504,7 @@ class VoiceAssistant:
         except Exception:
             return False
 
-    def _respond(self, text: str, doubtful: bool = False, follow_up: bool = False) -> bool:
+    def _respond(self, text: str, doubtful: bool = False) -> bool:
         """Answer it; False when the conversation should end: a doubtful follow-up that wasn't one of
         Sentinel's own commands (ignored), or words that made no sense ("Huh?")."""
         reply = self.answer(text, self._say, doubtful=True) if doubtful else self.answer(text, self._say)
@@ -516,9 +516,8 @@ class VoiceAssistant:
                        component="voice", action="respond")
         if is_confused(reply.text) and reply.confirm is None and reply.dictate is None:
             # Room talk, after a false wake or as a "follow-up": listening on only invites more of it
-            # (four "Let me think"s in a row, 2026-11-05). Ask once after the wake word, then stop.
-            if not follow_up:
-                self._say(reply.text)
+            # (four "Let me think"s in a row, 2026-11-05). Not even a "Huh?": she doesn't listen for the
+            # answer anyway, so just the closing chime (the user's call, 2026-11-10).
             return False
         self._say(casual(reply.text))
         if reply.dictate is not None:
@@ -546,11 +545,8 @@ class VoiceAssistant:
                     app_logger.log("info", "voice_cancelled", component="voice", action="conversation")
                     self.speaker.tone("cancel")
                     return
-                if not text:  # silence, or noise Whisper made nothing of
-                    if text == "" and turn == 0:
-                        self._say("Come again?")
-                    else:
-                        self.speaker.tone("cancel")
+                if not text:  # silence, or noise Whisper made nothing of: stop without a word
+                    self.speaker.tone("cancel")
                     return
                 doubtful = self.last_doubt > (FOLLOW_UP_DOUBT if turn else WAKE_DOUBT)
                 if doubtful and not turn and self._tv_on():
@@ -558,7 +554,7 @@ class VoiceAssistant:
                                    component="voice", action="respond")
                     self.speaker.tone("cancel")
                     return
-                if not self._respond(text, doubtful=doubtful, follow_up=bool(turn)):
+                if not self._respond(text, doubtful=doubtful):
                     self.speaker.tone("cancel")
                     return
                 if turn == MAX_TURNS - 1 or not self.settings.get("voice_follow_up", True):

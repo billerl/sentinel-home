@@ -88,6 +88,27 @@ function focusFromHash() {
 }
 window.addEventListener("hashchange", focusFromHash);
 
+// "/#map=3" (or "#map=all"): where someone is, full screen over the cameras ("show me Xena's location" on a TV)
+var mapFrame = null;
+function mapFromHash() {
+  var m = /^#map=([\w,]+)$/.exec(location.hash);
+  if (!m) { closeMap(); return; }
+  if (focusedCamId) closeFocus();  // (its applyCameras comes back here and opens the map)
+  if (mapFrame && mapFrame.getAttribute("data-p") === m[1]) return;
+  closeMap();
+  mapFrame = document.createElement("iframe");
+  mapFrame.setAttribute("data-p", m[1]);
+  mapFrame.src = "/where?p=" + m[1];
+  mapFrame.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;border:0;z-index:5000;background:#000";
+  document.body.appendChild(mapFrame);
+}
+function closeMap() {
+  if (!mapFrame) return;
+  mapFrame.parentNode.removeChild(mapFrame);
+  mapFrame = null;
+}
+window.addEventListener("hashchange", mapFromHash);
+
 // A Samsung's own browser: Sentinel says what to show here (instead of opening its address in a new tab each time)
 var TV_PAGE = /SMART-TV|Tizen/.test(navigator.userAgent);
 function tvPagePoll() {
@@ -101,8 +122,12 @@ function tvPagePoll() {
       location.reload();
     } else if (c.path && c.path.indexOf("#cam=") === 0) {
       if (location.hash !== c.path) location.hash = c.path; else focusFromHash();
-    } else if (focusedCamId) {
-      closeFocus();
+    } else if (c.path && c.path.indexOf("#map=") === 0) {
+      if (location.hash !== c.path) location.hash = c.path; else mapFromHash();
+    } else {
+      if (/^#map=/.test(location.hash)) history.replaceState(null, "", location.pathname);
+      closeMap();
+      if (focusedCamId) closeFocus();
     }
   }).catch(function() {});
 }
@@ -456,12 +481,13 @@ function applyCameras(cams) {
     // Staggered snapshot updates for the grid (1.5s interval)
     // This is MUCH more stable for mobile than multiple concurrent MJPEG streams.
     gridTimers[c.id] = setInterval(function() {
-      if (!focusedCamId && !playerOpen && !(isPhone() && currentTab === "events")) updateTile(c.id, img);
+      if (!focusedCamId && !mapFrame && !playerOpen && !(isPhone() && currentTab === "events")) updateTile(c.id, img);
     }, (dataSaver ? 5000 : 1500) + (Math.random() * 500));
   });
   root.appendChild(weatherTile);
   setTimeout(layoutGrid, 0);  // after the page script has finished setting up
   focusFromHash();
+  mapFromHash();
 }
 
 (function boot() {

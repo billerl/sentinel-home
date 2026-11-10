@@ -602,6 +602,16 @@ class TestOneCameraByVoice(unittest.TestCase):
         self.assertEqual(tv.shown, ["#cam=abc", "#cam=abc"])
         self.assertIsNone(sw.tv_parse("show me the weather"))  # not a camera: left for others
 
+    def test_show_me_where_someone_is(self):
+        tv = FakeTV()
+        tv.live_url, tv.shown = "http://192.168.1.9:8088/", []
+        tv.show_live = lambda host, reload=False, path="": tv.shown.append(path)
+        sw = SmartSwitches(tempfile.mkdtemp(prefix="sentinel-sw-"), drivers=[FakeKasa(), tv], clock=lambda: NOW)
+        sw.discover()
+        sw.camera_lookup = lambda words: ("Kate's location", "#map=3") if words.lower() == "kate's location" else None
+        self.assertEqual(sw.command("Show me Kate's location", "voice"), "Okay, Kate's location is on the TV.")
+        self.assertEqual(tv.shown, ["#map=3"])
+
 
 class TestSamsungDriver(unittest.TestCase):
     """The power dance: a TV that's off doesn't answer; the wake packet wakes only its network (picture

@@ -120,6 +120,8 @@ class TestConversation(unittest.TestCase):
     def test_silence_just_chimes_off(self):
         said, _ = self.run_talk([None], VoiceReply("unused"))
         self.assertEqual(said, ["<listen>", "<cancel>"])
+        said, _ = self.run_talk([""], VoiceReply("unused"))  # noise Whisper made nothing of: no "Come again?"
+        self.assertEqual(said, ["<listen>", "<cancel>"])
 
     def test_change_needs_a_spoken_yes(self):
         done = []
@@ -177,9 +179,10 @@ class TestConversation(unittest.TestCase):
             self.assertFalse(is_cancel(text), text)
 
     def test_a_confused_answer_ends_the_conversation(self):
-        """2026-11-05 08:53: a false wake, then room talk answered "Huh?", "Huh?", "Come again?" in turn."""
+        """2026-11-05 08:53: a false wake, then room talk answered "Huh?", "Huh?", "Come again?" in turn.
+        Since 2026-11-10 not even the first "Huh?" is said: she wasn't listening for the answer anyway."""
         said, _ = self.run_talk(["If you say go to my mind", "Get into the front", None], VoiceReply("Huh?"))
-        self.assertEqual(said, ["<listen>", "Huh?", "<cancel>"])  # asked once, then stopped listening
+        self.assertEqual(said, ["<listen>", "<cancel>"])  # just the closing chime
         replies = iter([VoiceReply("Kate is home."), VoiceReply("Come again?")])
         speaker = FakeSpeaker()
         va = VoiceAssistant({}, lambda text, say: next(replies), speaker)

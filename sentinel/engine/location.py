@@ -195,6 +195,10 @@ class Change:
     ts: float
 
 
+PHOTO_DIR = "people_photos"  # next to the database: <id>.jpg
+PHOTO_SIZE = 256  # pixels, square
+
+
 class LocationStore:
     """People, places, each person's latest position and their arrivals/departures (SQLite)."""
 
@@ -429,8 +433,40 @@ class LocationStore:
 
     def delete_person(self, person_id: int) -> None:
         self.forget(person_id)
+        self.set_photo(person_id, None)
         with self._lock, self._connect() as conn:
             conn.execute("DELETE FROM people WHERE id = ?", (person_id,))
+
+    # ---- profile pictures (People page), shown as their pin on the TV's map
+    def photo_path(self, person_id: int) -> str:
+        import os
+
+        return os.path.join(os.path.dirname(self.db_path), PHOTO_DIR, f"{int(person_id)}.jpg")
+
+    def photo_version(self, person_id: int) -> Optional[int]:
+        """When the picture was last changed (for the browser's cache), None without one."""
+        import os
+
+        try:
+            return int(os.path.getmtime(self.photo_path(person_id)))
+        except OSError:
+            return None
+
+    def set_photo(self, person_id: int, jpeg: Optional[bytes]) -> None:
+        """Keeps (or, with None, removes) the person's picture: a small square JPEG already checked by the caller."""
+        import os
+
+        path = self.photo_path(person_id)
+        if jpeg is None:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            return
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + ".tmp", "wb") as f:
+            f.write(jpeg)
+        os.replace(path + ".tmp", path)
 
     def authenticate(self, username: str, password: str) -> Optional[Person]:
         """The person whose phone this is, or None. Compares every token so timing says nothing."""
