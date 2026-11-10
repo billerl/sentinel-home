@@ -44,6 +44,12 @@ class TestIcons(unittest.TestCase):
             self.assertGreater(len(resp.data), 100)
             resp.close()
 
+    def test_pages_may_be_framed_by_sentinel_only(self):
+        # the TV's camera page shows the location map (/where) in a frame; other sites still may not frame us
+        resp = self.client.get("/favicon.ico")
+        self.assertEqual(resp.headers.get("X-Frame-Options"), "SAMEORIGIN")
+        resp.close()
+
     def test_live_page_script_and_style_load(self):
         # served with nosniff, so a wrong type would stop the browser running them
         for path, kind in (("/static/grid.js", "text/javascript"), ("/static/grid.css", "text/css")):

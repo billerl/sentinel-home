@@ -158,7 +158,9 @@ class WebServer:
         @app.after_request
         def _security_headers(resp):
             resp.headers.setdefault("X-Content-Type-Options", "nosniff")
-            resp.headers.setdefault("X-Frame-Options", "DENY")
+            # SAMEORIGIN, not DENY: the TV's camera page shows the location map (/where) in a frame of its own
+            # (DENY left the TV blank, 2026-11-10); other sites still can't frame Sentinel's pages
+            resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
             resp.headers.setdefault("Referrer-Policy", "same-origin")
             return resp
 
