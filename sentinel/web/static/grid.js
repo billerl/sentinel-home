@@ -109,8 +109,9 @@ function closeMap() {
 }
 window.addEventListener("hashchange", mapFromHash);
 
-// A Samsung's own browser: Sentinel says what to show here (instead of opening its address in a new tab each time)
-var TV_PAGE = /SMART-TV|Tizen/.test(navigator.userAgent);
+// A TV's browser (a Samsung's own, a Fire TV's kiosk): Sentinel says what to show here (instead of opening its address
+// in a new tab each time)
+var TV_PAGE = /SMART-TV|Tizen|\bAFT[A-Z0-9]+\b/.test(navigator.userAgent);  // (a Fire TV's kiosk too: maps, one camera)
 function tvPagePoll() {
   fetch("/api/tv_page").then(function(r) { return r.ok ? r.json() : null; }).then(function(c) {
     if (!c || !c.seq) return;

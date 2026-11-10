@@ -946,6 +946,23 @@ class TestFireTV(unittest.TestCase):
         self.assertFalse(next(s for s in self.sw.switches() if s.id == self.fire_id).on)
         self.assertEqual(oct(os.stat(os.path.join(self.dir, "fire_tv.json")).st_mode & 0o777), "0o600")
 
+    def test_a_map_or_camera_on_the_sentinel_tv(self):
+        # 2026-11-10: "show the planes on the Sentinel TV" went to the Samsung (the Fire TV couldn't show a map)
+        self.tv.live_url = None
+        self.tv.show_live = lambda host, reload=False, path="": self.fail("the Samsung was asked")
+        self.sw.set_live_url("http://192.168.1.9:8088/")
+        self.sw.camera_lookup = lambda words: ("the plane map", "#map=planes") if "planes" in words.lower() else None
+        self.assertEqual(self.sw.command("show the planes on the sentinel tv", "voice"),
+                         "Okay, the plane map is on the Sentinel TV.")
+        self.assertEqual(self.sw.tv_page("192.168.1.70")["path"], "#map=planes")  # the kiosk page takes it
+        self.assertTrue(any("monkey -p de.ozerov.fully" in c for c in self.shell.commands))  # and is brought forward
+        self.assertIn("Sentinel TV", self.sw.camera_tvs().values())  # routines can show a camera there too
+        self.assertEqual(self.fire.live_end("192.168.1.70"), "the cameras")  # a routine's time is up: the grid
+        self.assertEqual(self.sw.tv_page("192.168.1.70")["path"], "")
+        self.assertIsNone(self.fire.live_end("192.168.1.70"))  # (already there)
+        self.assertEqual(self.sw.tv_live(self.fire_id, False), (True, "showing"))  # Show cameras: closes a map too
+        self.assertEqual(self.sw.tv_page("192.168.1.70")["path"], "")
+
     def test_apps_are_what_people_open(self):
         self.assertEqual(self.fire.apps("192.168.1.70"), {"de.ozerov.fully": "Sentinel live view",
                                                           "com.netflix.ninja": "Netflix", "com.amazon.avod": "Prime Video"})

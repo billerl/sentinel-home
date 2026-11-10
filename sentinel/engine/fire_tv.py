@@ -110,6 +110,10 @@ class FireTVDriver:
         self._input: Dict[str, Optional[Tuple[str, set]]] = {}  # host -> (input device, its key codes) or None
         self._tvs: Dict[str, Dict[str, Any]] = {}  # mac -> {host, name, model, apps, apps_at}
         self._apps_failed: Dict[str, float] = {}  # host -> when listing its apps last failed
+        # What the kiosk's camera page should show (a map, one camera): it asks every 2 s (page_poll), like a Samsung's
+        self.live_url: Optional[str] = None  # (set by SmartSwitches.set_live_url: marks it as able to show one)
+        self._page: Dict[str, Dict[str, Any]] = {}
+        self._page_lock = threading.Lock()
         try:
             with open(self.path) as f:
                 self._tvs = {k: v for k, v in json.load(f).items() if isinstance(v, dict)}
@@ -384,14 +388,31 @@ class FireTVDriver:
         """The kiosk browser showing Sentinel's live view, if this Fire TV has one."""
         return next((pkg for pkg in LIVE_VIEW_APPS if pkg in self.apps(host)), None)
 
-    def show_live(self, host: str, reload: bool = False) -> None:
+    def show_live(self, host: str, reload: bool = False, path: str = "") -> None:
+        """The kiosk's camera page in front; ``path`` ("#map=planes", "#cam=<id>", "" = the grid) is picked up by the
+        page within 2 s (page_poll), the way a Samsung's browser page takes it."""
         package = self.live_app(host)
         if package is None:
             raise ValueError("this Fire TV has no Sentinel live view (Fully Kiosk Browser) installed")
+        with self._page_lock:
+            self._page[host] = {"seq": time.time(), "path": path, "reload": False}
         if reload:
             self._shell(host, f"am force-stop {package}")
             time.sleep(1)
         self.launch(host, package)
+
+    def page_poll(self, host: str) -> Dict[str, Any]:
+        """The open camera page asking what to show (every 2 s): {"seq", "path", "reload"}."""
+        with self._page_lock:
+            return dict(self._page.get(host) or {"seq": 0, "path": "", "reload": False})
+
+    def live_end(self, host: str) -> Optional[str]:
+        """A routine's camera time is up: back to the camera grid (the kiosk's usual screen)."""
+        with self._page_lock:
+            if not (self._page.get(host) or {}).get("path"):
+                return None
+            self._page[host] = {"seq": time.time(), "path": "", "reload": False}
+        return "the cameras"
 
     # ------------------------------------------------------------ the screen mirror
     def mirror_start(self, host: str) -> None:
