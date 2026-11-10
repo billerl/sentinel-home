@@ -286,6 +286,7 @@ class SmartSwitches:
         self._failures: Dict[str, int] = {}
         self._last_discover = 0.0
         self._mirrors: Dict[str, Any] = {}  # TV switch id -> TVMirror (the remote's screen mirror)
+        self.on_tv_step: Optional[Callable[[str, str, str], None]] = None  # the TV shortcut recorder (tv_shortcuts.py)
         self._tv_apps: Tuple[float, List[str]] = (0.0, [])
         self._tv_apps_busy = False
         # When no switch or TV matches: the heater thermostat (heater.py), then learned remote buttons (remotes.py).
@@ -798,6 +799,7 @@ class SmartSwitches:
             tv[1].press(tv[2], TV_KEYS[key])
         except (OSError, ValueError) as e:
             return False, f"The {tv[0].name} didn't answer ({e})." if tv[0].on else f"The {tv[0].name} is off."
+        self._step(switch_id, "key", key)
         return True, key
 
     def tv_open(self, switch_id: str, app_id: str) -> Tuple[bool, str]:
@@ -818,7 +820,18 @@ class SmartSwitches:
         except (OSError, ValueError) as e:
             return False, f"The {sw.name} didn't open it ({e})."
         app_logger.log("info", "tv_app", app=name, source="web", component="switches", action="tv")
+        self._step(switch_id, "open", app_id)
         return True, name
+
+    def tv_close(self, switch_id: str, app_id: str) -> Tuple[bool, str]:
+        tv = self._tv_for(switch_id)
+        if tv is None or not hasattr(tv[1], "close"):
+            return False, "That TV can't close apps."
+        try:
+            tv[1].close(tv[2], app_id)
+        except (OSError, ValueError) as e:
+            return False, f"The {tv[0].name} didn't close it ({e})."
+        return True, "closed"
 
     def tv_type(self, switch_id: str, text: str) -> Tuple[bool, str]:
         tv = self._tv_for(switch_id)
@@ -829,7 +842,12 @@ class SmartSwitches:
             tv[1].type_text(tv[2], text)
         except (OSError, ValueError) as e:
             return False, f"The {tv[0].name} didn't take it ({e})."
+        self._step(switch_id, "type", text)
         return True, "typed"
+
+    def _step(self, switch_id: str, do: str, value: str) -> None:
+        if self.on_tv_step is not None:
+            self.on_tv_step(switch_id, do, value)
 
     def tv_live(self, switch_id: str, reload: bool) -> Tuple[bool, str]:
         tv = self._tv_for(switch_id)

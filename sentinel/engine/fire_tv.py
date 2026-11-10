@@ -367,6 +367,12 @@ class FireTVDriver:
                           f"monkey -p {package} -c android.intent.category.LEANBACK_LAUNCHER 1 >/dev/null 2>&1 || "
                           f"monkey -p {package} -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1")
 
+    def close(self, host: str, package: str) -> None:
+        """Quit an app, so the next launch starts at its first screen (a TV shortcut needs that)."""
+        if not re.fullmatch(r"[\w.]{1,100}", package or ""):
+            raise ValueError("not an app")
+        self._shell(host, f"am force-stop {package}")
+
     def showing(self, host: str) -> Optional[str]:
         m = re.search(r"mCurrentFocus=Window\{\S+ \S+ ([\w.]+)/", self._shell(host, "dumpsys window | grep mCurrentFocus"))
         if not m:

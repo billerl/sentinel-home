@@ -169,6 +169,20 @@
         <input id="tvr-text" type="text" maxlength="100" autocomplete="off" placeholder="Type into the TV's search box…">
         <button type="submit" class="tvr-btn">Send</button>
       </form>
+      <div class="tvr-apps-h">Shortcuts <span class="tvr-beta">beta</span></div>
+      <div class="tvr-shortcuts" id="tvr-shortcuts"></div>
+      <div class="tvr-row" id="tvr-rec-start">
+        <button type="button" class="tvr-btn" onclick="recordStart()">⏺ Record a shortcut</button>
+      </div>
+      <div class="tvr-recbar" id="tvr-recbar" hidden>
+        <div class="tvr-rec-now"><span class="tvr-rec-dot"></span><span id="tvr-rec-count">Recording…</span></div>
+        <div class="tvr-hint" style="margin: 4px 0 8px;">Watch the TV and use this remote. Start by tapping the app below.</div>
+        <form class="tvr-type" onsubmit="recordSave(); return false;">
+          <input id="tvr-rec-name" type="text" maxlength="30" autocomplete="off" placeholder="Name it, e.g. Judge Judy">
+          <button type="submit" class="tvr-btn">⏹ Save</button>
+        </form>
+        <div class="tvr-row"><button type="button" class="tvr-btn" onclick="recordCancel()">Discard</button></div>
+      </div>
       <div class="tvr-apps-h">Apps</div>
       <div class="tvr-apps" id="tvr-apps"></div>
       <div id="tvr-msg" role="status"></div>

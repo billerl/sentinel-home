@@ -168,6 +168,9 @@ class Engine:
         self.heater = HeaterControl(VIDEO_DIR, self.remotes, self.settings, notify=lambda text: [
             self.telegram.reply_to_chat(c, text) for c in self.telegram.unpaused_chats()])
         self.switches.extras = [self.heater, self.remotes]
+        from sentinel.engine.tv_shortcuts import TVShortcuts
+
+        self.tv_shortcuts = TVShortcuts(VIDEO_DIR, self.switches)  # button presses recorded on the TV remote (beta)
         from sentinel.engine.wifi_motion import WifiMotion
 
         self.wifi_motion = WifiMotion(VIDEO_DIR)  # ESP32 boards that sense movement through the Wi-Fi signal

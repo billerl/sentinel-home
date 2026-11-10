@@ -761,6 +761,7 @@ async function openRemote(id) {
       b.style.display = !v.keys || v.keys.indexOf(b.dataset.key) >= 0 ? "" : "none";
     });
     document.getElementById("tvr-live").hidden = !v.live;
+    loadShortcuts();
     screenShow(v.screen ? id : null);
     v.apps.forEach(function(a) {
       var b = document.createElement("button");
@@ -863,6 +864,7 @@ function remoteKey(key) {
       var res = await switchPost("/api/tv/" + encodeURIComponent(id) + "/key", { key: key });
       if (!res.ok) { remoteMsg(res.data.error || "That didn't work."); stopRepeat(); }
       else if (document.getElementById("tvr-msg").className !== "ok") remoteMsg("");
+      if (res.ok && recording) loadShortcuts();
     } catch (e) { remoteMsg("Couldn't reach Sentinel."); stopRepeat(); }
   });
 }
@@ -881,6 +883,7 @@ async function remoteApp(a) {
   var res = await switchPost("/api/tv/" + encodeURIComponent(tvId) + "/open", { app: a.id });
   if (!res.ok) { remoteMsg(res.data.error || "That didn't work."); return; }
   remoteMsg(a.name + " ✓", true);
+  if (recording) loadShortcuts();
   if (tvState && !tvState.on) remoteShow(Object.assign({}, tvState, { on: true }));
 }
 async function remoteLive(reload) {
@@ -892,8 +895,73 @@ async function remoteType() {
   var box = document.getElementById("tvr-text");
   if (!box.value.trim() || !tvId) return;
   var res = await switchPost("/api/tv/" + encodeURIComponent(tvId) + "/type", { text: box.value.trim() });
-  if (res.ok) { box.value = ""; remoteMsg("Sent ✓ (it goes into the box the TV's keyboard is open on)", true); }
+  if (res.ok) { box.value = ""; remoteMsg("Sent ✓ (it goes into the box the TV's keyboard is open on)", true); if (recording) loadShortcuts(); }
   else remoteMsg(res.data.error || "That didn't work.");
+}
+// ---- shortcuts (beta): presses recorded on this remote, played back (sentinel/engine/tv_shortcuts.py) ----
+var recording = false;
+async function loadShortcuts() {
+  var id = tvId;
+  if (!id) return;
+  try {
+    var r = await fetch("/api/tv/" + encodeURIComponent(id) + "/shortcuts");
+    if (!r.ok || id !== tvId) return;
+    showShortcuts(await r.json());
+  } catch (e) {}
+}
+function showShortcuts(v) {
+  recording = !!v.recording;
+  document.getElementById("tvr-recbar").hidden = !recording;
+  document.getElementById("tvr-rec-start").hidden = recording;
+  document.getElementById("tvr-rec-count").textContent = "Recording… " + v.steps + (v.steps === 1 ? " step" : " steps");
+  var box = document.getElementById("tvr-shortcuts");
+  box.innerHTML = "";
+  v.shortcuts.forEach(function(sc) {
+    var row = document.createElement("div");
+    row.className = "tvr-sc";
+    var play = document.createElement("button");
+    play.type = "button";
+    play.className = "tvr-btn play";
+    play.innerHTML = "▶ " + esc(sc.name) + " <small>" + sc.steps + " steps</small>";
+    play.onclick = function() { shortcutPlay(sc); };
+    var del = document.createElement("button");
+    del.type = "button";
+    del.className = "tvr-btn del";
+    del.title = "Delete " + sc.name;
+    del.textContent = "✕";
+    del.onclick = function() { shortcutDelete(sc); };
+    row.appendChild(play);
+    row.appendChild(del);
+    box.appendChild(row);
+  });
+}
+async function recordStart() {
+  var res = await switchPost("/api/tv/" + encodeURIComponent(tvId) + "/record", {});
+  if (!res.ok) { remoteMsg(res.data.error || "That didn't work."); return; }
+  remoteMsg("Recording. Open the app first, then press buttons as usual.", true);
+  loadShortcuts();
+}
+async function recordSave() {
+  var box = document.getElementById("tvr-rec-name");
+  var res = await switchPost("/api/tv/" + encodeURIComponent(tvId) + "/record_save", { name: box.value.trim() });
+  remoteMsg(res.ok ? res.data.message : (res.data.error || "That didn't work."), res.ok);
+  if (res.ok) box.value = "";
+  loadShortcuts();
+}
+async function recordCancel() {
+  await switchPost("/api/tv/" + encodeURIComponent(tvId) + "/record_cancel", {});
+  remoteMsg("Recording discarded.", true);
+  loadShortcuts();
+}
+async function shortcutPlay(sc) {
+  var res = await switchPost("/api/tv/" + encodeURIComponent(tvId) + "/shortcut_play", { id: sc.id });
+  remoteMsg(res.ok ? res.data.message : (res.data.error || "That didn't work."), res.ok);
+}
+async function shortcutDelete(sc) {
+  if (!confirm("Delete the shortcut “" + sc.name + "”?")) return;
+  var res = await switchPost("/api/tv/" + encodeURIComponent(tvId) + "/shortcut_delete", { id: sc.id });
+  if (!res.ok) remoteMsg(res.data.error || "That didn't work.");
+  loadShortcuts();
 }
 function stopRepeat() {
   if (tvRepeat) { clearTimeout(tvRepeat.t); clearInterval(tvRepeat.i); tvRepeat.btn.classList.remove("pressed"); tvRepeat = null; }
@@ -950,7 +1018,7 @@ document.querySelectorAll("#tvr [data-key]").forEach(function(btn) {
 })();
 document.addEventListener("keydown", function(e) {
   if (!remoteOpen()) return;
-  if (e.target && e.target.id === "tvr-text") { if (e.key === "Escape") e.target.blur(); return; }
+  if (e.target && (e.target.id === "tvr-text" || e.target.id === "tvr-rec-name")) { if (e.key === "Escape") e.target.blur(); return; }
   var keys = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", Enter: "ok", Backspace: "back",
                "+": "vol_up", "=": "vol_up", "-": "vol_down", m: "mute", PageUp: "ch_up", PageDown: "ch_down" };
   if (e.key === "Escape") { closeRemote(); e.stopImmediatePropagation(); e.preventDefault(); return; }

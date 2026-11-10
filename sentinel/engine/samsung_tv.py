@@ -457,6 +457,10 @@ class SamsungTVDriver:
     def launch(self, host: str, app_id: str) -> None:
         self._rest(host, f"applications/{app_id}", method="POST", timeout=5.0)
 
+    def close(self, host: str, app_id: str) -> None:
+        """Quit an app, so the next launch starts at its first screen (a TV shortcut needs that)."""
+        self._rest(host, f"applications/{app_id}", method="DELETE", timeout=5.0)
+
     def showing(self, host: str) -> Optional[str]:
         """The app on screen, if any (None: the home screen, an input like cable, or off)."""
         for app_id, name in self.apps(host).items():

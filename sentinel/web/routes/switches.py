@@ -113,6 +113,16 @@ def register(app: Flask, ctx: WebContext) -> None:
         resp.headers["X-Accel-Buffering"] = "no"
         return resp
 
+    @app.route("/api/tv/<tv_id>/shortcuts")
+    def api_tv_shortcuts(tv_id):
+        """Recorded button presses for this TV (sentinel/engine/tv_shortcuts.py, beta)."""
+        redir = _require_session()
+        if redir:
+            return jsonify({"error": "unauthorized"}), 401
+        if engine is None:
+            return jsonify({"recording": False, "shortcuts": []})
+        return jsonify(engine.tv_shortcuts.view(tv_id[:40]))
+
     @app.route("/api/tv/<tv_id>/<action>", methods=["POST"])
     def api_tv_action(tv_id, action):
         err = _config_guard()
@@ -130,6 +140,17 @@ def register(app: Flask, ctx: WebContext) -> None:
             return _result(*engine.switches.tv_live(tv_id, body.get("reload") is True))
         if action == "tap":
             return _result(*engine.switches.tv_tap(tv_id, body.get("x"), body.get("y")))
+        shortcut = str(body.get("id") or "")[:16]
+        if action == "record":
+            return _result(*engine.tv_shortcuts.start(tv_id))
+        if action == "record_save":
+            return _result(*engine.tv_shortcuts.stop(tv_id, str(body.get("name") or "")[:60]))
+        if action == "record_cancel":
+            return _result(*engine.tv_shortcuts.cancel(tv_id))
+        if action == "shortcut_play":
+            return _result(*engine.tv_shortcuts.play(tv_id, shortcut))
+        if action == "shortcut_delete":
+            return _result(*engine.tv_shortcuts.delete(tv_id, shortcut))
         return jsonify({"error": "unknown action"}), 404
 
     # ---- learned remotes: buttons taught to a BroadLink (sentinel/engine/remotes.py) ----

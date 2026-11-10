@@ -486,6 +486,17 @@ button:disabled { opacity: 0.35; cursor: default; }
 .tvr-screen .dot { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%;
                    border: 2px solid #7fe8ff; pointer-events: none; animation: tvr-dot 0.6s ease-out forwards; }
 @keyframes tvr-dot { from { transform: scale(0.4); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
+.tvr-beta { font-size: 0.62rem; letter-spacing: 0.05em; padding: 1px 6px; border-radius: 8px; background: #3a2f12;
+            color: #ffd27f; vertical-align: 1px; text-transform: none; }
+.tvr-shortcuts { display: flex; flex-direction: column; gap: 6px; }
+.tvr-sc { display: flex; gap: 6px; }
+.tvr-sc .play { flex: 1; min-width: 0; justify-content: flex-start; padding: 0 12px; }
+.tvr-sc .play small { color: #6f9aab; margin-left: auto; }
+.tvr-sc .del { width: 44px; color: #ff9b9b; }
+.tvr-recbar { margin: 10px 0; padding: 10px 12px; border: 1px solid #6b2a2a; border-radius: 14px; background: #1c1012; }
+.tvr-rec-now { display: flex; align-items: center; gap: 8px; color: #ffb3b3; font-weight: 600; }
+.tvr-rec-dot { width: 12px; height: 12px; border-radius: 50%; background: #ff4a4a; animation: tvr-rec 1s ease-in-out infinite alternate; }
+@keyframes tvr-rec { to { opacity: 0.3; } }
 #tvr-msg { min-height: 1.2em; margin-top: 10px; text-align: center; font-size: 0.8rem; color: #ffb3b3; }
 #tvr-msg.ok { color: #7fe8c8; }
 @media (max-width: 760px) {
