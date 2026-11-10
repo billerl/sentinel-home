@@ -47,6 +47,9 @@ VEHICLE_TYPES: Dict[str, Tuple[Optional[str], bool, List[str]]] = {
     "van": ("van", False, ["a plain white work van", "a passenger van", "a cargo van"]),
     "school_bus": ("school bus", False, ["a yellow school bus"]),
     "garbage": ("garbage truck", False, ["a garbage truck", "a recycling truck"]),
+    # A green compact tractor with a loader was "a garbage truck" with no tractor here to pick (2026-11-10)
+    "tractor": ("tractor", False, ["a tractor", "a green John Deere tractor", "a compact tractor with a front loader",
+                                   "a riding lawn mower"]),
     "motorcycle": ("motorcycle", False, ["a motorcycle"]),
     "scenery": (None, False, ["an empty street", "a driveway", "the front of a house", "trees and grass"]),
 }
@@ -63,6 +66,9 @@ DELIVERY_MIN_PROB_NIGHT = 0.75
 DELIVERY_MIN_RATIO = 2.0  # times the runner-up
 DELIVERY_MIN_AREA = 2500  # px²; far-away specks are guesses
 TYPE_MIN_PROB = 0.4
+# Named by day only, and only when it wins: at night 13 of 2,400 parked-car photos (infrared, or lit by
+# headlights) came out "tractor", by day none did, and the family's tractor is out in the daytime (2026-11-10)
+DAYLIGHT_ONLY = ("tractor",)
 
 
 @dataclass
@@ -164,6 +170,13 @@ class VehicleClassifier:
             return None
         probs = self.probabilities(frame, box, embedding)
         ranked = sorted(probs.items(), key=lambda kv: -kv[1])
+        if ranked[0][0] not in DAYLIGHT_ONLY or not is_daylight(frame):
+            # Not a tractor: score the rest as if it had never been added (dropping it and renormalising is the
+            # same softmax as without its descriptions), so no other vehicle is named differently than before
+            rest = {k: p for k, p in probs.items() if k not in DAYLIGHT_ONLY}
+            total = sum(rest.values()) or 1.0
+            probs = {k: p / total for k, p in rest.items()}
+            ranked = sorted(probs.items(), key=lambda kv: -kv[1])
         key, prob = ranked[0]
         phrase, delivery, _ = VEHICLE_TYPES[key]
         if delivery:

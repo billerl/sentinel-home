@@ -21,7 +21,7 @@ class Cars:
     """Family cars. presence (the driveway's car tracker), the cameras and the car classifier are looked up
     each time: they start later than this, and only when object detection is on."""
 
-    VEHICLE_KINDS = ("car", "sedan", "suv", "pickup", "van", "minivan", "motorcycle")
+    VEHICLE_KINDS = ("car", "sedan", "suv", "pickup", "van", "minivan", "motorcycle", "tractor")
     CAR_FIX_KEEP = 40  # newest alerts that can still be corrected (each holds a camera frame)
     CAR_FIX_HOURS = 24
 

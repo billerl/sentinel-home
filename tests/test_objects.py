@@ -10,7 +10,8 @@ import unittest
 import numpy as np
 
 from sentinel.detection.objects import DEFAULT_MODEL, Detection, ObjectDetector
-from sentinel.engine.objects import CameraObjectTracker, DetectionWorker, Track, describe, vehicle_color
+from sentinel.engine.objects import (CameraObjectTracker, DetectionWorker, Track, companions, describe,
+                                     vehicle_color)
 
 W, H = 640, 360
 GREY = np.full((H, W, 3), 120, dtype=np.uint8)
@@ -304,6 +305,22 @@ class TestDetectorRuns(unittest.TestCase):
         result = det.detect(GREY)
         self.assertIsInstance(result, list)
         self.assertLess(time.time() - start, 10)
+
+
+class TestCompanions(unittest.TestCase):
+    """2026-11-10: one person in the Driveway kept coming out as "2 people"."""
+
+    def make(self, tid, box, last_seen, group="person"):
+        return Track(tid, group, group, 0.0, last_seen, [(last_seen, box)], 0.9, 3)
+
+    def test_only_people_seen_together_in_different_spots(self):
+        me = self.make(1, (100, 100, 40, 100), 10.0)
+        other = self.make(2, (400, 100, 40, 100), 9.6)  # walking next to me
+        ghost = self.make(3, (300, 100, 40, 100), 6.0)  # me, before the camera lost me behind a car
+        twin = self.make(4, (105, 102, 40, 96), 10.0)  # me again (a "dog" turned back into a person)
+        car = self.make(5, (600, 100, 200, 100), 10.0, "vehicle")
+        self.assertEqual(companions(me, [me, other, ghost, twin, car]), 1)
+        self.assertEqual(companions(me, [me, ghost, twin]), 0)
 
 
 if __name__ == "__main__":

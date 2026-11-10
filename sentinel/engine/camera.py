@@ -573,6 +573,11 @@ class CameraPipeline:
                     track.known_vehicle = household.vehicle(vehicle_id)
             if vt is not None and vt.delivery and track.known_vehicle is not None:
                 vt = None  # one of the family's cars, not an Amazon van
+            if vt is not None and vt.key == "tractor" and track.known_vehicle is None and household is not None:
+                # Tractors all look alike to the car fingerprints: a tractor is the family's own, if they have one
+                own = [v for v in household.vehicles() if v.kind == "tractor"]
+                if len(own) == 1:
+                    track.known_vehicle = own[0]
         except Exception as e:  # never let the classifier break detection
             app_logger.log("error", "vehicle_classifier_failed", error_message=str(e),
                            camera_display=self.display_name, component="camera", action="classify")
@@ -590,13 +595,13 @@ class CameraPipeline:
         return newly_delivery and track.alerted
 
     def _report_track(self, track, confirmed, ts: float) -> None:
-        from sentinel.engine.objects import ObjectEvent, describe
+        from sentinel.engine.objects import ObjectEvent, companions, describe
 
         source = track.best_frame
         h, w = source.shape[:2]
         x, y, bw, bh = track.best_box or track.box
         zone = self.zone_name_at((x + bw // 2, y + bh), w, h)
-        companions = sum(1 for t in confirmed if t is not track and t.group == track.group == "person")
+        others = companions(track, confirmed)
         vt = track.vehicle_type
         tag = vt.phrase if vt is not None and vt.delivery else track.label
         if track.hd_view is not None:
@@ -610,7 +615,7 @@ class CameraPipeline:
             camera_name=self.display_name,
             track=track,
             zone_name=zone,
-            description=describe(track, self.display_name, zone, source, w, companions),
+            description=describe(track, self.display_name, zone, source, w, others),
             snapshot=snapshot,
             timestamp=ts,
         )

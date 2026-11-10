@@ -123,6 +123,16 @@ class TestThresholds(unittest.TestCase):
         self.assertIsNone(_FakeClassifier({"scenery": 0.9, "car": 0.1}).classify(self.COLOUR, (0, 0, 9, 9)))
         self.assertIsNone(_FakeClassifier({"pickup": 0.3, "car": 0.3, "suv": 0.4 - 0.01}).classify(self.COLOUR, (0, 0, 9, 9)))
 
+    def test_tractor_only_when_it_wins_by_day(self):
+        """2026-11-10: the family's tractor was "a garbage truck"; parked cars at night must not become tractors."""
+        vt = _FakeClassifier({"tractor": 0.8, "garbage": 0.2}).classify(self.COLOUR, (0, 0, 50, 50))
+        self.assertEqual((vt.key, vt.phrase), ("tractor", "tractor"))
+        vt = _FakeClassifier({"tractor": 0.6, "car": 0.3, "suv": 0.1}).classify(GREY, (0, 0, 50, 50))  # infrared
+        self.assertEqual((vt.key, round(vt.prob, 2)), ("car", 0.75))
+        # not the winner: the others score as if tractors didn't exist (a 0.38 SUV still clears the 0.4 bar)
+        vt = _FakeClassifier({"suv": 0.38, "tractor": 0.05, "car": 0.3, "pickup": 0.27}).classify(self.COLOUR, (0, 0, 50, 50))
+        self.assertEqual((vt.key, round(vt.prob, 2)), ("suv", 0.4))
+
     def test_crop_is_square_and_safe_at_edges(self):
         crop = crop_for_clip(GREY, (600, 300, 100, 80))
         self.assertEqual(crop.shape[0], crop.shape[1])

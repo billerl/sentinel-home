@@ -238,7 +238,7 @@ def vehicle_color(frame: np.ndarray, box: Tuple[int, int, int, int]) -> Optional
 _EMOJI = {"person": "🚶", "car": "🚗", "truck": "🚚", "bus": "🚌", "motorcycle": "🏍️", "bicycle": "🚲",
           "dog": "🐕", "cat": "🐈", "bird": "🐦", "horse": "🦌", "cow": "🦌", "sheep": "🦌", "bear": "🐻",
           "delivery": "📦", "pickup": "🛻", "suv": "🚙", "minivan": "🚐", "van": "🚐", "school_bus": "🚌",
-          "garbage": "🚛", "sedan": "🚗", "deer": "🦌"}
+          "garbage": "🚛", "tractor": "🚜", "sedan": "🚗", "deer": "🦌"}
 _VEHICLE_NOUN = {"car": "car", "truck": "truck", "bus": "bus", "motorcycle": "motorcycle", "bicycle": "bicycle"}
 
 
@@ -281,6 +281,19 @@ def _preposition(name: str) -> str:
     words = name.lower().split()
     last = words[-1] if words else ""
     return "in" if last in _IN_PLACES else "on" if last in _ON_PLACES else "at"
+
+
+COMPANION_SECONDS = 1.0  # "2 people": the other one must have been seen within this of the one alerting
+
+
+def companions(track: "Track", tracks: List["Track"]) -> int:
+    """Other people in view with this one ("2 people are walking past"). Only people seen at the same moment:
+    someone the camera lost for a moment (behind a car) and picked up again as a new track left the old one
+    behind for TRACK_TTL_SECONDS, and that ghost made one person "2 people" (36 of 137 Driveway person alerts in
+    the week to 2026-11-10). Nor one standing in this one's box: the same person seen twice, e.g. once as a
+    "dog" that the second opinion turned back into a person."""
+    return sum(1 for t in tracks if t is not track and t.group == track.group == "person"
+               and abs(t.last_seen - track.last_seen) < COMPANION_SECONDS and _iou(t.box, track.box) < 0.3)
 
 
 def describe(track: Track, camera_name: str, zone_name: Optional[str], frame: np.ndarray,

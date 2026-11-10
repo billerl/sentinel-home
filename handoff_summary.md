@@ -60,6 +60,15 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     (`sentinel/detection/vehicle_prompts.npz`). After editing `VEHICLE_TYPES`, rebuild them with
     `tools/build_vehicle_prompts.py`. Recognised deliveries add a `delivery` clip label and alert group;
     vehicles are re-checked (up to 3 times) as they get closer, which can send a second "📦" alert.
+    "tractor" (2026-11-10) is `DAYLIGHT_ONLY`: named only when it wins in daylight; otherwise it is dropped and
+    the rest renormalised, so every other vehicle scores exactly as before it was added (2,400 stored photos:
+    the only change was the real tractor; at night 13 parked cars had come out "tractor"). A tractor is the
+    family's own when the Vehicles page has exactly one vehicle of kind "tractor" (fingerprints can't tell
+    tractors apart; camera.py `_check_vehicle_type`).
+  - "2 people" (`objects.companions`, 2026-11-10): only other person tracks seen within 1 s of this one and not
+    overlapping its box. Before, any confirmed track counted, incl. the same person's ghost track (lost behind a
+    car, picked up as a new track; tracks live TRACK_TTL_SECONDS) and a "dog" relabelled to person: 36 of 137
+    Driveway person alerts in a week said 2+. Replay of 67 clips: 23 -> 15 multi-person alerts, the 15 all real.
   - Far vehicles (box < 1/4 of the frame width) are checked on the HD stream instead: a background
     thread (`DetectionWorker.run_later`) waits for the segment holding the sighting to close, decodes its
     keyframe (`HDRecorder.keyframe_near`, ~0.6 CPU-s), re-finds the vehicle with YOLOX near the scaled box
