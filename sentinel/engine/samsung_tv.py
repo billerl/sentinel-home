@@ -58,6 +58,7 @@ COMMON_APPS = {
     "3201606009684": "Spotify", "3201808016802": "Pluto TV", "3201504001965": "Tubi", "3201512006963": "Plex",
     "3201710015037": "Gallery", "3201908019041": "Paramount+", "3201508004642": "Sling TV",
 }
+BROWSER_APP = "org.tizen.browser"  # the TV's "Internet": Sentinel's camera page opens in it (Chrome 56 on a 2018 TV)
 # YouTube and YouTube TV draw their own search keyboard, so text sent for the TV's keyboard never gets there
 # (2026-11-10). Their grid, as on this TV: four rows of seven, letters or (after the key right of N) numbers and
 # signs; below them SPACE, CLEAR and SEARCH, reached down from the first column (and back up to it). A new search
@@ -76,6 +77,7 @@ class SamsungTVDriver:
     def __init__(self, root: str, timeout: float = 2.0) -> None:
         self.path = os.path.join(os.path.abspath(root), STATE_FILE)
         self.timeout = timeout
+        self.live_url: Optional[str] = None  # Sentinel's page on the home network (SmartSwitches.set_live_url)
         self._lock = threading.Lock()
         self._tvs: Dict[str, Dict[str, Any]] = {}  # mac -> {host, token, name, model, apps, apps_at, on_since}
         self._off_at: Dict[str, float] = {}  # host -> when we pressed power to turn it off
@@ -507,6 +509,18 @@ class SamsungTVDriver:
 
     def launch(self, host: str, app_id: str) -> None:
         self._rest(host, f"applications/{app_id}", method="POST", timeout=5.0)
+
+    def live_app(self, host: str) -> Optional[str]:
+        """The browser, once Sentinel has said where its camera page is (``live_url``)."""
+        return BROWSER_APP if self.live_url else None
+
+    def show_live(self, host: str, reload: bool = False) -> None:
+        """Sentinel's camera page in the TV's browser. Opening the address again loads it afresh, so a reload is
+        the same (signed in once with the QR code, the browser keeps it)."""
+        if not self.live_url:
+            raise ValueError("Sentinel's web page isn't on the home network")
+        self._send(host, [{"method": "ms.channel.emit", "params": {"event": "ed.apps.launch", "to": "host", "data": {
+            "appId": BROWSER_APP, "action_type": "NATIVE_LAUNCH", "metaTag": self.live_url}}}])
 
     def close(self, host: str, app_id: str) -> None:
         """Quit an app, so the next launch starts at its first screen (a TV shortcut needs that)."""

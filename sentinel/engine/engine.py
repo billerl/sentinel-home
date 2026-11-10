@@ -30,6 +30,19 @@ from sentinel.notifications import TelegramNotifier
 from sentinel.recordings import RecordingStore
 from sentinel.settings import SettingsManager
 
+
+def _home_lan(host: str) -> bool:
+    """A private IPv4 address other screens in the house can reach (not loopback or Tailscale's range)."""
+    import ipaddress
+
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return (addr.version == 4 and addr.is_private and not addr.is_loopback
+            and addr not in ipaddress.ip_network("100.64.0.0/10"))
+
+
 # OpenCV's default thread pool busy-spins between the small per-frame jobs we
 # give it (blur, MOG2, dilate) and was the single largest CPU cost. Each camera
 # already has its own thread, so run OpenCV single-threaded.
@@ -159,6 +172,9 @@ class Engine:
         from sentinel.engine.switches import SmartSwitches
 
         self.switches = SmartSwitches(VIDEO_DIR)  # Kasa smart plugs/switches on the home network
+        web = self.settings.get("web") or {}
+        home = next((h for h in str(web.get("bind_host") or "").split(",") if _home_lan(h.strip())), None)
+        self.switches.set_live_url(f"http://{home.strip()}:{int(web.get('port') or 8088)}/" if home else None)
         from sentinel.engine.remotes import Remotes
 
         self.remotes = Remotes(VIDEO_DIR)  # IR/RF buttons taught to a BroadLink (heater, soundbar, fans)

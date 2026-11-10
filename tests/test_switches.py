@@ -484,6 +484,23 @@ class TestYouTubeKeyboard(unittest.TestCase):
         self.assertEqual(self.keys, [])
 
 
+class TestSamsungLiveView(unittest.TestCase):
+    """"Show cameras" on a Samsung: Sentinel's page in the TV's own browser."""
+
+    def test_opens_the_page_in_the_browser(self):
+        from sentinel.engine.samsung_tv import BROWSER_APP, SamsungTVDriver
+        drv, sent = SamsungTVDriver(tempfile.mkdtemp(prefix="sentinel-tv-")), []
+        drv._send = lambda host, messages: sent.extend(messages)
+        self.assertIsNone(drv.live_app("tv"))  # not told where Sentinel is: no button
+        with self.assertRaises(ValueError):
+            drv.show_live("tv")
+        SmartSwitches(tempfile.mkdtemp(prefix="sentinel-sw-"), drivers=[drv]).set_live_url("http://192.168.1.9:8088/")
+        self.assertEqual(drv.live_app("tv"), BROWSER_APP)
+        drv.show_live("tv", reload=True)
+        self.assertEqual(sent[0]["params"]["data"], {"appId": BROWSER_APP, "action_type": "NATIVE_LAUNCH",
+                                                     "metaTag": "http://192.168.1.9:8088/"})
+
+
 class TestSamsungDriver(unittest.TestCase):
     """The power dance: a TV that's off doesn't answer; the wake packet wakes only its network (picture
     still dark) and the power button lights the picture. Tested on a UN65NU6900, 2026-11-03."""

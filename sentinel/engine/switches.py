@@ -856,6 +856,12 @@ class SmartSwitches:
         if self.on_tv_step is not None:
             self.on_tv_step(switch_id, do, value)
 
+    def set_live_url(self, url: Optional[str]) -> None:
+        """Where TVs that show Sentinel in their own browser (Samsung) should open it."""
+        for driver in self._drivers.values():
+            if hasattr(driver, "live_url"):
+                driver.live_url = url
+
     def tv_live(self, switch_id: str, reload: bool) -> Tuple[bool, str]:
         tv = self._tv_for(switch_id)
         if tv is None or not hasattr(tv[1], "show_live"):
