@@ -1,4 +1,22 @@
 // Live camera page (templates/grid.html). BOOT_ID and the camera list come from the page.
+// Browsers before Chrome 71 (a 2018 Samsung TV has 56) leave cookies off fetch() unless asked: the TV's sign-in
+// cookie was dropped and every request after it came back "signed out" (2026-11-10).
+(function() {
+  var f = window.fetch;
+  if (!f) return;
+  window.fetch = function(url, opts) {
+    opts = opts || {};
+    if (!opts.credentials) opts.credentials = "same-origin";
+    return f.call(this, url, opts);
+  };
+})();
+if (!String.prototype.padStart) {  // Chrome 57+; without it the weather tile's clock threw and the tile stayed empty
+  String.prototype.padStart = function(len, fill) {
+    var s = String(this);
+    while (s.length < len) s = (fill || " ") + s;
+    return s;
+  };
+}
 var liveCams = [];
 var focusedCamId = null;
 var gridTimers = {};
@@ -1113,6 +1131,7 @@ function toggleTimeline(show) {
 // Desktop grid: try every column count and keep the one where each camera picture
 // (16:9, or the cameras' real shape once known) is largest in the space available.
 var camAspect = 16 / 9;
+var GRID_CSS = !window.CSS || !CSS.supports || CSS.supports("display", "grid");
 function layoutGrid() {
   var grid = document.getElementById("grid");
   var n = grid.querySelectorAll(".tile:not(.weather)").length;
@@ -1134,6 +1153,14 @@ function layoutGrid() {
   var tw = Math.floor(best.w), th = Math.floor(best.w / camAspect);
   grid.style.gridTemplateColumns = "repeat(" + best.cols + ", " + tw + "px)";
   grid.style.gridAutoRows = th + "px";
+  weatherTile.style.setProperty("--cqh", th / 100 + "px");  // for browsers without container units (grid.css)
+  weatherTile.style.setProperty("--cqw", tw / 100 + "px");
+  if (!GRID_CSS) {  // see grid.css: the same sizes, on each tile
+    Array.prototype.forEach.call(grid.querySelectorAll(".tile"), function(t) {
+      t.style.width = tw + "px";
+      t.style.height = th + "px";
+    });
+  }
   // Only in a cell that would otherwise be empty: it never shrinks the cameras.
   weatherTile.hidden = !weather || best.cols * Math.ceil(n / best.cols) <= n;
 }

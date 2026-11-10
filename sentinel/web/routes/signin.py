@@ -110,10 +110,13 @@ def register(app: Flask, ctx: WebContext, home_base: Optional[str]) -> None:
         if made is None:
             return jsonify({"error": "too many sign-in codes; wait a few minutes"}), 429
         code, pairing = made
+        # The phone that scans it is signed in at the public address, and a phone on mobile data can't reach this
+        # PC's home address at all (a TV on the home address made codes nobody could approve, 2026-11-10).
+        public = str(server._settings.settings.get("remote_web_url") or "").strip().rstrip("/")
         proto = (request.headers.get("X-Forwarded-Proto") or request.scheme).split(",")[0].strip()
-        url = f"{proto}://{request.host}/pair/{code}"
+        url = f"{public if public.startswith('https://') else f'{proto}://{request.host}'}/pair/{code}"
         svg = segno.make(url, error="m").svg_inline(scale=6, dark="#000", light="#fff", border=2)
-        return jsonify({"code": code, "short": pairing.short, "qr": svg})
+        return jsonify({"code": code, "short": pairing.short, "qr": svg, "url": url})
 
     @app.route("/login/pair/<code>")
     def login_pair_poll(code: str):

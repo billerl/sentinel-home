@@ -60,6 +60,18 @@ class TestQrLogin(unittest.TestCase):
         self.assertRegex(d["short"], r"^[A-Z0-9]{4}$")
         return d["code"]
 
+    def test_the_code_points_at_the_public_address(self):
+        tv = self.server._app.test_client()
+        settings = self.server._settings.settings
+        settings["remote_web_url"] = "https://sentinel.example.com/"
+        try:
+            r = tv.post("/login/pair", data="{}", headers={**JSON, **self.home})
+            self.assertRegex(r.get_json()["url"], r"^https://sentinel\.example\.com/pair/[\w-]+$")
+        finally:
+            settings["remote_web_url"] = ""
+        r = tv.post("/login/pair", data="{}", headers={**JSON, **self.home})
+        self.assertRegex(r.get_json()["url"], r"^http://localhost/pair/")  # none set: the address the TV used
+
     def test_phone_approves_and_tv_is_signed_in(self):
         tv = self.server._app.test_client()
         self.assertEqual(tv.get("/", headers=self.home).status_code, 302)  # not signed in

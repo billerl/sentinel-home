@@ -104,6 +104,17 @@
   </div>
   </div>
   <script>
+    // Browsers before Chrome 71 (a 2018 Samsung TV has 56) leave cookies off fetch() unless asked: the TV's sign-in
+    // cookie was dropped and every request after it came back "signed out" (2026-11-10).
+    (function() {
+      var f = window.fetch;
+      if (!f) return;
+      window.fetch = function(url, opts) {
+        opts = opts || {};
+        if (!opts.credentials) opts.credentials = "same-origin";
+        return f.call(this, url, opts);
+      };
+    })();
     var qrCode = null, qrStarted = 0, qrTimer = null;
     async function newQr() {
       try {
@@ -136,7 +147,11 @@
       startQr();
       card.scrollIntoView({ behavior: "smooth" });
     }
-    if (getComputedStyle(document.getElementById("qr-card")).display !== "none") startQr();
+    // a TV's browser can lay the page out narrow first and widen it after the script ran (Samsung, 2026-11-10)
+    function startIfShown() { if (getComputedStyle(document.getElementById("qr-card")).display !== "none") startQr(); }
+    startIfShown();
+    window.addEventListener("load", startIfShown);
+    window.addEventListener("resize", startIfShown);
   </script>
 </body>
 </html>

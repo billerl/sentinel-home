@@ -38,6 +38,12 @@ h1 { font-size: 0.9rem; margin: 0; flex: 1; }
   overflow: hidden;
 }
 
+/* Browsers without CSS grid (Chrome before 57: a 2018 Samsung TV's) stacked the cameras full width with no way to
+   scroll; there, rows wrap and layoutGrid() sizes each tile. */
+@supports not (display: grid) {
+  #grid { display: flex; flex-wrap: wrap; }
+  #grid > .tile { flex: none; }  /* no gap: margins would push the last tile of a row onto the next */
+}
 .tile {
   position: relative;
   background: #000;
@@ -104,6 +110,35 @@ h1 { font-size: 0.9rem; margin: 0; flex: 1; }
 .tile.weather.fam .wx-temp { font-size: 17cqh; }
 .tile.weather.fam .wx-clock .t { font-size: 17cqh; }
 .tile.weather.fam .wx-hours div { padding: 1cqh 0; gap: 0.3cqh; }
+/* Browsers without container units (Chrome before 105, e.g. a 2018 Samsung TV's): the same sizes from --cqh /
+   --cqw, which layoutGrid() sets to 1% of the tile; and margins where flex gap isn't known (Chrome before 84). */
+@supports not (height: 1cqh) {
+  .tile.weather { gap: calc(var(--cqh) * 3); padding: calc(var(--cqh) * 9) calc(var(--cqw) * 5) calc(var(--cqh) * 4); }
+  .wx-top { gap: calc(var(--cqw) * 3); }
+  .wx-icon { font-size: calc(var(--cqh) * 15); }
+  .wx-temp { font-size: calc(var(--cqh) * 22); }
+  .wx-now { font-size: calc(var(--cqh) * 5.5); gap: calc(var(--cqh) * 1); }
+  .wx-clock .t { font-size: calc(var(--cqh) * 22); }
+  .wx-clock .ap { font-size: calc(var(--cqh) * 7); }
+  .wx-clock .d { font-size: calc(var(--cqh) * 5); margin-top: calc(var(--cqh) * 1.2); }
+  .wx-now b { font-size: calc(var(--cqh) * 7); }
+  .wx-meta { font-size: calc(var(--cqh) * 5); }
+  .wx-hours { gap: calc(var(--cqw) * 1); }
+  .wx-hours div { padding: calc(var(--cqh) * 1.5) 0; gap: calc(var(--cqh) * 0.6); font-size: calc(var(--cqh) * 5); }
+  .wx-hours .r { font-size: calc(var(--cqh) * 4); }
+  .wx-foot { font-size: calc(var(--cqh) * 4); }
+  .wx-msg { font-size: calc(var(--cqh) * 6); }
+  .wx-family { gap: calc(var(--cqh) * 1) calc(var(--cqw) * 3); font-size: calc(var(--cqh) * 5); padding-top: calc(var(--cqh) * 2); }
+  .tile.weather.fam { gap: calc(var(--cqh) * 1.6); padding-top: calc(var(--cqh) * 7.5); padding-bottom: calc(var(--cqh) * 2); }
+  .tile.weather.fam .wx-icon { font-size: calc(var(--cqh) * 12); }
+  .tile.weather.fam .wx-temp { font-size: calc(var(--cqh) * 17); }
+  .tile.weather.fam .wx-clock .t { font-size: calc(var(--cqh) * 17); }
+  .tile.weather.fam .wx-hours div { padding: calc(var(--cqh) * 1) 0; gap: calc(var(--cqh) * 0.3); }
+  .tile.weather > * + * { margin-top: calc(var(--cqh) * 3); }
+  .tile.weather.fam > * + * { margin-top: calc(var(--cqh) * 1.6); }
+  .wx-hours { display: flex; }  /* the next hours side by side without CSS grid */
+  .wx-hours div { flex: 1; margin: 0 calc(var(--cqw) * 0.5); }
+}
 .tile.weather:focus-visible { outline: 3px solid #fff; outline-offset: -3px; }
 
 /* ---- Full-screen weather (tap the weather tile) ---- */
