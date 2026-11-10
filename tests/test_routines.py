@@ -265,6 +265,16 @@ class TestRunner(unittest.TestCase):
         self.runner.sensor("2350-beb4")
         self.assertEqual(self.fake.said[-1], "kitchen")
 
+    def test_wifi_sensor_fires_when_movement_starts_not_all_through_it(self):
+        self.add({"when": {"type": "sensor", "sensors": ["2350-beb4"]}, "then": [{"do": "say", "text": "front door"}]})
+        for _ in range(60 * 10):  # ten minutes of moving readings, never 30 s apart
+            self.runner.sensor("2350-beb4")
+            self.now += 1
+        self.assertEqual(self.fake.said, ["front door"])
+        self.now += 60  # quiet a minute, then movement again: a new time
+        self.runner.sensor("2350-beb4")
+        self.assertEqual(self.fake.said, ["front door", "front door"])
+
     def run_due(self):
         """Run the decisions whose time has come (the runner's own timers, faked)."""
         due = [(t, fn) for t, fn in self.timers if t <= self.now]

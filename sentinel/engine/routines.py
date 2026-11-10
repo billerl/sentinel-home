@@ -41,6 +41,7 @@ MAX_ACTIONS = 5
 MESSAGE_COOLDOWN = 5 * 60  # a routine sends Telegram messages at most this often...
 SAY_COOLDOWN = 2 * 60  # ...and speaks at most this often (each routine on its own: one per room says its room in turn)
 MOTION_REPEAT = 30.0  # a motion routine fires at most this often per camera
+SENSOR_REARM = 30.0  # a Wi-Fi sensor routine fires when movement starts after this long quiet, not all through it
 # Wi-Fi sensor rules ("this one and that one, but not that one"): how far apart the sensors' movement may be.
 # They never react at the same instant: walking through, the next room's line fires a few seconds later.
 WITHIN_DEFAULT, WITHIN_MIN, WITHIN_MAX = 5, 2, 60
@@ -596,7 +597,8 @@ class RoutineRunner:
         switching on changes the camera picture, not the radio signal. A rule with "and" / "but not" groups
         is decided ``within`` seconds later, once the other sensors have had their chance to react."""
         now = self._clock()
-        self._sensor_moved[path] = now
+        fresh = now - self._sensor_moved.get(path, -math.inf) >= SENSOR_REARM  # (a jittery line once said
+        self._sensor_moved[path] = now  # "someone opened the front door" every 2 minutes for an hour)
         due, rules = [], []
         for r in self._routines:
             w = r.spec["when"]
@@ -605,7 +607,7 @@ class RoutineRunner:
             if is_rule(w):
                 if now - self._motion_fired.get((r.id, "rule"), 0) >= MOTION_REPEAT:
                     rules.append(r)
-            elif now - self._motion_fired.get((r.id, "wifi:" + path), 0) >= MOTION_REPEAT:
+            elif fresh and now - self._motion_fired.get((r.id, "wifi:" + path), 0) >= MOTION_REPEAT:
                 due.append(r)
         for r in due:
             self._motion_fired[(r.id, "wifi:" + path)] = now

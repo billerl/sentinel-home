@@ -63,6 +63,19 @@ class JudgeTest(unittest.TestCase):
         self.assertTrue(j.motion)
         self.assertAlmostEqual(j.baseline, 2.2, delta=0.2)
 
+    def test_jitter_for_ten_minutes_becomes_the_new_normal(self):
+        """2026-11-09: a front door line jumped from steady ~28 to a jittery 48-70 for hours with nobody near."""
+        j = MotionJudge()
+        quiet(j, 130, level=28.0)
+        changes = []
+        for i in range(4 * 11 * 60):
+            changes.append(j.feed(NOW + 130 + i * 0.25, (48.0, 70.0, 55.0, 62.0, 50.0)[i % 5]))
+        self.assertEqual([c for c in changes if c], ["started", "ended"])  # once, not all evening
+        self.assertFalse(j.motion)
+        self.assertGreater(j.baseline, 50.0)
+        t = NOW + 130 + 11 * 60
+        self.assertIn("started", [j.feed(t + i * 0.25, 200.0) for i in range(8)])  # a real opening still shows
+
     def test_never_steady_falls_back_after_two_minutes(self):
         j = MotionJudge()
         for i in range(4 * 125):

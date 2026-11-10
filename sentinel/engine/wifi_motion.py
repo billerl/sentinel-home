@@ -64,6 +64,11 @@ RATIO = 1.4                  # motion when the score is this many times the quie
 MIN_DELTA = 3.0              # ...and at least this much above it (tiny quiet levels make ratios jumpy)
 TRIGGER_SAMPLES = 2          # consecutive smoothed scores over the line (0.5 s)
 HOLD_SECONDS = 15.0          # motion "ends" after this long with nothing
+# A line can jump to a new, jittery level and stay there for hours with nobody near (2026-11-09: the front door
+# boards' 2350-hears-5e9c line went from a steady ~28 to 48-70 for 2.5 h; the other direction stayed steady).
+# Jitter like that never looks "steady", so the quiet level never moved up and it read as non-stop motion.
+# Real movement comes in bursts with pauses; this long without one, the line's level is its new normal.
+STUCK_SECONDS = 10 * 60
 RATIO_MIN, RATIO_MAX = 1.1, 8.0  # the movement line the user may pick per path (real walks reach 5-12x)
 EVENTS_DB = "wifi_motion.db"  # movement history: one row per stretch of movement on a path
 MERGE_GAP = 120.0             # movement on a path less than this apart is one stretch ("10:02-10:05 pm")
@@ -127,6 +132,11 @@ class MotionJudge:
             self._over += 1
         else:
             self._over = 0
+        if self.motion and ts - self.started > STUCK_SECONDS:  # see STUCK_SECONDS
+            self._baseline = max(self._baseline, statistics.median(self._history))
+            self._over = 0
+            self.motion = False
+            return "ended"
         if self._over >= TRIGGER_SAMPLES:
             self.last_motion = ts
             self.peak = max(self.peak, self.smoothed)
