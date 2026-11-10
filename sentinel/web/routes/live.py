@@ -28,7 +28,7 @@ def register(app: Flask, ctx: WebContext) -> None:
             return redir
         if TV_BROWSER.search(request.headers.get("User-Agent", "")):
             return live_page()
-        return render_template("home.html")
+        return render_template("home.html", boot_id=BOOT_ID)
 
     @app.route("/live")
     def live_page():

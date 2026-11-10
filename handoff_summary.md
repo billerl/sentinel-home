@@ -420,6 +420,17 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   immediately; Claude's suggestions ask yes first / show a ✅ button). New makes = another driver class
   with `discover/status/set/rename` (Shelly and Tasmota have local HTTP APIs). Newer KLAP-only Kasa/Tapo
   devices don't answer on 9999 and aren't supported. No automations yet (e.g. lights on for a person at night).
+- **Talk button** (2026-11-10; `sentinel/engine/phone_talk.py` PhoneTalk, `static/talk.js` on the home page,
+  `sentinel/web/routes/talk.py` POST `/api/talk` + `/api/talk/answer`): the phone records (MediaRecorder: webm/opus
+  on Android, mp4/aac on iPhone, 32 kbit/s; stops itself after ~1.3 s quiet once speech was heard, 2.5 s while
+  taking a note; level from a WebAudio analyser) and posts base64 JSON (that route alone allows 4 MB; others keep
+  256 KB). `voice.decode_audio` = bundled ffmpeg via a temp file (an iPhone mp4's index is at the end) -> 16 kHz;
+  `VoiceAssistant.transcribe` = the house Whisper (one transcription at a time, `_transcribe_lock`); then
+  `Engine.answer_voice` as from the house mic, "Let me think." dropped; reply spoken by
+  `AudioAlertSystem.synthesize` (WAV, Kokoro/Piper, full level, the Jarvis voice) and played on the phone (the
+  player is started silently during the tap so phones allow sound later). confirm -> Yes/No buttons, dictate ->
+  records the note next; both wait 2 min by id. Needs HTTPS (getUserMedia): the tunnel address; only TVs are
+  moved to the home-network http address. Hidden on TV/kiosk browsers.
 - **Location map on the TV** (2026-11-10; `Family.map_lookup/map_view/set_photo`, `templates/where.html`, `/where`,
   `/api/where`, `/person_photo/<id>.jpg`, POST `/api/people/<id>/photo`): "show me Kate's location" / "where Kate is" /
   "everyone's location" goes through the same path as "show me the front door": `Engine._camera_page` asks

@@ -20,7 +20,7 @@
     .clock { color: #9cc; font-size: 0.9rem; }
     button { font: inherit; cursor: pointer; }
     .logout { background: none; border: 1px solid #1d3a44; color: #9cc; border-radius: 8px; padding: 5px 10px; font-size: 0.8rem; }
-    main { max-width: 1000px; margin: 0 auto; padding: 14px 16px 60px; }
+    main { max-width: 1000px; margin: 0 auto; padding: 14px 16px 110px; }  /* (room under the 🎙️ Talk button) */
     h2 { font-size: 0.8rem; color: #6f97a5; text-transform: uppercase; letter-spacing: 0.08em; margin: 22px 0 8px; }
 
     .top { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -220,5 +220,6 @@
     loadWeatherAlerts(); setInterval(loadWeatherAlerts, 60 * 1000);
     refresh(); setInterval(refresh, 10000);
   </script>
+  <script src="{{ url_for('static', filename='talk.js') }}?v={{ boot_id }}"></script>
 </body>
 </html>

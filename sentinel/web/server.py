@@ -18,7 +18,7 @@ from sentinel.web.bind_util import bind_host_allowed
 from sentinel.web.context import TV_BROWSER, WebContext  # noqa: F401  (TV_BROWSER: tests import it from here)
 from sentinel.web.frame_broker import FrameBroker
 from sentinel.web.routes import (cameras, family, house, live, mesh, recipes, recordings, routines, sensors,
-                                 settings, signin, spotify, switches, vehicles)
+                                 settings, signin, spotify, switches, talk, vehicles)
 from sentinel.web.routes.signin import _from_this_home, _home_nets  # noqa: F401  (tests use them here)
 
 if TYPE_CHECKING:
@@ -175,7 +175,7 @@ class WebServer:
         home_base = next((f"http://{h}:{port}" for h in bind_hosts if _home_lan_address(h)), None)
         signin.register(app, ctx, home_base)
         for area in (live, family, mesh, recipes, spotify, switches, sensors, house, routines, cameras, vehicles,
-                     settings, recordings):
+                     settings, recordings, talk):
             area.register(app, ctx)
 
         app_logger.log(

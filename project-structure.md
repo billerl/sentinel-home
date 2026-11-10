@@ -57,6 +57,7 @@ sentinel-home/                         # repository root
     │   ├── assistant.py               # Opt-in: Telegram messages Sentinel doesn't understand -> `claude -p`
     │   ├── reminders.py               # "Remind me ..." -> Telegram message at that time (reminders.db)
     │   ├── switches.py                # Smart plugs/switches (Kasa, local protocol): Live page panel, voice, Telegram
+    │   ├── phone_talk.py              # Talk button: a phone's recording -> Whisper -> answer_voice -> words + WAV
     │   ├── samsung_tv.py              # Samsung TVs as a switch (Wake-on-LAN + power key), apps, volume, mute
     │   ├── remotes.py                 # Learned IR/RF remote buttons sent by a BroadLink RM4 (Remotes page, voice, Telegram)
     │   ├── heater.py                  # Heater thermostat: steps a remote-only heater's setting toward a target
@@ -87,7 +88,7 @@ sentinel-home/                         # repository root
     │   ├── context.py                 # WebContext: what every area's routes share (session check, write guard)
     │   ├── routes/                    # Pages + API, one module per area, each with register(app, ctx):
     │   │                              #   signin, live, cameras, recordings, family, vehicles, switches (+ TV
-    │   │                              #   remote), spotify, sensors, house, routines, settings, mesh, recipes
+    │   │                              #   remote), spotify, sensors, house, routines, settings, mesh, recipes, talk
     │   ├── auth.py                    # Bcrypt login, sessions (saved as hashes in .web_sessions.json),
     │   │                              #   lockout / backoff, QR sign-in pairing for TVs
     │   ├── frame_broker.py            # Latest frame per camera; opaque ids; lazy JPEG encoding
@@ -95,7 +96,8 @@ sentinel-home/                         # repository root
     │   ├── set_password.py            # CLI: `python -m sentinel.web.set_password`
     │   ├── static/                    # Icons + web app manifest; leaflet/ = Leaflet 1.9.4 (BSD-2, map on the Timeline),
     │   │                              #   three/ = three.js r128 + OrbitControls (MIT, the House page),
-    │   │                              #   grid.js + grid.css = the live page's script and styles (?v=boot id)
+    │   │                              #   grid.js + grid.css = the live page's script and styles (?v=boot id),
+    │   │                              #   talk.js = the home page's 🎙️ Talk button (phone mic -> Jarvis)
     │   └── templates/                 # login (+ QR), pair (phone approves a TV), home (`/`: weather, who's home,
     │                                  #   page tiles, switches), grid (`/live`: cameras + weather/clock +
     │                                  #   family lights + switches + timeline + player), zones, settings, vehicles,

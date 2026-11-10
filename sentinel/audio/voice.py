@@ -19,7 +19,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -120,6 +120,28 @@ class BandPass:
 
         out, self._zi = sosfilt(self._sos, audio, zi=self._zi)
         return out.astype(np.float32)
+
+
+PHONE_MAX_SECONDS = 30  # a Talk-button recording is cut here
+
+
+def decode_audio(data: bytes, ffmpeg: str = "") -> np.ndarray:
+    """A phone browser's recording (webm/opus from Android, mp4/aac from an iPhone) -> 16 kHz mono float32.
+    Through a file: an iPhone's mp4 has its index at the end, which a pipe can't seek back to."""
+    import tempfile
+
+    if not ffmpeg:
+        import imageio_ffmpeg
+
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    with tempfile.NamedTemporaryFile(prefix="sentinel-talk-", suffix=".audio") as f:
+        f.write(data)
+        f.flush()
+        out = subprocess.run([ffmpeg, "-v", "error", "-nostdin", "-i", f.name, "-t", str(PHONE_MAX_SECONDS),
+                              "-ac", "1", "-ar", str(RATE), "-f", "s16le", "-"], capture_output=True, timeout=30)
+    if out.returncode != 0 or not out.stdout:
+        raise ValueError((out.stderr or b"no audio").decode(errors="replace").strip()[:200])
+    return np.frombuffer(out.stdout[:len(out.stdout) // 2 * 2], np.int16).astype(np.float32) / 32768.0
 
 
 def rms(audio: np.ndarray) -> float:
@@ -284,6 +306,7 @@ class VoiceAssistant:
         self._trial_peak = 0.0
         self._whisper = None
         self._whisper_lock = threading.Lock()
+        self._transcribe_lock = threading.Lock()
         self.last_error = ""
         # Who is talking this conversation: "Hey Jarvis" gets Jarvis (a man's voice, voice_jarvis_id),
         # the other wake word the main voice and voice_name. Read by the engine for Claude's prompt.
@@ -466,6 +489,16 @@ class VoiceAssistant:
         if not end.heard:
             return None
         audio = normalise(np.concatenate(chunks))
+        started = time.time()
+        text, segments = self._transcribe(audio, prompt)
+        self.last_doubt = doubt(segments)
+        app_logger.log("info", "voice_heard", text=text[:200], seconds=round(time.time() - started, 1),
+                       audio_seconds=round(len(audio) / RATE, 1),
+                       no_speech=[round(s.no_speech_prob, 2) for s in segments], component="voice", action="hear")
+        return text
+
+    def _transcribe(self, audio: np.ndarray, prompt: Optional[str] = None):
+        """(words, Whisper's segments) for 16 kHz mono audio, with the family's names etc. as the hint."""
         if prompt is None:
             try:
                 prompt = whisper_prompt(self.names() if self.names else [], self.switches() if self.switches else [],
@@ -473,16 +506,21 @@ class VoiceAssistant:
                                         self.pets() if self.pets else [])
             except Exception:  # a database hiccup shouldn't cost the question
                 prompt = PROMPT
+        whisper = self._load_whisper()
+        with self._transcribe_lock:  # (the house mic and a phone at once: one at a time)
+            segments, _ = whisper.transcribe(audio, beam_size=1, language="en", initial_prompt=prompt,
+                                             vad_filter=False, condition_on_previous_text=False)
+            segments = list(segments)
+        return clean_transcript(segments), segments
+
+    def transcribe(self, audio: np.ndarray) -> Tuple[str, float]:
+        """A recording made elsewhere (the Talk button on a phone): (words, doubt)."""
         started = time.time()
-        segments, _ = self._load_whisper().transcribe(audio, beam_size=1, language="en", initial_prompt=prompt,
-                                                      vad_filter=False, condition_on_previous_text=False)
-        segments = list(segments)
-        text = clean_transcript(segments)
-        self.last_doubt = doubt(segments)
+        text, segments = self._transcribe(normalise(audio))
         app_logger.log("info", "voice_heard", text=text[:200], seconds=round(time.time() - started, 1),
-                       audio_seconds=round(len(audio) / RATE, 1),
+                       audio_seconds=round(len(audio) / RATE, 1), source="phone",
                        no_speech=[round(s.no_speech_prob, 2) for s in segments], component="voice", action="hear")
-        return text
+        return text, doubt(segments)
 
     # ------------------------------------------------------------ talking
     def _persona(self, word: str) -> None:

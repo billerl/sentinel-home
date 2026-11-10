@@ -216,6 +216,10 @@ class Engine:
             household_answer=self.cars.answer_question,
             on_home=lambda kind, person_id: self.routines.person(kind, person_id),
             speak=lambda text: self.audio.speak(text) if self.audio is not None else None)
+        from sentinel.engine.phone_talk import PhoneTalk
+
+        self.phone_talk = PhoneTalk(  # the web page's Talk button: Jarvis through a phone's microphone
+            self.settings, voice=lambda: self.voice, speaker=lambda: self.audio, answer=self.answer_voice)
         from sentinel.engine.mesh import MeshChat
 
         self.mesh = MeshChat(  # chat over the LoRa mesh, through the pets' base station (the Mesh page)

@@ -387,6 +387,35 @@ class AudioAlertSystem:
                 print(f"Error speaking: {e}")
         return False
 
+    def synthesize(self, text: str, voice: str = "") -> Optional[bytes]:
+        """The spoken reply as a WAV file instead of out of the speaker (the Talk button on a phone), at full
+        level: the phone has its own volume. None when no neural voice is set up."""
+        try:
+            if self.kokoro is not None:
+                name = voice.split(":", 1)[1] if voice.startswith("kokoro:") else self.kokoro_voice
+                lang = "en-gb" if name.startswith("b") else "en-us"
+                parts = [self.kokoro.create(sentence, voice=name, speed=self._kokoro_speed(), lang=lang)[0]
+                         for sentence in split_sentences(text)]
+                pcm = (np.clip(np.concatenate(parts), -1, 1) * 32767).astype(np.int16).tobytes() if parts else b""
+                buf = io.BytesIO()
+                with wave.open(buf, "wb") as w:
+                    w.setnchannels(1)
+                    w.setsampwidth(2)
+                    w.setframerate(KOKORO_RATE)
+                    w.writeframes(pcm)
+                return buf.getvalue()
+            if self.piper_voice:
+                from piper.config import SynthesisConfig
+
+                buf = io.BytesIO()
+                with wave.open(buf, "wb") as w:
+                    self.piper_voice.synthesize_wav(text, w, set_wav_format=True, syn_config=SynthesisConfig(
+                        length_scale=150.0 / max(self._speech_rate, 1)))
+                return buf.getvalue()
+        except Exception as e:
+            print(f"Speech for the phone failed: {e}")
+        return None
+
     def tone(self, kind: str = "listen") -> None:
         """A short chime: rising = "I'm listening", falling = "never mind"."""
         notes = (660, 880) if kind == "listen" else (660, 440)
