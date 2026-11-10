@@ -11,6 +11,7 @@ planes file no public route; for them it's just what they are.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import math
 import re
@@ -30,6 +31,10 @@ MAP_RADIUS_NM = 40  # what the TV map shows (and what's fetched)
 ASK_RADIUS_NM = 25  # "any planes around?"
 OVERHEAD_NM = 12  # "what plane is that?": closer than this counts as the one being asked about
 POSITIONS_FRESH = 10.0  # seconds a fetch is reused
+AWAY_NM = 5.0  # someone asking from farther than this from home hears about the planes over them instead
+# Where the person asking is, while their question is answered (their phone's position: Telegram, the Talk button, the
+# Planes page); None = the house. Set by whoever takes the question (Engine.answer_question, the Talk route).
+ASKER: "contextvars.ContextVar[Optional[Tuple[float, float]]]" = contextvars.ContextVar("planes_asker", default=None)
 ROUTE_KEEP = 6 * 3600.0
 NM_TO_MILES = 1.15078
 EARTH_NM = 3440.065
@@ -132,7 +137,7 @@ class Planes:
         self._get = get_json or self._http_json
         self._clock = clock
         self._lock = threading.Lock()
-        self._positions: Tuple[float, Optional[Tuple[float, float]], List[Dict[str, Any]]] = (0.0, None, [])
+        self._positions: Dict[Tuple[float, float], Tuple[float, List[Dict[str, Any]]]] = {}  # spot -> (when, planes)
         self._routes: Dict[str, Tuple[float, Optional[Dict[str, Any]]]] = {}  # callsign -> (when, route or None)
         self._pool = ThreadPoolExecutor(4, thread_name_prefix="planes")
 
@@ -143,16 +148,27 @@ class Planes:
             return json.loads(r.read(4 << 20))
 
     # ------------------------------------------------------------ data
-    def nearby(self) -> List[Dict[str, Any]]:
-        """Planes within MAP_RADIUS_NM, nearest overhead first (ground distance and height together). Raises
-        OSError when the flight tracker can't be reached, ValueError when the house's place isn't known."""
-        home = self.home()
-        if not home:
-            raise ValueError("no home")
+    def center(self, at: Optional[Tuple[float, float]] = None) -> Tuple[Tuple[float, float], bool]:
+        """Where to look: (the spot, whether it's the asker away from home). The asker's position (``at``, else
+        ASKER) when they're more than a few miles from home; else the house. ValueError when neither is known."""
+        home, at = self.home(), at or ASKER.get()
+        if at and (not home or distance_nm(home[0], home[1], at[0], at[1]) > AWAY_NM):
+            return (float(at[0]), float(at[1])), True
+        if home:
+            return (float(home[0]), float(home[1])), False
+        raise ValueError("no home")
+
+    def nearby(self, spot: Optional[Tuple[float, float]] = None) -> List[Dict[str, Any]]:
+        """Planes within MAP_RADIUS_NM of the spot (default: center()), nearest overhead first (ground distance and
+        height together). Raises OSError when the flight tracker can't be reached, ValueError when the house's
+        place isn't known."""
+        home = spot or self.center()[0]
+        key = (round(home[0], 2), round(home[1], 2))  # (~1 km: the TV's map and a phone at home share a fetch)
+        now = self._clock()
         with self._lock:
-            at, where, planes = self._positions
-            if where == home and self._clock() - at < POSITIONS_FRESH:
-                return planes
+            got = self._positions.get(key)
+            if got and now - got[0] < POSITIONS_FRESH:
+                return got[1]
         try:
             data = self._get(POSITIONS_URL.format(lat=home[0], lon=home[1], radius=MAP_RADIUS_NM))
         except (OSError, ValueError) as e:
@@ -162,7 +178,8 @@ class Planes:
         planes.sort(key=lambda p: p["slant_nm"])
         self._find_routes(planes)
         with self._lock:
-            self._positions = (self._clock(), home, planes)
+            self._positions = {k: v for k, v in self._positions.items() if now - v[0] < 60}  # (phones on the move)
+            self._positions[key] = (self._clock(), planes)
         return planes
 
     @staticmethod
@@ -245,7 +262,7 @@ class Planes:
         if feet:
             parts.append(feet)
         miles = p["dist_nm"] * NM_TO_MILES
-        parts.append("right overhead" if miles < 1 else f"{miles:.0f} miles {p['dir']}" if miles >= 2
+        parts.append(("close by" if p["alt"] == "ground" else "right overhead") if miles < 1 else f"{miles:.0f} miles {p['dir']}" if miles >= 2
                      else f"about a mile {p['dir']}")
         text = ", ".join(parts)
         return text[0].upper() + text[1:] if lead else text
@@ -253,32 +270,40 @@ class Planes:
     def answer(self, kind: str) -> str:
         """kind "that" (the plane overhead) or "list" (what's around)."""
         try:
-            planes = self.nearby()
+            spot, away = self.center()
+            planes = self.nearby(spot)
         except ValueError:
             return "I don't know where the house is yet: save Home on the Family page first."
         except OSError:
             return "I couldn't reach the flight tracker just now. Try again in a minute."
+        # (planes parked or taxiing at an airport aren't what anyone looks up at: only when nothing is flying)
         near = [p for p in planes if p["dist_nm"] <= ASK_RADIUS_NM]
+        near = [p for p in near if p["alt"] != "ground"] or near
+        of = " of you" if away else ""
         if not near:
-            return f"I don't see any planes within {ASK_RADIUS_NM * NM_TO_MILES:.0f} miles right now."
+            return f"I don't see any planes within {ASK_RADIUS_NM * NM_TO_MILES:.0f} miles{of} right now."
         if kind == "that":
             first = near[0]
             said = ("That's probably " if first["dist_nm"] <= OVERHEAD_NM else
-                    "Nothing's right overhead. The closest is ") + self.describe(first, lead=False) + "."
+                    f"Nothing's right over {'you' if away else 'the house'}. The closest is ") \
+                + self.describe(first, lead=False) + "."
             if first["airline"] and not first["route"] and not first["military"]:
                 said += " I couldn't confirm where it's headed."
             return said
         count = len(near)
-        lines = [f"{count} plane{'s' if count != 1 else ''} within {ASK_RADIUS_NM * NM_TO_MILES:.0f} miles. "
+        lines = [f"{count} plane{'s' if count != 1 else ''} within {ASK_RADIUS_NM * NM_TO_MILES:.0f} miles{of}. "
                  + ("The closest:" if count > 1 else "")]
         lines += [f"• {self.describe(p)}" for p in near[:3]]
         return "\n".join(lines)
 
-    def map_view(self) -> Dict[str, Any]:
-        """The TV's plane map: the house and every plane with what it is."""
+    def map_view(self, at: Optional[Tuple[float, float]] = None) -> Dict[str, Any]:
+        """The plane map: every plane with what it is, around the house (a TV) or around ``at`` (a phone's own
+        position, when it's away from home)."""
         home = self.home()
+        spot, away = None, False
         try:
-            planes = self.nearby()
+            spot, away = self.center(at)
+            planes = self.nearby(spot)
             error = None
         except ValueError:
             planes, error = [], "Save Home on the Family page first."
@@ -293,8 +318,8 @@ class Planes:
                         "text": self.describe(p),
                         "route": f"{route['from']['code'] or route['from']['city']} → {route['to']['code'] or route['to']['city']}"
                         if route else ""})
-        return {"home": list(home) if home else None, "planes": out, "radius_nm": MAP_RADIUS_NM,
-                "error": error, "now": self._clock()}
+        return {"home": list(home) if home else None, "center": list(spot) if spot else None, "away": away,
+                "planes": out, "radius_nm": MAP_RADIUS_NM, "error": error, "now": self._clock()}
 
 
 # ------------------------------------------------------------ recognising the question

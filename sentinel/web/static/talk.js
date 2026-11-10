@@ -76,7 +76,22 @@
     start();
   };
 
+  // Where the phone is, only if its owner already allowed it (on the Planes page): "what plane is that?" while away
+  // from home is about the planes over them. Never asks for permission here.
+  var spot = null;
+  function locate() {
+    try {
+      if (!navigator.permissions || !navigator.geolocation) return;
+      navigator.permissions.query({ name: "geolocation" }).then(function (p) {
+        if (p.state !== "granted") return;
+        navigator.geolocation.getCurrentPosition(function (pos) { spot = [pos.coords.latitude, pos.coords.longitude]; },
+                                                 function () {}, { maximumAge: 300000, timeout: 5000 });
+      }).catch(function () {});
+    } catch (e) {}
+  }
+
   function start() {
+    locate();
     if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
       show('<div class="err">This page can’t use the microphone here. Open Sentinel by its https:// address '
         + "(the one you use away from home) in Chrome or Safari.</div>");
@@ -140,7 +155,9 @@
     var reader = new FileReader();
     reader.onload = function () {
       var b64 = String(reader.result).split(",")[1] || "";
-      post("/api/talk", { audio: b64, pending: dictating ? pending : "" });
+      var body = { audio: b64, pending: dictating ? pending : "" };
+      if (spot) { body.lat = spot[0]; body.lon = spot[1]; }
+      post("/api/talk", body);
     };
     reader.readAsDataURL(blob);
   }

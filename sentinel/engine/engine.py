@@ -732,12 +732,30 @@ class Engine:
             speak=to_speech, voice_stage="late", log_kind=lambda _m: "indoor"))
         return commands
 
+    def asker_spot(self, person_id: Optional[int] = None, name: str = "") -> Optional[Tuple[float, float]]:
+        """Where someone asking is, from their phone (by id, or by the first name they write under on Telegram):
+        None when unknown or their phone hasn't reported in the last hour."""
+        from sentinel.engine.location import _words_in
+
+        if person_id is None and name:
+            person_id = next((p.id for p in self.locations.people()
+                              if not p.tracker and _words_in(" " + name.lower() + " ", p.words())), None)
+        fix = self.locations.fix(person_id) if person_id is not None else None
+        if not fix or time.time() - float(fix.get("ts") or 0) > 3600:
+            return None
+        return float(fix["lat"]), float(fix["lon"])
+
     def answer_question(self, chat_id: str, text: str) -> None:
         """Reply to 'did anyone come by?'-style questions from the event history."""
+        from sentinel.engine.planes import ASKER
         from sentinel.engine.questions import _fmt_clock
 
-        if self.commands.telegram_reply(chat_id, text):
-            return
+        asker = ASKER.set(self.asker_spot(name=getattr(self.telegram, "chat_names", {}).get(chat_id, "")))
+        try:
+            if self.commands.telegram_reply(chat_id, text):
+                return
+        finally:
+            ASKER.reset(asker)
         reply, photos = self.event_question_reply(text)
         self.telegram.reply_to_chat(chat_id, reply)
         for event in photos:

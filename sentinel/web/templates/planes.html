@@ -22,6 +22,13 @@
                            font-weight: 700; padding: 1px 6px; }
     .leaflet-tooltip.tag:before { display: none; }
     .leaflet-tooltip.tag.low { color: #ffd84d; }
+    #home-link { position: absolute; top: 12px; left: 12px; z-index: 1000; padding: 8px 14px; border-radius: 10px;
+                 background: rgba(0, 10, 16, 0.86); border: 1px solid #16303a; color: #cfe; text-decoration: none; font-size: 15px; }
+    @media (max-width: 700px) {  /* a phone */
+      #panel { left: 8px; right: 8px; bottom: 8px; max-width: none; padding: 10px 12px; }
+      .title { font-size: 15px; } .row { font-size: 14px; } .empty { font-size: 15px; }
+      .leaflet-tooltip.tag { font-size: 12px; }
+    }
     .leaflet-control-attribution { background: rgba(0,0,0,0.6) !important; color: #6aa !important; }
     .leaflet-control-attribution a { color: #8cc !important; }
   </style>
@@ -29,8 +36,19 @@
 <body>
   <div id="map"></div>
   <div id="panel"><div class="empty">Looking for planes…</div></div>
+  <a id="home-link" href="/" hidden>← Home</a>
   <script>
-    var map = null, layers = null;
+    var map = null, layers = null, me = null, centered = null;
+    // A phone (not a TV) may share where it is: away from home, the map is of the planes over its owner
+    var TV = /SMART-TV|Tizen|\bAFT[A-Z0-9]+\b|Web0S|webOS|BRAVIA/.test(navigator.userAgent);
+    if (!TV && window.top === window) document.getElementById("home-link").hidden = false;  // (not inside the TV's page)
+    if (!TV && window.isSecureContext && navigator.geolocation) {
+      navigator.geolocation.watchPosition(function (pos) {
+        var first = !me;
+        me = [pos.coords.latitude, pos.coords.longitude];
+        if (first) load();
+      }, function () {}, { enableHighAccuracy: false, maximumAge: 120000, timeout: 20000 });
+    }
     // A plane seen from above, pointing up (north); turned to its heading
     var SHAPE = '<path d="M16 1 L19 12 L30 18 L30 21 L19 18 L18 26 L22 29 L22 31 L16 29.5 L10 31 L10 29 L14 26 L13 18 L2 21 L2 18 L13 12 Z"'
       + ' fill="FILL" stroke="#000" stroke-width="1.2"/>';
@@ -44,35 +62,45 @@
         // and drew CSS-filtered tiles black)
         L.tileLayer("/map_tile/dark/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap · planes: adsb.lol" }).addTo(map);
         layers = L.layerGroup().addTo(map);
-        if (data.home) {
-          // the whole circle the planes come from (radius in nautical miles)
-          map.fitBounds(L.latLng(data.home).toBounds(data.radius_nm * 1852 * 2 * 0.8), { animate: false });
-        } else {
-          map.setView([39.8, -98.6], 4);
-        }
+      }
+      var at = data.center || data.home;
+      if (at && String(at) !== centered) {  // the house, or the phone's owner away from it (once, then as they move)
+        // the whole circle the planes come from (radius in nautical miles)
+        map.fitBounds(L.latLng(at).toBounds(data.radius_nm * 1852 * 2 * 0.8), { animate: false });
+        centered = String(at);
+      } else if (!at && centered === null) {
+        map.setView([39.8, -98.6], 4);
+        centered = "";
       }
       layers.clearLayers();
       if (data.home) {
         L.circleMarker(data.home, { radius: 8, color: "#fff", weight: 2, fillColor: "#00a8a8", fillOpacity: 1, interactive: false })
           .bindTooltip("Home", { permanent: true, direction: "right", offset: [10, 0], className: "tag" }).addTo(layers);
       }
+      if (data.away && data.center) {
+        L.circleMarker(data.center, { radius: 8, color: "#fff", weight: 2, fillColor: "#ff6bc1", fillOpacity: 1, interactive: false })
+          .bindTooltip("You", { permanent: true, direction: "right", offset: [10, 0], className: "tag" }).addTo(layers);
+      }
       var planes = data.planes || [];
+      var labels = 0;
       planes.forEach(function (p) {
         var turn = p.track == null ? 0 : Math.round(p.track);
         var icon = L.divIcon({ className: "plane", iconSize: [32, 32], iconAnchor: [16, 16],
           html: '<svg width="32" height="32" viewBox="0 0 32 32" style="transform:rotate(' + turn + 'deg);-webkit-transform:rotate(' + turn + 'deg)">'
             + SHAPE.replace("FILL", p.low ? "#ffd84d" : "#4de0ff") + "</svg>" });
-        L.marker([p.lat, p.lon], { icon: icon, interactive: false })
-          .bindTooltip(esc(p.tag) + (p.route ? " · " + esc(p.route) : "") + (p.feet ? " · " + esc(p.feet.replace(" feet up", " ft").replace("on the ground", "landed")) : ""),
-                       { permanent: true, direction: "right", offset: [14, 0], className: "tag" + (p.low ? " low" : "") })
-          .addTo(layers);
+        var pin = L.marker([p.lat, p.lon], { icon: icon, interactive: false }).addTo(layers);
+        // labels on the closest flying ones only: around a big airport they piled up unreadably
+        if (p.feet === "on the ground" || ++labels > 15) return;
+        pin.bindTooltip(esc(p.tag) + (p.route ? " · " + esc(p.route) : "") + (p.feet ? " · " + esc(p.feet.replace(" feet up", " ft")) : ""),
+                       { permanent: true, direction: "right", offset: [14, 0], className: "tag" + (p.low ? " low" : "") });
       });
       var rows = [];
       if (data.error) rows.push('<div class="empty">' + esc(data.error) + "</div>");
       else if (!planes.length) rows.push('<div class="empty">No planes nearby right now.</div>');
       else {
-        rows.push('<div class="title">✈️ ' + planes.length + " plane" + (planes.length === 1 ? "" : "s") + " near the house · closest first</div>");
-        planes.slice(0, 5).forEach(function (p) { rows.push('<div class="row">' + esc(p.text) + "</div>"); });
+        rows.push('<div class="title">✈️ ' + planes.length + " plane" + (planes.length === 1 ? "" : "s") + (data.away ? " near you" : " near the house") + " · closest first</div>");
+        planes.filter(function (p) { return p.feet !== "on the ground"; }).slice(0, 5)
+          .forEach(function (p) { rows.push('<div class="row">' + esc(p.text) + "</div>"); });
       }
       document.getElementById("panel").innerHTML = rows.join("");
     }
@@ -80,7 +108,7 @@
     function load() {
       // (XMLHttpRequest: the TV's old browser leaves the sign-in cookie off fetch() calls)
       var xhr = new XMLHttpRequest();
-      xhr.open("GET", "/api/planes");
+      xhr.open("GET", "/api/planes" + (me ? "?lat=" + me[0].toFixed(4) + "&lon=" + me[1].toFixed(4) : ""));
       xhr.onload = function () {
         if (xhr.status === 401) { location.reload(); return; }
         if (xhr.status !== 200) return;

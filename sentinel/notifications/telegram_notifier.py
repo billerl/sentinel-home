@@ -39,6 +39,8 @@ class TelegramNotifier:
         self._pending_access_chat_ids: List[str] = []
         self._pending_video_queries: List[Tuple[str, str]] = []
         self._pending_questions: List[Tuple[str, str]] = []
+        # Who last wrote in each chat (their Telegram first name): "what plane is that?" looks over them when away
+        self.chat_names: Dict[str, str] = {}
         # Button taps: (chat_id, message_id, data, callback_query_id)
         self._pending_buttons: List[Tuple[str, int, str, str]] = []
         # Extra question check supplied by the engine (knows the family's car/owner names).
@@ -88,7 +90,7 @@ class TelegramNotifier:
             "- Put the cameras on the Sentinel TV / Reload the cameras — the live view on a TV\n"
             "- Show me the front door (on the TV) — one camera full screen (the Samsung)\n"
             "- Show me Kate's location / everyone's location — a map on the TV (pictures: Family page)\n"
-            "- What plane is that? / Any planes around? — planes near the house: airline, type, height, where from and to\n"
+            "- What plane is that? / Any planes around? — planes near the house (near you, when you're away): airline, type, height, where from and to\n"
             "- Show me the planes (on the TV) — a map of the planes near the house\n"
             "- Soundbar volume up 3 times / Heater power — a button taught on the Remotes page (BroadLink)\n"
             "- Set the heater to 70 / How warm is it inside? / Stop holding the temperature — the heater thermostat\n\n"
@@ -549,6 +551,8 @@ class TelegramNotifier:
                 continue
             app_logger.log("info", "telegram_message_received", chat_id=chat_id, length=len(text),
                            component="telegram", action="listen")
+            sender = message.get("from") if isinstance(message.get("from"), dict) else {}
+            self.chat_names[chat_id] = str(sender.get("first_name") or "")[:40]
 
             self.route_text(chat_id, text)
 

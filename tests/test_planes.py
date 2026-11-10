@@ -96,6 +96,15 @@ class TestPlanes(unittest.TestCase):
         self.assertIn("Delta Air Lines flight 1776, an Airbus A321 from Tampa to Chicago, 11,000 feet up", said)
         self.assertIn("7 miles northwest", said)
 
+    def test_planes_at_the_airport_arent_what_anyone_means(self):
+        parked = {"hex": "g1", "flight": "AAL716", "t": "A319", "alt_baro": "ground", "lat": HOME[0], "lon": HOME[1]}
+        self.net.aircraft = [parked] + [dict(a) for a in SKY]
+        said = self.planes.answer("that")
+        self.assertNotIn("American", said)
+        self.assertNotIn("on the ground", self.planes.answer("list"))
+        lonely = Planes(home=lambda: HOME, get_json=FakeNet([parked]), clock=lambda: 1000.0).answer("that")
+        self.assertIn("on the ground, close by", lonely)  # (nothing flying: then it's the one)
+
     def test_whats_around(self):
         said = self.planes.answer("list")
         self.assertTrue(said.startswith("5 planes within 29 miles."), said)
@@ -133,6 +142,64 @@ class TestPlanes(unittest.TestCase):
         self.assertEqual((delta["route"], delta["feet"], delta["low"]), ("TPA → ORD", "11,000 feet up", False))
         self.assertTrue(next(p for p in view["planes"] if p["tag"] == "N2628U")["low"])
 
+
+class TestPlanesNearTheAsker(unittest.TestCase):
+    """Asked from a phone away from home: the planes over that person, not over the house."""
+
+    def setUp(self):
+        self.net = FakeNet([dict(a) for a in SKY])
+        self.planes = Planes(home=lambda: HOME, get_json=self.net, clock=lambda: 1000.0)
+
+    def test_away_from_home_looks_over_them(self):
+        from sentinel.engine.planes import ASKER
+
+        away = (41.8, -87.6)  # ~45 miles off
+        token = ASKER.set(away)
+        try:
+            said = self.planes.answer("list")
+        finally:
+            ASKER.reset(token)
+        self.assertIn("/41.8000/-87.6000/", self.net.asked[-1] if "adsb.lol" in self.net.asked[-1]
+                      else next(u for u in self.net.asked if "adsb.lol" in u))
+        self.assertIn("miles of you", said)
+        view = self.planes.map_view(at=away)
+        self.assertEqual((view["center"], view["away"], view["home"]), ([41.8, -87.6], True, list(HOME)))
+
+    def test_near_home_is_still_the_house(self):
+        from sentinel.engine.planes import ASKER
+
+        token = ASKER.set((HOME[0] + 0.02, HOME[1]))  # in the yard, a mile off at most
+        try:
+            said = self.planes.answer("list")
+        finally:
+            ASKER.reset(token)
+        self.assertNotIn("of you", said)
+        self.assertTrue(all(f"/{HOME[0]:.4f}/{HOME[1]:.4f}/" in u for u in self.net.asked if "adsb.lol" in u))
+        self.assertFalse(self.planes.map_view()["away"])
+
+    def test_no_home_but_a_phone(self):
+        planes = Planes(home=lambda: None, get_json=self.net, clock=lambda: 1000.0)
+        self.assertTrue(planes.map_view(at=(41.8, -87.6))["away"])
+        self.assertEqual(planes.map_view()["error"], "Save Home on the Family page first.")
+
+class TestWhoIsAsking(unittest.TestCase):
+    def test_telegram_name_or_login_to_their_phone(self):
+        import time
+        import types
+
+        from sentinel.engine.engine import Engine
+        from sentinel.engine.location import Person
+
+        people = [Person(1, "Alex", aliases=["Dad"]), Person(2, "Grace", tracker="!a1b2c3d4")]
+        fixes = {1: {"ts": time.time() - 60, "lat": 41.8, "lon": -87.6}, 2: {"ts": time.time(), "lat": 1.0, "lon": 1.0}}
+        fake = types.SimpleNamespace(locations=types.SimpleNamespace(people=lambda: people, fix=fixes.get))
+        self.assertEqual(Engine.asker_spot(fake, name="Alex"), (41.8, -87.6))
+        self.assertEqual(Engine.asker_spot(fake, person_id=1), (41.8, -87.6))
+        self.assertIsNone(Engine.asker_spot(fake, name="Grace"))  # (a dog's collar isn't someone asking)
+        self.assertIsNone(Engine.asker_spot(fake, name="Ben"))
+        self.assertIsNone(Engine.asker_spot(fake))
+        fixes[1]["ts"] = time.time() - 7200  # a phone silent for two hours: not where they are now
+        self.assertIsNone(Engine.asker_spot(fake, name="Alex"))
 
 if __name__ == "__main__":
     unittest.main()

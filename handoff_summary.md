@@ -461,6 +461,11 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   and airlines reuse numbers (live check 2026-11-10: 6 of 13 looked-up routes fit, the rest were other legs).
   "That" = nearest by slant distance (ground + height). ICAO type codes -> names in `TYPE_NAMES`. adsb.im's
   position-aware routeset needs prior approval, so it isn't used. A USB ADS-B receiver could feed `nearby` later.
+  Away from home (> AWAY_NM 5 nm) it looks over the asker: `planes.ASKER` (a ContextVar) is set by
+  `Engine.answer_question` (Telegram first name -> person -> their phone fix, < 1 h old: `Engine.asker_spot`) and by
+  `/api/talk` (lat/lon the page sends when geolocation is already granted, else the personal login's fix); `/planes` on a
+  phone (not a TV UA) watches the browser's position and asks `/api/planes?lat=&lon=`. Planes on the ground are left
+  out of answers (unless nothing flies); the map labels the closest 15 flying ones. Home page tile ✈️ Planes.
 - **Lost dog** (`Family.set_lost/lost_view` in `sentinel/engine/family.py`, `lost_command` in location.py, page
   `/lost`, `/api/lost*`): "Grace is lost" (page button, voice, Telegram) = every unpaused chat gets the news, the
   `remote_web_url` + `/lost` link and the last fix as a pin; the base's check-ins then ask the collar every

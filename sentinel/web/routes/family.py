@@ -231,7 +231,10 @@ def register(app: Flask, ctx: WebContext) -> None:
             return jsonify({"error": "unauthorized"}), 401
         if engine is None:
             return jsonify({"home": None, "planes": [], "error": None, "now": time.time()})
-        return jsonify(engine.planes.map_view())
+        from sentinel.web.routes.talk import _spot
+
+        # (a phone sends where it is, when its owner allowed it: the planes over them while they're away)
+        return jsonify(engine.planes.map_view(_spot(request.args.get("lat"), request.args.get("lon"))))
 
     tiles_box = []  # (made on first use: it needs the engine's data folder)
 
