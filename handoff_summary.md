@@ -420,6 +420,15 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   immediately; Claude's suggestions ask yes first / show a ✅ button). New makes = another driver class
   with `discover/status/set/rename` (Shelly and Tasmota have local HTTP APIs). Newer KLAP-only Kasa/Tapo
   devices don't answer on 9999 and aren't supported. No automations yet (e.g. lights on for a person at night).
+- **Location map on the TV** (2026-11-10; `Family.map_lookup/map_view/set_photo`, `templates/where.html`, `/where`,
+  `/api/where`, `/person_photo/<id>.jpg`, POST `/api/people/<id>/photo`): "show me Kate's location" / "where Kate is" /
+  "everyone's location" goes through the same path as "show me the front door": `Engine._camera_page` asks
+  `map_lookup` first and returns `#map=<ids|all>`; the TV's camera page (grid.js `mapFromHash`) opens `/where` in a
+  full-screen iframe (Back = hash pops = closed). The map fits everyone (no animation: Chrome 56), people within 60 m
+  share a pin, labels go to the side away from a close neighbour, a pet alone gets Esri aerial tiles + the yard, else
+  OSM (dark-inverted). Data by XMLHttpRequest every 15 s (old fetch drops the cookie). Pictures: the People page
+  crops/shrinks to 400 px in the browser (requests are capped at 256 KB), the server re-encodes a 256 px JPEG
+  (`<location db dir>/people_photos/<id>.jpg`, removed with the person).
 - **Lost dog** (`Family.set_lost/lost_view` in `sentinel/engine/family.py`, `lost_command` in location.py, page
   `/lost`, `/api/lost*`): "Grace is lost" (page button, voice, Telegram) = every unpaused chat gets the news, the
   `remote_web_url` + `/lost` link and the last fix as a pin; the base's check-ins then ask the collar every

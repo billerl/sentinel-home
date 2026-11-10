@@ -106,7 +106,8 @@ sentinel-home/                         # repository root
     │                                  #   mesh (Mesh chat: conversations, invite QR codes, radios heard),
     │                                  #   recipes (recipe box, one recipe, cooking mode),
     │                                  #   remotes (learned IR/RF buttons: teach, press, rename),
-    │                                  #   lost (Lost dog: live collar map, search on/off, beep)
+    │                                  #   lost (Lost dog: live collar map, search on/off, beep),
+    │                                  #   where (full-screen "where is everyone" map for a TV, pictures as pins)
     ├── notifications/
     │   └── telegram_notifier.py       # HTTPS Bot API, commands, clips
     ├── audio/
