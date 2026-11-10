@@ -216,6 +216,23 @@ def register(app: Flask, ctx: WebContext) -> None:
             return jsonify({"people": [], "home": None, "yard": [], "now": time.time()})
         return jsonify(engine.family.map_view(which))
 
+    @app.route("/planes")
+    def planes_page():
+        # Full-screen map of the planes near the house, for a TV ("show me the planes")
+        redir = _require_session()
+        if redir:
+            return redir
+        return render_template("planes.html")
+
+    @app.route("/api/planes")
+    def api_planes():
+        redir = _require_session()
+        if redir:
+            return jsonify({"error": "unauthorized"}), 401
+        if engine is None:
+            return jsonify({"home": None, "planes": [], "error": None, "now": time.time()})
+        return jsonify(engine.planes.map_view())
+
     tiles_box = []  # (made on first use: it needs the engine's data folder)
 
     @app.route("/map_tile/<source>/<int:z>/<int:x>/<int:y>.png")

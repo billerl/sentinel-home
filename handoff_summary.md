@@ -448,7 +448,19 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   share a pin, labels go to the side away from a close neighbour, a pet alone gets Esri aerial tiles + the yard, else
   OSM (dark-inverted). Data by XMLHttpRequest every 15 s (old fetch drops the cookie). Pictures: the People page
   crops/shrinks to 400 px in the browser (requests are capped at 256 KB), the server re-encodes a 256 px JPEG
-  (`<location db dir>/people_photos/<id>.jpg`, removed with the person).
+  (`<location db dir>/people_photos/<id>.jpg`, removed with the person). The frame needs X-Frame-Options
+  SAMEORIGIN (DENY blanked the TV). Map tiles come through Sentinel (`/map_tile/<street|aerial>/z/x/y.png`,
+  `sentinel/web/map_tiles.py`: fetched with Sentinel's User-Agent, kept a week on disk under `.map_tiles`):
+  OpenStreetMap sent the TV's browser "Access blocked" tiles.
+- **Planes overhead** (2026-11-10; `sentinel/engine/planes.py`, `templates/planes.html`, `/planes`, `/api/planes`):
+  "what plane is that?" / "any planes around?" (command "planes", voice stage late) and "show me the planes" on the
+  TV (`_camera_page` -> `#map=planes`; grid.js opens `/planes` instead of `/where`). Positions: adsb.lol
+  `/v2/point/<home>/40` (free, no key), reused 10 s. Routes: adsbdb.com `/v0/callsign/<cs>` for airline-style call
+  signs, kept 6 h; a route is told only when `route_fits` (the plane is within max(60 nm, 15%) of the
+  origin->destination path and heading within 60 deg of the destination): adsbdb returns one route per flight number
+  and airlines reuse numbers (live check 2026-11-10: 6 of 13 looked-up routes fit, the rest were other legs).
+  "That" = nearest by slant distance (ground + height). ICAO type codes -> names in `TYPE_NAMES`. adsb.im's
+  position-aware routeset needs prior approval, so it isn't used. A USB ADS-B receiver could feed `nearby` later.
 - **Lost dog** (`Family.set_lost/lost_view` in `sentinel/engine/family.py`, `lost_command` in location.py, page
   `/lost`, `/api/lost*`): "Grace is lost" (page button, voice, Telegram) = every unpaused chat gets the news, the
   `remote_web_url` + `/lost` link and the last fix as a pin; the base's check-ins then ask the collar every

@@ -98,7 +98,7 @@ function mapFromHash() {
   closeMap();
   mapFrame = document.createElement("iframe");
   mapFrame.setAttribute("data-p", m[1]);
-  mapFrame.src = "/where?p=" + m[1];
+  mapFrame.src = m[1] === "planes" ? "/planes" : "/where?p=" + m[1];  // (the planes near the house: planes.html)
   mapFrame.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;border:0;z-index:5000;background:#000";
   document.body.appendChild(mapFrame);
 }

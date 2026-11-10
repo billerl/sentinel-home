@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <title>Sentinel — Planes</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='leaflet/leaflet.css') }}">
+  <script src="{{ url_for('static', filename='leaflet/leaflet.js') }}"></script>
+  <style>
+    /* Shown full screen on a TV (Samsung's browser is Chrome 56: no flex gap, no CSS grid) */
+    html, body { height: 100%; margin: 0; background: #000; color: #cfe; font-family: system-ui, sans-serif; }
+    #map { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: #050b0f; }
+    #map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.8) contrast(0.9); }
+    #panel { position: absolute; left: 2vw; bottom: 3vh; z-index: 1000; max-width: 62vw; padding: 1.2vh 1.6vw;
+             background: rgba(0, 10, 16, 0.88); border: 1px solid #16303a; border-radius: 14px; }
+    .title { font-size: 2.4vh; color: #7fd6e8; margin-bottom: 0.4vh; }
+    .row { font-size: 2.4vh; line-height: 1.45; color: #cde; }
+    .row b { color: #fff; }
+    .empty { font-size: 2.6vh; color: #8fb6c4; }
+    .plane svg { display: block; }
+    .leaflet-tooltip.tag { background: rgba(0, 0, 0, 0.72); color: #fff; border: 0; box-shadow: none; font-size: 1.8vh;
+                           font-weight: 700; padding: 1px 6px; }
+    .leaflet-tooltip.tag:before { display: none; }
+    .leaflet-tooltip.tag.low { color: #ffd84d; }
+    .leaflet-control-attribution { background: rgba(0,0,0,0.6) !important; color: #6aa !important; }
+    .leaflet-control-attribution a { color: #8cc !important; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="panel"><div class="empty">Looking for planes…</div></div>
+  <script>
+    var map = null, layers = null;
+    // A plane seen from above, pointing up (north); turned to its heading
+    var SHAPE = '<path d="M16 1 L19 12 L30 18 L30 21 L19 18 L18 26 L22 29 L22 31 L16 29.5 L10 31 L10 29 L14 26 L13 18 L2 21 L2 18 L13 12 Z"'
+      + ' fill="FILL" stroke="#000" stroke-width="1.2"/>';
+
+    function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+    function draw(data) {
+      if (!map) {
+        map = L.map("map", { zoomControl: false, keyboard: false, zoomAnimation: false, fadeAnimation: false });
+        // (map pictures come through Sentinel: the TV's old browser was turned away by the map servers)
+        L.tileLayer("/map_tile/street/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap · planes: adsb.lol" }).addTo(map);
+        layers = L.layerGroup().addTo(map);
+        if (data.home) {
+          // the whole circle the planes come from (radius in nautical miles)
+          map.fitBounds(L.latLng(data.home).toBounds(data.radius_nm * 1852 * 2 * 0.8), { animate: false });
+        } else {
+          map.setView([39.8, -98.6], 4);
+        }
+      }
+      layers.clearLayers();
+      if (data.home) {
+        L.circleMarker(data.home, { radius: 8, color: "#fff", weight: 2, fillColor: "#00a8a8", fillOpacity: 1, interactive: false })
+          .bindTooltip("Home", { permanent: true, direction: "right", offset: [10, 0], className: "tag" }).addTo(layers);
+      }
+      var planes = data.planes || [];
+      planes.forEach(function (p) {
+        var turn = p.track == null ? 0 : Math.round(p.track);
+        var icon = L.divIcon({ className: "plane", iconSize: [32, 32], iconAnchor: [16, 16],
+          html: '<svg width="32" height="32" viewBox="0 0 32 32" style="transform:rotate(' + turn + 'deg);-webkit-transform:rotate(' + turn + 'deg)">'
+            + SHAPE.replace("FILL", p.low ? "#ffd84d" : "#4de0ff") + "</svg>" });
+        L.marker([p.lat, p.lon], { icon: icon, interactive: false })
+          .bindTooltip(esc(p.tag) + (p.route ? " · " + esc(p.route) : "") + (p.feet ? " · " + esc(p.feet.replace(" feet up", " ft").replace("on the ground", "landed")) : ""),
+                       { permanent: true, direction: "right", offset: [14, 0], className: "tag" + (p.low ? " low" : "") })
+          .addTo(layers);
+      });
+      var rows = [];
+      if (data.error) rows.push('<div class="empty">' + esc(data.error) + "</div>");
+      else if (!planes.length) rows.push('<div class="empty">No planes nearby right now.</div>');
+      else {
+        rows.push('<div class="title">✈️ ' + planes.length + " plane" + (planes.length === 1 ? "" : "s") + " near the house · closest first</div>");
+        planes.slice(0, 5).forEach(function (p) { rows.push('<div class="row">' + esc(p.text) + "</div>"); });
+      }
+      document.getElementById("panel").innerHTML = rows.join("");
+    }
+
+    function load() {
+      // (XMLHttpRequest: the TV's old browser leaves the sign-in cookie off fetch() calls)
+      var xhr = new XMLHttpRequest();
+      xhr.open("GET", "/api/planes");
+      xhr.onload = function () {
+        if (xhr.status === 401) { location.reload(); return; }
+        if (xhr.status !== 200) return;
+        try { draw(JSON.parse(xhr.responseText)); } catch (e) {}
+      };
+      xhr.send();
+    }
+    load();
+    setInterval(load, 10000);
+  </script>
+</body>
+</html>

@@ -216,6 +216,9 @@ class Engine:
             household_answer=self.cars.answer_question,
             on_home=lambda kind, person_id: self.routines.person(kind, person_id),
             speak=lambda text: self.audio.speak(text) if self.audio is not None else None)
+        from sentinel.engine.planes import Planes
+
+        self.planes = Planes(home=self.family.home_coords)  # "what plane is that?" and the TV's plane map
         from sentinel.engine.phone_talk import PhoneTalk
 
         self.phone_talk = PhoneTalk(  # the web page's Talk button: Jarvis through a phone's microphone
@@ -664,6 +667,7 @@ class Engine:
         from sentinel.engine.location import beep_command, lost_command, outing_command
         from sentinel.engine.mesh import read_command
         from sentinel.engine.packages import TAKEN_IN
+        from sentinel.engine.planes import plane_question
         from sentinel.engine.questions import household_question
         from sentinel.engine.recap import RECAP
         from sentinel.engine.recipes import can_make_command, cooking_command, is_video_link, save_link_command
@@ -719,6 +723,10 @@ class Engine:
             "household cars", lambda t: household_question(t, self.household.vehicles()),
             lambda m, _t: self.cars.answer_question(m), speak=to_speech, voice_stage="late",
             log_kind=lambda m: "household_" + m.kind))
+        commands.add(Command(
+            "planes", plane_question, lambda kind, _t: self.planes.answer(kind),
+            speak=lambda said: to_speech(said.replace("• ", ""), max_lines=6, max_chars=600), voice_stage="late",
+            prefix="✈️ ", log_kind=lambda kind: "planes_" + kind))
         commands.add(Command(
             "movement inside", self._indoor_question, lambda _m, t: self.wifi_motion.answer(t),
             speak=to_speech, voice_stage="late", log_kind=lambda _m: "indoor"))
@@ -1141,6 +1149,10 @@ class Engine:
         shown = self.family.map_lookup(words)  # "show me Xena's location": her map instead of a camera
         if shown is not None:
             return shown
+        from sentinel.engine.planes import plane_map_words
+
+        if plane_map_words(words):  # "show me the planes": the plane map (sentinel/engine/planes.py)
+            return "the plane map", "#map=planes"
         name = re.sub(r"\s+", " ", re.sub(r"\bcam(?:era)?s?\b", "", words.lower())).strip()
         if not name or self.frame_broker is None:
             return None

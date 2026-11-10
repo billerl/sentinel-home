@@ -46,6 +46,7 @@ sentinel-home/                         # repository root
     │   ├── objects.py                 # Detection worker, tracking, plain-English descriptions
     │   ├── household.py               # Family cars: photo references, recognition, who's home
     │   ├── camera_light.py            # Camera white light on for cars at night (admin login: camera_admin.json)
+    │   ├── planes.py                  # Planes near the house (adsb.lol + adsbdb routes checked against position)
     │   ├── location.py                # Family phones (OwnTracks): people, places, arrive/leave, "where is X?",
     │   │                              #   every position (points) and each person's own web login
     │   ├── timeline.py                # Family timeline: positions -> stops + drives for one day
