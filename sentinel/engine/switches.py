@@ -789,6 +789,7 @@ class SmartSwitches:
         return {"id": sw.id, "name": sw.name, "on": sw.on, "online": sw.online, "kind": driver.kind,
                 "keys": [k for k, name in TV_KEYS.items() if supports(name)], "live": live,
                 "screen": hasattr(driver, "mirror_start"),
+                "grid": hasattr(driver, "type_on_grid"),
                 "apps": [a for a in apps if a["name"] not in TV_SYSTEM_APPS and not (live and a["name"] == "Sentinel live view")]}
 
     def tv_key(self, switch_id: str, key: str) -> Tuple[bool, str]:
@@ -833,16 +834,22 @@ class SmartSwitches:
             return False, f"The {tv[0].name} didn't close it ({e})."
         return True, "closed"
 
-    def tv_type(self, switch_id: str, text: str) -> Tuple[bool, str]:
+    def tv_type(self, switch_id: str, text: str, grid: bool = False) -> Tuple[bool, str]:
+        """Into the TV's keyboard, or with ``grid`` into an app's own (YouTube's) by arrows and OK."""
         tv = self._tv_for(switch_id)
         text = (text or "").strip()[:100]
         if tv is None or not text:
             return False, "Nothing to type."
+        if grid and not hasattr(tv[1], "type_on_grid"):
+            return False, f"The {tv[0].name} takes typing straight into the box."
         try:
-            tv[1].type_text(tv[2], text)
+            if grid:
+                tv[1].type_on_grid(tv[2], text)
+            else:
+                tv[1].type_text(tv[2], text)
         except (OSError, ValueError) as e:
             return False, f"The {tv[0].name} didn't take it ({e})."
-        self._step(switch_id, "type", text)
+        self._step(switch_id, "grid" if grid else "type", text)
         return True, "typed"
 
     def _step(self, switch_id: str, do: str, value: str) -> None:

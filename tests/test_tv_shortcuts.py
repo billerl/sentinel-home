@@ -29,8 +29,8 @@ class FakeSwitches:
     def tv_close(self, tv, app):
         return self._do(("close", tv, app))
 
-    def tv_type(self, tv, text):
-        return self._do(("type", tv, text))
+    def tv_type(self, tv, text, grid=False):
+        return self._do(("grid" if grid else "type", tv, text))
 
 
 class TVShortcutsTest(unittest.TestCase):
@@ -52,16 +52,17 @@ class TVShortcutsTest(unittest.TestCase):
         self.press(6, "key", "ok")
         self.press(2, "key", "up")
         self.press(60, "type", "judge judy")
+        self.press(3, "grid", "judge")
         return self.sc.stop("samsung-1", "Judge Judy")
 
     def test_records_steps_with_pauses_and_saves(self):
         ok, msg = self.record_judge_judy()
         self.assertTrue(ok)
-        self.assertIn("4 steps", msg)
+        self.assertIn("5 steps", msg)
         saved = json.load(open(os.path.join(self.dir, "tv_shortcuts.json")))
         steps = saved[0]["steps"]
-        self.assertEqual([s["do"] for s in steps], ["open", "key", "key", "type"])
-        self.assertEqual([s["wait"] for s in steps], [0.0, 6, 2, LONGEST_WAIT])  # first: no wait; long: capped
+        self.assertEqual([s["do"] for s in steps], ["open", "key", "key", "type", "grid"])
+        self.assertEqual([s["wait"] for s in steps], [0.0, 6, 2, LONGEST_WAIT, 3])  # first: no wait; long: capped
         view = self.sc.view("samsung-1")
         self.assertFalse(view["recording"])
         self.assertEqual(view["shortcuts"][0]["name"], "Judge Judy")
@@ -80,8 +81,9 @@ class TVShortcutsTest(unittest.TestCase):
         self.assertTrue(self.sc.play("samsung-1", sid)[0])
         self.assertEqual(self.sw.done, [("close", "samsung-1", "3201707014489"), ("open", "samsung-1", "3201707014489"),
                                         ("key", "samsung-1", "ok"), ("key", "samsung-1", "up"),
-                                        ("type", "samsung-1", "judge judy")])
-        self.assertEqual(self.slept, [QUIT_WAIT, 6 * SLOWER + EXTRA, 2 * SLOWER + EXTRA, LONGEST_WAIT * SLOWER + EXTRA])
+                                        ("type", "samsung-1", "judge judy"), ("grid", "samsung-1", "judge")])
+        self.assertEqual(self.slept, [QUIT_WAIT, 6 * SLOWER + EXTRA, 2 * SLOWER + EXTRA, LONGEST_WAIT * SLOWER + EXTRA,
+                                       3 * SLOWER + EXTRA])
         self.assertIsNone(self.sc.view("samsung-1")["playing"])
 
     def test_playback_isnt_recorded_and_stops_at_a_failed_step(self):

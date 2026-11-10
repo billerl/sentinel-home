@@ -761,6 +761,7 @@ async function openRemote(id) {
       b.style.display = !v.keys || v.keys.indexOf(b.dataset.key) >= 0 ? "" : "none";
     });
     document.getElementById("tvr-live").hidden = !v.live;
+    document.getElementById("tvr-grid").hidden = !v.grid;
     loadShortcuts();
     screenShow(v.screen ? id : null);
     v.apps.forEach(function(a) {
@@ -891,11 +892,12 @@ async function remoteLive(reload) {
   var res = await switchPost("/api/tv/" + encodeURIComponent(tvId) + "/live", { reload: reload });
   remoteMsg(res.ok ? (reload ? "Reloaded ✓" : "Cameras on ✓") : (res.data.error || "That didn't work."), res.ok);
 }
-async function remoteType() {
+async function remoteType(grid) {
   var box = document.getElementById("tvr-text");
   if (!box.value.trim() || !tvId) return;
-  var res = await switchPost("/api/tv/" + encodeURIComponent(tvId) + "/type", { text: box.value.trim() });
-  if (res.ok) { box.value = ""; remoteMsg("Sent ✓ (it goes into the box the TV's keyboard is open on)", true); if (recording) loadShortcuts(); }
+  if (grid) remoteMsg("Typing… (one letter at a time, watch the TV)", true);
+  var res = await switchPost("/api/tv/" + encodeURIComponent(tvId) + "/type", { text: box.value.trim(), grid: grid === true });
+  if (res.ok) { box.value = ""; remoteMsg(grid ? "Searched ✓" : "Sent ✓ (it goes into the box the TV's keyboard is open on)", true); if (recording) loadShortcuts(); }
   else remoteMsg(res.data.error || "That didn't work.");
 }
 // ---- shortcuts (beta): presses recorded on this remote, played back (sentinel/engine/tv_shortcuts.py) ----

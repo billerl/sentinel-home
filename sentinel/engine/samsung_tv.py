@@ -58,6 +58,14 @@ COMMON_APPS = {
     "3201606009684": "Spotify", "3201808016802": "Pluto TV", "3201504001965": "Tubi", "3201512006963": "Plex",
     "3201710015037": "Gallery", "3201908019041": "Paramount+", "3201508004642": "Sling TV",
 }
+# YouTube and YouTube TV draw their own search keyboard, so text sent for the TV's keyboard never gets there
+# (2026-11-10). Their grid, as on this TV: four rows of seven, letters or (after the key right of N) numbers and
+# signs; below them SPACE, CLEAR and SEARCH, reached down from the first column (and back up to it). A new search
+# opens on A. The key to the right of the 2nd row swaps letters and numbers, and stays highlighted.
+GRIDS = {"abc": ("ABCDEFG", "HIJKLMN", "OPQRSTU", "VWXYZ-'"),
+         "123": ("123&#()", "456@!?:", '789.-_"', "0/$%+[]")}
+GRID_SWAP = (1, 7)
+GRID_SPACE, GRID_CLEAR, GRID_SEARCH = (4, 0), (4, 1), (4, 2)
 
 
 class SamsungTVDriver:
@@ -231,6 +239,49 @@ class SamsungTVDriver:
         self._send(host, [{"method": "ms.remote.control", "params": {
             "Cmd": base64.b64encode(text.encode()).decode(), "DataOfCmd": "base64", "TypeOfRemote": "SendInputString"}},
             {"method": "ms.remote.control", "params": {"TypeOfRemote": "SendInputEnd"}}])
+
+    def type_on_grid(self, host: str, text: str, start: Tuple[int, int] = (0, 0), mode: str = "abc") -> None:
+        """Search an app's own on-screen keyboard (GRIDS) for ``text``: CLEAR, the text by arrows and OK, then
+        SEARCH. Starts on A (a fresh search) unless told where it is. Never presses left of the first column
+        (that opens the app's menu)."""
+        text = re.sub(r"\s+", " ", text.upper()).strip()
+        bad = sorted({ch for ch in text if ch != " " and not any(ch in "".join(g) for g in GRIDS.values())})
+        if bad:
+            raise ValueError("that keyboard has no " + " ".join(bad))
+        keys: List[str] = []
+        at = start
+        bottom = len(GRIDS["abc"])
+
+        def go(to: Tuple[int, int]) -> None:
+            nonlocal at
+            if at[0] == bottom:  # SPACE / CLEAR / SEARCH: back along to SPACE, then up
+                keys.extend(["KEY_LEFT"] * at[1] + ["KEY_UP"])
+                at = (bottom - 1, 0)
+            if to[0] == bottom:
+                go((bottom - 1, 0))
+                keys.extend(["KEY_DOWN"] + ["KEY_RIGHT"] * to[1])
+                at = to
+                return
+            steps_v = ["KEY_DOWN" if to[0] > at[0] else "KEY_UP"] * abs(to[0] - at[0])
+            steps_h = ["KEY_RIGHT" if to[1] > at[1] else "KEY_LEFT"] * abs(to[1] - at[1])
+            keys.extend(steps_h + steps_v if at[1] == GRID_SWAP[1] else steps_v + steps_h)  # the 8th column is short
+            at = to
+
+        def press(spot: Tuple[int, int]) -> None:
+            go(spot)
+            keys.append("KEY_ENTER")
+
+        press(GRID_CLEAR)
+        for ch in text:
+            if ch == " ":
+                press(GRID_SPACE)
+                continue
+            if ch not in "".join(GRIDS[mode]):
+                press(GRID_SWAP)
+                mode = "123" if mode == "abc" else "abc"
+            press(next((r, row.index(ch)) for r, row in enumerate(GRIDS[mode]) if ch in row))
+        press(GRID_SEARCH)
+        self.press(host, *keys)
 
     def _wake(self, mac: str, host: str) -> None:
         packet = b"\xff" * 6 + bytes.fromhex(mac) * 16

@@ -169,6 +169,10 @@
         <input id="tvr-text" type="text" maxlength="100" autocomplete="off" placeholder="Type into the TV's search box…">
         <button type="submit" class="tvr-btn">Send</button>
       </form>
+      <div id="tvr-grid" hidden>
+        <div class="tvr-row"><button type="button" class="tvr-btn" onclick="remoteType(true)">Search it on YouTube's keyboard</button></div>
+        <div class="tvr-hint" style="margin: 2px 0 8px;">For YouTube and YouTube TV: open their search first (A highlighted). It clears the box, types, then searches</div>
+      </div>
       <div class="tvr-apps-h">Shortcuts <span class="tvr-beta">beta</span></div>
       <div class="tvr-shortcuts" id="tvr-shortcuts"></div>
       <div class="tvr-row" id="tvr-rec-start">

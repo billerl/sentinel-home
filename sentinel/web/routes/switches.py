@@ -135,7 +135,7 @@ def register(app: Flask, ctx: WebContext) -> None:
         if action == "open":
             return _result(*engine.switches.tv_open(tv_id, str(body.get("app") or "")[:40]))
         if action == "type":
-            return _result(*engine.switches.tv_type(tv_id, str(body.get("text") or "")[:100]))
+            return _result(*engine.switches.tv_type(tv_id, str(body.get("text") or "")[:100], body.get("grid") is True))
         if action == "live":
             return _result(*engine.switches.tv_live(tv_id, body.get("reload") is True))
         if action == "tap":

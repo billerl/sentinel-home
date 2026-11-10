@@ -158,6 +158,8 @@ class TVShortcuts:
                     ok, why = sw.tv_open(tv_id, step["value"])
                 elif step["do"] == "type":
                     ok, why = sw.tv_type(tv_id, step["value"])
+                elif step["do"] == "grid":
+                    ok, why = sw.tv_type(tv_id, step["value"], grid=True)
                 else:
                     ok, why = sw.tv_key(tv_id, step["value"])
                 if not ok:

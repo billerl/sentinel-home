@@ -446,6 +446,44 @@ class TestTV(unittest.TestCase):
         self.assertIn("Pluto TV", self.sw.summary())
 
 
+class TestYouTubeKeyboard(unittest.TestCase):
+    """YouTube's own search keyboard, typed by arrows and OK (checked on the Samsung, 2026-11-10: "JUDGE V")."""
+
+    def setUp(self):
+        from sentinel.engine.samsung_tv import SamsungTVDriver
+        self.drv = SamsungTVDriver(tempfile.mkdtemp(prefix="sentinel-tv-"))
+        self.keys = []
+        self.drv.press = lambda host, *keys: self.keys.extend(k[4:] for k in keys)
+
+    def test_clear_type_and_search(self):
+        self.drv.type_on_grid("tv", "Judge  v")
+        self.assertEqual(" ".join(self.keys),
+                         "DOWN DOWN DOWN DOWN RIGHT ENTER "  # CLEAR
+                         "LEFT UP UP UP RIGHT RIGHT ENTER DOWN RIGHT RIGHT RIGHT RIGHT ENTER UP UP LEFT LEFT LEFT ENTER "
+                         "RIGHT RIGHT RIGHT ENTER LEFT LEFT ENTER DOWN DOWN DOWN LEFT LEFT LEFT LEFT DOWN ENTER "
+                         "UP ENTER DOWN RIGHT RIGHT ENTER")  # " V", SEARCH
+
+    def test_numbers_swap_the_keyboard_and_back(self):
+        self.drv.type_on_grid("tv", "A1b", start=(0, 0))
+        self.assertEqual(" ".join(self.keys),
+                         "DOWN DOWN DOWN DOWN RIGHT ENTER LEFT UP UP UP UP ENTER "  # CLEAR, A
+                         "DOWN RIGHT RIGHT RIGHT RIGHT RIGHT RIGHT RIGHT ENTER LEFT LEFT LEFT LEFT LEFT LEFT LEFT UP ENTER "
+                         "DOWN RIGHT RIGHT RIGHT RIGHT RIGHT RIGHT RIGHT ENTER LEFT LEFT LEFT LEFT LEFT LEFT UP ENTER "
+                         "DOWN DOWN DOWN LEFT DOWN RIGHT RIGHT ENTER")
+
+    def test_never_left_of_the_first_column(self):
+        self.drv.type_on_grid("tv", "a v o h a")
+        col = 0
+        for k in self.keys:
+            col += {"LEFT": -1, "RIGHT": 1}.get(k, 0)
+            self.assertGreaterEqual(col, 0)
+
+    def test_what_isnt_on_the_keyboard(self):
+        with self.assertRaises(ValueError):
+            self.drv.type_on_grid("tv", "café")
+        self.assertEqual(self.keys, [])
+
+
 class TestSamsungDriver(unittest.TestCase):
     """The power dance: a TV that's off doesn't answer; the wake packet wakes only its network (picture
     still dark) and the power button lights the picture. Tested on a UN65NU6900, 2026-11-03."""
