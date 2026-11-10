@@ -956,6 +956,9 @@ class SmartSwitches:
                 return True, tv[1].live_back(tv[2])
             tv[1].show_live(tv[2], reload=reload)
         except (OSError, ValueError) as e:
+            # (logged: the remote's failed Back presses on 2026-11-10 left no trace of why)
+            app_logger.log("warning", "tv_live_failed", tv=tv[0].name, back=back, reload=reload,
+                           error_message=str(e)[:200], component="switches", action="tv")
             return False, f"The {tv[0].name} didn't do it ({e})."
         return True, "reloaded" if reload else "showing"
 

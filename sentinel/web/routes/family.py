@@ -216,6 +216,27 @@ def register(app: Flask, ctx: WebContext) -> None:
             return jsonify({"people": [], "home": None, "yard": [], "now": time.time()})
         return jsonify(engine.family.map_view(which))
 
+    tiles_box = []  # (made on first use: it needs the engine's data folder)
+
+    @app.route("/map_tile/<source>/<int:z>/<int:x>/<int:y>.png")
+    def map_tile(source, z, x, y):
+        # The /where map's pictures through Sentinel (sentinel/web/map_tiles.py): the TV's browser was turned away
+        redir = _require_session()
+        if redir:
+            return Response(status=401)
+        if engine is None:
+            return Response(status=404)
+        if not tiles_box:
+            import os
+
+            from sentinel.web.map_tiles import MapTiles
+
+            tiles_box.append(MapTiles(os.path.join(os.path.dirname(engine.locations.db_path), ".map_tiles")))
+        got = tiles_box[0].get(source, z, x, y)
+        if got is None:
+            return Response(status=404)
+        return Response(got[0], mimetype=got[1], headers={"Cache-Control": "private, max-age=86400"})
+
     @app.route("/api/lost/<action>", methods=["POST"])
     def api_lost_action(action):
         err = _config_guard()

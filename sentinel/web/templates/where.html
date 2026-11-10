@@ -54,14 +54,15 @@
       if (!map) {
         map = L.map("map", { zoomControl: false, keyboard: false, zoomAnimation: false, fadeAnimation: false });
         if (pets) {  // a dog in the yard: the aerial photo shows where
-          L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-            maxZoom: 21, maxNativeZoom: 19, referrerPolicy: "strict-origin-when-cross-origin",
+          // (map pictures come through Sentinel: the TV's old browser was turned away by the map servers)
+          L.tileLayer("/map_tile/aerial/{z}/{x}/{y}.png", {
+            maxZoom: 21, maxNativeZoom: 19,
             attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics"
           }).addTo(map);
         } else {
           document.getElementById("map").className = "street";
-          L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            maxZoom: 19, referrerPolicy: "strict-origin-when-cross-origin", attribution: "&copy; OpenStreetMap"
+          L.tileLayer("/map_tile/street/{z}/{x}/{y}.png", {
+            maxZoom: 19, attribution: "&copy; OpenStreetMap"
           }).addTo(map);
         }
         layers = L.layerGroup().addTo(map);

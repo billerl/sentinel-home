@@ -86,6 +86,7 @@ sentinel-home/                         # repository root
     ├── web/                           # Web viewer = the user interface
     │   ├── server.py                  # Flask app: settings, sign-in setup, listeners; calls each routes/ module
     │   ├── context.py                 # WebContext: what every area's routes share (session check, write guard)
+    │   ├── map_tiles.py               # Location map pictures fetched by Sentinel and kept a week (the TV browser was turned away)
     │   ├── routes/                    # Pages + API, one module per area, each with register(app, ctx):
     │   │                              #   signin, live, cameras, recordings, family, vehicles, switches (+ TV
     │   │                              #   remote), spotify, sensors, house, routines, settings, mesh, recipes, talk

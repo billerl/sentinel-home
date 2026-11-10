@@ -547,6 +547,31 @@ class TestSamsungLiveView(unittest.TestCase):
         self.assertEqual(posted[-1], "111299001912")
 
 
+    def test_a_failed_back_keeps_the_app_and_tries_the_tv_start(self):
+        # 2026-11-10: the first failed Back press forgot YouTube TV, so every press after it failed too
+        from sentinel.engine.samsung_tv import SamsungTVDriver
+        drv, posted = SamsungTVDriver(tempfile.mkdtemp(prefix="sentinel-tv-")), []
+        drv._before_live["tv"] = "3201707014489"
+        drv.apps = lambda host: {"3201707014489": "YouTube TV"}
+
+        def fail(host, app_id):
+            raise OSError("the TV closed the connection")
+        drv.launch = fail
+
+        def rest(host, path="", method="GET", timeout=None):
+            if method == "POST":
+                posted.append(path)
+                if len(posted) == 1:
+                    raise OSError("timed out")
+            return {}
+        drv._rest = rest
+        with self.assertRaises(OSError):
+            drv.live_back("tv")  # both ways failed...
+        self.assertEqual(drv._before_live.get("tv"), "3201707014489")  # ...but it's still remembered
+        self.assertEqual(drv.live_back("tv"), "YouTube TV")  # so the next press works
+        self.assertEqual(posted, ["applications/3201707014489"] * 2)
+        self.assertNotIn("tv", drv._before_live)
+
 class TestCameraOnTV(unittest.TestCase):
     """A routine's "show the Front Door camera on the TV", then back to the show."""
 

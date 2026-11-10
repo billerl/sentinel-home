@@ -585,10 +585,17 @@ class SamsungTVDriver:
 
     def live_back(self, host: str) -> str:
         """Back to the app the cameras covered, where it was. Returns its name."""
-        app_id = self._before_live.pop(host, None)
+        app_id = self._before_live.get(host)
         if not app_id:
             raise ValueError("nothing was on before the cameras")
-        self.launch(host, app_id)
+        try:
+            self.launch(host, app_id)
+        except (OSError, ValueError):
+            # One more way in, the TV's REST "start": from the app's first screen if it had closed. The app is
+            # only forgotten once it's back, so pressing Back again can still work (2026-11-10: the first failed
+            # press forgot YouTube TV and every press after it said "nothing was on").
+            self._rest(host, f"applications/{app_id}", method="POST", timeout=5.0)
+        self._before_live.pop(host, None)
         return self.apps(host).get(app_id, app_id)
 
     def close(self, host: str, app_id: str) -> None:
