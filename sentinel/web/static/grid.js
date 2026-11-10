@@ -54,7 +54,7 @@ function openFocus(camId, displayName) {
   Object.values(gridTimers).forEach(clearInterval);  // stop grid updates
   gridTimers = {};
 
-  if (dataSaver) {
+  if (dataSaver || TV_PAGE) {  // (TV_PAGE: full-size live video made the 2018 Samsung close the show behind it)
     // One picture a second, at most 960 px wide.
     img.onerror = null;
     var w = Math.min(960, Math.ceil(window.innerWidth * Math.min(window.devicePixelRatio || 1, 1.5)));
@@ -87,6 +87,26 @@ function focusFromHash() {
   if (c && focusedCamId !== c.id) openFocus(c.id, c.display || c.id);
 }
 window.addEventListener("hashchange", focusFromHash);
+
+// A Samsung's own browser: Sentinel says what to show here (instead of opening its address in a new tab each time)
+var TV_PAGE = /SMART-TV|Tizen/.test(navigator.userAgent);
+function tvPagePoll() {
+  fetch("/api/tv_page").then(function(r) { return r.ok ? r.json() : null; }).then(function(c) {
+    if (!c || !c.seq) return;
+    var done = 0;
+    try { done = Number(sessionStorage.getItem("sentinel.tvSeq") || 0); sessionStorage.setItem("sentinel.tvSeq", c.seq); } catch (e) {}
+    if (c.seq <= done) return;
+    if (c.reload) {
+      history.replaceState(null, "", location.pathname + (c.path || ""));
+      location.reload();
+    } else if (c.path && c.path.indexOf("#cam=") === 0) {
+      if (location.hash !== c.path) location.hash = c.path; else focusFromHash();
+    } else if (focusedCamId) {
+      closeFocus();
+    }
+  }).catch(function() {});
+}
+if (TV_PAGE) { tvPagePoll(); setInterval(tvPagePoll, 2000); }
 
 function closeFocus() {
   if (/^#cam=/.test(location.hash)) history.replaceState(null, "", location.pathname);  // Back stays on the grid

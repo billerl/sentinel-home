@@ -175,6 +175,7 @@ class Engine:
         web = self.settings.get("web") or {}
         home = next((h for h in str(web.get("bind_host") or "").split(",") if _home_lan(h.strip())), None)
         self.switches.set_live_url(f"http://{home.strip()}:{int(web.get('port') or 8088)}/" if home else None)
+        self.switches.camera_lookup = self._camera_page
         from sentinel.engine.remotes import Remotes
 
         self.remotes = Remotes(VIDEO_DIR)  # IR/RF buttons taught to a BroadLink (heater, soundbar, fans)
@@ -1127,6 +1128,18 @@ class Engine:
             "boards": [{k: b[k] for k in ("id", "name", "online")} for b in wm["boards"]],
             "switches": self.switches.view()["switches"],
         }
+
+    def _camera_page(self, words: str) -> Optional[Tuple[str, str]]:
+        """"front door" / "the garage camera" -> (camera name, "#cam=<its page id>"), for showing it on a TV."""
+        name = re.sub(r"\s+", " ", re.sub(r"\bcam(?:era)?s?\b", "", words.lower())).strip()
+        if not name or self.frame_broker is None:
+            return None
+        cams = list({id(p): p for p in self.cameras.values()}.values())  # (some are listed under two keys)
+        hit = ([p for p in cams if p.display_name.lower() == name] or
+               [p for p in cams if name in p.display_name.lower() or p.display_name.lower() in name])
+        if len(hit) != 1:
+            return None
+        return hit[0].display_name, "#cam=" + self.frame_broker.web_id(hit[0].camera_id)
 
     def _routine_tv_camera(self, tv_id: str, camera: str, seconds: float) -> bool:
         """A routine's "show the Front Door camera on the TV" (the camera by its host, as routines name them)."""

@@ -497,9 +497,24 @@ class TestSamsungLiveView(unittest.TestCase):
             drv.show_live("tv")
         SmartSwitches(tempfile.mkdtemp(prefix="sentinel-sw-"), drivers=[drv]).set_live_url("http://192.168.1.9:8088/")
         self.assertEqual(drv.live_app("tv"), BROWSER_APP)
-        drv.show_live("tv", reload=True)
-        self.assertEqual(sent[0]["params"]["data"], {"appId": BROWSER_APP, "action_type": "NATIVE_LAUNCH",
-                                                     "metaTag": "http://192.168.1.9:8088/"})
+        with mock.patch("sentinel.engine.samsung_tv.PAGE_WAIT", 0):
+            drv.show_live("tv", reload=True)  # no page open: brought forward, then its address (a new tab)
+        self.assertEqual([m["params"]["data"] for m in sent],
+                         [{"appId": BROWSER_APP, "action_type": "NATIVE_LAUNCH"},
+                          {"appId": BROWSER_APP, "action_type": "NATIVE_LAUNCH", "metaTag": "http://192.168.1.9:8088/"}])
+
+    def test_an_open_page_is_told_instead_of_a_new_tab(self):
+        from sentinel.engine.samsung_tv import SamsungTVDriver
+        drv, sent = SamsungTVDriver(tempfile.mkdtemp(prefix="sentinel-tv-")), []
+        drv.live_url = "http://192.168.1.9:8088/"
+        drv._visible_app = lambda host: None
+        self.assertEqual(drv.page_poll("tv")["seq"], 0)  # nothing asked yet
+        drv._send = lambda host, messages: sent.extend(messages) or drv.page_poll("tv")  # the page checks in
+        drv.show_live("tv", path="#cam=abc")
+        self.assertEqual(len(sent), 1)  # just brought forward
+        cmd = drv.page_poll("tv")
+        self.assertEqual((cmd["path"], cmd["reload"]), ("#cam=abc", False))
+        self.assertGreater(cmd["seq"], 0)
 
     def test_back_to_what_the_cameras_covered_where_it_was(self):
         from sentinel.engine.samsung_tv import SamsungTVDriver
@@ -507,7 +522,7 @@ class TestSamsungLiveView(unittest.TestCase):
         drv.live_url = "http://192.168.1.9:8088/"
         apps = {"11101200001": {"running": True, "visible": True}, "111299001912": {"running": False, "visible": False}}
         drv.apps = lambda host: {"11101200001": "Netflix", "111299001912": "YouTube"}
-        drv._send = lambda host, messages: sent.extend(messages)
+        drv._send = lambda host, messages: sent.extend(messages) or drv.page_poll("tv")
 
         def rest(host, path="", method="GET", timeout=None):
             app_id = path.split("/")[-1]
@@ -523,8 +538,13 @@ class TestSamsungLiveView(unittest.TestCase):
         self.assertEqual(sent[-1]["params"]["data"], {"appId": "11101200001", "action_type": "DEEP_LINK"})  # resumed
         self.assertEqual(posted, [])  # not started over
         self.assertIsNone(drv.live_return("tv"))  # once back, the button goes
+        apps["11101200001"]["visible"] = True  # watching Netflix again
+        drv.show_live("tv")
+        apps["11101200001"].update(running=False, visible=False)  # the TV closed Netflix behind the camera
+        self.assertEqual(drv.live_end("tv"), "Netflix")  # time's up: opened again (from its first screen)
+        self.assertEqual(posted[-1], "11101200001")
         drv.launch("tv", "111299001912")  # not running: started the usual way
-        self.assertEqual(posted, ["111299001912"])
+        self.assertEqual(posted[-1], "111299001912")
 
 
 class TestCameraOnTV(unittest.TestCase):
@@ -536,8 +556,7 @@ class TestCameraOnTV(unittest.TestCase):
         self.sw._after = lambda delay, fn: self.timers.append(fn)
         self.tv = types.SimpleNamespace(live_url="http://192.168.1.9:8088/", shown=[], backs=0, covering=True)
         self.tv.show_live = lambda host, reload=False, path="": self.tv.shown.append(path)
-        self.tv.live_return = lambda host: "Netflix" if self.tv.covering else None
-        self.tv.live_back = lambda host: setattr(self.tv, "backs", self.tv.backs + 1)
+        self.tv.live_end = lambda host: setattr(self.tv, "backs", self.tv.backs + 1) if self.tv.covering else None
         self.switch = types.SimpleNamespace(id="samsung-1", name="TV", on=True, online=True)
         self.sw._tv_for = lambda sid: (self.switch, self.tv, "192.168.1.55") if sid == "samsung-1" else None
 
@@ -568,6 +587,20 @@ class TestCameraOnTV(unittest.TestCase):
         self.now += 61
         self.run_timers()
         self.assertEqual(self.tv.backs, 0)  # leave them be
+
+
+class TestOneCameraByVoice(unittest.TestCase):
+    def test_show_me_the_front_door(self):
+        tv = FakeTV()
+        tv.live_url, tv.shown = "http://192.168.1.9:8088/", []
+        tv.show_live = lambda host, reload=False, path="": tv.shown.append(path)
+        sw = SmartSwitches(tempfile.mkdtemp(prefix="sentinel-sw-"), drivers=[FakeKasa(), tv], clock=lambda: NOW)
+        sw.discover()
+        sw.camera_lookup = lambda words: ("Front Door", "#cam=abc") if words.lower() == "front door" else None
+        self.assertEqual(sw.command("Show me the front door", "voice"), "Okay, the Front Door camera is on the TV.")
+        self.assertEqual(sw.command("put the front door camera on the TV", "voice"), "Okay, the Front Door camera is on the TV.")
+        self.assertEqual(tv.shown, ["#cam=abc", "#cam=abc"])
+        self.assertIsNone(sw.tv_parse("show me the weather"))  # not a camera: left for others
 
 
 class TestSamsungDriver(unittest.TestCase):

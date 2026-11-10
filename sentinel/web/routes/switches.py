@@ -56,6 +56,15 @@ def register(app: Flask, ctx: WebContext) -> None:
         return _result(True, "looking")
 
     # ---- the TV remote (a Samsung TV among the switches; sentinel/engine/samsung_tv.py) ----
+    @app.route("/api/tv_page")
+    def api_tv_page():
+        """A TV's camera page asking what to show (Show cameras, a routine's camera): no new browser tabs."""
+        redir = _require_session()
+        if redir:
+            return jsonify({"error": "unauthorized"}), 401
+        cmd = engine.switches.tv_page(request.remote_addr or "") if engine is not None else None
+        return jsonify(cmd or {})
+
     @app.route("/api/tv/<tv_id>")
     def api_tv(tv_id):
         redir = _require_session()

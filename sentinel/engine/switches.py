@@ -196,6 +196,11 @@ _TV_MUTE = re.compile(r"^(mute|unmute) " + _TV + r"$", re.IGNORECASE)
 _TV_LIVE = re.compile(r"^(?:put|show|bring up|switch)\s+(?:the )?(?:cameras?|camera view|live view|security cameras|sentinel)"
                       r"\s+(?:on|to)\s+" + _TV + r"$|^(reload|refresh|restart)\s+(?:the )?(?:cameras?|camera view|live view)"
                       r"(?:\s+on\s+" + _TV + r")?$", re.IGNORECASE)
+# "show me the front door", "put the back yard camera on the TV": one camera, on a TV that can (camera_lookup says
+# whether the words name a camera, so "show me the weather" isn't taken)
+_TV_ONE_CAMERA = re.compile(r"^(?:please )?(?:can you |could you )?(?:show|put up|put|bring up|pull up)\s+(?:me\s+)?"
+                            r"(?:the\s+)?(.+?)(?:\s+camera)?(?:\s+(?:on|to)\s+" + _TV + r")?(?:\s+please)?$",
+                            re.IGNORECASE)
 _TV_WHAT = re.compile(r"^what(?:'s| is) (?:on|playing on) " + _TV + r"$", re.IGNORECASE)
 # Playing on the TV: pause/play, back or ahead by a time, mute for a while. By voice they mean the TV even without
 # "TV" (while it's on); naming Spotify or "the music" sends them to Spotify instead (the user's rule, 2026-11-07).
@@ -289,6 +294,8 @@ class SmartSwitches:
         self._unmute: Dict[str, Any] = {}  # TV switch id -> the timer that ends "mute the TV for 2 minutes"
         self._camera_shows: Dict[str, List[Any]] = {}  # TV switch id -> [until, page path] (a routine's camera)
         self._after: Callable[[float, Callable[[], None]], None] = _after
+        # words -> (camera name, its page path "#cam=<id>") when they name a camera (set by the engine)
+        self.camera_lookup: Optional[Callable[[str], Optional[Tuple[str, str]]]] = None
         self._known: Dict[str, Dict[str, Any]] = {}  # device key ("kasa-<mac>") -> {kind, host, model}
         self._state: Dict[str, Dict[str, Any]] = {}  # device key -> last sysinfo
         self._failures: Dict[str, int] = {}
@@ -591,6 +598,11 @@ class SmartSwitches:
             live = [x for x in tvs if hasattr(x[1], "show_live") and x[1].live_app(x[2])]
             if live:
                 return "live", ((tv if tv in live else live[0]), bool(m.group(1)))
+        m = _TV_ONE_CAMERA.match(t)
+        cam_tvs = [x for x in tvs if getattr(x[1], "live_url", None)]
+        found = self.camera_lookup(m.group(1)) if m and cam_tvs and self.camera_lookup else None
+        if found:
+            return "camera", (tv if tv in cam_tvs else self._pick_tv(t, cam_tvs), found)
         m = _TV_VOLUME.match(t)
         if m:
             way = next(g for g in m.groups() if g).lower()
@@ -642,6 +654,14 @@ class SmartSwitches:
         what, detail = parsed
         tv = detail[0] if what != "what" else detail
         sw, driver, host = tv
+        if what == "camera":
+            name, path = detail[1]
+            try:
+                driver.show_live(host, path=path)
+            except (OSError, ValueError) as e:
+                return f"The {sw.name} didn't do it ({e})."
+            app_logger.log("info", "tv_camera", tv=sw.name, camera=name, source=source, component="switches", action="tv")
+            return f"Okay, the {name} camera is on the {sw.name}."
         if what == "live":
             try:
                 driver.show_live(host, reload=detail[1])
@@ -871,6 +891,13 @@ class SmartSwitches:
             if hasattr(driver, "live_url"):
                 driver.live_url = url
 
+    def tv_page(self, ip: str) -> Optional[Dict[str, Any]]:
+        """For a TV's own camera page (by its address): what Sentinel wants it to show, else None."""
+        for _sw, driver, host in self._tvs():
+            if host == ip and hasattr(driver, "page_poll"):
+                return driver.page_poll(host)
+        return None
+
     def camera_tvs(self) -> Dict[str, str]:
         """TVs that can show one camera full screen (in their own browser): switch id -> name."""
         return {tv[0].id: tv[0].name for tv in self._tvs() if getattr(tv[1], "live_url", None)}
@@ -908,9 +935,9 @@ class SmartSwitches:
             self._after(left, lambda: self._camera_done(switch_id))
             return
         tv = self._tv_for(switch_id)
-        if showing and tv is not None and tv[1].live_return(tv[2]):  # still on the camera: back to the show
+        if showing and tv is not None:
             try:
-                tv[1].live_back(tv[2])
+                tv[1].live_end(tv[2])  # back to the show (or, if the TV closed it meanwhile, open it again)
             except (OSError, ValueError):
                 pass
 

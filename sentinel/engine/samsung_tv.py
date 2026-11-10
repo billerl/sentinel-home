@@ -58,6 +58,7 @@ COMMON_APPS = {
     "3201606009684": "Spotify", "3201808016802": "Pluto TV", "3201504001965": "Tubi", "3201512006963": "Plex",
     "3201710015037": "Gallery", "3201908019041": "Paramount+", "3201508004642": "Sling TV",
 }
+PAGE_WAIT = 6.0  # after bringing the browser forward, how long its camera page has to check in (it asks every 2 s)
 BROWSER_APP = "org.tizen.browser"  # the TV's "Internet": Sentinel's camera page opens in it (Chrome 56 on a 2018 TV)
 # YouTube and YouTube TV draw their own search keyboard, so text sent for the TV's keyboard never gets there
 # (2026-11-10). Their grid, as on this TV: four rows of seven, letters or (after the key right of N) numbers and
@@ -79,6 +80,9 @@ class SamsungTVDriver:
         self.timeout = timeout
         self.live_url: Optional[str] = None  # Sentinel's page on the home network (SmartSwitches.set_live_url)
         self._before_live: Dict[str, str] = {}  # TV address -> the app that was on when the cameras came up
+        self._page_lock = threading.Lock()
+        self._page: Dict[str, Dict[str, Any]] = {}  # TV address -> what its camera page should show (page_poll)
+        self._page_polled: Dict[str, float] = {}  # TV address -> when its page last asked
         self._lock = threading.Lock()
         self._tvs: Dict[str, Dict[str, Any]] = {}  # mac -> {host, token, name, model, apps, apps_at, on_since}
         self._off_at: Dict[str, float] = {}  # host -> when we pressed power to turn it off
@@ -534,8 +538,25 @@ class SamsungTVDriver:
         before = self._visible_app(host)  # (the browser itself isn't one of the TV's listed apps)
         if before:
             self._before_live[host] = before
+        # Opening the address put it in a new tab every time. So: what to show waits here for the page (page_poll),
+        # the browser comes forward on its last tab, and only if no page checks in is the address opened.
+        asked = time.time()
+        with self._page_lock:
+            self._page[host] = {"seq": asked, "path": path, "reload": reload}
+        self._send(host, [{"method": "ms.channel.emit", "params": {"event": "ed.apps.launch", "to": "host", "data": {
+            "appId": BROWSER_APP, "action_type": "NATIVE_LAUNCH"}}}])
+        while time.time() - asked < PAGE_WAIT:
+            if self._page_polled.get(host, 0) > asked:
+                return
+            time.sleep(0.25)
         self._send(host, [{"method": "ms.channel.emit", "params": {"event": "ed.apps.launch", "to": "host", "data": {
             "appId": BROWSER_APP, "action_type": "NATIVE_LAUNCH", "metaTag": self.live_url + path}}}])
+
+    def page_poll(self, host: str) -> Dict[str, Any]:
+        """The open camera page asking what to show (every 2 s, on a TV): {"seq", "path", "reload"}."""
+        with self._page_lock:
+            self._page_polled[host] = time.time()
+            return dict(self._page.get(host) or {"seq": 0, "path": "", "reload": False})
 
     def live_return(self, host: str) -> Optional[str]:
         """The app the cameras covered, while it's still running behind them, else None."""
@@ -552,6 +573,15 @@ class SamsungTVDriver:
         if self._visible_app(host):  # that app, or another one someone opened since: the cameras are gone
             return None
         return self.apps(host).get(app_id, app_id)
+
+    def live_end(self, host: str) -> Optional[str]:
+        """A routine's camera time is up: back to the app it covered, unless someone changed the TV meanwhile.
+        An app the TV closed behind the camera (short of memory) is opened again, from its first screen."""
+        app_id = self._before_live.get(host)
+        if not app_id or self._visible_app(host):
+            self._before_live.pop(host, None)
+            return None
+        return self.live_back(host)
 
     def live_back(self, host: str) -> str:
         """Back to the app the cameras covered, where it was. Returns its name."""
