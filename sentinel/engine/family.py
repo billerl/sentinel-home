@@ -13,6 +13,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from sentinel.logging_utils import app_logger
 
 LOCATION_STALE_S = 10 * 60  # a family phone's position older than this: ask the phone for a fresh one
+SPOT_CHECK_HOUR = 18  # new spots worth saving are looked for once a day, from this hour on
+SPOT_ASK_AGAIN_DAYS = 14  # a suggestion nobody answered may come back after this
 LOST_PIN_SECONDS = 300  # a lost pet: a fresh Telegram map pin at most this often ...
 LOST_PIN_METRES = 30  # ... and only once it has moved this far
 
@@ -39,6 +41,7 @@ class Family:
         self._place_pins: Dict[str, Tuple[float, float, float]] = {}  # chat -> pin waiting for a name (lat, lon, until)
         self._location_alerted: Dict[Tuple[int, int], float] = {}  # (person, place) -> last alert
         self._location_asked: Dict[int, float] = {}  # person -> last time we asked their phone for a fresh fix
+        self._spots_checked = ""  # the day frequent spots were last looked for
         self._places_asked: Dict[int, float] = {}  # person -> last time we asked their phone which places it has
         self._outings: Dict[int, float] = {}  # pet -> until when its tracker is asked often ("the dogs are going out")
         self._beeps: Dict[int, float] = {}  # pet -> when "recall Xena" was asked (the LoRa base picks it up)
@@ -255,6 +258,10 @@ class Family:
         msg = payload if isinstance(payload, dict) else {}
         if not person.tracker:
             reply += self._sync_places(person, msg, now)
+            day = time.strftime("%Y-%m-%d", time.localtime(now))
+            if self._spots_checked != day and time.localtime(now).tm_hour >= SPOT_CHECK_HOUR:
+                self._spots_checked = day
+                threading.Thread(target=self.suggest_spot, args=(now,), name="spots", daemon=True).start()
         if person.tracker:  # the LoRa base checks in every 5 s: "ping or beep the collar now?"
             from sentinel.engine.location import OUTING_POLL_SECONDS
 
@@ -369,6 +376,55 @@ class Family:
             self.telegram.reply_to_chat(chat_id, f"📍 Saved “{name}”. I'll say when anyone arrives or leaves "
                                                  "(change its size or alerts on the Family page).")
         app_logger.log("info", "location_place_saved", source="telegram", component="engine", action="location")
+        return True
+
+    # A spot someone keeps going back to (a new job, a friend's house): offer to save it as a place.
+    def suggest_spot(self, now: Optional[float] = None) -> bool:
+        """Looks for one unsaved spot visited on several days and asks on Telegram; True if it asked."""
+        from sentinel.engine.location import SPOT_DAYS, frequent_spots, stops_in
+
+        now = time.time() if now is None else now
+        people = [p for p in self.locations.people() if not p.tracker]
+        stops = [s for p in people for s in stops_in(p.id, self.locations.points(p.id, now - SPOT_DAYS * 86400, now))]
+        skip = [(a["lat"], a["lon"]) for a in self.locations.spot_asks()
+                if a["answer"] or now - a["ts"] < SPOT_ASK_AGAIN_DAYS * 86400]
+        spots = frequent_spots(stops, self.locations.places(), skip)
+        chats = self.telegram.unpaused_chats()
+        if not spots or not chats:
+            return False
+        spot = spots[0]
+        ask_id = self.locations.add_spot_ask(spot.lat, spot.lon, now)
+        names = {p.id: p.name for p in people}
+        who = sorted({names.get(s.person_id, "?") for s in spot.stops})
+        who_text = who[0] if len(who) == 1 else ", ".join(who[:-1]) + " and " + who[-1]
+        latest = sorted(spot.stops, key=lambda s: -s.start)[:4]
+        when = "; ".join(f"{names.get(s.person_id, '?')} {_day_time(s.start)}–{_clock(s.end)}" for s in reversed(latest))
+        text = (f"📍 {who_text} {'has' if len(who) == 1 else 'have'} stopped at this spot on {len(spot.days())} "
+                f"different days lately ({when}). It isn't one of your places. Save it, so I can say when "
+                "anyone arrives or leaves?")
+        for chat in chats:
+            self.telegram.send_location(chat, spot.lat, spot.lon)
+            self.telegram.send_text_with_buttons(chat, text, [[("📍 Save it", f"spot:{ask_id}"),
+                                                               ("No thanks", f"spot:{ask_id}:no")]])
+        app_logger.log("info", "location_spot_suggested", days=len(spot.days()), stops=len(spot.stops),
+                       component="engine", action="location")
+        return True
+
+    def handle_button(self, chat_id: str, message_id: int, data: str, callback_id: str) -> bool:
+        """A tap on "Save it" / "No thanks" under a suggested spot; False when it is something else."""
+        m = re.fullmatch(r"spot:(\d+)(:no)?", data or "")
+        if not m:
+            return False
+        ask = self.locations.answer_spot(int(m.group(1)), "no" if m.group(2) else "save")
+        if ask is None:
+            self.telegram.answer_button(callback_id, "That suggestion has expired")
+        elif m.group(2):
+            self.telegram.answer_button(callback_id, "OK")
+            self.telegram.edit_text(chat_id, message_id, "OK, I won't ask about that spot again.")
+        else:
+            self.telegram.answer_button(callback_id, "Name it")
+            self.telegram.edit_text(chat_id, message_id, "📍 Saving that spot…")
+            self.on_telegram_pin(chat_id, ask["lat"], ask["lon"])  # asks for its name
         return True
 
     def home_coords(self) -> Optional[Tuple[float, float]]:
@@ -630,3 +686,11 @@ class Family:
                 "username": person.username, "password": person.token, "config": config,
                 "sharing": self.locations.fix(person.id) is not None,
                 "names": [p.name for p in self.locations.people()]}
+
+
+def _clock(ts: float) -> str:
+    return time.strftime("%I:%M %p", time.localtime(ts)).lstrip("0").lower().replace(" ", "")
+
+
+def _day_time(ts: float) -> str:
+    return time.strftime("%a ", time.localtime(ts)) + _clock(ts)

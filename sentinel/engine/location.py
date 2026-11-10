@@ -238,6 +238,9 @@ class LocationStore:
                 conn.execute("ALTER TABLE people ADD COLUMN login_expires REAL NOT NULL DEFAULT 0")
             # The places last sent to each phone (places_signature) and {place id: [name, tst]}, so a
             # renamed or deleted one can be replaced or removed. No row: never sent since setup.
+            # Spots offered as new places on Telegram (frequent_spots); answer "", "save" or "no".
+            conn.execute("CREATE TABLE IF NOT EXISTS spot_asks (id INTEGER PRIMARY KEY AUTOINCREMENT, lat REAL NOT NULL,"
+                         " lon REAL NOT NULL, ts REAL NOT NULL, answer TEXT NOT NULL DEFAULT '')")
             conn.execute("CREATE TABLE IF NOT EXISTS phone_places (person_id INTEGER PRIMARY KEY,"
                          " signature TEXT NOT NULL, sent TEXT NOT NULL)")
         self.reassess()
@@ -458,6 +461,23 @@ class LocationStore:
         with self._lock, self._connect() as conn:
             conn.execute("INSERT OR REPLACE INTO phone_places (person_id, signature, sent) VALUES (?, ?, ?)",
                          (person_id, places_signature(places), json.dumps(sent)))
+
+    def spot_asks(self) -> List[Dict[str, Any]]:
+        with self._connect() as conn:
+            return [dict(r) for r in conn.execute("SELECT * FROM spot_asks ORDER BY id")]
+
+    def add_spot_ask(self, lat: float, lon: float, now: Optional[float] = None) -> int:
+        with self._lock, self._connect() as conn:
+            return int(conn.execute("INSERT INTO spot_asks (lat, lon, ts) VALUES (?, ?, ?)",
+                                    (lat, lon, time.time() if now is None else now)).lastrowid)
+
+    def answer_spot(self, ask_id: int, answer: str) -> Optional[Dict[str, Any]]:
+        """Notes the answer; returns the ask, or None if it doesn't exist."""
+        with self._lock, self._connect() as conn:
+            row = conn.execute("SELECT * FROM spot_asks WHERE id = ?", (ask_id,)).fetchone()
+            if row is not None:
+                conn.execute("UPDATE spot_asks SET answer = ? WHERE id = ?", (answer, ask_id))
+        return dict(row) if row is not None else None
 
     def place(self, place_id: Optional[int]) -> Optional[Place]:
         return next((p for p in self.places() if p.id == place_id), None)
@@ -802,6 +822,94 @@ def owntracks_link(config: Dict[str, Any]) -> str:
     """owntracks:///config?inline=... — scanned or tapped on the phone, it sets the app up."""
     raw = base64.b64encode(json.dumps(config, separators=(",", ":")).encode()).decode()
     return "owntracks:///config?inline=" + urllib.parse.quote(raw, safe="")
+
+
+# --------------------------------------------------------------- spots worth naming
+# A place someone keeps going back to that isn't saved yet (a new job, a friend's house): after stops
+# there on SPOT_MIN_DAYS different days in the last SPOT_DAYS, Sentinel offers to save it.
+SPOT_DAYS = 21
+SPOT_MIN_DAYS = 3
+SPOT_MIN_STAY_S = 20 * 60
+SPOT_STAY_M = 150  # positions this close to where a stop began are the same stop
+SPOT_SAME_M = 200  # stops this close on different days are the same spot
+SPOT_MAX_ACC_M = 100
+SPOT_LONGEST_S = 10 * 3600  # a phone silent longer than this might be off, not still there
+
+
+@dataclass
+class Stop:
+    person_id: int
+    start: float
+    end: float
+    lat: float
+    lon: float
+
+
+@dataclass
+class Spot:
+    lat: float
+    lon: float
+    stops: List[Stop]
+
+    def days(self) -> List[str]:
+        return sorted({time.strftime("%Y-%m-%d", time.localtime(s.start)) for s in self.stops})
+
+
+def stops_in(person_id: int, points: Iterable[Tuple[float, float, float, Optional[float], Optional[float]]]) -> List[Stop]:
+    """Where a phone stayed put for SPOT_MIN_STAY_S or more. A phone that goes quiet counts as still
+    there until its next report (an iPhone sends nothing while it sits still), up to SPOT_LONGEST_S."""
+    pts = sorted(points)
+
+    def moving(k: int) -> bool:
+        return pts[k][4] is not None and pts[k][4] >= MOVING_KMH
+
+    def vague(k: int) -> bool:
+        return pts[k][3] is not None and pts[k][3] > SPOT_MAX_ACC_M
+
+    out: List[Stop] = []
+    i = 0
+    while i < len(pts):
+        if moving(i) or vague(i):
+            i += 1
+            continue
+        ts0, lat0, lon0 = pts[i][:3]
+        j, lats, lons = i + 1, [lat0], [lon0]
+        while j < len(pts) and pts[j][0] - pts[j - 1][0] <= SPOT_LONGEST_S and not moving(j) and (
+                vague(j) or distance_m(lat0, lon0, pts[j][1], pts[j][2]) <= SPOT_STAY_M):  # (vague: no news)
+            if not vague(j):
+                lats.append(pts[j][1])
+                lons.append(pts[j][2])
+            j += 1
+        end = pts[j - 1][0]
+        if j < len(pts) and pts[j][0] - end <= SPOT_LONGEST_S:
+            end = pts[j][0]  # quiet until it moved on
+        if end - ts0 >= SPOT_MIN_STAY_S:
+            lats.sort()
+            lons.sort()
+            out.append(Stop(person_id, ts0, end, lats[len(lats) // 2], lons[len(lons) // 2]))
+        i = j
+    return out
+
+
+def frequent_spots(stops: Iterable[Stop], places: Iterable[Place], skip: Iterable[Tuple[float, float]] = ()) -> List[Spot]:
+    """Unsaved spots with stops on SPOT_MIN_DAYS or more different days, most visited first. Spots at
+    or next to a saved place, or near one in skip (already asked about), are left out."""
+    places, skip = list(places), list(skip)
+    spots: List[Spot] = []
+    for stop in sorted(stops, key=lambda s: s.start):
+        if any(distance_m(stop.lat, stop.lon, p.lat, p.lon) <= p.radius + SPOT_STAY_M for p in places):
+            continue
+        spot = next((sp for sp in spots if distance_m(stop.lat, stop.lon, sp.lat, sp.lon) <= SPOT_SAME_M), None)
+        if spot is None:
+            spots.append(Spot(stop.lat, stop.lon, [stop]))
+        else:
+            spot.stops.append(stop)
+            lats = sorted(s.lat for s in spot.stops)
+            lons = sorted(s.lon for s in spot.stops)
+            spot.lat, spot.lon = lats[len(lats) // 2], lons[len(lons) // 2]
+    found = [sp for sp in spots if len(sp.days()) >= SPOT_MIN_DAYS
+             and not any(distance_m(sp.lat, sp.lon, lat, lon) <= SPOT_SAME_M for lat, lon in skip)]
+    return sorted(found, key=lambda sp: -len(sp.days()))
 
 
 # --------------------------------------------------------------- questions

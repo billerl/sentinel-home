@@ -789,6 +789,8 @@ class Engine:
             self.telegram.answer_button(callback_id, "Got it")
             self.telegram.reply_to_chat(chat_id, self.news.packages_taken_in())
             return
+        if self.family.handle_button(chat_id, message_id, data, callback_id):
+            return
         if not self.cars.handle_button(chat_id, message_id, data, callback_id):
             self.telegram.answer_button(callback_id)
 

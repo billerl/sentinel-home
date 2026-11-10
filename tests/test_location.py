@@ -19,6 +19,7 @@ from sentinel.engine.household import Vehicle
 from sentinel.engine.location import (
     CarLine, LocationQuestion, LocationStore, Person, PersonView, answer_location, change_message, distance_m,
     location_question, beep_command, lost_command, outing_command, owntracks_config, owntracks_link, WAYPOINT_TST_BASE, parse_coordinates, resolve_map_link,
+    Place, Stop, frequent_spots, stops_in,
 )
 
 HOME = (41.1145, -88.1780)
@@ -294,6 +295,39 @@ class TestHelpers(unittest.TestCase):
             shutil.rmtree(os.path.dirname(store.db_path), ignore_errors=True)
 
 
+GYM = (HOME[0], HOME[1] + 0.03)  # ~2.5 km east
+
+
+class TestSpots(unittest.TestCase):
+    """A spot someone keeps going back to, offered as a new place."""
+
+    def test_stops(self):
+        day = 1_762_000_000.0
+        iphone = [(day, *GYM, 6, 0), (day + 60, *GYM, 6, 0),  # arrives, then quiet while it sits there
+                  (day + 3 * 3600, GYM[0] + 0.01, GYM[1], 6, 40)]  # next report: driving away
+        self.assertEqual([(s.start, s.end) for s in stops_in(1, iphone)], [(day, day + 3 * 3600)])
+        android = [(day + i * 900, GYM[0] + i * 0.0002, GYM[1], 20, 0) for i in range(5)]  # pings every 15 min, wandering a bit
+        self.assertEqual([(s.start, s.end) for s in stops_in(1, android)], [(day, day + 3600)])
+        quick = [(day, *GYM, 6, 0), (day + 600, *HOME, 6, 0)]  # 10 minutes: a stop at the shop
+        self.assertEqual(stops_in(1, quick), [])
+        dead = [(day, *GYM, 6, 0), (day + 60, *GYM, 6, 0), (day + 20 * 3600, *GYM, 6, 0)]  # phone off overnight?
+        self.assertEqual(stops_in(1, dead), [])
+        driving = [(day + i * 600, *GYM, 6, 50) for i in range(6)]
+        self.assertEqual(stops_in(1, driving), [])
+
+    def test_frequent_spots(self):
+        day = 1_762_000_000.0
+        stops = [Stop(1, day + d * 86400, day + d * 86400 + 3600, GYM[0] + d * 0.0003, GYM[1]) for d in range(3)]
+        spots = frequent_spots(stops, [])
+        self.assertEqual((len(spots), len(spots[0].stops)), (1, 3))
+        self.assertAlmostEqual(spots[0].lat, GYM[0] + 0.0003)
+        self.assertEqual(frequent_spots(stops[:2], []), [])  # two days isn't a habit yet
+        twice_a_day = stops[:2] + [Stop(2, day + 3600 * 5, day + 3600 * 6, *GYM)]
+        self.assertEqual(frequent_spots(twice_a_day, []), [])  # still two days
+        self.assertEqual(frequent_spots(stops, [Place(1, "Gym", GYM[0], GYM[1] + 0.002, 150)]), [])  # already a place
+        self.assertEqual(frequent_spots(stops, [], skip=[GYM]), [])  # already asked
+
+
 class TestQuestions(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="sentinel-loc-")
@@ -554,6 +588,41 @@ class TestEndpoints(unittest.TestCase):
         phone["waypoints"][1]["desc"] = "Lincoln High"
         out = self.post("elizabeth", self.liz.token, phone).get_json()[0]["waypoints"]["waypoints"]
         self.assertEqual([(w["desc"], w["lat"]) for w in out], [("Home", round(home.lat, 6)), ("Lincoln High", 360.0)])
+
+    def test_a_spot_she_keeps_going_to_is_offered_as_a_place(self):
+        loc, family = self.engine.locations, self.engine.family
+        now = time.time()
+        for d in (3, 2, 1):
+            loc.record(self.liz, fix(*GYM, now - d * 86400))
+            loc.record(self.liz, fix(*GYM, now - d * 86400 + 60))
+            loc.record(self.liz, fix(*HOME, now - d * 86400 + 5400))
+        pins, asks = [], []
+        for name, fn in (("send_location", lambda _s, chat, lat, lon: pins.append((lat, lon)) or True),
+                         ("send_text_with_buttons", lambda _s, chat, text, buttons: asks.append((text, buttons)) or True),
+                         ("edit_text", lambda _s, chat, mid, text: self.sent.append(text) or True),
+                         ("answer_button", lambda _s, cid, text="": True)):
+            patcher = patch.object(type(self.engine.telegram), name, fn)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.assertTrue(family.suggest_spot(now))
+        self.assertEqual(pins, [GYM])
+        text, buttons = asks[0]
+        self.assertIn("Elizabeth has stopped at this spot on 3 different days lately", text)
+        self.assertFalse(family.suggest_spot(now))  # asked already: not again tomorrow
+
+        self.engine.handle_button("111", 5, buttons[0][0][1], "cb")  # 📍 Save it
+        self.assertIn("What should I call this place?", self.sent[-1])
+        self.assertTrue(family.name_pinned_place("111", "the gym"))
+        self.assertEqual([p.name for p in loc.places()], ["Home", "the gym"])
+        self.assertFalse(family.suggest_spot(now))  # a place now
+
+        loc.delete_place(loc.places()[1].id)
+        with loc._connect() as conn:
+            conn.execute("DELETE FROM spot_asks")
+        self.assertTrue(family.suggest_spot(now))
+        self.engine.handle_button("111", 6, asks[-1][1][0][1][1], "cb")  # No thanks
+        self.assertIn("won't ask about that spot again", self.sent[-1])
+        self.assertFalse(family.suggest_spot(now + 30 * 86400 + 1))  # not even weeks later
 
     def test_stale_position_asks_phone_for_a_fresh_one(self):
         ask = [{"_type": "cmd", "action": "reportLocation"}]
