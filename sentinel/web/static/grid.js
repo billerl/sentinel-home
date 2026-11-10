@@ -80,7 +80,16 @@ function openFocus(camId, displayName) {
   };
 }
 
+// "/#cam=<id>": straight to that camera full screen (a routine showing the front door on a TV)
+function focusFromHash() {
+  var m = /^#cam=([\w-]+)$/.exec(location.hash);
+  var c = m && liveCams.filter(function(x) { return x.id === m[1]; })[0];
+  if (c && focusedCamId !== c.id) openFocus(c.id, c.display || c.id);
+}
+window.addEventListener("hashchange", focusFromHash);
+
 function closeFocus() {
+  if (/^#cam=/.test(location.hash)) history.replaceState(null, "", location.pathname);  // Back stays on the grid
   clearInterval(focusTimer);
   focusTimer = null;
   document.getElementById('focus-img').onerror = null;
@@ -432,6 +441,7 @@ function applyCameras(cams) {
   });
   root.appendChild(weatherTile);
   setTimeout(layoutGrid, 0);  // after the page script has finished setting up
+  focusFromHash();
 }
 
 (function boot() {

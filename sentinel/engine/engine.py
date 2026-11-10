@@ -235,6 +235,7 @@ class Engine:
             "switch_on": lambda sid: next((s.on for s in self.switches.switches() if s.id == sid and s.online), None),
             "telegram": self.news.routine_message,
             "say": lambda text: self.audio.speak(text) if self.audio is not None else None,
+            "tv_camera": self._routine_tv_camera,
             "coords": self.family.home_coords,
             "nobody_home": self.family.nobody_home,
             "last_motion": lambda cam: (max(self._last_motion.values(), default=0.0) if cam is None
@@ -1127,6 +1128,16 @@ class Engine:
             "switches": self.switches.view()["switches"],
         }
 
+    def _routine_tv_camera(self, tv_id: str, camera: str, seconds: float) -> bool:
+        """A routine's "show the Front Door camera on the TV" (the camera by its host, as routines name them)."""
+        pipeline = self.cameras.get(camera)
+        if pipeline is None or self.frame_broker is None:
+            return False
+        ok, why = self.switches.tv_show_camera(tv_id, "#cam=" + self.frame_broker.web_id(pipeline.camera_id), seconds)
+        if not ok:
+            app_logger.log("info", "routine_tv_camera_skipped", why=why, component="routines", action="run")
+        return ok
+
     def routine_catalog(self):
         from sentinel.engine.routines import Catalog
 
@@ -1134,7 +1145,7 @@ class Engine:
                        switches={s.id: s.name for s in self.switches.switches()},
                        people={p.id: p.name for p in self.locations.people()},
                        cars={v.id: v.name for v in self.household.vehicles()},
-                       sensors=self.wifi_motion.paths())
+                       sensors=self.wifi_motion.paths(), tvs=self.switches.camera_tvs())
 
     @staticmethod
     def _routine_error(e: ValueError) -> str:
@@ -1223,7 +1234,7 @@ class Engine:
             "routines": [{"id": r.id, "name": r.name, "enabled": r.enabled, "spec": r.spec, "text": describe(r.spec, cat),
                           "last_run": r.last_run, "holding_until": holding.get(r.id)} for r in self.routines.store.all()],
             "catalog": {k: [{"id": i, "name": n} for i, n in getattr(cat, k).items()]
-                        for k in ("cameras", "switches", "people", "cars", "sensors")},
+                        for k in ("cameras", "switches", "people", "cars", "sensors", "tvs")},
             "dark": self.routines.is_dark(), "located": coords is not None,
             "sunrise": sun[0] if sun else None, "sunset": sun[1] if sun else None,
         }

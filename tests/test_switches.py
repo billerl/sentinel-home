@@ -7,6 +7,7 @@ import os
 import shutil
 import tempfile
 import threading
+import types
 import unittest
 from unittest import mock
 
@@ -524,6 +525,49 @@ class TestSamsungLiveView(unittest.TestCase):
         self.assertIsNone(drv.live_return("tv"))  # once back, the button goes
         drv.launch("tv", "111299001912")  # not running: started the usual way
         self.assertEqual(posted, ["111299001912"])
+
+
+class TestCameraOnTV(unittest.TestCase):
+    """A routine's "show the Front Door camera on the TV", then back to the show."""
+
+    def setUp(self):
+        self.now, self.timers = 1000.0, []
+        self.sw = SmartSwitches(tempfile.mkdtemp(prefix="sentinel-sw-"), drivers=[], clock=lambda: self.now)
+        self.sw._after = lambda delay, fn: self.timers.append(fn)
+        self.tv = types.SimpleNamespace(live_url="http://192.168.1.9:8088/", shown=[], backs=0, covering=True)
+        self.tv.show_live = lambda host, reload=False, path="": self.tv.shown.append(path)
+        self.tv.live_return = lambda host: "Netflix" if self.tv.covering else None
+        self.tv.live_back = lambda host: setattr(self.tv, "backs", self.tv.backs + 1)
+        self.switch = types.SimpleNamespace(id="samsung-1", name="TV", on=True, online=True)
+        self.sw._tv_for = lambda sid: (self.switch, self.tv, "192.168.1.55") if sid == "samsung-1" else None
+
+    def run_timers(self):
+        timers, self.timers = self.timers, []
+        for fn in timers:
+            fn()
+
+    def test_shows_then_goes_back_and_more_sightings_keep_it_up(self):
+        self.assertTrue(self.sw.tv_show_camera("samsung-1", "#cam=abc", 60)[0])
+        self.now += 40
+        self.sw.tv_show_camera("samsung-1", "#cam=abc", 60)  # still there: not reloaded, just longer
+        self.assertEqual(self.tv.shown, ["#cam=abc"])
+        self.now += 25
+        self.run_timers()  # the first minute is up, but the second sighting asked for more
+        self.assertEqual(self.tv.backs, 0)
+        self.now += 40
+        self.run_timers()
+        self.assertEqual(self.tv.backs, 1)  # back to Netflix
+
+    def test_off_tv_and_someone_already_changed_it(self):
+        self.switch.on = False
+        self.assertFalse(self.sw.tv_show_camera("samsung-1", "#cam=abc", 60)[0])  # never turns the TV on
+        self.assertEqual(self.tv.shown, [])
+        self.switch.on = True
+        self.sw.tv_show_camera("samsung-1", "#cam=abc", 60)
+        self.tv.covering = False  # someone tapped Back or opened YouTube
+        self.now += 61
+        self.run_timers()
+        self.assertEqual(self.tv.backs, 0)  # leave them be
 
 
 class TestSamsungDriver(unittest.TestCase):

@@ -40,6 +40,7 @@ MAX_TEXT = 200
 MAX_ACTIONS = 5
 MESSAGE_COOLDOWN = 5 * 60  # a routine sends Telegram messages at most this often...
 SAY_COOLDOWN = 2 * 60  # ...and speaks at most this often (each routine on its own: one per room says its room in turn)
+TV_CAMERA_MAX_MINUTES = 30  # "show the front door on the TV": it goes back to the show after this at most
 MOTION_REPEAT = 30.0  # a motion routine fires at most this often per camera
 SENSOR_REARM = 30.0  # a Wi-Fi sensor routine fires when movement starts after this long quiet, not all through it
 # Wi-Fi sensor rules ("this one and that one, but not that one"): how far apart the sensors' movement may be.
@@ -111,6 +112,7 @@ class Catalog:
     people: Dict[int, str] = field(default_factory=dict)
     cars: Dict[int, str] = field(default_factory=dict)
     sensors: Dict[str, str] = field(default_factory=dict)  # Wi-Fi motion lines (path id -> name)
+    tvs: Dict[str, str] = field(default_factory=dict)  # TVs that can show a camera (switch id -> name)
 
 
 def _pick(values: Any, table: Dict[Any, str], what: str) -> List[Any]:
@@ -308,8 +310,22 @@ def normalize(spec: Any, cat: Catalog) -> Dict[str, Any]:
                          **({"photo": True} if a.get("photo") and kind == "seen" else {})})
         elif do == "say":
             then.append({"do": "say", "text": _text(a.get("text"), "announcement")})
+        elif do == "tv_camera":
+            tv = _pick(a.get("tv"), cat.tvs, "TV") or (list(cat.tvs)[:1] if len(cat.tvs) == 1 else [])
+            if len(tv) != 1:
+                raise ValueError("say which TV shows the camera" if cat.tvs else "no TV here can show a camera yet")
+            cam = _pick(a.get("camera"), cat.cameras, "camera")
+            if len(cam) > 1:
+                raise ValueError("pick one camera to show")
+            if not cam and kind not in ("seen", "motion"):
+                raise ValueError("say which camera to show")
+            minutes = _minutes(a.get("for"), "how long it shows the camera") or 1
+            if minutes > TV_CAMERA_MAX_MINUTES:
+                raise ValueError(f"a camera can stay on the TV for up to {TV_CAMERA_MAX_MINUTES} minutes")
+            then.append({"do": "tv_camera", "tv": tv[0], "camera": cam[0] if cam else "", "for": minutes})
         else:
-            raise ValueError("it can turn a switch on or off, send a Telegram message, or say something out loud")
+            raise ValueError("it can turn a switch on or off, send a Telegram message, say something out loud, "
+                             "or show a camera on a TV")
     out = {"when": w, "only": o, "then": then}
     out["name"] = name or default_name(out, cat)
     return out
@@ -318,7 +334,9 @@ def normalize(spec: Any, cat: Catalog) -> Dict[str, Any]:
 def default_name(spec: Dict[str, Any], cat: Catalog) -> str:
     sw = next((a for a in spec["then"] if a["do"] == "switch"), None)
     w = spec["when"]
-    head = cat.switches.get(sw["switch"], "Switch") if sw else ("Message" if spec["then"][0]["do"] == "telegram" else "Announcement")
+    first = spec["then"][0]["do"]
+    head = (cat.switches.get(sw["switch"], "Switch") if sw else
+            {"telegram": "Message", "tv_camera": "Camera on TV"}.get(first, "Announcement"))
     where = {"seen": lambda: ", ".join(cat.cameras.get(c, "?") for c in w["cameras"]) or "any camera",
              "motion": lambda: ", ".join(cat.cameras.get(c, "?") for c in w["cameras"]) or "any camera",
              "sensor": lambda: ", ".join(cat.sensors.get(c, "?") for c in w["sensors"] or w.get("all", []))
@@ -402,6 +420,10 @@ def describe(spec: Dict[str, Any], cat: Catalog) -> str:
             steps.append(text)
         elif a["do"] == "telegram":
             steps.append(f"send “{a['text']}” on Telegram" + (" with a photo" if a.get("photo") else ""))
+        elif a["do"] == "tv_camera":
+            cam = f"the {cat.cameras.get(a['camera'], 'removed')} camera" if a["camera"] else "that camera"
+            steps.append(f"show {cam} on the {cat.tvs.get(a['tv'], 'removed TV')} (if it's on) for "
+                         f"{_minutes_words(a['for'])}, then go back to what was on")
         else:
             steps.append(f"say “{a['text']}” out loud")
     return f"{when}: {_join(steps, 'and')}."
@@ -728,6 +750,9 @@ class RoutineRunner:
             elif a["do"] == "say" and "say" in due:
                 self.hooks["say"](a["text"])
                 did.append("say")
+            elif a["do"] == "tv_camera" and (a["camera"] or camera) and "tv_camera" in self.hooks:
+                if self.hooks["tv_camera"](a["tv"], a["camera"] or camera, a["for"] * 60):
+                    did.append("tv_camera")
         for kind in due & set(did):
             self._said[(r.id, kind)] = now
         if any(did):

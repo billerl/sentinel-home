@@ -262,6 +262,12 @@ def _app_words(name: str) -> List[str]:
     return _words(name)
 
 
+def _after(delay: float, fn: Callable[[], None]) -> None:
+    t = threading.Timer(delay, fn)
+    t.daemon = True
+    t.start()
+
+
 class SmartSwitches:
     def __init__(self, root: str, drivers: Optional[List[Any]] = None,
                  clock: Callable[[], float] = time.time) -> None:
@@ -281,6 +287,8 @@ class SmartSwitches:
         self._clock = clock
         self._lock = threading.Lock()
         self._unmute: Dict[str, Any] = {}  # TV switch id -> the timer that ends "mute the TV for 2 minutes"
+        self._camera_shows: Dict[str, List[Any]] = {}  # TV switch id -> [until, page path] (a routine's camera)
+        self._after: Callable[[float, Callable[[], None]], None] = _after
         self._known: Dict[str, Dict[str, Any]] = {}  # device key ("kasa-<mac>") -> {kind, host, model}
         self._state: Dict[str, Dict[str, Any]] = {}  # device key -> last sysinfo
         self._failures: Dict[str, int] = {}
@@ -862,6 +870,49 @@ class SmartSwitches:
         for driver in self._drivers.values():
             if hasattr(driver, "live_url"):
                 driver.live_url = url
+
+    def camera_tvs(self) -> Dict[str, str]:
+        """TVs that can show one camera full screen (in their own browser): switch id -> name."""
+        return {tv[0].id: tv[0].name for tv in self._tvs() if getattr(tv[1], "live_url", None)}
+
+    def tv_show_camera(self, switch_id: str, path: str, seconds: float) -> Tuple[bool, str]:
+        """A routine's "show the Front Door camera on the TV": only on a TV that's on, then back to what was on
+        once it's been ``seconds`` since the camera was last asked for (more sightings keep it up)."""
+        tv = self._tv_for(switch_id)
+        if tv is None or not getattr(tv[1], "live_url", None):
+            return False, "That TV can't show a camera."
+        sw, driver, host = tv
+        if not (sw.on and sw.online):
+            return False, f"The {sw.name} is off."
+        with self._lock:
+            showing = self._camera_shows.get(switch_id)
+            self._camera_shows[switch_id] = [self._clock() + seconds, path]
+        if showing is None or showing[1] != path:
+            try:
+                driver.show_live(host, path=path)
+            except (OSError, ValueError) as e:
+                with self._lock:
+                    self._camera_shows.pop(switch_id, None)
+                return False, f"The {sw.name} didn't do it ({e})."
+        if showing is None:
+            self._after(seconds, lambda: self._camera_done(switch_id))
+        return True, "showing"
+
+    def _camera_done(self, switch_id: str) -> None:
+        with self._lock:
+            showing = self._camera_shows.get(switch_id)
+            left = showing[0] - self._clock() if showing else 0
+            if showing and left <= 0:
+                self._camera_shows.pop(switch_id, None)
+        if showing and left > 0:
+            self._after(left, lambda: self._camera_done(switch_id))
+            return
+        tv = self._tv_for(switch_id)
+        if showing and tv is not None and tv[1].live_return(tv[2]):  # still on the camera: back to the show
+            try:
+                tv[1].live_back(tv[2])
+            except (OSError, ValueError):
+                pass
 
     def tv_live(self, switch_id: str, reload: bool, back: bool = False) -> Tuple[bool, str]:
         """Show (or reload) the cameras; with ``back``, return to what the cameras covered (Samsung)."""

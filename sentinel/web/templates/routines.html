@@ -551,7 +551,8 @@
       step.className = "step";
       var kind = a.do === "switch" ? (a.on ? "on" : "off") : a.do;
       step.innerHTML = '<div class="line"><select class="s-do"><option value="on">Turn on</option><option value="off">Turn off</option>' +
-        '<option value="telegram">Send a Telegram message</option><option value="say">Say out loud</option></select>' +
+        '<option value="telegram">Send a Telegram message</option><option value="say">Say out loud</option>' +
+        '<option value="tv_camera">Show a camera on a TV</option></select>' +
         '<button type="button" class="x" title="Remove this step">✕</button></div><div class="s-fields"></div>';
       step.querySelector(".s-do").value = kind;
       step._a = a;
@@ -584,6 +585,18 @@
           var sync = function() { f.querySelector(".s-min").hidden = d.value === "stay"; };
           d.onchange = sync; sync();
         }
+      } else if (kind === "tv_camera") {
+        var seen = ["seen", "motion"].indexOf(document.getElementById("when-type").value) >= 0;
+        var tvs = (data.catalog.tvs || []).map(function(t) { return '<option value="' + esc(t.id) + '">' + esc(t.name) + '</option>'; }).join("");
+        var cams = (seen ? '<option value="">the camera that saw it</option>' : "") +
+          (data.catalog.cameras || []).map(function(c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>'; }).join("");
+        f.innerHTML = '<div class="line"><select class="s-cam">' + cams + '</select> on <select class="s-tv">' +
+          (tvs || '<option value="">(no TV can show a camera yet)</option>') + '</select></div>' +
+          '<div class="line">for <input type="number" class="s-n" min="1" max="30" value="' + (a.for || 1) +
+          '"> minutes, then back to what was on</div>' +
+          '<div class="line"><span class="note">Only if that TV is already on. It takes over the whole screen.</span></div>';
+        if (a.camera !== undefined) f.querySelector(".s-cam").value = a.camera;
+        if (a.tv) f.querySelector(".s-tv").value = a.tv;
       } else if (kind === "telegram") {
         f.innerHTML = '<div class="line"><input type="text" class="s-text" maxlength="200" placeholder="e.g. Someone is in the back yard"></div>' +
           (document.getElementById("when-type").value === "seen"
@@ -662,6 +675,9 @@
           var d = step.querySelector(".s-dur");
           if (d && d.value !== "stay") a[d.value === "quiet" ? "until_quiet" : "for"] = Number(step.querySelector(".s-n").value);
           then.push(a);
+        } else if (kind === "tv_camera") {
+          then.push({ do: "tv_camera", tv: step.querySelector(".s-tv").value, camera: step.querySelector(".s-cam").value,
+                      for: Number(step.querySelector(".s-n").value) });
         } else {
           var t = { do: kind, text: step.querySelector(".s-text").value };
           var p = step.querySelector(".s-photo");

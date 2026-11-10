@@ -60,7 +60,9 @@ Rules:
   "days": ["mon", ...], "nobody_home": true.
   "then", up to 5 steps: {"do": "switch", "switch": name, "on": true|false, "for": minutes} or with
   "until_quiet": minutes instead of "for" (stays on until there's been no motion on the routine's cameras or Wi-Fi
-  sensors that long; camera and sensor routines only); {"do": "telegram", "text": "...", "photo": true (camera routines)}; {"do": "say", "text": "..."}.
+  sensors that long; camera and sensor routines only); {"do": "telegram", "text": "...", "photo": true (camera routines)}; {"do": "say", "text": "..."};
+  {"do": "tv_camera", "tv": TV name, "camera": camera name ("" = the camera that saw it), "for": minutes (1-30,
+  then back to what was on; only if that TV is on)}.
   Use only camera, switch, people, car and Wi-Fi sensor names from DATA. If the switch or what should happen is unclear, ask
   instead (no command). For "until there's no motion" without a time, use 2 minutes. Keep your sentence short:
   Sentinel reads the routine back in its own words before saving. To pause or delete one use

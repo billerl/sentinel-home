@@ -192,6 +192,28 @@ class TestRunner(unittest.TestCase):
         self.runner.package_waiting("192.168.0.10")  # (the next parcel's first look)
         self.assertEqual(len(self.fake.said), 2)
 
+    def test_front_door_on_the_tv(self):
+        cat = Catalog(CAT.cameras, CAT.switches, CAT.people, CAT.cars, CAT.sensors, tvs={"samsung-1": "TV"})
+        spec = normalize({"when": {"type": "seen", "what": ["person"], "cameras": ["Front Door"]},
+                          "then": [{"do": "tv_camera", "camera": ""}]}, cat)  # the one TV; the camera that saw it
+        self.assertEqual(spec["then"], [{"do": "tv_camera", "tv": "samsung-1", "camera": "", "for": 1}])
+        self.assertEqual(spec["name"], "Camera on TV — Front Door")
+        self.assertEqual(describe(spec, cat), "When the Front Door camera sees a person: show that camera on the TV "
+                                              "(if it's on) for 1 minute, then go back to what was on.")
+        for bad, why in (({"do": "tv_camera", "for": 45}, "30 minutes"),
+                         ({"do": "tv_camera", "tv": "Bedroom"}, "Bedroom")):
+            with self.assertRaises(ValueError) as e:
+                normalize({**spec, "then": [bad]}, cat)
+            self.assertIn(why, str(e.exception))
+        with self.assertRaises(ValueError):  # a timed routine has no "camera that saw it"
+            normalize({"when": {"type": "time", "at": "18:00"}, "then": [{"do": "tv_camera"}]}, cat)
+        self.store.save(spec)  # (already checked against the catalog with the TV in it)
+        self.runner.reload()
+        shown = []
+        self.runner.hooks["tv_camera"] = lambda tv, camera, seconds: shown.append((tv, camera, seconds)) or True
+        self.runner.seen("192.168.0.10", "person")
+        self.assertEqual(shown, [("samsung-1", "192.168.0.10", 60)])
+
     def test_patio_lights_until_quiet(self):
         self.add(PATIO)
         self.runner.seen("192.168.0.10", "person")  # another camera

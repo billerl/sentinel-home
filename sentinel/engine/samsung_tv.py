@@ -525,7 +525,7 @@ class SamsungTVDriver:
         """The browser, once Sentinel has said where its camera page is (``live_url``)."""
         return BROWSER_APP if self.live_url else None
 
-    def show_live(self, host: str, reload: bool = False) -> None:
+    def show_live(self, host: str, reload: bool = False, path: str = "") -> None:
         """Sentinel's camera page in the TV's browser. Opening the address again loads it afresh, so a reload is
         the same (signed in once with the QR code, the browser keeps it). The app that was on is remembered for
         live_back: it keeps running behind the browser."""
@@ -535,7 +535,7 @@ class SamsungTVDriver:
         if before:
             self._before_live[host] = before
         self._send(host, [{"method": "ms.channel.emit", "params": {"event": "ed.apps.launch", "to": "host", "data": {
-            "appId": BROWSER_APP, "action_type": "NATIVE_LAUNCH", "metaTag": self.live_url}}}])
+            "appId": BROWSER_APP, "action_type": "NATIVE_LAUNCH", "metaTag": self.live_url + path}}}])
 
     def live_return(self, host: str) -> Optional[str]:
         """The app the cameras covered, while it's still running behind them, else None."""
@@ -549,7 +549,9 @@ class SamsungTVDriver:
         if not state.get("running"):
             self._before_live.pop(host, None)
             return None
-        return None if state.get("visible") else self.apps(host).get(app_id, app_id)
+        if self._visible_app(host):  # that app, or another one someone opened since: the cameras are gone
+            return None
+        return self.apps(host).get(app_id, app_id)
 
     def live_back(self, host: str) -> str:
         """Back to the app the cameras covered, where it was. Returns its name."""
