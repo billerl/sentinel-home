@@ -16,12 +16,34 @@ from typing import Optional, Tuple
 SOURCES = {
     # name -> (address, maximum zoom, picture type)
     "street": ("https://tile.openstreetmap.org/{z}/{x}/{y}.png", 19, "image/png"),
+    # the street map darkened here, for a TV in a dark room: the pages did it with a CSS filter (invert + hue-rotate),
+    # and the Samsung's old browser drew those tiles solid black (2026-11-10)
+    "dark": ("https://tile.openstreetmap.org/{z}/{x}/{y}.png", 19, "image/jpeg"),
     "aerial": ("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
                19, "image/jpeg"),
 }
 USER_AGENT = "SentinelHome/1.0 (self-hosted home security; https://github.com/billerl/sentinel-home)"
 KEEP_SECONDS = 7 * 86400
 MAX_FILES = 20000  # ~300 MB at most; the oldest go first
+
+
+def darken(png: bytes) -> bytes:
+    """A street map picture turned dark the way the pages' CSS did it: colours inverted, hues turned back round (so
+    water stays blue-ish and parks green-ish), a little dimmer and flatter. JPEG: smaller for the TV."""
+    import cv2
+    import numpy as np
+
+    img = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("not a picture")
+    hsv = cv2.cvtColor(255 - img, cv2.COLOR_BGR2HSV)
+    hsv[..., 0] = (hsv[..., 0].astype(np.int16) + 90) % 180  # (OpenCV hue runs 0-179: +90 = half way round)
+    out = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR).astype(np.float32)
+    out = ((out - 128.0) * 0.9 + 128.0) * 0.82
+    ok, jpeg = cv2.imencode(".jpg", np.clip(out, 0, 255).astype(np.uint8), [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if not ok:
+        raise ValueError("couldn't save the picture")
+    return jpeg.tobytes()
 
 
 class MapTiles:
@@ -53,7 +75,9 @@ class MapTiles:
             pass
         try:
             data = self._fetch(url.format(z=z, x=x, y=y))
-        except OSError:
+            if source == "dark":
+                data = darken(data)
+        except (OSError, ValueError):
             return (cached, kind) if cached else None  # offline: an old picture beats none
         self._save(path, data)
         return data, kind

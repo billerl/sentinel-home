@@ -11,7 +11,6 @@
     /* Shown full screen on a TV (Samsung's browser is Chrome 56: no flex gap, no CSS grid) */
     html, body { height: 100%; margin: 0; background: #000; color: #cfe; font-family: system-ui, sans-serif; }
     #map { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: #050b0f; }
-    #map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.8) contrast(0.9); }
     #panel { position: absolute; left: 2vw; bottom: 3vh; z-index: 1000; max-width: 62vw; padding: 1.2vh 1.6vw;
              background: rgba(0, 10, 16, 0.88); border: 1px solid #16303a; border-radius: 14px; }
     .title { font-size: 2.4vh; color: #7fd6e8; margin-bottom: 0.4vh; }
@@ -41,8 +40,9 @@
     function draw(data) {
       if (!map) {
         map = L.map("map", { zoomControl: false, keyboard: false, zoomAnimation: false, fadeAnimation: false });
-        // (map pictures come through Sentinel: the TV's old browser was turned away by the map servers)
-        L.tileLayer("/map_tile/street/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap · planes: adsb.lol" }).addTo(map);
+        // (map pictures come through Sentinel, already dark: the TV's old browser was turned away by the map servers,
+        // and drew CSS-filtered tiles black)
+        L.tileLayer("/map_tile/dark/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap · planes: adsb.lol" }).addTo(map);
         layers = L.layerGroup().addTo(map);
         if (data.home) {
           // the whole circle the planes come from (radius in nautical miles)

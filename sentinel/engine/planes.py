@@ -233,7 +233,7 @@ class Planes:
             who = f"a military {kind}" if p["kind"] else "a military plane"
         elif p["airline"] and p["callsign"]:
             number = re.sub(r"^[A-Z]{3}", "", p["callsign"])
-            who = f"{p['airline']} flight {number}, {article} {kind}"
+            who = f"{p['airline']} flight {number}" + (f", {article} {kind}" if p["kind"] else "")
         elif p["reg"] or p["callsign"]:  # (a private plane's call sign is its registration, N622DJ)
             who = f"{article} {kind} ({p['reg'] or p['callsign']})"
         else:

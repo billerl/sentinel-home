@@ -559,17 +559,16 @@ class SamsungTVDriver:
             return dict(self._page.get(host) or {"seq": 0, "path": "", "reload": False})
 
     def live_return(self, host: str) -> Optional[str]:
-        """The app the cameras covered, while it's still running behind them, else None."""
+        """The app the cameras covered (while nothing else has been opened since), else None."""
         app_id = self._before_live.get(host)
         if not app_id:
             return None
         try:
-            state = self._rest(host, f"applications/{app_id}")
+            self._rest(host, f"applications/{app_id}")  # (the TV answers: else nothing can be done anyway)
         except (OSError, ValueError):
             return None
-        if not state.get("running"):
-            self._before_live.pop(host, None)
-            return None
+        # (not running: the TV closed it behind the browser for memory, 2026-11-10. Still offered: Back opens it again,
+        # from its first screen, rather than leaving people to find it)
         if self._visible_app(host):  # that app, or another one someone opened since: the cameras are gone
             return None
         return self.apps(host).get(app_id, app_id)

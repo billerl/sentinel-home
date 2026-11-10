@@ -184,7 +184,9 @@ _ASK = re.compile(r"^(?:is|are)\s+(.+?)\s+on or off$|^(?:is|are)\s+(.+?)\s+(?:on
                   re.IGNORECASE)
 COMMAND = re.compile(r"^turn (?:on|off) [\w' -]{1,40}$|^turn [\w' -]{1,40} (?:on|off)$", re.IGNORECASE)  # Claude's button
 # TVs: apps, volume, mute, "what's on". "Play ..." is left to Spotify.
-_TV = r"(?:the )?(?:[\w']+ ){0,2}?(?:tv|television)"  # "the TV", "the Sentinel TV", "the fire TV"
+# "the TV", "the Sentinel TV", "the fire or Sentinel TV" (as heard, 2026-11-10); never "on"/"for"... ("go back two
+# minutes on the TV" is a time, then the TV)
+_TV = r"(?:the )?(?:(?!(?:on|to|for|by|in|at) )[\w']+ ){0,3}?(?:tv|television)"
 _TV_APP = re.compile(r"^(?:please )?(?:can you |could you )?(?:open|launch|start|put on|go to|switch to|turn on)\s+(.+?)"
                      r"(?:\s+on " + _TV + r")?(?:\s+please)?$", re.IGNORECASE)
 # "turn on the TV to Netflix", "turn the TV on to Hulu", "put the TV on YouTube TV", "switch the TV to Disney Plus"

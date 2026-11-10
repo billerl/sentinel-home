@@ -540,6 +540,14 @@ class TestSamsungLiveView(unittest.TestCase):
         self.assertIsNone(drv.live_return("tv"))  # once back, the button goes
         apps["11101200001"]["visible"] = True  # watching Netflix again
         drv.show_live("tv")
+        apps["11101200001"].update(running=False, visible=False)  # the TV closed Netflix behind the map (memory)
+        self.assertEqual(drv.live_return("tv"), "Netflix")  # still offered: Back opens it again
+        self.assertEqual(drv.live_back("tv"), "Netflix")
+        self.assertEqual(posted[-1], "11101200001")  # (started, from its first screen)
+        posted.clear()
+        apps["11101200001"]["visible"] = True
+        apps["11101200001"]["visible"] = True  # watching Netflix again
+        drv.show_live("tv")
         apps["11101200001"].update(running=False, visible=False)  # the TV closed Netflix behind the camera
         self.assertEqual(drv.live_end("tv"), "Netflix")  # time's up: opened again (from its first screen)
         self.assertEqual(posted[-1], "11101200001")
@@ -955,6 +963,9 @@ class TestFireTV(unittest.TestCase):
         self.assertEqual(self.sw.command("show the planes on the sentinel tv", "voice"),
                          "Okay, the plane map is on the Sentinel TV.")
         self.assertEqual(self.sw.tv_page("192.168.1.70")["path"], "#map=planes")  # the kiosk page takes it
+        # as heard on 2026-11-10 (went to Claude, then to the Samsung): four words before "TV"
+        self.assertEqual(self.sw.command("Show planes on the fire or Sentinel TV.", "voice"),
+                         "Okay, the plane map is on the Sentinel TV.")
         self.assertTrue(any("monkey -p de.ozerov.fully" in c for c in self.shell.commands))  # and is brought forward
         self.assertIn("Sentinel TV", self.sw.camera_tvs().values())  # routines can show a camera there too
         self.assertEqual(self.fire.live_end("192.168.1.70"), "the cameras")  # a routine's time is up: the grid

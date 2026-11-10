@@ -478,6 +478,7 @@ button:disabled { opacity: 0.35; cursor: default; }
             font: inherit; font-size: 0.85rem; max-width: 45%; }
 .tvr-x { background: none; border: 0; color: #7fb3c4; font-size: 1.3rem; padding: 6px 10px; cursor: pointer; }
 .tvr-row { display: flex; gap: 8px; margin: 10px 0; }
+.tvr-row[hidden] { display: none; }  /* (display:flex beat the hidden attribute: "Back to" always showed, 2026-11-10) */
 .tvr-row > * { flex: 1; min-width: 0; }
 .tvr-live .tvr-btn { border-color: #2a6f7e; color: #bff3ff; }
 .tvr-dpad { position: relative; width: 230px; height: 230px; margin: 16px auto; border-radius: 50%; touch-action: none;

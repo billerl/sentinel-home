@@ -11,7 +11,6 @@
     /* Shown full screen on a TV (Samsung's browser is Chrome 56: no flex gap, no CSS grid) */
     html, body { height: 100%; margin: 0; background: #000; color: #cfe; font-family: system-ui, sans-serif; }
     #map { position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: #050b0f; }
-    #map.street .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9); }
     #panel { position: absolute; left: 2vw; bottom: 3vh; z-index: 1000; max-width: 70vw; padding: 1.2vh 1.6vw;
              background: rgba(0, 10, 16, 0.86); border: 1px solid #16303a; border-radius: 14px; }
     .row { font-size: 2.6vh; line-height: 1.45; color: #9cc; }
@@ -61,7 +60,7 @@
           }).addTo(map);
         } else {
           document.getElementById("map").className = "street";
-          L.tileLayer("/map_tile/street/{z}/{x}/{y}.png", {
+          L.tileLayer("/map_tile/dark/{z}/{x}/{y}.png", {  // (already dark: CSS filters drew black on the TV)
             maxZoom: 19, attribution: "&copy; OpenStreetMap"
           }).addTo(map);
         }

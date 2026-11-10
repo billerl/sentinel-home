@@ -43,6 +43,21 @@ class TestMapTiles(unittest.TestCase):
         self.assertEqual(self.tiles.get("street", 3, 1, 2), (b"PNGDATA", "image/png"))
         self.assertIsNone(self.tiles.get("street", 3, 0, 0))  # never fetched: nothing to show
 
+    def test_dark_street_map_is_made_here(self):
+        # the TV's old browser drew CSS-filtered tiles black (2026-11-10): Sentinel darkens them instead
+        import cv2
+        import numpy as np
+
+        light = np.full((256, 256, 3), 235, np.uint8)  # a pale map square
+        self.tiles._fetch = lambda url: self.asked.append(url) or cv2.imencode(".png", light)[1].tobytes()
+        data, kind = self.tiles.get("dark", 5, 3, 4)
+        self.assertEqual(kind, "image/jpeg")
+        self.assertEqual(self.asked, ["https://tile.openstreetmap.org/5/3/4.png"])
+        self.assertLess(cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR).mean(), 60)  # now dark
+        self.assertEqual(self.tiles.get("dark", 5, 3, 4)[0], data)  # kept, darkened
+        self.tiles._fetch = lambda url: b"not a picture"
+        self.assertIsNone(self.tiles.get("dark", 5, 3, 5))
+
     def test_only_real_map_squares(self):
         for args in (("other", 3, 1, 1), ("street", 20, 1, 1), ("street", 3, 8, 1), ("street", 3, 1, -1)):
             self.assertIsNone(self.tiles.get(*args), args)
