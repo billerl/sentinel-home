@@ -18,7 +18,7 @@ import bcrypt
 from sentinel.engine.household import Vehicle
 from sentinel.engine.location import (
     CarLine, LocationQuestion, LocationStore, Person, PersonView, answer_location, change_message, distance_m,
-    location_question, beep_command, lost_command, outing_command, owntracks_config, owntracks_link, parse_coordinates, resolve_map_link,
+    location_question, beep_command, lost_command, outing_command, owntracks_config, owntracks_link, WAYPOINT_TST_BASE, parse_coordinates, resolve_map_link,
 )
 
 HOME = (41.1145, -88.1780)
@@ -433,6 +433,7 @@ class TestEndpoints(unittest.TestCase):
         loc = self.engine.locations
         loc.save_place("Home", *HOME)
         self.liz = loc.person(loc.save_person("Elizabeth"))
+        loc.phone_places_sent(self.liz.id, loc.places())  # her phone has the places (see test_places_reach_the_phones)
         self.sent = []
         patcher = patch.object(type(self.engine.telegram), "reply_to_chat",
                                lambda _self, chat, text: self.sent.append(text) or True)
@@ -517,6 +518,42 @@ class TestEndpoints(unittest.TestCase):
         self.engine.family._location_asked.clear()
         self.assertEqual(self.post(dog.username, dog.token, {"_type": "checkin"}).get_json(), [])
         self.assertIn("wasn't marked lost", self.engine.family.set_lost("found", [loc.person(dog.id)]))
+
+    def test_places_reach_the_phones(self):
+        loc = self.engine.locations
+        home = loc.places()[0]
+        school = loc.save_place("School", HOME[0] + 0.02, HOME[1])
+        ask = [{"_type": "cmd", "action": "waypoints"}]
+        self.assertEqual(self.post("elizabeth", self.liz.token, fix(*HOME, time.time())).get_json(), ask)
+        self.assertEqual(self.post("elizabeth", self.liz.token, fix(*HOME, time.time())).get_json(), [])  # asked once
+        # an Android phone set up with Home under its own "tst": it keeps it (a new one would be a second Home)
+        phone = {"_type": "waypoints", "waypoints": [{"_type": "waypoint", "desc": "home", "lat": HOME[0], "lon": HOME[1],
+                                                      "rad": 150, "tst": 1762000000}]}
+        reply = self.post("elizabeth", self.liz.token, phone).get_json()
+        self.assertEqual(reply[0]["action"], "setWaypoints")
+        sent = {w["desc"]: w["tst"] for w in reply[0]["waypoints"]["waypoints"]}
+        self.assertEqual(sent, {"Home": 1762000000, "School": WAYPOINT_TST_BASE + school})
+        self.engine.family._places_asked.clear()
+        self.assertEqual(self.post("elizabeth", self.liz.token, fix(*HOME, time.time())).get_json(), [])  # up to date
+
+        # renamed: the old name comes off (an iPhone deletes a place sent with impossible coordinates)
+        loc.save_place("Lincoln High", HOME[0] + 0.02, HOME[1], place_id=school)
+        self.assertEqual(self.post("elizabeth", self.liz.token, fix(*HOME, time.time())).get_json(), ask)
+        phone["waypoints"].append({"_type": "waypoint", "desc": "School", "lat": HOME[0] + 0.02, "lon": HOME[1],
+                                   "rad": 150, "tst": WAYPOINT_TST_BASE + school})
+        phone["waypoints"].append({"_type": "waypoint", "desc": "Gym", "lat": 1, "lon": 1, "rad": 50, "tst": 5})
+        out = self.post("elizabeth", self.liz.token, phone).get_json()[0]["waypoints"]["waypoints"]
+        self.assertEqual([(w["desc"], w["lat"], w["tst"]) for w in out],
+                         [("Home", round(home.lat, 6), 1762000000),
+                          ("Lincoln High", round(HOME[0] + 0.02, 6), WAYPOINT_TST_BASE + school),  # Android: replaced
+                          ("School", 360.0, WAYPOINT_TST_BASE + school)])  # iPhone: removed; her own "Gym" left alone
+        # deleted: off the iPhone too
+        self.engine.family._places_asked.clear()
+        loc.delete_place(school)
+        self.assertEqual(self.post("elizabeth", self.liz.token, fix(*HOME, time.time())).get_json(), ask)
+        phone["waypoints"][1]["desc"] = "Lincoln High"
+        out = self.post("elizabeth", self.liz.token, phone).get_json()[0]["waypoints"]["waypoints"]
+        self.assertEqual([(w["desc"], w["lat"]) for w in out], [("Home", round(home.lat, 6)), ("Lincoln High", 360.0)])
 
     def test_stale_position_asks_phone_for_a_fresh_one(self):
         ask = [{"_type": "cmd", "action": "reportLocation"}]

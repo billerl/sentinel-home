@@ -18,6 +18,7 @@ for a dog (leaving needs 100+ m), so trackers also get the yard: a shape drawn o
 """
 
 import base64
+import hashlib
 import json
 import math
 import re
@@ -235,6 +236,10 @@ class LocationStore:
                 conn.execute("ALTER TABLE people ADD COLUMN web_hash TEXT NOT NULL DEFAULT ''")
                 conn.execute("ALTER TABLE people ADD COLUMN login_code TEXT NOT NULL DEFAULT ''")
                 conn.execute("ALTER TABLE people ADD COLUMN login_expires REAL NOT NULL DEFAULT 0")
+            # The places last sent to each phone (places_signature) and {place id: [name, tst]}, so a
+            # renamed or deleted one can be replaced or removed. No row: never sent since setup.
+            conn.execute("CREATE TABLE IF NOT EXISTS phone_places (person_id INTEGER PRIMARY KEY,"
+                         " signature TEXT NOT NULL, sent TEXT NOT NULL)")
         self.reassess()
         try:
             os.chmod(self.db_path, 0o600)  # holds the phones' passwords and the family's whereabouts
@@ -439,6 +444,20 @@ class LocationStore:
         with self._connect() as conn:
             return [Place(r["id"], r["name"], r["lat"], r["lon"], r["radius"], bool(r["alerts"]))
                     for r in conn.execute("SELECT * FROM places ORDER BY id")]
+
+    def phone_places(self, person_id: int) -> Tuple[str, Dict[str, Any]]:
+        """(signature, {place id: [name, tst]}) of the places last sent to this person's phone; ("", {}) if never."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM phone_places WHERE person_id = ?", (person_id,)).fetchone()
+        return (row["signature"], json.loads(row["sent"])) if row else ("", {})
+
+    def phone_places_sent(self, person_id: int, places: Iterable[Place], sent: Optional[Dict[str, Any]] = None) -> None:
+        places = list(places)
+        if sent is None:
+            sent = {str(p.id): [p.name, WAYPOINT_TST_BASE + p.id] for p in places}
+        with self._lock, self._connect() as conn:
+            conn.execute("INSERT OR REPLACE INTO phone_places (person_id, signature, sent) VALUES (?, ?, ?)",
+                         (person_id, places_signature(places), json.dumps(sent)))
 
     def place(self, place_id: Optional[int]) -> Optional[Place]:
         return next((p for p in self.places() if p.id == place_id), None)
@@ -719,9 +738,64 @@ def owntracks_config(person: Person, endpoint: str, places: Iterable[Place], now
         "tid": initials(person.name),
         "monitoring": 1,  # "significant changes": easy on the battery
         "cmd": True,  # lets Sentinel's reply ask for a fresh position when the one it has is old
-        "waypoints": [{"_type": "waypoint", "desc": p.name, "lat": round(p.lat, 6), "lon": round(p.lon, 6),
-                       "rad": int(p.radius), "tst": int(now) - i} for i, p in enumerate(places)],
+        "waypoints": [_waypoint(p) for p in places],
     }
+
+
+WAYPOINT_TST_BASE = 1_000_000_000  # a place's id on the phones: this + its id (Android keys places by "tst")
+
+
+def _waypoint(place: Place, tst: Optional[int] = None) -> Dict[str, Any]:
+    return {"_type": "waypoint", "desc": place.name, "lat": round(place.lat, 6), "lon": round(place.lon, 6),
+            "rad": int(place.radius), "tst": WAYPOINT_TST_BASE + place.id if tst is None else tst}
+
+
+def places_signature(places: Iterable[Place]) -> str:
+    """Changes when a place is added, removed, renamed, moved or resized."""
+    raw = json.dumps(sorted((p.id, p.name, round(p.lat, 6), round(p.lon, 6), int(p.radius)) for p in places))
+    return hashlib.sha1(raw.encode()).hexdigest()[:16]
+
+
+def set_waypoints(on_phone: Any, places: Iterable[Place],
+                  sent_before: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """The command that brings a phone's places up to date, given the list the phone sent
+    ({"_type": "waypoints"}) and what was sent to it before ({place id: [name, tst]}); returns it
+    with the new "sent before". A place keeps the "tst" it has on the phone, by name or, renamed,
+    by the one sent for it last time: Android keys places by "tst" (a new one would be a second
+    copy) and iPhones by name. A name Sentinel sent before that is gone now goes with impossible
+    coordinates, which removes it on an iPhone (Android ignores it; there the rename replaced it).
+    Places the person added on the phone themselves are left alone."""
+    have: Dict[str, Tuple[str, int]] = {}  # lower-case name -> (name as on the phone, tst)
+    listed = on_phone.get("waypoints") if isinstance(on_phone, dict) else None
+    for w in listed if isinstance(listed, list) else []:
+        try:
+            have[str(w["desc"]).strip().lower()] = (str(w["desc"]), int(w["tst"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    places = list(places)
+    taken = {tst for _name, tst in have.values()}
+    out, sent = [], {}
+    for p in places:
+        key = p.name.strip().lower()
+        before = sent_before.get(str(p.id))
+        if key in have:
+            tst = have[key][1]
+        elif before and int(before[1]) in taken:
+            tst = int(before[1])  # renamed: replaces the old one on Android
+        else:
+            tst = WAYPOINT_TST_BASE + p.id
+            while tst in taken:
+                tst += 1
+            taken.add(tst)
+        out.append(_waypoint(p, tst))
+        sent[str(p.id)] = [p.name, tst]
+    current = {p.name.strip().lower() for p in places}
+    for name, _tst in sent_before.values():
+        key = str(name).strip().lower()
+        if key not in current and key in have:
+            out.append({"_type": "waypoint", "desc": have[key][0], "lat": 360.0, "lon": 360.0, "rad": 0,
+                        "tst": have[key][1]})
+    return {"_type": "cmd", "action": "setWaypoints", "waypoints": {"_type": "waypoints", "waypoints": out}}, sent
 
 
 def owntracks_link(config: Dict[str, Any]) -> str:

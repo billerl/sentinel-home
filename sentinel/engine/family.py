@@ -39,6 +39,7 @@ class Family:
         self._place_pins: Dict[str, Tuple[float, float, float]] = {}  # chat -> pin waiting for a name (lat, lon, until)
         self._location_alerted: Dict[Tuple[int, int], float] = {}  # (person, place) -> last alert
         self._location_asked: Dict[int, float] = {}  # person -> last time we asked their phone for a fresh fix
+        self._places_asked: Dict[int, float] = {}  # person -> last time we asked their phone which places it has
         self._outings: Dict[int, float] = {}  # pet -> until when its tracker is asked often ("the dogs are going out")
         self._beeps: Dict[int, float] = {}  # pet -> when "recall Xena" was asked (the LoRa base picks it up)
         self._lost_pinned: Dict[int, Tuple[float, float, float]] = {}  # lost pet -> last pin sent (ts, lat, lon)
@@ -214,6 +215,26 @@ class Family:
         return {"pets": pets, "yard": self.locations.yard(), "home": [home.lat, home.lon] if home else None,
                 "poll_seconds": OUTING_POLL_SECONDS, "now": now}
 
+    def _sync_places(self, person, msg: Dict[str, Any], now: float) -> List[Dict[str, Any]]:
+        """Keeps the places on a family phone the same as Sentinel's, so the phone itself says the
+        moment someone arrives or leaves one added after it was set up. When they differ, the phone
+        is asked for its list (it posts {"_type": "waypoints"}) and the answer to that brings it up
+        to date without doubling the places it already has."""
+        from sentinel.engine.location import places_signature, set_waypoints
+
+        places = self.locations.places()
+        signature, sent_before = self.locations.phone_places(person.id)
+        if msg.get("_type") == "waypoints":
+            command, sent = set_waypoints(msg, places, sent_before)
+            self.locations.phone_places_sent(person.id, places, sent)
+            app_logger.log("info", "places_synced", person=person.name, places=len(places),
+                           on_phone=len(msg.get("waypoints") or []), component="engine", action="location")
+            return [command]
+        if signature != places_signature(places) and now - self._places_asked.get(person.id, 0) > LOCATION_STALE_S:
+            self._places_asked[person.id] = now
+            return [{"_type": "cmd", "action": "waypoints"}]
+        return []
+
     def owntracks_post(self, username: str, password: str, payload: Any) -> Optional[List[Dict[str, Any]]]:
         """A message from a family phone. Returns what to send back to the phone, or None if the
         login is wrong. A phone left alone mostly re-sends its last position (its 15-minute check-in
@@ -232,6 +253,8 @@ class Family:
             self._location_asked[person.id] = now
             reply = [{"_type": "cmd", "action": "reportLocation"}]
         msg = payload if isinstance(payload, dict) else {}
+        if not person.tracker:
+            reply += self._sync_places(person, msg, now)
         if person.tracker:  # the LoRa base checks in every 5 s: "ping or beep the collar now?"
             from sentinel.engine.location import OUTING_POLL_SECONDS
 
