@@ -310,6 +310,32 @@ class TestRunner(unittest.TestCase):
                                     clock=lambda: self.now, spawn=lambda fn, *a: fn(*a),
                                     later=lambda delay, fn: self.timers.append((self.now + delay, fn)))
 
+    def test_a_house_wide_wifi_blip_is_not_the_front_door(self):
+        # 2026-11-10 19:07: 15 of 21 paths jumped in the same second -> "someone opened the front door", nobody had
+        self.rule_runner()
+        together = {"n": 15}
+        self.runner.house_wide = lambda at: together["n"]
+        self.add({"when": {"type": "sensor", "sensors": ["2350-beb4"]},
+                  "then": [{"do": "say", "text": "Someone has opened the front door"}]})
+        self.runner.sensor("2350-beb4")
+        self.assertEqual(self.fake.said, [])  # waits to see the rest of the house first
+        self.now += 3
+        self.run_due()
+        self.assertEqual(self.fake.said, [])  # the whole house moved: a blip
+        self.now += 60
+        together["n"] = 4  # a real opening moved 4-5 paths near the door
+        self.runner.sensor("2350-beb4")
+        self.now += 3
+        self.run_due()
+        self.assertEqual(self.fake.said, ["Someone has opened the front door"])
+        self.add(TestSensorRules.ROOM)  # rules ("and" / "but not") skip a blip too
+        self.now += 300
+        together["n"] = 14
+        self.runner.sensor("beb4-df1c")
+        self.now += 10
+        self.run_due()
+        self.assertEqual(self.fake.said, ["Someone has opened the front door"])
+
     def test_but_not_waits_for_the_other_sensors(self):
         self.rule_runner()
         self.add(TestSensorRules.ROOM)

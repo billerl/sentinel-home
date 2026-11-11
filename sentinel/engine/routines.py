@@ -42,6 +42,7 @@ MESSAGE_COOLDOWN = 5 * 60  # a routine sends Telegram messages at most this ofte
 SAY_COOLDOWN = 2 * 60  # ...and speaks at most this often (each routine on its own: one per room says its room in turn)
 TV_CAMERA_MAX_MINUTES = 30  # "show the front door on the TV": it goes back to the show after this at most
 MOTION_REPEAT = 30.0  # a motion routine fires at most this often per camera
+HOUSE_WIDE_WAIT = 2.5  # a Wi-Fi sensor routine waits this long to see whether the whole house moved at once
 SENSOR_REARM = 30.0  # a Wi-Fi sensor routine fires when movement starts after this long quiet, not all through it
 # Wi-Fi sensor rules ("this one and that one, but not that one"): how far apart the sensors' movement may be.
 # They never react at the same instant: walking through, the next room's line fires a few seconds later.
@@ -529,6 +530,9 @@ class RoutineRunner:
         self._package_fired: Dict[Tuple[int, str], float] = {}  # (routine, camera) -> last time, while a parcel waits
         self._sensor_moved: Dict[str, float] = {}  # Wi-Fi sensor path -> its latest moving reading
         self._deciding: Dict[int, float] = {}  # sensor rule -> when the movement that started it was
+        # When set: did most of the house's sensor paths start moving around this moment (a Wi-Fi blip)? Then
+        # sensor routines stay quiet. Asked HOUSE_WIDE_WAIT after the movement, once the other paths have reported.
+        self.house_wide: Optional[Callable[[float], int]] = None
         self._settle_until = 0.0
         self._time_checked = clock()
         self._routines: List[Routine] = []
@@ -633,8 +637,11 @@ class RoutineRunner:
                 due.append(r)
         for r in due:
             self._motion_fired[(r.id, "wifi:" + path)] = now
-        if due:
+        if due and self.house_wide is None:
             self._fire(lambda w: False, None, None, only={r.id for r in due})
+        elif due:
+            ids = {r.id for r in due}
+            self._later(HOUSE_WIDE_WAIT, lambda: self._fire_unless_house_wide(ids, now, path))
         for r in rules:
             with self._lock:
                 if r.id in self._deciding:
@@ -642,11 +649,30 @@ class RoutineRunner:
                 self._deciding[r.id] = now
             self._later(r.spec["when"]["within"], lambda rid=r.id: self._decide(rid))
 
+    def _blip(self, at: float, path: str, ids) -> bool:
+        """Most of the house moved at once around ``at``: the Wi-Fi blipped (logged, and nothing fires)."""
+        if self.house_wide is None:
+            return False
+        from sentinel.engine.wifi_motion import HOUSE_WIDE_PATHS
+
+        together = self.house_wide(at)
+        if together < HOUSE_WIDE_PATHS:
+            return False
+        app_logger.log("info", "routine_skipped_house_wide", routines=sorted(ids), path=path, paths=together,
+                       component="routines", action="sensor")
+        return True
+
+    def _fire_unless_house_wide(self, ids, at: float, path: str) -> None:
+        if not self._blip(at, path, ids):
+            self._fire(lambda w: False, None, None, only=set(ids))
+
     def _decide(self, rid: int) -> None:
         with self._lock:
             first = self._deciding.pop(rid, None)
         r = next((x for x in self._routines if x.id == rid), None)
         if first is None or r is None or not r.enabled:
+            return
+        if self._blip(first, "rule", [rid]):
             return
         if rule_met(r.spec["when"], first, lambda p: self._sensor_moved.get(p, -math.inf)):
             self._motion_fired[(rid, "rule")] = self._clock()

@@ -251,6 +251,7 @@ class Engine:
             "last_sensor_motion": self.wifi_motion.last_motion,
         }, holds_path=os.path.join(VIDEO_DIR, HOLDS_FILE))
         self.wifi_motion.on_motion = self.routines.sensor
+        self.routines.house_wide = self.wifi_motion.paths_starting  # (a Wi-Fi blip isn't someone at the door)
         self._routines_ticked = 0.0
         from sentinel.engine.recap import Recap
 

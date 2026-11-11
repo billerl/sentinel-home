@@ -41,6 +41,8 @@ LOG_DIR = "wifi_motion"
 HELLO_PORT = 47301
 POLL_SECONDS = 1.0
 OFFLINE_AFTER = 15.0
+HOUSE_WIDE_WINDOW = 2.0  # seconds either side: paths that began moving "together"
+HOUSE_WIDE_PATHS = 12  # this many together = the Wi-Fi itself blipped (interference), not a person
 KEEP_DAYS = 14
 SERIES_SECONDS = 120  # what the web page's live chart shows
 NAME_MAX = 30
@@ -236,6 +238,7 @@ class WifiMotion:
         self._ratios: Dict[str, float] = {}  # path id -> movement line the user picked (else RATIO)
         self.on_motion: Optional[Callable[[str], None]] = None  # path id, on each moving reading (routines)
         self._moving: Set[str] = set()  # paths that moved in the poll being taken
+        self._starts: Deque[Tuple[float, str]] = deque(maxlen=400)  # (when, path) each line's movement began
         self._open: Dict[str, List[float]] = {}  # path -> [start, last movement, peak x quiet level] still going
         self._bursts: List[Tuple[str, float, float, float]] = []  # ended bursts waiting to be written (path, start, end, peak)
         self._db_path = os.path.join(store_dir, EVENTS_DB)
@@ -379,6 +382,7 @@ class WifiMotion:
                 base = line.judge.baseline or 0.0
                 self._note_movement(pid, ts, line.judge.smoothed / base if base else 0.0)
             if change == "started":
+                self._starts.append((ts, path_id(line)))
                 app_logger.log("info", "wifi_motion_started", sensor=line.id, path=path_id(line),
                                name=self._path_name(path_id(line), [line]),
                                score=round(line.judge.smoothed, 2), baseline=round(line.judge.baseline or 0, 2),
@@ -391,6 +395,13 @@ class WifiMotion:
                                name=self._path_name(path_id(line), [line]),
                                seconds=round(line.judge.last_motion - line.judge.started, 1),
                                peak=round(line.judge.peak, 2), component="wifi_motion", action="judge")
+
+    def paths_starting(self, ts: float, window: float = HOUSE_WIDE_WINDOW) -> int:
+        """How many different paths began moving within ``window`` seconds of ``ts``. A person moves a few paths
+        near them; a blip in the house's Wi-Fi moves most of them in the same second (2026-11-10: 13 and 15 of
+        21, each "someone opened the front door"; walking around: at most 10)."""
+        with self._lock:
+            return len({p for t, p in self._starts if abs(t - ts) <= window})
 
     # ---- movement history (the History page, "any movement inside today?") ----
     def _db(self) -> sqlite3.Connection:
