@@ -33,6 +33,7 @@ MAX_TIMES = 20  # "volume up 50 times" is a typo
 PRESS_GAP = 0.3
 # Spoken extras around "<remote> <button>": "press the soundbar power button please".
 FILLER = {"press", "push", "hit", "tap", "click", "the", "my", "a", "button", "please", "jarvis", "hey"}
+LOOSE_FILLER = {"turn", "set", "switch", "put", "to", "speed", "it", "at", "make"}
 COUNTS = {"once": 1, "twice": 2, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
           "eight": 8, "nine": 9, "ten": 10}
 # "turn the soundbar up" / "louder" mean a button called "Volume up" (only if the remote has one).
@@ -463,7 +464,28 @@ class Remotes:
                         want = sorted(w for w in _words(rname) + _words(bname) if w not in FILLER)
                         if want and said == want:
                             return rname, bname, times
-        return None
+        return self._loose(low, remotes, times)
+
+    @staticmethod
+    def _loose(low: str, remotes, times: int) -> Optional[Tuple[str, str, int]]:
+        """The short way people say it: "fan high", "fan light on", "set the fan to medium", "turn off the ceiling
+        fan" for "Living Room Ceiling Fan" / "Fan High"... Every word said must belong to the remote's name or the
+        button's, at least one to the remote's, and every word that sets the button apart from the remote's name
+        ("high", "light on") must be said: "turn on the fan" is no button (not the fan's Light On). Only one answer."""
+        said = [w for w in low.split() if w not in FILLER and w not in LOOSE_FILLER]
+        if not said:
+            return None
+        hits = []
+        for rname, buttons in remotes:
+            rwords = set(_words(rname)) - FILLER
+            for bname in buttons:
+                own = set(_words(bname)) - FILLER - rwords  # what sets this button apart
+                if not own or not own <= set(said) or not set(said) <= rwords | own | set(_words(bname)):
+                    continue
+                if not set(said) & rwords:
+                    continue
+                hits.append((rname, bname))
+        return (hits[0][0], hits[0][1], times) if len(hits) == 1 else None
 
     def understands(self, text: str) -> bool:
         return self.parse(text) is not None

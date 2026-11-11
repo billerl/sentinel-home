@@ -195,6 +195,21 @@ class TestRemotes(unittest.TestCase):
         self.remotes.press("Fan", "Fan Low")
         self.assertEqual(self.dev.sent, [b"\xb2LOW"])
 
+    def test_short_ways_to_say_a_fan_button(self):
+        for button in ("Light On", "Light Off", "Fan Off", "Fan Low", "Fan Medium", "Fan High"):
+            self.teach("Living Room Ceiling Fan", button)
+        self.teach("Heater", "Power")
+        p = self.remotes.parse
+        for said, button in (("fan high", "Fan High"), ("turn off the ceiling fan", "Fan Off"),
+                             ("set the fan to medium", "Fan Medium"), ("fan light on", "Light On"),
+                             ("turn off the fan light", "Light Off"), ("living room fan low", "Fan Low")):
+            self.assertEqual(p(said), ("Living Room Ceiling Fan", button, 1), said)
+        for said in ("turn on the fan", "light on", "turn on the lights", "turn off the tv", "high"):
+            self.assertIsNone(p(said), said)  # (not "Light On": the light wasn't asked for)
+        self.teach("Bedroom Ceiling Fan", "Fan High")
+        self.assertIsNone(p("fan high"))  # two fans now: which one?
+        self.assertEqual(p("bedroom fan high"), ("Bedroom Ceiling Fan", "Fan High", 1))
+
     def test_teaching_again_replaces_the_button(self):
         self.teach("Heater", "Power", code=b"old")
         self.teach("heater", "power", code=b"new")
@@ -243,9 +258,9 @@ class TestRemotes(unittest.TestCase):
         self.assertEqual(p("soundbar volume down twice"), ("Soundbar", "Volume down", 2))
         self.assertEqual(p("turn the soundbar up"), ("Soundbar", "Volume up", 1))
         self.assertEqual(p("turn up the soundbar five times"), ("Soundbar", "Volume up", 5))
-        self.assertEqual(p("turn the heater on"), None)  # "turn ... on" isn't a button name
+        self.assertEqual(p("turn the heater on"), ("Heater", "On", 1))  # (a button named "On": the short way)
         self.assertEqual(p("heater on"), ("Heater", "On", 1))
-        self.assertEqual(p("bedroom fan high"), None)  # the button is "Fan high"
+        self.assertEqual(p("bedroom fan high"), ("Bedroom fan", "Fan high", 1))  # (said short, 2026-11-10)
         self.assertEqual(p("bedroom fan fan high"), ("Bedroom fan", "Fan high", 1))
         for other in ("what's the weather", "soundbar", "volume up", "turn on the patio lights", ""):
             self.assertIsNone(p(other), other)
