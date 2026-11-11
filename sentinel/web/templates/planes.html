@@ -22,6 +22,7 @@
                            font-weight: 700; padding: 1px 6px; }
     .leaflet-tooltip.tag:before { display: none; }
     .leaflet-tooltip.tag.low { color: #ffd84d; }
+    .leaflet-tooltip.tag.mil { color: #ff8f8f; }
     #home-link { position: absolute; top: 12px; left: 12px; z-index: 1000; padding: 8px 14px; border-radius: 10px;
                  background: rgba(0, 10, 16, 0.86); border: 1px solid #16303a; color: #cfe; text-decoration: none; font-size: 15px; }
     @media (max-width: 700px) {  /* a phone */
@@ -87,12 +88,12 @@
         var turn = p.track == null ? 0 : Math.round(p.track);
         var icon = L.divIcon({ className: "plane", iconSize: [32, 32], iconAnchor: [16, 16],
           html: '<svg width="32" height="32" viewBox="0 0 32 32" style="transform:rotate(' + turn + 'deg);-webkit-transform:rotate(' + turn + 'deg)">'
-            + SHAPE.replace("FILL", p.low ? "#ffd84d" : "#4de0ff") + "</svg>" });
+            + SHAPE.replace("FILL", p.military ? "#ff6b6b" : p.low ? "#ffd84d" : "#4de0ff") + "</svg>" });
         var pin = L.marker([p.lat, p.lon], { icon: icon, interactive: false }).addTo(layers);
         // labels on the closest flying ones only: around a big airport they piled up unreadably
-        if (p.feet === "on the ground" || ++labels > 15) return;
-        pin.bindTooltip(esc(p.tag) + (p.route ? " · " + esc(p.route) : "") + (p.feet ? " · " + esc(p.feet.replace(" feet up", " ft")) : ""),
-                       { permanent: true, direction: "right", offset: [14, 0], className: "tag" + (p.low ? " low" : "") });
+        if (p.feet === "on the ground" || (++labels > 15 && !p.military)) return;
+        pin.bindTooltip((p.military ? "military · " : "") + esc(p.tag) + (p.route ? " · " + esc(p.route) : "") + (p.feet ? " · " + esc(p.feet.replace(" feet up", " ft")) : ""),
+                       { permanent: true, direction: "right", offset: [14, 0], className: "tag" + (p.military ? " mil" : p.low ? " low" : "") });
       });
       var rows = [];
       if (data.error) rows.push('<div class="empty">' + esc(data.error) + "</div>");

@@ -466,6 +466,9 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   `/api/talk` (lat/lon the page sends when geolocation is already granted, else the personal login's fix); `/planes` on a
   phone (not a TV UA) watches the browser's position and asks `/api/planes?lat=&lon=`. Planes on the ground are left
   out of answers (unless nothing flies); the map labels the closest 15 flying ones. Home page tile ✈️ Planes.
+  "What was that" (also "plane" misheard as "playing" next to "flew over") ranks planes by their closest pass in
+  the last LOOKBACK 180 s (walked back along track at ground speed). "Any military planes?" (kind "military"):
+  /v2/point radius MIL_RADIUS_NM 150, dbFlags & 1 only, no route lookups; map: military red + always labeled.
 - **Lost dog** (`Family.set_lost/lost_view` in `sentinel/engine/family.py`, `lost_command` in location.py, page
   `/lost`, `/api/lost*`): "Grace is lost" (page button, voice, Telegram) = every unpaused chat gets the news, the
   `remote_web_url` + `/lost` link and the last fix as a pin; the base's check-ins then ask the collar every

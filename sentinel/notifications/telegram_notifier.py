@@ -91,6 +91,7 @@ class TelegramNotifier:
             "- Show me the front door (on the TV) — one camera full screen (the Samsung)\n"
             "- Show me Kate's location / everyone's location — a map on the TV (pictures: Family page)\n"
             "- What plane is that? / Any planes around? — planes near the house (near you, when you're away): airline, type, height, where from and to\n"
+            "- Any military planes around? — military aircraft within about 170 miles\n"
             "- Show me the planes (on the TV) — a map of the planes near the house\n"
             "- Soundbar volume up 3 times / Heater power — a button taught on the Remotes page (BroadLink)\n"
             "- Set the heater to 70 / How warm is it inside? / Stop holding the temperature — the heater thermostat\n\n"

@@ -48,13 +48,16 @@ class TestPlaneQuestions(unittest.TestCase):
     def test_what_people_say(self):
         for text in ("What plane is that?", "what's that plane", "Hey Jarvis, what kind of plane is that?",
                      "what's flying overhead", "what is flying over the house", "what's that helicopter",
-                     "which flight is that", "whose plane is that"):
+                     "which flight is that", "whose plane is that",
+                     "What was that playing? It just flew over.",  # (as heard, 2026-11-10: "plane" -> "playing")
+                     "what was that that just flew over the house"):
             self.assertEqual(plane_question(text), "that", text)
         for text in ("Any planes around?", "are there any planes nearby", "how many planes are overhead",
                      "what planes are flying over", "what planes are in the area", "any helicopters around"):
             self.assertEqual(plane_question(text), "list", text)
         for text in ("show me the planes on the TV", "where is Kate", "what's on the TV", "turn on the fan",
-                     "play Jet Airliner", "book a plane ticket", "what time does her plane land"):
+                     "play Jet Airliner", "book a plane ticket", "what time does her plane land",
+                     "what was that noise", "what is that playing on the TV"):
             self.assertIsNone(plane_question(text), text)
 
     def test_tv_map_words(self):
@@ -104,6 +107,35 @@ class TestPlanes(unittest.TestCase):
         self.assertNotIn("on the ground", self.planes.answer("list"))
         lonely = Planes(home=lambda: HOME, get_json=FakeNet([parked]), clock=lambda: 1000.0).answer("that")
         self.assertIn("on the ground, close by", lonely)  # (nothing flying: then it's the one)
+
+    def test_the_one_that_just_went_over(self):
+        # heard, then asked: by then a low plane is miles off. It flew east right over the house 90 s ago.
+        low = {"hex": "c1", "flight": "N12345", "r": "N12345", "t": "C172", "alt_baro": 2000, "gs": 240.0,
+               "track": 90.0, "lat": HOME[0], "lon": HOME[1] + 6 / (60 * 0.7534)}
+        high = {"hex": "c2", "flight": "N55555", "r": "N55555", "t": "GLEX", "alt_baro": 34000, "gs": 430.0,
+                "track": 0.0, "lat": HOME[0] - 0.05, "lon": HOME[1] + 0.03}
+        planes = Planes(home=lambda: HOME, get_json=FakeNet([low, high]), clock=lambda: 1000.0)
+        said = planes.answer("that")
+        self.assertTrue(said.startswith("That's probably a Cessna 172 (N12345), 2,000 feet up, 7 miles east, "
+                                        "and it passed right over the house a minute ago."), said)
+        self.assertNotIn("trackers can't see", said)
+        alone = Planes(home=lambda: HOME, get_json=FakeNet([high]), clock=lambda: 1000.0).answer("that")
+        self.assertIn("34,000 feet up", alone)
+        self.assertIn("may be one the trackers can't see", alone)  # a loud low one heard isn't a jet that high
+
+    def test_military_farther_out(self):
+        herc = {"hex": "ae1", "flight": "ANVIL30", "t": "C30J", "dbFlags": 1, "alt_baro": 2400, "lat": HOME[0] + 1.5,
+                "lon": HOME[1]}
+        net = FakeNet([herc, dict(SKY[0])])
+        said = Planes(home=lambda: HOME, get_json=net, clock=lambda: 1000.0).answer("military")
+        self.assertIn("/150", net.asked[0])  # (looks ~170 miles out, not 40)
+        self.assertTrue(said.startswith("1 military aircraft within 173 miles."), said)
+        self.assertIn("A military C-130J Hercules (ANVIL30), 2,400 feet up, 104 miles north", said)
+        self.assertFalse(any("adsbdb" in u for u in net.asked))  # (no route lookups for the airliners out there)
+        none = Planes(home=lambda: HOME, get_json=FakeNet([dict(SKY[0])]), clock=lambda: 1000.0).answer("military")
+        self.assertIn("don't see any military aircraft", none)
+        for text in ("any military planes around?", "are there any C-130s nearby", "is there a C 130 around"):
+            self.assertEqual(plane_question(text), "military", text)
 
     def test_whats_around(self):
         said = self.planes.answer("list")

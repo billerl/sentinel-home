@@ -28,9 +28,11 @@ POSITIONS_URL = "https://api.adsb.lol/v2/point/{lat:.4f}/{lon:.4f}/{radius}"
 ROUTE_URL = "https://api.adsbdb.com/v0/callsign/{callsign}"
 USER_AGENT = "SentinelHome/1.0 (self-hosted home security; https://github.com/billerl/sentinel-home)"
 MAP_RADIUS_NM = 40  # what the TV map shows (and what's fetched)
+MIL_RADIUS_NM = 150  # "any military planes around?": they're few, so look much farther (~170 miles)
 ASK_RADIUS_NM = 25  # "any planes around?"
 OVERHEAD_NM = 12  # "what plane is that?": closer than this counts as the one being asked about
 POSITIONS_FRESH = 10.0  # seconds a fetch is reused
+LOOKBACK = 180.0  # "what was that?": a plane heard has usually just passed; look this many seconds back along its way
 AWAY_NM = 5.0  # someone asking from farther than this from home hears about the planes over them instead
 # Where the person asking is, while their question is answered (their phone's position: Telegram, the Talk button, the
 # Planes page); None = the house. Set by whoever takes the question (Engine.answer_question, the Talk route).
@@ -80,6 +82,14 @@ TYPE_NAMES = {
     "AS50": "Airbus AStar helicopter", "B06": "Bell 206 helicopter", "B407": "Bell 407 helicopter",
     "B429": "Bell 429 helicopter", "A109": "AW109 helicopter", "A119": "AW119 helicopter", "S76": "Sikorsky S-76 helicopter",
     "H60": "Black Hawk helicopter", "UH60": "Black Hawk helicopter",
+    # military (adsb.lol shows them when they broadcast; Flightradar24 hides many)
+    "C130": "C-130 Hercules", "C30J": "C-130J Hercules", "H47": "Chinook helicopter", "CH47": "Chinook helicopter",
+    "H64": "Apache helicopter", "LAKO": "Lakota helicopter", "V22": "V-22 Osprey",
+    "F16": "F-16 fighter", "F15": "F-15 fighter", "F18H": "F/A-18 Super Hornet", "F35": "F-35 fighter",
+    "A10": "A-10 Warthog", "KC46": "KC-46 tanker", "K35E": "KC-135 tanker", "KC10": "KC-10 tanker",
+    "B52": "B-52 bomber", "B1": "B-1 bomber", "B2": "B-2 bomber", "C5": "C-5 Galaxy", "C12": "C-12 Huron",
+    "C560": "Cessna Citation", "C27J": "C-27 Spartan", "E3TF": "AWACS", "P8": "P-8 Poseidon", "T38": "T-38 trainer",
+    "T6": "T-6 Texan trainer", "U2": "U-2 spy plane", "Q9": "Reaper drone",
 }
 DIRECTIONS = ("north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest")
 
@@ -158,23 +168,26 @@ class Planes:
             return (float(home[0]), float(home[1])), False
         raise ValueError("no home")
 
-    def nearby(self, spot: Optional[Tuple[float, float]] = None) -> List[Dict[str, Any]]:
+    def nearby(self, spot: Optional[Tuple[float, float]] = None, radius: int = MAP_RADIUS_NM,
+               military_only: bool = False) -> List[Dict[str, Any]]:
         """Planes within MAP_RADIUS_NM of the spot (default: center()), nearest overhead first (ground distance and
         height together). Raises OSError when the flight tracker can't be reached, ValueError when the house's
         place isn't known."""
         home = spot or self.center()[0]
-        key = (round(home[0], 2), round(home[1], 2))  # (~1 km: the TV's map and a phone at home share a fetch)
+        key = (round(home[0], 2), round(home[1], 2), radius, military_only)  # (~1 km: the TV and a phone share one)
         now = self._clock()
         with self._lock:
             got = self._positions.get(key)
             if got and now - got[0] < POSITIONS_FRESH:
                 return got[1]
         try:
-            data = self._get(POSITIONS_URL.format(lat=home[0], lon=home[1], radius=MAP_RADIUS_NM))
+            data = self._get(POSITIONS_URL.format(lat=home[0], lon=home[1], radius=radius))
         except (OSError, ValueError) as e:
             app_logger.log("info", "planes_unreachable", error_message=str(e)[:200], component="planes", action="fetch")
             raise OSError("the flight tracker didn't answer") from e
         planes = [p for p in (self._plane(a, home) for a in (data or {}).get("ac") or []) if p]
+        if military_only:  # (hundreds of airliners that far out: their routes aren't wanted)
+            planes = [p for p in planes if p["military"]]
         planes.sort(key=lambda p: p["slant_nm"])
         self._find_routes(planes)
         with self._lock:
@@ -247,7 +260,8 @@ class Planes:
         kind = p["kind"] or "plane"
         article = "an" if kind[:1].upper() in "AEIOU" else "a"
         if p["military"]:
-            who = f"a military {kind}" if p["kind"] else "a military plane"
+            who = (f"a military {kind}" if p["kind"] else "a military plane") \
+                + (f" ({p['callsign']})" if p["callsign"] else "")
         elif p["airline"] and p["callsign"]:
             number = re.sub(r"^[A-Z]{3}", "", p["callsign"])
             who = f"{p['airline']} flight {number}" + (f", {article} {kind}" if p["kind"] else "")
@@ -267,8 +281,29 @@ class Planes:
         text = ", ".join(parts)
         return text[0].upper() + text[1:] if lead else text
 
+    @staticmethod
+    def closest_pass(p: Dict[str, Any], spot: Tuple[float, float]) -> Tuple[float, float, Tuple[float, float]]:
+        """(how close it came to the spot in the last LOOKBACK seconds, how long ago, where it was then), walking
+        it back along its heading at its speed. A plane heard is usually one that just went over, and is already
+        a few miles off by the time anyone asks (2026-11-10)."""
+        best = (p["dist_nm"], 0.0, (p["lat"], p["lon"]))
+        speed, track = p.get("speed_kt"), p.get("track")
+        if not speed or track is None:
+            return best
+        back = math.radians(float(track) + 180)
+        for ago in range(5, int(LOOKBACK) + 1, 5):
+            nm = float(speed) * ago / 3600.0
+            lat = p["lat"] + nm * math.cos(back) / 60.0
+            lon = p["lon"] + nm * math.sin(back) / (60.0 * max(0.2, math.cos(math.radians(p["lat"]))))
+            d = distance_nm(spot[0], spot[1], lat, lon)
+            if d < best[0]:
+                best = (d, float(ago), (lat, lon))
+        return best
+
     def answer(self, kind: str) -> str:
-        """kind "that" (the plane overhead) or "list" (what's around)."""
+        """kind "that" (the plane overhead), "list" (what's around) or "military" (military aircraft, farther out)."""
+        if kind == "military":
+            return self._answer_military()
         try:
             spot, away = self.center()
             planes = self.nearby(spot)
@@ -283,17 +318,49 @@ class Planes:
         if not near:
             return f"I don't see any planes within {ASK_RADIUS_NM * NM_TO_MILES:.0f} miles{of} right now."
         if kind == "that":
-            first = near[0]
-            said = ("That's probably " if first["dist_nm"] <= OVERHEAD_NM else
-                    f"Nothing's right over {'you' if away else 'the house'}. The closest is ") \
-                + self.describe(first, lead=False) + "."
+            def height_nm(p):
+                return float(p["alt"]) / 6076.0 if isinstance(p["alt"], (int, float)) else 0.0
+
+            passes = {p["id"]: self.closest_pass(p, spot) for p in near}
+            first = min(near, key=lambda p: math.hypot(passes[p["id"]][0], height_nm(p)))
+            gap, ago, then = passes[first["id"]]
+            where = "you" if away else "the house"
+            said = ("That's probably " if gap <= OVERHEAD_NM else
+                    f"Nothing's right over {where}. The closest is ") + self.describe(first, lead=False)
+            if ago >= 20 and gap < first["dist_nm"] - 1:
+                miles = gap * NM_TO_MILES
+                close = "right over " + where if miles < 1 else \
+                    f"about {miles:.0f} mile{'s' if round(miles) != 1 else ''} {compass(bearing(spot[0], spot[1], *then))} of {where}"
+                said += f", and it passed {close} {'a minute' if ago < 100 else f'{round(ago / 60)} minutes'} ago"
+            said += "."
             if first["airline"] and not first["route"] and not first["military"]:
                 said += " I couldn't confirm where it's headed."
+            if gap > OVERHEAD_NM or height_nm(first) * 6076 > 10000:
+                said += (" If it sounded low and loud, it may be one the trackers can't see: some low and "
+                         "military planes don't show up.")
             return said
         count = len(near)
         lines = [f"{count} plane{'s' if count != 1 else ''} within {ASK_RADIUS_NM * NM_TO_MILES:.0f} miles{of}. "
                  + ("The closest:" if count > 1 else "")]
         lines += [f"• {self.describe(p)}" for p in near[:3]]
+        return "\n".join(lines)
+
+    def _answer_military(self) -> str:
+        try:
+            spot, away = self.center()
+            found = self.nearby(spot, MIL_RADIUS_NM, military_only=True)
+        except ValueError:
+            return "I don't know where the house is yet: save Home on the Family page first."
+        except OSError:
+            return "I couldn't reach the flight tracker just now. Try again in a minute."
+        miles = f"{MIL_RADIUS_NM * NM_TO_MILES:.0f} miles{' of you' if away else ''}"
+        flying = [p for p in found if p["alt"] != "ground"] or found
+        if not flying:
+            return (f"I don't see any military aircraft within {miles} right now. Many don't broadcast where they "
+                    "are, so that's not a guarantee.")
+        count = len(flying)
+        lines = [f"{count} military aircraft within {miles}." + (" The closest:" if count > 1 else "")]
+        lines += [f"• {self.describe(p)}" for p in flying[:3]]
         return "\n".join(lines)
 
     def map_view(self, at: Optional[Tuple[float, float]] = None) -> Dict[str, Any]:
@@ -315,6 +382,7 @@ class Planes:
             out.append({"id": p["id"], "lat": p["lat"], "lon": p["lon"], "track": p["track"],
                         "tag": p["callsign"] or p["reg"] or p["kind"] or "?", "feet": _feet(p["alt"]),
                         "low": isinstance(p["alt"], (int, float)) and p["alt"] < 5000 or p["alt"] == "ground",
+                        "military": p["military"],
                         "text": self.describe(p),
                         "route": f"{route['from']['code'] or route['from']['city']} → {route['to']['code'] or route['to']['city']}"
                         if route else ""})
@@ -337,6 +405,14 @@ _LIST = re.compile(r"^(?:are there |is there |any |how many |what |which |list |
                    re.IGNORECASE)
 
 
+_FLEW = re.compile(r"\b(?:flew|flying|flies|went|go(?:es|ing)?|passed|buzzed)\s+(?:right\s+|just\s+)?"
+                   r"(?:over(?:head)?|by|above)\b|\bjust flew\b", re.IGNORECASE)
+
+
+_MILITARY = re.compile(r"\bmilitary\b|\bair force\b|\bnational guard\b|\bc-? ?130s?\b|\bhercules\b|"
+                       r"\bfighter (?:jets?|planes?)\b|\bchinooks?\b|\bblack ?hawks?\b|\bospreys?\b", re.IGNORECASE)
+
+
 def plane_question(text: str) -> Optional[str]:
     """"what plane is that?" -> "that"; "any planes around?" -> "list"; None for anything else ("show the planes
     on the TV" is the TV's)."""
@@ -344,6 +420,13 @@ def plane_question(text: str) -> Optional[str]:
     t = re.sub(r"^(?:hey |ok |okay )?(?:jarvis|sentinel)\s*", "", t, flags=re.IGNORECASE)
     if not t or _SHOW.match(t):
         return None
+    if _FLEW.search(t):  # "what was that playing? it just flew over" (heard 2026-11-10): "plane" misheard
+        t = re.sub(r"\b(?:playing|plain|plains|plan|player)\b", "plane", t, flags=re.IGNORECASE)
+        if re.match(r"^(?:what|who)(?:'s| is| was)? (?:that|this)\b", t, re.IGNORECASE):
+            return "that"
+    if _MILITARY.search(t) and re.match(r"^(?:are there |is there |any |how many |what |which |where |list |"
+                                        r"tell me |do you see |can you see )", t, re.IGNORECASE):
+        return "military"
     if _THAT.match(t):
         return "that"
     if _LIST.match(t):
