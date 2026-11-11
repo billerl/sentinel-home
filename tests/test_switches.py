@@ -719,10 +719,30 @@ class TestSamsungDriver(unittest.TestCase):
             with self.assertRaises(OSError):
                 self.drv.set("192.168.1.60", None, True)  # no BroadLink button taught: as before
             self.drv.ir_power = lambda: pressed.append("ir") or True
-            self.drv.set("192.168.1.60", None, True)
+            with mock.patch("sentinel.engine.samsung_tv.IR_BOOT_SECONDS", 0):
+                self.drv.set("192.168.1.60", None, True)
         self.assertEqual(pressed, ["ir"])
         self.assertTrue(self.drv._tvs["001122334455"].get("on_since"))
         self.assertNotIn(("KEY_POWER",), self.log)  # (nothing over the network: it isn't there)
+        # "turn on YouTube" 15 s later, its network still not up: never the button again (it switched it off)
+        with mock.patch("sentinel.engine.samsung_tv.WAKE_SECONDS", 0), \
+                mock.patch("sentinel.engine.samsung_tv.IR_BOOT_SECONDS", 0):
+            self.assertEqual(self.drv.status("192.168.1.60")["relay_state"], 1)  # starting up: still on
+            self.drv.set("192.168.1.60", None, True)
+        self.assertEqual(pressed, ["ir"])
+
+    def test_found_at_a_new_address(self):
+        # the router gave the TV a new address after a deep sleep (2026-11-10): .55 -> .245
+        self.net = True
+        seen = {"192.168.1.245"}
+        self.drv.answering = lambda host, timeout=None: (
+            {"device": {"type": "Samsung SmartTV", "wifiMac": "00:11:22:33:44:55", "modelName": "UN65NU6900"}}
+            if host in seen else None)
+        with mock.patch("sentinel.engine.samsung_tv._arp_hosts", lambda macs: ["192.168.1.245"]), \
+                mock.patch("sentinel.engine.samsung_tv.socket.socket"):
+            found = self.drv.discover(wait=0)
+        self.assertEqual([h for h, _ in found], ["192.168.1.245"])
+        self.assertEqual(self.drv._tvs["001122334455"]["host"], "192.168.1.245")
 
     def test_off_presses_power_once(self):
         self.net = self.picture = True

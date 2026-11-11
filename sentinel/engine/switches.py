@@ -735,6 +735,11 @@ class SmartSwitches:
         except (OSError, ValueError) as e:
             app_logger.log("warning", "tv_failed", what=what, error_message=str(e), source=source,
                            component="switches", action="tv")
+            if re.search(r"no route|timed out|refused|unreachable|errno 11[0-9]", str(e), re.IGNORECASE):
+                # (Jarvis read out "<urlopen error [Errno 113] No route to host>", 2026-11-10: the router had given
+                # the TV a new address. Look for it now, not at the next 15-minute search.)
+                self.request_scan()
+                return f"The {sw.name} isn't answering yet. It may still be starting up: try again in a moment."
             return f"The {sw.name} didn't do it ({e})."
 
     def _tv_press(self, driver, host: str, *keys: str) -> None:
@@ -864,6 +869,9 @@ class SmartSwitches:
         try:
             driver.launch(host, app_id)
         except (OSError, ValueError) as e:
+            if re.search(r"no route|timed out|refused|unreachable", str(e), re.IGNORECASE):
+                self.request_scan()  # (a new address? see tv_command)
+                return False, f"The {sw.name} isn't answering yet. It may still be starting up: try again in a moment."
             return False, f"The {sw.name} didn't open it ({e})."
         app_logger.log("info", "tv_app", app=name, source="web", component="switches", action="tv")
         self._step(switch_id, "open", app_id)

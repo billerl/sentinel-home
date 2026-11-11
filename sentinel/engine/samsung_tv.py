@@ -35,6 +35,8 @@ from sentinel.logging_utils import app_logger
 STATE_FILE = "samsung_tv.json"
 REST_PORT, WS_PORT = 8001, 8002
 CLIENT_NAME = "Sentinel"
+IR_GRACE = 120.0  # after the infrared Power button: on, whatever its network says (it takes a while to come up)
+IR_BOOT_SECONDS = 45  # how long to wait for its network after the infrared button
 WAKE_SECONDS = 25  # how long a wake (packet, then waiting for its network) may take
 SCREEN_AFTER = 240.0  # answering this long without a break = the picture is on (dark wake-ups last ~2 min)
 APPS_EVERY = 3600.0
@@ -70,6 +72,20 @@ GRID_SWAP = (1, 7)
 GRID_SPACE, GRID_CLEAR, GRID_SEARCH = (4, 0), (4, 1), (4, 2)
 
 
+def _arp_hosts(macs) -> List[str]:
+    """Addresses this PC has lately seen for these network cards (the kernel's ARP table)."""
+    out = []
+    try:
+        with open("/proc/net/arp") as f:
+            for line in f.read().splitlines()[1:]:
+                cols = line.split()
+                if len(cols) >= 4 and cols[3].replace(":", "").lower() in macs and cols[2] != "0x0":
+                    out.append(cols[0])
+    except OSError:
+        pass
+    return out
+
+
 class SamsungTVDriver:
     """The SmartSwitches driver interface (discover, status, set, rename) plus apps and remote buttons."""
 
@@ -80,6 +96,7 @@ class SamsungTVDriver:
         self.timeout = timeout
         self.live_url: Optional[str] = None  # Sentinel's page on the home network (SmartSwitches.set_live_url)
         self.ir_power: Optional[Callable[[], bool]] = None  # a BroadLink's taught TV Power button: True = pressed
+        self._ir_on_at: Dict[str, float] = {}  # TV address -> when the infrared button switched it on
         self._before_live: Dict[str, str] = {}  # TV address -> the app that was on when the cameras came up
         self._page_lock = threading.Lock()
         self._page: Dict[str, Dict[str, Any]] = {}  # TV address -> what its camera page should show (page_poll)
@@ -305,6 +322,15 @@ class SamsungTVDriver:
         finally:
             sock.close()
 
+    def _wait_network(self, host: str) -> bool:
+        """After the infrared Power button: until the TV answers on the network (or IR_BOOT_SECONDS)."""
+        end = time.time() + IR_BOOT_SECONDS
+        while time.time() < end:
+            if self.answering(host, timeout=1.5) is not None:
+                return True
+            time.sleep(1)
+        return False
+
     def _ready(self, host: str) -> bool:
         """Fully awake (READY_PORT answers)."""
         try:
@@ -391,6 +417,8 @@ class SamsungTVDriver:
             sock.close()
         with self._lock:
             hosts |= {tv["host"] for tv in self._tvs.values() if tv.get("host")}
+            macs = set(self._tvs)
+        hosts |= set(_arp_hosts(macs))  # (a known TV the router gave a new address: 2026-11-10, .55 -> .245)
         found = []
         for host in hosts:
             reply = self.answering(host)
@@ -422,7 +450,8 @@ class SamsungTVDriver:
         now = time.time()
         if self.answering(host) is None:
             self._net_since.pop(host, None)
-            self._screen(mac, False)
+            if now - self._ir_on_at.get(host, -IR_GRACE) >= IR_GRACE:  # (just switched on by infrared: starting up)
+                self._screen(mac, False)
         else:
             since = self._net_since.setdefault(host, now)
             if not tv.get("on_since") and now - since >= SCREEN_AFTER and now - self._off_at.get(host, 0.0) >= SCREEN_AFTER:
@@ -447,6 +476,12 @@ class SamsungTVDriver:
             return
         if tv.get("on_since") and self.answering(host) is not None:
             return  # on, as far as we know: pressing power would switch it off
+        if time.time() - self._ir_on_at.get(host, -IR_GRACE) < IR_GRACE:
+            # Switched on by the infrared button moments ago and still starting up: pressing it again switched it
+            # back off ("turn on YouTube" 15 s after "turn on the TV", 2026-11-10). Wait for it instead.
+            self._wait_network(host)
+            self._screen(mac, True)
+            return
         if recently_off:  # wait for its network to go, or the wake below would be taken for "already on"
             end = time.time() + 15
             while time.time() < end and self.answering(host, timeout=1.0) is not None:
@@ -467,8 +502,10 @@ class SamsungTVDriver:
             # Asleep too deeply for the wake packet (off a while, its Wi-Fi fully down: 2026-11-04). With its network
             # gone it's surely off, so the infrared Power button (a BroadLink's) can only switch it on.
             if self.ir_power is not None and self.ir_power():
+                self._ir_on_at[host] = time.time()
                 app_logger.log("info", "tv_ir_power", host=host, component="switches", action="on")
                 self._screen(mac, True)
+                self._wait_network(host)  # (so "open YouTube" right after finds it answering)
                 return
             raise OSError("the TV didn't wake up (is 'Power On with Mobile' on in its network settings?)")
         time.sleep(1)
