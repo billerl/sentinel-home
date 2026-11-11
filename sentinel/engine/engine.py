@@ -185,6 +185,10 @@ class Engine:
         self.heater = HeaterControl(VIDEO_DIR, self.remotes, self.settings, notify=lambda text: [
             self.telegram.reply_to_chat(c, text) for c in self.telegram.unpaused_chats()])
         self.switches.extras = [self.heater, self.remotes]
+        self.switches.sound_keys = self._soundbar_keys  # "turn the TV down": the soundbar's infrared buttons
+        for driver in self.switches.drivers():
+            if getattr(driver, "kind", "") == "samsung":
+                driver.ir_power = lambda: self._remote_button(("tv", "television"), ("power",))
         from sentinel.engine.tv_shortcuts import TVShortcuts
 
         self.tv_shortcuts = TVShortcuts(VIDEO_DIR, self.switches)  # button presses recorded on the TV remote (beta)
@@ -732,6 +736,22 @@ class Engine:
             "movement inside", self._indoor_question, lambda _m, t: self.wifi_motion.answer(t),
             speak=to_speech, voice_stage="late", log_kind=lambda _m: "indoor"))
         return commands
+
+    def _remote_button(self, remotes: Tuple[str, ...], buttons: Tuple[str, ...], times: int = 1) -> bool:
+        """Press a taught BroadLink button by name (a remote called "Soundbar", its "Volume up"): True when pressed."""
+        known = self.remotes.buttons()
+        for rname, bnames in known.items():
+            if rname.lower() not in remotes:
+                continue
+            for bname in bnames:
+                if bname.lower() in buttons:
+                    return self.remotes.press(rname, bname, times=times, source="tv")[0]
+        return False
+
+    def _soundbar_keys(self, key: str, times: int) -> bool:
+        names = {"KEY_VOLUP": ("volume up", "vol up", "louder"), "KEY_VOLDOWN": ("volume down", "vol down", "quieter"),
+                 "KEY_MUTE": ("mute",)}[key]
+        return self._remote_button(("soundbar", "sound bar"), names, times)
 
     def asker_spot(self, person_id: Optional[int] = None, name: str = "") -> Optional[Tuple[float, float]]:
         """Where someone asking is, from their phone (by id, or by the first name they write under on Telegram):

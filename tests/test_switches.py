@@ -371,6 +371,23 @@ class TestTV(unittest.TestCase):
         self.assertEqual(self.sw.command("mute the TV", "telegram"), "Okay, muting the TV.")
         self.assertEqual(self.tv.calls[-1], ("press", "KEY_MUTE"))
 
+    def test_volume_through_the_soundbar(self):
+        # the soundbar follows infrared only: the TV's own volume changed the TV, not the bar (2026-11-07)
+        self.tv.on = True
+        self.sw.poll()
+        got = []
+        self.sw.sound_keys = lambda key, times: got.append((key, times)) or True
+        before = len(self.tv.calls)
+        self.assertEqual(self.sw.command("turn the tv down", "voice"), "Okay, turning the TV down.")
+        self.assertEqual(self.sw.command("mute the TV", "telegram"), "Okay, muting the TV.")
+        tv_id = next(s.id for s in self.sw.switches() if s.icon == "tv")
+        self.assertTrue(self.sw.tv_key(tv_id, "vol_up")[0])  # the web remote's volume key too
+        self.assertEqual(got, [("KEY_VOLDOWN", 3), ("KEY_MUTE", 1), ("KEY_VOLUP", 1)])
+        self.assertEqual(len(self.tv.calls), before)  # none of it went to the TV
+        self.sw.sound_keys = lambda key, times: False  # no soundbar buttons taught: the TV's own, as before
+        self.sw.command("turn the tv up", "voice")
+        self.assertEqual(self.tv.calls[-1], ("press", "KEY_VOLUP", "KEY_VOLUP", "KEY_VOLUP"))
+
     def test_pause_play_and_skip(self):
         self.tv.on = True
         self.sw.poll()
@@ -693,6 +710,19 @@ class TestSamsungDriver(unittest.TestCase):
         self.log.clear()
         self.drv.set("192.168.1.60", None, True)  # already on: no button (it would switch it off)
         self.assertEqual(self.log, [])
+
+    def test_too_deeply_asleep_the_infrared_power_button(self):
+        # off a while: its Wi-Fi is gone and the wake packet does nothing (2026-11-04); a BroadLink's Power button
+        self.drv._wake = lambda mac, host: self.log.append("wake")  # (no answer)
+        pressed = []
+        with mock.patch("sentinel.engine.samsung_tv.WAKE_SECONDS", 0):
+            with self.assertRaises(OSError):
+                self.drv.set("192.168.1.60", None, True)  # no BroadLink button taught: as before
+            self.drv.ir_power = lambda: pressed.append("ir") or True
+            self.drv.set("192.168.1.60", None, True)
+        self.assertEqual(pressed, ["ir"])
+        self.assertTrue(self.drv._tvs["001122334455"].get("on_since"))
+        self.assertNotIn(("KEY_POWER",), self.log)  # (nothing over the network: it isn't there)
 
     def test_off_presses_power_once(self):
         self.net = self.picture = True

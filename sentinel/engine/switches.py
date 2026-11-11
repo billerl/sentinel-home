@@ -294,6 +294,9 @@ class SmartSwitches:
         self._clock = clock
         self._lock = threading.Lock()
         self._unmute: Dict[str, Any] = {}  # TV switch id -> the timer that ends "mute the TV for 2 minutes"
+        # The TV's sound through a soundbar that only follows infrared (a BroadLink's taught "Soundbar" buttons): the
+        # TV's own volume keys changed the TV, not the bar (2026-11-07). (key, times) -> True when it took them.
+        self.sound_keys: Optional[Callable[[str, int], bool]] = None
         self._camera_shows: Dict[str, List[Any]] = {}  # TV switch id -> [until, page path] (a routine's camera)
         self._after: Callable[[float, Callable[[], None]], None] = _after
         # words -> (camera name, its page path "#cam=<id>") when they name a camera (set by the engine)
@@ -694,7 +697,7 @@ class SmartSwitches:
             if not sw.on:
                 return f"The {sw.name} is off."
             if what == "volume":
-                driver.press(host, *(["KEY_VOLUP" if detail[1] == "up" else "KEY_VOLDOWN"] * VOLUME_STEPS))
+                self._tv_press(driver, host, *(["KEY_VOLUP" if detail[1] == "up" else "KEY_VOLDOWN"] * VOLUME_STEPS))
                 return f"Okay, turning the {sw.name} {detail[1]}."
             if what == "play":
                 pause = detail[1] == "pause"
@@ -723,7 +726,7 @@ class SmartSwitches:
             if pending is not None:
                 pending.cancel()  # still muted from "mute for": only "unmute" presses the button
             if pending is None or detail[1] == "unmute":
-                driver.press(host, "KEY_MUTE")
+                self._tv_press(driver, host, "KEY_MUTE")
             if what == "mute_for":
                 self._unmute[sw.id] = self._after(detail[1], lambda: self._press_later(
                     sw, driver, host, ["KEY_MUTE"], "unmute", source, only=self._unmute.pop(sw.id, None)))
@@ -733,6 +736,14 @@ class SmartSwitches:
             app_logger.log("warning", "tv_failed", what=what, error_message=str(e), source=source,
                            component="switches", action="tv")
             return f"The {sw.name} didn't do it ({e})."
+
+    def _tv_press(self, driver, host: str, *keys: str) -> None:
+        """A TV's buttons; a Samsung's volume and mute go to the soundbar's infrared buttons when there are some."""
+        sound = {"KEY_VOLUP", "KEY_VOLDOWN", "KEY_MUTE"}
+        if (self.sound_keys is not None and getattr(driver, "kind", "") == "samsung" and keys
+                and all(k == keys[0] for k in keys) and keys[0] in sound and self.sound_keys(keys[0], len(keys))):
+            return
+        driver.press(host, *keys)
 
     def _after(self, seconds: float, fn: Callable[[], None]):
         timer = threading.Timer(seconds, fn)
@@ -747,7 +758,7 @@ class SmartSwitches:
         if only is None or now is None or not now.on:
             return
         try:
-            driver.press(host, *keys)
+            self._tv_press(driver, host, *keys)
         except (OSError, ValueError) as e:
             app_logger.log("warning", "tv_failed", what=what, error_message=str(e), source=source,
                            component="switches", action="tv")
@@ -831,7 +842,7 @@ class SmartSwitches:
         if tv is None or key not in TV_KEYS or not getattr(tv[1], "supports", lambda k: k not in HELD_KEYS)(TV_KEYS[key]):
             return False, "I don't know that button."
         try:
-            tv[1].press(tv[2], TV_KEYS[key])
+            self._tv_press(tv[1], tv[2], TV_KEYS[key])
         except (OSError, ValueError) as e:
             return False, f"The {tv[0].name} didn't answer ({e})." if tv[0].on else f"The {tv[0].name} is off."
         self._step(switch_id, "key", key)
@@ -889,6 +900,10 @@ class SmartSwitches:
     def _step(self, switch_id: str, do: str, value: str) -> None:
         if self.on_tv_step is not None:
             self.on_tv_step(switch_id, do, value)
+
+    def drivers(self) -> List[Any]:
+        """The device drivers (Kasa, Samsung, Fire TV...), for wiring hooks into them."""
+        return list(self._drivers.values())
 
     def set_live_url(self, url: Optional[str]) -> None:
         """Where TVs that show Sentinel in their own browser (Samsung) should open it."""

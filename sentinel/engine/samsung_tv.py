@@ -28,7 +28,7 @@ import struct
 import threading
 import time
 import urllib.request
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sentinel.logging_utils import app_logger
 
@@ -79,6 +79,7 @@ class SamsungTVDriver:
         self.path = os.path.join(os.path.abspath(root), STATE_FILE)
         self.timeout = timeout
         self.live_url: Optional[str] = None  # Sentinel's page on the home network (SmartSwitches.set_live_url)
+        self.ir_power: Optional[Callable[[], bool]] = None  # a BroadLink's taught TV Power button: True = pressed
         self._before_live: Dict[str, str] = {}  # TV address -> the app that was on when the cameras came up
         self._page_lock = threading.Lock()
         self._page: Dict[str, Dict[str, Any]] = {}  # TV address -> what its camera page should show (page_poll)
@@ -463,6 +464,12 @@ class SamsungTVDriver:
                 break
             time.sleep(1)
         else:
+            # Asleep too deeply for the wake packet (off a while, its Wi-Fi fully down: 2026-11-04). With its network
+            # gone it's surely off, so the infrared Power button (a BroadLink's) can only switch it on.
+            if self.ir_power is not None and self.ir_power():
+                app_logger.log("info", "tv_ir_power", host=host, component="switches", action="on")
+                self._screen(mac, True)
+                return
             raise OSError("the TV didn't wake up (is 'Power On with Mobile' on in its network settings?)")
         time.sleep(1)
         self._power_on(mac, host)  # the wake packet only wakes its network: the picture needs the button
