@@ -1068,7 +1068,8 @@ class Engine:
         from sentinel.engine.assistant import split_command
         from sentinel.engine.questions import _fmt_clock, is_question
 
-        plain = re.sub(r"\s+", " ", re.sub(r"[^\w\s'?:-]", " ", text)).strip()
+        # ("50%" lost its % below and "set Jabra speaker to 50%" wasn't understood, 2026-11-10)
+        plain = re.sub(r"\s+", " ", re.sub(r"[^\w\s'?:-]", " ", re.sub(r"\s*%", " percent", text))).strip()
         low = plain.lower().rstrip("?")
         app_logger.log("info", "voice_request", text=text[:200], component="voice", action="answer")
         note = self._NOTE.match(plain)
@@ -1171,6 +1172,9 @@ class Engine:
         if command and self.switches.understands(command):
             return VoiceReply(spoken + " Should I do that? Say yes or no.",
                               lambda: self.switches.command(command, source="voice") or "I couldn't do that.")
+        volume = parse_volume_command(command.lower()) if command else None
+        if volume:  # (Claude said how to say it and didn't offer to do it: "this is dumb", 2026-11-10)
+            return VoiceReply(spoken + " Should I do that? Say yes or no.", lambda: self.change_volume(*volume))
         return VoiceReply(spoken)
 
     # ---- routines (sentinel/engine/routines.py)

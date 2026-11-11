@@ -137,6 +137,21 @@ class TestEngine(unittest.TestCase):
         self.assertEqual([(r.text, r.chat_id) for r in pending], [("PT appointment at 11am", "")])
         self.assertIn("PT appointment", self.engine.answer_voice("What are my reminders?", lambda _s: None).text)
 
+    def test_jarvis_speaker_volume_by_voice(self):
+        # 2026-11-10: "Set Jabra speaker to 50%." lost its "%" and went to Claude, who said how to say it instead
+        with mock.patch.object(self.engine, "change_volume", return_value="PC volume 50 percent.") as change:
+            self.assertEqual(self.engine.answer_voice("Set Jabra speaker to 50%.", lambda _s: None).text,
+                             "PC volume 50 percent.")
+            change.assert_called_with("pc", "50")
+            reply_text = "That's my own speaker.\nCOMMAND: Set the speaker volume to 40"
+            with mock.patch.object(self.engine.assistant, "ask", return_value=reply_text), \
+                    mock.patch.object(self.engine.assistant, "remaining_today", return_value=5), \
+                    mock.patch.object(self.engine.assistant, "enabled", return_value=True):
+                reply = self.engine.answer_voice("make the thing you talk through medium", lambda _s: None)
+            self.assertIn("Should I do that?", reply.text)  # Claude's suggestion is offered, not just read out
+            self.assertEqual(reply.confirm(), "PC volume 50 percent.")
+            change.assert_called_with("pc", "40")
+
     def test_claude_sees_the_reminders(self):
         self.engine.reminders.add(time.time() + 3600, "PT", "111")
         self.assertIn("REMINDERS ALREADY SET:\n", self.engine.assistant_context())
