@@ -92,14 +92,15 @@
     .field { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; flex: 1 1 160px; min-width: 0; }
     .field span { color: #9cc; }
   </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
 </head>
-<body>
+<body data-role="{{ role }}">
   <header>
     <div class="bar">
       <a href="{{ url_for('index') }}">← Home</a>
       <h1>Mesh chat</h1>
       <a href="{{ url_for('people_page') }}">Family</a>
-      <a href="{{ url_for('settings_page') }}">Settings</a>
+      <a href="{{ url_for('settings_page') }}" data-min="admin">Settings</a>
     </div>
   </header>
 

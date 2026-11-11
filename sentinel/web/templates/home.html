@@ -64,8 +64,9 @@
     @keyframes wx-pulse { 50% { background: #e5372b; } }
     @media (prefers-reduced-motion: reduce) { .wx-alert.loud { animation: none; } }
   </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
 </head>
-<body>
+<body data-role="{{ role }}">
   <div id="wx-alert" class="wx-alert" role="alert" hidden></div>
   <header>
     <div class="bar">
@@ -80,47 +81,49 @@
   <main>
     <div class="top">
       <div class="card wx" id="weather"><span class="muted">Loading the weather…</span></div>
-      <div class="card"><div class="people" id="people"><span class="muted">Loading who's home…</span></div></div>
+      <div class="card" data-min="user"><div class="people" id="people"><span class="muted">Loading who's home…</span></div></div>
     </div>
 
     <h2>Go to</h2>
     <div class="tiles">
       <a class="tile big" href="{{ url_for('live_page') }}">
         <span class="ic">📹</span><span class="t">Cameras</span><span class="s" id="s-cams">Live view, timeline and clips</span></a>
-      <a class="tile big" href="{{ url_for('sensors_page') }}">
+      <a class="tile big" href="{{ url_for('sensors_page') }}" data-min="user">
         <span class="ic">📶</span><span class="t">Movement inside</span><span class="s" id="s-sensors">Wi-Fi motion sensors</span></a>
       <a class="tile" href="{{ url_for('lost_page') }}" id="t-lost">
         <span class="ic">🐕</span><span class="t">Lost dog</span><span class="s" id="s-lost">Live map of the dogs' collars</span></a>
-      <a class="tile" href="{{ url_for('house_page') }}">
+      <a class="tile" href="{{ url_for('house_page') }}" data-min="user">
         <span class="ic">🏠</span><span class="t">House</span><span class="s">3D map: sensors, switches, cameras</span></a>
       <a class="tile" href="{{ url_for('live_page') }}#switches">
         <span class="ic">💡</span><span class="t">Switches</span><span class="s" id="s-switches">Lights and plugs</span></a>
-      <a class="tile" href="{{ url_for('live_page') }}#remote">
+      <a class="tile" href="{{ url_for('live_page') }}#remote" data-min="user">
         <span class="ic">🎮</span><span class="t">TV remote</span><span class="s" id="s-remotes">TV remotes</span></a>
-      <a class="tile" href="{{ url_for('remotes_page') }}">
+      <a class="tile" href="{{ url_for('remotes_page') }}" data-min="user">
         <span class="ic">🎛️</span><span class="t">Remotes</span><span class="s">Heater, soundbar, fans</span></a>
-      <a class="tile" href="{{ url_for('sensors_history_page') }}">
+      <a class="tile" href="{{ url_for('sensors_history_page') }}" data-min="user">
         <span class="ic">🕒</span><span class="t">Movement history</span><span class="s">When each room saw movement</span></a>
-      <a class="tile" href="{{ url_for('planes_page') }}">
+      <a class="tile" href="{{ url_for('planes_page') }}" data-min="user">
         <span class="ic">✈️</span><span class="t">Planes</span><span class="s">What's flying over (or over you, when away)</span></a>
-      <a class="tile" href="{{ url_for('timeline_page') }}">
+      <a class="tile" href="{{ url_for('timeline_page') }}" data-min="user">
         <span class="ic">🗺️</span><span class="t">Family timeline</span><span class="s">Where everyone has been</span></a>
-      <a class="tile" href="{{ url_for('people_page') }}">
+      <a class="tile" href="{{ url_for('people_page') }}" data-min="user">
         <span class="ic">👪</span><span class="t">Family</span><span class="s">Phones, places, home</span></a>
-      <a class="tile" href="{{ url_for('recipes_page') }}">
+      <a class="tile" href="{{ url_for('recipes_page') }}" data-min="user">
         <span class="ic">🍳</span><span class="t">Recipes</span><span class="s">Family recipe box and cooking mode</span></a>
-      <a class="tile" href="{{ url_for('mesh_page') }}">
+      <a class="tile" href="{{ url_for('notes_page') }}" data-min="user">
+        <span class="ic">📝</span><span class="t">Notes</span><span class="s">Shared lists, and notes only you can see</span></a>
+      <a class="tile" href="{{ url_for('mesh_page') }}" data-min="user">
         <span class="ic">📡</span><span class="t">Mesh chat</span><span class="s">Text over the radio mesh</span></a>
-      <a class="tile" href="{{ url_for('vehicles_page') }}">
+      <a class="tile" href="{{ url_for('vehicles_page') }}" data-min="admin">
         <span class="ic">🚗</span><span class="t">Vehicles</span><span class="s">Family cars the cameras know</span></a>
-      <a class="tile" href="{{ url_for('routines_page') }}">
+      <a class="tile" href="{{ url_for('routines_page') }}" data-min="user">
         <span class="ic">⚙️</span><span class="t">Routines</span><span class="s" id="s-routines">When this happens, do that</span></a>
-      <a class="tile" href="{{ url_for('zones_page') }}">
+      <a class="tile" href="{{ url_for('zones_page') }}" data-min="admin">
         <span class="ic">🔲</span><span class="t">Zones</span><span class="s">Where the cameras watch</span></a>
-      <a class="tile" href="{{ url_for('settings_page') }}">
+      <a class="tile" href="{{ url_for('settings_page') }}" data-min="admin">
         <span class="ic">🛠️</span><span class="t">Settings</span><span class="s">Cameras, alerts, Telegram, voice</span></a>
       <a class="tile" href="{{ url_for('settings_page') }}#help">
-        <span class="ic">❓</span><span class="t">Help</span><span class="s">How everything works</span></a>
+        <span class="ic">❓</span><span class="t">Help</span><span class="s">How everything works{% if role == "user" %}, and your password{% endif %}</span></a>
     </div>
   </main>
 
@@ -133,6 +136,7 @@
     async function getJson(url) {
       var r = await fetch(url);
       if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
+      if (!r.ok) throw new Error("not available");  // (403: not part of this login's role)
       return r.json();
     }
     function setText(id, text, alert) {
@@ -223,6 +227,7 @@
     refresh(); setInterval(refresh, 10000);
   </script>
   <script src="{{ url_for('static', filename='slowlog.js') }}?v={{ boot_id }}"></script>
-  <script src="{{ url_for('static', filename='talk.js') }}?v={{ boot_id }}"></script>
+  {% if role != "guest" %}<script src="{{ url_for('static', filename='talk.js') }}?v={{ boot_id }}"></script>
+  <script src="{{ url_for('static', filename='hear.js') }}?v={{ boot_id }}"></script>{% endif %}
 </body>
 </html>

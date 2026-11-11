@@ -57,15 +57,16 @@
     .rename input { flex: 1; min-width: 0; font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid #1d3a44;
                     background: #050b0f; color: #fff; }
   </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
 </head>
-<body>
+<body data-role="{{ role }}">
   <header>
     <div class="bar">
       <a href="{{ url_for('index') }}">← Home</a>
       <h1>Sensors</h1>
       <a href="{{ url_for('sensors_history_page') }}">History</a>
       <a href="{{ url_for('routines_page') }}">Routines</a>
-      <a href="{{ url_for('settings_page') }}">Settings</a>
+      <a href="{{ url_for('settings_page') }}" data-min="admin">Settings</a>
     </div>
   </header>
 

@@ -62,8 +62,9 @@
     .empty { color: #6aa; font-size: 0.85rem; padding: 6px 0; }
     .suggestion { color: #ffd479; font-size: 0.82rem; margin-top: 6px; }
   </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
 </head>
-<body>
+<body data-role="{{ role }}">
   <header>
     <div class="bar">
       <a href="{{ url_for('index') }}">← Home</a>

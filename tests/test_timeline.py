@@ -198,7 +198,7 @@ class TestPages(unittest.TestCase):
         self.assertIsNone(c2.get("/api/timeline").get_json()["me"])
         self.assertEqual(self.sign_in(self.client(), "alex", "wrong-pw").status_code, 401)
 
-    def test_everyone_sees_everyone_but_only_deletes_their_own(self):
+    def test_an_admin_sees_the_last_two_days_but_only_the_person_deletes(self):
         d0, _ = day_window(time.strftime("%Y-%m-%d"))
         now = time.time()
         for i, ts in enumerate(range(int(max(d0, now - 3 * 3600)), int(now), 600)):
@@ -206,6 +206,10 @@ class TestPages(unittest.TestCase):
         self.engine.locations.set_web_password(self.alex.id, "alexs-own-pw")
         c = self.client()
         self.sign_in(c, "alex", "alexs-own-pw")
+        # a person's timeline is their own (sentinel/web/roles.py; more in test_roles.py)
+        self.assertEqual([p["id"] for p in c.get("/api/timeline").get_json()["people"]], [self.alex.id])
+        self.assertEqual(c.get(f"/api/timeline/{self.liz.id}/{time.strftime('%Y-%m-%d')}").status_code, 403)
+        self.engine.locations.set_role(self.alex.id, "admin")
         people = {p["id"]: p for p in c.get("/api/timeline").get_json()["people"]}
         self.assertEqual(people[self.liz.id]["days"], [time.strftime("%Y-%m-%d")])
         day = c.get(f"/api/timeline/{self.liz.id}/{time.strftime('%Y-%m-%d')}").get_json()

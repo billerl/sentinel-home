@@ -1,5 +1,6 @@
 """
 The Talk button (sentinel/engine/phone_talk.py): a phone's recording in, Jarvis's answer out.
+"Hear alerts" (sentinel/engine/heard.py): the alerts a page with the switch on reads out, and their sound.
 """
 
 from __future__ import annotations
@@ -7,7 +8,7 @@ from __future__ import annotations
 import base64
 import binascii
 
-from flask import Flask, jsonify, request
+from flask import Flask, Response, jsonify, request
 
 from sentinel.web.context import WebContext
 
@@ -62,3 +63,23 @@ def register(app: Flask, ctx: WebContext) -> None:
         body = request.get_json(silent=True) or {}
         out = engine.phone_talk.answer(str(body.get("id") or ""), bool(body.get("yes")))
         return (jsonify(out), 400) if "error" in out else jsonify(out)
+
+    @app.route("/api/heard")
+    def api_heard():
+        if ctx.require_session() or engine is None:
+            return jsonify({"error": "unauthorized"}), 401
+        after = request.args.get("after", "")
+        out = jsonify(engine.heard.since(int(after) if after.isdigit() else None))
+        out.headers["Cache-Control"] = "no-store"
+        return out
+
+    @app.route("/api/heard/<int:alert_id>.wav")
+    def api_heard_voice(alert_id: int):
+        if ctx.require_session() or engine is None:
+            return jsonify({"error": "unauthorized"}), 401
+        audio = engine.audio
+        voice = str(engine.settings.get("voice_jarvis_id") or "")
+        wav = engine.heard.voice(alert_id, lambda text: audio.synthesize(text, voice)) if audio is not None else None
+        if not wav:
+            return jsonify({"error": "no voice"}), 404  # (the page falls back to the browser's own voice)
+        return Response(wav, mimetype="audio/wav", headers={"Cache-Control": "no-store"})

@@ -26,6 +26,11 @@ class HouseNews:
         self._weather_warnings = weather_warnings
         self._home_coords = home_coords
         self._seen = seen  # (camera, "package", photo) -> routines
+        self.heard: Optional[Callable[[str], None]] = None  # also read out in browsers (engine/heard.py)
+
+    def _hear(self, text: str) -> None:
+        if self.heard is not None:
+            self.heard(text)
 
     def recap_extra(self) -> List[str]:
         """The recap's last lines: parcels still waiting, warnings in effect, today's weather."""
@@ -55,6 +60,7 @@ class HouseNews:
 
     def tell_everyone(self, text: str) -> None:
         """A message to every Sentinel chat (weather warnings)."""
+        self._hear(text)
         for chat in list(self.telegram.chat_ids):
             self.telegram.reply_to_chat(chat, text)
 
@@ -72,6 +78,7 @@ class HouseNews:
         if not (ask_done and jpeg):
             self.routine_message(text, jpeg)
             return
+        self._hear(text)
         for chat_id in self.telegram.unpaused_chats():
             self.telegram.send_photo_with_buttons(chat_id, jpeg, text, [[("✅ Got it", "pkg:got")]])
 
@@ -89,6 +96,7 @@ class HouseNews:
         return times[1] if times else None
 
     def routine_message(self, text: str, jpeg: Optional[bytes]) -> None:
+        self._hear(text)
         for chat_id in self.telegram.unpaused_chats():
             if jpeg:
                 self.telegram.send_photo(chat_id, jpeg, text)

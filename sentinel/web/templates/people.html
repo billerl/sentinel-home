@@ -65,15 +65,16 @@
     .qr { background: #fff; display: inline-block; padding: 4px; border-radius: 4px; margin-top: 8px; }
     .qr svg { display: block; width: 180px; height: 180px; }
   </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
 </head>
-<body>
+<body data-role="{{ role }}">
   <header>
     <div class="bar">
       <a href="{{ url_for('index') }}">← Home</a>
       <h1>Family &amp; places</h1>
       <a href="/timeline">Timeline</a>
-      <a href="{{ url_for('vehicles_page') }}">Vehicles</a>
-      <a href="{{ url_for('settings_page') }}">Settings</a>
+      <a href="{{ url_for('vehicles_page') }}" data-min="admin">Vehicles</a>
+      <a href="{{ url_for('settings_page') }}" data-min="admin">Settings</a>
     </div>
   </header>
 
@@ -84,15 +85,16 @@
       at or leaves a place. The phone says where the <i>person</i> is; their car is reported separately, since
       people swap cars. Every position the phones send is kept for the <a href="/timeline">Timeline</a> (each person
       can delete their own); arrivals/departures for questions like “when did Elizabeth get home?” are kept 30 days.
-      Give each person their own Sentinel login with <b>Make login link</b>.</p>
+      Give each person their own Sentinel login with <b>Make login link</b>, and choose what that login may do
+      with <b>Role</b> (see Help → Roles).</p>
     <p class="warn" id="no-url" hidden>⚠️ Set the web address under Settings → Remote access first, so phones away from
       home can reach Sentinel.</p>
 
     <section>
       <h2>People</h2>
       <div id="people"><div class="empty">Loading…</div></div>
-      <div id="suggest" class="row"></div>
-      <details class="card" id="add-box">
+      <div id="suggest" class="row" data-min="admin"></div>
+      <details class="card" id="add-box" data-min="admin">
         <summary style="cursor:pointer;color:#9ff">+ Add a person</summary>
         <div class="row">
           <div class="field"><span>Name</span><input type="text" id="new-name" placeholder="Elizabeth" maxlength="30"></div>
@@ -105,7 +107,7 @@
     <section>
       <h2>Places</h2>
       <div id="places"><div class="empty">Loading…</div></div>
-      <details class="card" id="place-box">
+      <details class="card" id="place-box" data-min="admin">
         <summary style="cursor:pointer;color:#9ff">+ Add a place</summary>
         <div class="row">
           <div class="field"><span>Name — the way you'd say it after “at”</span><input type="text" id="pl-name" placeholder="the salon" maxlength="40"></div>
@@ -122,7 +124,7 @@
       </details>
     </section>
 
-    <section>
+    <section data-min="admin">
       <h2>Yard</h2>
       <div class="card">
         <p class="hint" style="margin-top:0">For a pet with a collar tracker: tap the corners of your yard on the map, then
@@ -133,7 +135,7 @@
       </div>
     </section>
 
-    <section>
+    <section data-min="admin">
       <h2>Messages</h2>
       <label class="check"><input type="checkbox" id="alerts" onchange="setAlerts()"> Send a Telegram message when someone
         arrives at or leaves a place</label>
@@ -197,6 +199,32 @@
     }
 
     // ---------------- people ----------------
+    // What this login may do (the server checks every request itself; this only hides what would be refused)
+    var RANK = { guest: 0, user: 1, admin: 2, owner: 3 };
+    function can(role) { return RANK[(data.me || {}).role || "guest"] >= RANK[role]; }
+    function rolePicker(p, msg) {
+      var box = el("label", "check");
+      box.appendChild(document.createTextNode("Role "));
+      var sel = el("select");
+      [["guest", "Guest"], ["user", "User"], ["admin", "Admin"]].forEach(function(r) {
+        var o = el("option", null, r[1]); o.value = r[0];
+        o.disabled = r[0] === "admin" && !can("owner");  // only the household login makes admins
+        sel.appendChild(o);
+      });
+      sel.value = p.role;
+      sel.disabled = p.role === "admin" && !can("owner");
+      sel.title = "Guest: live cameras, switches and the lost-dog page. User: everything except setup. " +
+                  "Admin: setup too (not logins or the household's accounts).";
+      sel.onchange = function() {
+        api("/api/people/" + p.id + "/role", { role: sel.value })
+          .then(function(d) { return load().then(function() {  // (the cards were redrawn: say it on the new one)
+            var m = document.querySelector('[data-person="' + p.id + '"] .msg'); if (m) say(m, d.message, true); }); })
+          .catch(function(e) { sel.value = p.role; say(msg, e.message, false); });
+      };
+      box.appendChild(sel);
+      return box;
+    }
+
     function renderPeople() {
       var root = $("people");
       root.innerHTML = "";
@@ -225,12 +253,12 @@
           bits.push("updated " + ago(p.ts));
           if (p.batt != null) bits.push("🔋 " + p.batt + "%");
         } else {
-          bits.push(p.tracker ? "No position from the tracker yet" : "Not sharing yet — send them a setup link");
+          bits.push(p.tracker ? "No position from the tracker yet" : p.pet ? "🐾 Pet (no collar tracker)" : "Not sharing yet — send them a setup link");
         }
         if (p.tracker) bits.push("🐕 collar tracker " + p.tracker);
         if (p.aliases.length) bits.push("also: " + p.aliases.join(", "));
         if (p.cars.length) bits.push("car: " + p.cars.join(", "));
-        if (!p.tracker) bits.push(p.has_login ? "Sentinel login: " + p.username : "no Sentinel login of their own yet");
+        if (!p.pet) bits.push(p.has_login ? "Sentinel login: " + p.username + " (" + p.role + ")" : "no Sentinel login of their own yet");
         card.appendChild(el("div", "meta", bits.join(" · ")));
 
         var row = el("div", "row");
@@ -281,8 +309,15 @@
         armed(del, "Tap again to delete " + p.name, function() {
           api("/api/people/" + p.id + "/delete", {}).then(load).catch(function(e) { say(msg, e.message, false); });
         });
-        (p.tracker ? [tl, edit, pic, nopic, forget, del, msg, file]  // a pet: no phone setup, no login
-                   : [link, login, tl, edit, pic, nopic, nologin, forget, pw, del, msg, file]).forEach(function(b) { row.appendChild(b); });
+        var mine = data.me && data.me.person === p.id;
+        var setup = can("admin"), logins = can("owner");
+        [link, edit, forget, pw].forEach(function(b) { if (!setup) b.hidden = true; });
+        [login, nologin].forEach(function(b) { if (!logins) b.hidden = true; });
+        if (!setup && !mine) pic.hidden = nopic.hidden = true;
+        if (!setup || (p.role === "admin" && !logins)) del.hidden = true;  // an admin is the owner's to delete
+        var role = setup && !p.pet ? rolePicker(p, msg) : null;
+        (p.pet ? [tl, edit, pic, nopic, forget, del, msg, file]  // a pet: no phone setup, no login
+                   : [link, login, tl, edit, pic, nopic, nologin, role, forget, pw, del, msg, file]).forEach(function(b) { if (b) row.appendChild(b); });
         card.appendChild(row);
         card.dataset.person = p.id;
         root.appendChild(card);
@@ -382,15 +417,18 @@
         '<div class="row"><div class="field"><span>Name</span><input type="text" maxlength="30" data-f="name"></div>' +
         '<div class="field"><span>Other names (commas)</span><input type="text" maxlength="120" data-f="aliases"></div></div>' +
         '<div class="row"><div class="field"><span>Pet? Its collar tracker\'s id (Meshtastic, like !a1cacb2a)</span>' +
-        '<input type="text" maxlength="9" data-f="tracker" placeholder="leave empty for a person"></div></div>' +
+        '<input type="text" maxlength="9" data-f="tracker" placeholder="leave empty if it has none"></div></div>' +
+        '<div class="row"><label class="check"><input type="checkbox" data-f="pet"> This is a pet (no phone, login or role)</label></div>' +
         '<div class="row"><button class="primary">Save</button><button>Cancel</button><span class="msg"></span></div>';
       card.appendChild(box);
       var f = function(n) { return box.querySelector('[data-f="' + n + '"]'); };
       f("name").value = p.name; f("aliases").value = p.aliases.join(", "); f("tracker").value = p.tracker || "";
+      f("pet").checked = !!p.pet;
       var buttons = box.querySelectorAll("button");
       buttons[1].onclick = function() { box.remove(); };
       buttons[0].onclick = async function() {
-        try { await api("/api/people", { id: p.id, name: f("name").value, aliases: f("aliases").value, tracker: f("tracker").value }); await load(); }
+        try { await api("/api/people", { id: p.id, name: f("name").value, aliases: f("aliases").value, tracker: f("tracker").value,
+                                           pet: f("pet").checked }); await load(); }
         catch (e) { say(box.querySelector(".msg"), e.message, false); }
       };
     }
@@ -422,6 +460,7 @@
         head.appendChild(a);
         card.appendChild(head);
         var row = el("div", "row");
+        row.setAttribute("data-min", "admin");  // (places are an admin's to change)
         var size = el("div", "field"); size.style.flex = "0 1 130px";
         size.appendChild(el("span", null, "Size (m)"));
         var r = el("input"); r.type = "number"; r.min = 50; r.max = 2000; r.step = 10; r.value = Math.round(pl.radius);

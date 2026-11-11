@@ -81,8 +81,9 @@
     .drive::before { content: ""; width: 2px; height: 22px; background: #066; margin-right: 8px; }
     .empty { color: #6aa; font-size: 0.88rem; line-height: 1.6; padding: 14px 4px; }
   </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
 </head>
-<body>
+<body data-role="{{ role }}">
   <header>
     <div class="bar">
       <a href="{{ url_for('index') }}">← Home</a>
@@ -92,6 +93,7 @@
   </header>
   <main>
     <div class="people" id="people" role="group" aria-label="Whose timeline"></div>
+    <p class="legend" id="privacy" hidden></p>
     <div class="grid">
       <div class="card">
         <div class="month"><button class="nav" id="prev" aria-label="Previous month">‹</button><h2 id="monthname"></h2><button class="nav" id="next" aria-label="Next month">›</button></div>
@@ -268,6 +270,10 @@
     async function loadPeople() {
       var d = await api("/api/timeline");
       me = d.me; people = d.people;
+      $("privacy").hidden = false;  // a person's history is their own
+      $("privacy").textContent = d.others_hours
+        ? "🔒 Each person's history is their own. As an admin you see the last " + d.others_hours + " hours of someone else's, no further back."
+        : "🔒 Only you can see your history. Pets' history is shared.";
     }
 
     $("people").addEventListener("click", function(e) {

@@ -1,0 +1,5 @@
+/* Hide what the signed-in role can't use: <body data-role="user"> … <a data-min="admin">.
+   Only tidiness: the server checks every request itself (sentinel/web/roles.py). */
+body[data-role="guest"] [data-min="user"], body[data-role="guest"] [data-min="admin"], body[data-role="guest"] [data-min="owner"],
+body[data-role="user"] [data-min="admin"], body[data-role="user"] [data-min="owner"],
+body[data-role="admin"] [data-min="owner"] { display: none !important; }

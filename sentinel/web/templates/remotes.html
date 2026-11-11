@@ -75,12 +75,39 @@
     .heat .state.on { border-color: #ff8a4c; color: #ffb38a; }
     .heat details { margin-top: 10px; font-size: 0.85rem; color: #9cc; }
     .heat details select { font: inherit; padding: 7px; border-radius: 8px; border: 1px solid #1d3a44; background: #050b0f; color: #fff; width: 100%; }
+    .cost .ins { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 4px 12px; }
+    .cost input { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid #1d3a44; background: #050b0f;
+                  color: #fff; width: 100%; }
+    .cost .say { margin-top: 14px; padding: 12px 14px; border-radius: 10px; border: 1px solid #1d3a44; color: #fff;
+                 line-height: 1.5; font-size: 0.95rem; }
+    .cost .say.elec { border-color: #4cc2ff; }
+    .cost .say.gas { border-color: #ff8a4c; }
+    .cost table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+    .cost th, .cost td { text-align: right; padding: 7px 6px; border-top: 1px solid #16303a; white-space: nowrap; }
+    .cost th { color: #6f97a5; font-weight: 500; border-top: 0; white-space: normal; vertical-align: bottom; }
+    .cost th:first-child, .cost td:first-child { text-align: left; }
+    .cost tr.mine td { color: #fff; font-weight: 600; background: rgba(0,255,255,0.07); }
+    .cost .bars { display: flex; flex-direction: column; gap: 3px; min-width: 60px; }
+    .cost .bars i { display: block; height: 6px; border-radius: 3px; }
+    .cost .bars .e { background: #4cc2ff; }
+    .cost .bars .g { background: #ff8a4c; }
+    .cost .key { font-size: 0.78rem; color: #9cc; margin-top: 8px; }
+    .cost .key i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin: 0 4px 0 10px; }
+    .cost .scroll { overflow-x: auto; scrollbar-color: #1d3a44 transparent; }
+    .cost th.e { color: #4cc2ff; }
+    .cost th.g { color: #ff8a4c; }
+    @media (max-width: 600px) {
+      .cost table { font-size: 0.8rem; }
+      .cost th, .cost td { padding: 7px 4px; }
+      .cost th:last-child, .cost td:last-child { display: none; }
+    }
     .pulse { animation: pulse 1.2s ease-in-out infinite; }
     @keyframes pulse { 50% { opacity: 0.55; } }
     @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
   </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
 </head>
-<body>
+<body data-role="{{ role }}">
   <header>
     <div class="bar">
       <a href="{{ url_for('index') }}">← Home</a>
@@ -122,6 +149,29 @@
           the heater, a press could turn it on, or to High, by mistake.</p>
       </details>
       <div class="msg" id="h-msg"></div>
+    </div>
+
+    <div class="card cost" id="cost" hidden>
+      <div class="top"><span class="name">💲 What the heater costs</span></div>
+      <div class="ins">
+        <div><label for="c-kwh">Electricity, $ per kWh</label><input id="c-kwh" type="number" inputmode="decimal" step="0.0001" min="0"></div>
+        <div><label for="c-watts">Heater, watts</label><input id="c-watts" type="number" inputmode="numeric" step="50" min="0"></div>
+        <div><label for="c-hours">Hours a day it's heating</label><input id="c-hours" type="number" inputmode="decimal" step="0.5" min="0" max="24"></div>
+        <div><label for="c-gal">Propane, $ per gallon</label><input id="c-gal" type="number" inputmode="decimal" step="0.01" min="0"></div>
+        <div><label for="c-eff">Boiler efficiency, %</label><input id="c-eff" type="number" inputmode="numeric" step="1" min="30" max="100"></div>
+      </div>
+      <div class="say" id="c-say"></div>
+      <div class="scroll"><table>
+        <thead><tr><th>Heating a day</th><th>Uses</th><th class="e">Electric a day</th><th class="e">a month</th>
+          <th class="g">Propane a day</th><th class="g">a month</th><th></th></tr></thead>
+        <tbody id="c-rows"></tbody>
+      </table></div>
+      <div class="key"><i class="e" style="background:#4cc2ff;margin-left:0"></i>heater (electric)<i style="background:#ff8a4c"></i>boiler (propane), for the same heat</div>
+      <p class="muted">“Heating” means the hours the heater is actually making heat, not the hours it's switched on: in
+        Auto it turns itself off and on (the marked row is the hours you typed), and its 13 lights are a temperature setting, not a power level. Sentinel
+        can't see when it's heating, so that number is your estimate. A month is 30 days. The numbers you type are
+        remembered on this device. One heater warms about one room: the boiler still has to keep the rest of the
+        house, and the pipes, warm.</p>
     </div>
 
     <div id="remotes"></div>
@@ -202,9 +252,59 @@
       if (f == null) return "–";
       return heat.celsius ? ((f - 32) * 5 / 9).toFixed(1) + "°C" : f.toFixed(f % 1 ? 1 : 0) + "°F";
     }
+    // ---- what the heater costs, and the same heat from the propane boiler ----
+    var COST_KEY = "sentinel-heat-cost", KWH_BTU = 3412, GALLON_BTU = 91500;
+    var cost = { kwh: 0.1019, watts: 1500, hours: 12, gal: 2.5, eff: 85 };
+    try { var kept = JSON.parse(localStorage.getItem(COST_KEY) || "{}");
+      Object.keys(cost).forEach(function (k) { if (typeof kept[k] === "number" && isFinite(kept[k]) && kept[k] >= 0) cost[k] = kept[k]; });
+    } catch (e) {}
+    function money(v) { return "$" + (v >= 100 ? Math.round(v).toLocaleString() : v.toFixed(2)); }
+    function showCost() {
+      var kwPerHour = cost.watts / 1000, eff = Math.min(100, Math.max(30, cost.eff)) / 100;
+      var elecHour = kwPerHour * cost.kwh;
+      // the same heat from the boiler: the heater's BTUs, out of gallons the boiler turns into heat at its efficiency
+      var gasHour = cost.gal * (kwPerHour * KWH_BTU) / (GALLON_BTU * eff);
+      var even = cost.kwh * GALLON_BTU * eff / KWH_BTU;  // propane price where the two cost the same
+      var say = document.getElementById("c-say");
+      if (!(elecHour > 0) || !(gasHour > 0)) {
+        say.className = "say";
+        say.textContent = "Fill in the prices above to compare.";
+      } else {
+        var elecWins = elecHour <= gasHour, off = Math.round(Math.abs(1 - (elecWins ? elecHour / gasHour : gasHour / elecHour)) * 100);
+        say.className = "say " + (elecWins ? "elec" : "gas");
+        say.innerHTML = "<b>" + (elecWins ? "The electric heater is cheaper" : "The propane boiler is cheaper") + "</b> for the same heat, by about "
+          + off + "%. The heater costs " + money(elecHour) + " for each hour it's heating; the boiler would burn "
+          + money(gasHour) + " of propane to make that much. They cost the same when propane is <b>" + money(even)
+          + " a gallon</b>: above that, electric wins.";
+      }
+      var hours = [4, 8, 12, 16, 20, 24];
+      if (cost.hours > 0 && cost.hours <= 24 && hours.indexOf(cost.hours) < 0) hours.push(cost.hours);
+      hours.sort(function (a, b) { return a - b; });
+      var top = Math.max(elecHour, gasHour) * 24 || 1;
+      document.getElementById("c-rows").innerHTML = hours.map(function (h) {
+        var e = elecHour * h, g = gasHour * h;
+        return '<tr' + (h === cost.hours ? ' class="mine"' : "") + "><td>" + h + " h" + (h === cost.hours ? " ◀" : "") + "</td><td>"
+          + (kwPerHour * h).toFixed(1) + " kWh</td><td>" + money(e) + "</td><td>" + money(e * 30) + "</td><td>" + money(g)
+          + "</td><td>" + money(g * 30) + '</td><td><div class="bars"><i class="e" style="width:' + Math.max(2, e / top * 100)
+          + '%"></i><i class="g" style="width:' + Math.max(2, g / top * 100) + '%"></i></div></td></tr>';
+      }).join("");
+    }
+    Object.keys(cost).forEach(function (k) {
+      var el = document.getElementById("c-" + k);
+      el.value = cost[k];
+      el.oninput = function () {
+        var v = parseFloat(el.value);
+        cost[k] = isFinite(v) && v >= 0 ? v : 0;
+        try { localStorage.setItem(COST_KEY, JSON.stringify(cost)); } catch (e) {}
+        showCost();
+      };
+    });
+    showCost();
+
     function showHeater() {
       var box = document.getElementById("heat");
       box.hidden = !Object.keys(heat.remotes || {}).length;
+      document.getElementById("cost").hidden = box.hidden;
       if (box.hidden) return;
       document.getElementById("h-room").textContent = deg(heat.room_f);
       document.getElementById("h-hum").textContent = heat.room_f == null ? "No reading from the BroadLink's thermometer"

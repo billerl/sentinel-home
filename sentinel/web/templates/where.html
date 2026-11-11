@@ -29,8 +29,9 @@
     .leaflet-control-attribution { background: rgba(0,0,0,0.6) !important; color: #6aa !important; }
     .leaflet-control-attribution a { color: #8cc !important; }
   </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
 </head>
-<body>
+<body data-role="{{ role }}">
   <div id="map"></div>
   <div id="panel"><div class="empty">Loading…</div></div>
   <script>

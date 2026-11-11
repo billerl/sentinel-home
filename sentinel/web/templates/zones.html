@@ -70,8 +70,9 @@
     #status.err { color: #ff6b6b; }
     #status.ok { color: #6f6; }
   </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
 </head>
-<body>
+<body data-role="{{ role }}">
   <header>
     <a href="{{ url_for('live_page') }}">← Live</a>
     <h1>Zones &amp; lines</h1>

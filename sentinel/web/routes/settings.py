@@ -10,6 +10,7 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 from sentinel.logging_utils import app_logger
 from sentinel.web.auth import _client_ip
 from sentinel.web.context import WebContext
+from sentinel.web.roles import OWNER, OWNER_SETTINGS
 
 
 def register(app: Flask, ctx: WebContext) -> None:
@@ -38,6 +39,7 @@ def register(app: Flask, ctx: WebContext) -> None:
                 return jsonify({"error": "configuration unavailable"}), 503
             view = engine.settings_view()
             view["web_username"] = str(server._auth_cfg().get("username", ""))
+            view["owner_only"] = sorted(OWNER_SETTINGS)  # (the page greys these out for an admin)
             return jsonify(view)
         err = _config_guard()
         if err:
@@ -45,6 +47,25 @@ def register(app: Flask, ctx: WebContext) -> None:
         body = request.get_json(silent=True)
         if not isinstance(body, dict):
             return jsonify({"error": "expected a JSON object"}), 400
+        if not ctx.viewer().at_least(OWNER):
+            # The page saves a whole section at once, so an admin's save carries the owner's settings too:
+            # the ones left as they were are simply not theirs to save; a changed one is refused.
+            current = engine.settings_view()["values"]
+            from sentinel.engine import admin
+
+            for key in OWNER_SETTINGS & body.keys():
+                validator = admin.SETTINGS_SCHEMA.get(key)
+                was, now = current.get(key), body[key]
+                same = was == now or (was in ("", None) and now in ("", None))
+                try:
+                    same = same or (validator is not None and validator(now) == validator(was))
+                except (TypeError, ValueError):
+                    pass
+                if not same and not (validator is None and body[key] in ("", None)):  # (a secret left empty)
+                    return ctx.denied(f"Only the household (owner) login can change this ({key.replace('_', ' ')}).")
+                body = {k: v for k, v in body.items() if k != key}
+            if not body:
+                return _result(True, "saved")
         return _result(*engine.update_settings(body))
 
     @app.route("/api/backup", methods=["GET", "POST"])

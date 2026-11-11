@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#001525">
+  <title>Notes - Sentinel</title>
+  <style>
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; }
+    a { color: #00ffff; }
+    header { position: sticky; top: 0; z-index: 10; background: #1a1a1a; border-bottom: 1px solid #033; }
+    .bar { display: flex; align-items: center; gap: 12px; padding: 0 1rem; height: 48px; max-width: 760px; margin: 0 auto; }
+    .bar a { text-decoration: none; font-size: 0.9rem; }
+    h1 { font-size: 1.05rem; margin: 0; flex: 1; color: #00ffff; }
+    main { max-width: 760px; margin: 0 auto; padding: 14px 16px 60px; }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; border-radius: 10px; border: 1px solid #1d3a44; background: #0c151c; color: #cfe; padding: 9px 14px; min-height: 42px; }
+    button.primary { background: #00ffff; border-color: #00ffff; color: #001; font-weight: 700; }
+    button.small { min-height: 34px; padding: 5px 10px; font-size: 0.85rem; }
+    button.danger { border-color: #7a2b2b; color: #ff9c9c; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    input[type="text"], textarea { width: 100%; background: #05090c; color: #fff; border: 1px solid #1d3a44; border-radius: 10px; padding: 10px 12px; }
+    textarea { min-height: 220px; resize: vertical; line-height: 1.45; }
+    input:focus, textarea:focus, button:focus-visible { outline: 2px solid #00a8a8; outline-offset: 1px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .chips { display: flex; gap: 6px; margin-left: auto; }
+    .chip { min-height: 34px; padding: 5px 12px; border-radius: 999px; font-size: 0.85rem; }
+    .chip[aria-pressed="true"] { background: #062f3a; border-color: #00a8a8; color: #fff; }
+    .card { background: linear-gradient(180deg, #0c151c, #091015); border: 1px solid #16303a; border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; }
+    .card.private { border-color: #4a3a12; }
+    .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .title { font-weight: 700; font-size: 1.05rem; color: #fff; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .badge { font-size: 0.75rem; border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+    .badge.private { background: #2a2108; color: #ffd166; }
+    .badge.shared { background: #06262e; color: #7fe7e7; }
+    .meta { color: #6f97a5; font-size: 0.78rem; margin-top: 4px; }
+    .text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; margin: 10px 0 0; }
+    .text.clamp { max-height: 9em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
+    .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+    .items { list-style: none; margin: 10px 0 0; padding: 0; }
+    .items li { display: flex; align-items: center; gap: 10px; padding: 4px 0; border-bottom: 1px solid #0f222a; }
+    .items label { flex: 1; display: flex; align-items: center; gap: 12px; min-height: 40px; cursor: pointer; overflow-wrap: anywhere; }
+    .items input[type="checkbox"] { width: 22px; height: 22px; flex: none; accent-color: #00d0d0; }
+    .items li.done label { color: #5d7d88; text-decoration: line-through; }
+    .items .x { min-height: 34px; padding: 2px 10px; border-color: transparent; background: none; color: #6f97a5; }
+    .add { display: flex; gap: 8px; margin-top: 10px; }
+    .add input { flex: 1; }
+    .field { margin-bottom: 10px; }
+    .field > span { display: block; font-size: 0.8rem; color: #6f97a5; margin-bottom: 4px; }
+    .who { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .who label { display: block; border: 1px solid #1d3a44; border-radius: 12px; padding: 10px 12px; cursor: pointer; }
+    .who input { position: absolute; opacity: 0; }
+    .who label b { display: block; color: #fff; }
+    .who label small { color: #6f97a5; }
+    .who input:checked + label { border-color: #00a8a8; background: #062f3a; }
+    .who input:focus-visible + label { outline: 2px solid #00a8a8; }
+    .msg { font-size: 0.85rem; color: #ffb3b3; }
+    .empty { text-align: center; color: #6f97a5; padding: 36px 10px; }
+    .empty .big { font-size: 2rem; }
+    .hint { color: #6f97a5; font-size: 0.8rem; line-height: 1.4; }
+    @media (max-width: 520px) { .who { grid-template-columns: 1fr; } .chips { margin-left: 0; width: 100%; } }
+  </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
+</head>
+<body data-role="{{ role }}">
+  <header>
+    <div class="bar">
+      <a href="{{ url_for('index') }}">← Home</a>
+      <h1>Notes</h1>
+    </div>
+  </header>
+
+  <main>
+    <div class="toolbar">
+      <button type="button" class="primary" onclick="openEditor(null, 'note')">＋ Note</button>
+      <button type="button" onclick="openEditor(null, 'list')">＋ List</button>
+      <div class="chips" role="group" aria-label="Which notes to show">
+        <button type="button" class="chip" data-show="all" aria-pressed="true">All</button>
+        <button type="button" class="chip" data-show="shared" aria-pressed="false">👪 Shared</button>
+        <button type="button" class="chip" data-show="private" aria-pressed="false" id="chip-private">🔒 Only me</button>
+      </div>
+    </div>
+
+    <div class="card" id="editor" hidden>
+      <div class="field"><span id="ed-title-label">Title</span><input type="text" id="ed-title" maxlength="80" autocomplete="off"></div>
+      <div class="field" id="ed-body-box"><span>Note</span><textarea id="ed-body" maxlength="20000"></textarea></div>
+      <div class="field" id="ed-who-box">
+        <span>Who can see it</span>
+        <div class="who">
+          <div><input type="radio" name="who" id="who-private" value="private"><label for="who-private"><b>🔒 Only me</b><small>Nobody else, not even an admin</small></label></div>
+          <div><input type="radio" name="who" id="who-shared" value="shared"><label for="who-shared"><b>👪 The family</b><small>Everyone can see it and change it</small></label></div>
+        </div>
+      </div>
+      <p class="hint" id="ed-household" hidden>You're on the household login, which everyone shares, so this will be a shared note.
+        Sign in with your own login to write notes only you can see.</p>
+      <div class="acts">
+        <button type="button" class="primary" id="ed-save" onclick="saveEditor()">Save</button>
+        <button type="button" onclick="closeEditor()">Cancel</button>
+        <span class="msg" id="ed-msg" role="alert"></span>
+      </div>
+    </div>
+
+    <div id="list"><div class="empty">Loading…</div></div>
+    <p class="hint">🔒 <b>Only me</b> notes are shown to nobody else on Sentinel's pages, whatever their role, and are never sent
+      to Telegram, Jarvis or Claude. They are kept on the Sentinel PC (and in its backup) as ordinary text, not locked
+      with your password.</p>
+  </main>
+
+  <script>
+    var data = { me: null, notes: [] }, show = "all", editing = null, editKind = "note", open = {};
+    function $(id) { return document.getElementById(id); }
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, function(c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+      });
+    }
+    async function post(path, body) {
+      var r = await fetch(path, { method: "POST", credentials: "same-origin",
+                                  headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+                                  body: JSON.stringify(body || {}) });
+      if (r.status === 401) { location.href = "/login?next=/notes"; return { ok: false, data: {} }; }
+      var d = {}; try { d = await r.json(); } catch (e) {}
+      return { ok: r.ok, data: d };
+    }
+    function when(ts) {
+      var d = new Date(ts * 1000), today = new Date().toDateString() === d.toDateString();
+      return today ? "today " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+                   : d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
+    }
+
+    async function load() {
+      try {
+        var r = await fetch("/api/notes", { credentials: "same-origin" });
+        if (r.status === 401) { location.href = "/login?next=/notes"; return; }
+        if (!r.ok) return;
+        data = await r.json();
+      } catch (e) { return; }
+      $("chip-private").hidden = data.me === null;  // (the household login has no notes of its own)
+      draw();
+    }
+
+    function draw() {
+      // (the list is redrawn when anything changes, here or on someone else's phone: keep what is half-typed)
+      var root = $("list"), keep = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.addFor : null;
+      var typed = {};
+      document.querySelectorAll("[data-add-for]").forEach(function(b) { if (b.value) typed[b.dataset.addFor] = b.value; });
+      var notes = data.notes.filter(function(n) { return show === "all" || (show === "shared") === n.shared; });
+      if (!notes.length) {
+        root.innerHTML = '<div class="empty"><div class="big">📝</div>' +
+          (data.notes.length ? "Nothing here." : "No notes yet.<br>Tap <b>＋ Note</b> for a journal entry, or <b>＋ List</b> for a grocery list everyone can add to.") + '</div>';
+        return;
+      }
+      root.innerHTML = "";
+      notes.forEach(function(n) {
+        var card = document.createElement("div");
+        card.className = "card" + (n.shared ? "" : " private");
+        var badge = n.shared ? '<span class="badge shared">👪 Shared' + (n.mine ? "" : " · " + esc(n.by)) + '</span>'
+                             : '<span class="badge private">🔒 Only me</span>';
+        var html = '<div class="head"><span class="title">' + esc(n.title || (n.kind === "list" ? "List" : "Note")) + '</span>' + badge + '</div>' +
+          '<div class="meta">Changed ' + esc(when(n.updated)) + (n.shared && n.updated_by ? " by " + esc(n.updated_by) : "") + '</div>';
+        if (n.kind === "list") {
+          var items = n.items.filter(function(i) { return !i.done; }).concat(n.items.filter(function(i) { return i.done; }));
+          html += '<ul class="items">' + items.map(function(i) {
+            return '<li class="' + (i.done ? "done" : "") + '"><label><input type="checkbox" data-item="' + i.id + '"' + (i.done ? " checked" : "") + '>' +
+              '<span>' + esc(i.text) + '</span></label><button type="button" class="x" data-remove="' + i.id + '" aria-label="Remove ' + esc(i.text) + '">✕</button></li>';
+          }).join("") + '</ul>' +
+          '<form class="add"><input type="text" maxlength="200" placeholder="Add to the list…" aria-label="Add to ' + esc(n.title) + '" data-add-for="' + n.id + '" enterkeyhint="done" autocomplete="off">' +
+          '<button type="submit" class="primary">Add</button></form>';
+        } else if (n.body) {
+          var long = n.body.length > 400 || n.body.split("\n").length > 7;
+          html += '<p class="text' + (long && !open[n.id] ? " clamp" : "") + '">' + esc(n.body) + '</p>';
+        }
+        html += '<div class="acts">' +
+          (n.kind === "note" && n.body && (n.body.length > 400 || n.body.split("\n").length > 7)
+            ? '<button type="button" class="small" data-a="more">' + (open[n.id] ? "Show less" : "Show all") + '</button>' : "") +
+          '<button type="button" class="small" data-a="edit">✎ ' + (n.kind === "list" ? "Rename / sharing" : "Edit") + '</button>' +
+          (n.kind === "list" && n.items.some(function(i) { return i.done; }) ? '<button type="button" class="small" data-a="clear">Clear ticked</button>' : "") +
+          (n.can_manage ? '<button type="button" class="small danger" data-a="delete">Delete</button>' : "") +
+          '<span class="msg" role="alert"></span></div>';
+        card.innerHTML = html;
+        var msg = card.querySelector(".msg");
+        async function change(body) {
+          var res = await post("/api/notes/" + n.id + "/items", body);
+          if (!res.ok) { msg.textContent = res.data.error || "That didn't save."; return false; }
+          await load(); return true;
+        }
+        card.addEventListener("change", function(e) {
+          if (e.target.dataset.item) change({ toggle: +e.target.dataset.item, done: e.target.checked });
+        });
+        card.addEventListener("click", function(e) {
+          var b = e.target.closest("button"); if (!b) return;
+          if (b.dataset.remove) change({ remove: +b.dataset.remove });
+          else if (b.dataset.a === "clear") change({ clear_done: true });
+          else if (b.dataset.a === "edit") openEditor(n, n.kind);
+          else if (b.dataset.a === "more") { open[n.id] = !open[n.id]; draw(); }
+          else if (b.dataset.a === "delete") {
+            if (b.dataset.armed) {
+              post("/api/notes/" + n.id + "/delete").then(function(res) {
+                if (res.ok) load(); else msg.textContent = res.data.error || "That didn't delete.";
+              });
+            } else {
+              b.dataset.armed = "1"; b.textContent = "Tap again to delete";
+              setTimeout(function() { delete b.dataset.armed; b.textContent = "Delete"; }, 4000);
+            }
+          }
+        });
+        var form = card.querySelector("form.add");
+        if (form) form.addEventListener("submit", async function(e) {
+          e.preventDefault();
+          var box = form.querySelector("input"), text = box.value.trim();
+          if (!text) return;
+          box.value = "";
+          if (await change({ add: text })) {
+            var again = document.querySelector('[data-add-for="' + n.id + '"]'); if (again) again.focus();  // keep adding
+          } else box.value = text;
+        });
+        root.appendChild(card);
+      });
+      document.querySelectorAll("[data-add-for]").forEach(function(b) {
+        if (typed[b.dataset.addFor]) b.value = typed[b.dataset.addFor];
+        if (b.dataset.addFor === keep) b.focus();
+      });
+    }
+
+    function openEditor(n, kind) {
+      editing = n ? n.id : null; editKind = kind;
+      $("ed-title").value = n ? n.title : "";
+      $("ed-title-label").textContent = kind === "list" ? "List name (e.g. Groceries)" : "Title (optional)";
+      $("ed-body").value = n ? n.body : "";
+      $("ed-body-box").hidden = kind === "list";
+      // a journal entry starts private, a list starts shared; the household login can only share
+      var shared = n ? n.shared : (kind === "list" || data.me === null);
+      $("who-shared").checked = shared; $("who-private").checked = !shared;
+      $("ed-who-box").hidden = data.me === null || (n && !n.can_manage) || (n && !n.mine && n.shared);
+      $("ed-household").hidden = !(data.me === null && !n);
+      $("ed-msg").textContent = "";
+      $("editor").hidden = false;
+      $("editor").scrollIntoView({ block: "start" });
+      (kind === "list" || !n ? $("ed-title") : $("ed-body")).focus();
+    }
+    function closeEditor() { $("editor").hidden = true; editing = null; }
+    async function saveEditor() {
+      var body = { title: $("ed-title").value, body: editKind === "list" ? "" : $("ed-body").value, kind: editKind };
+      if (!$("ed-who-box").hidden || editing === null) body.shared = $("who-shared").checked;
+      if (editing !== null) body.id = editing;
+      $("ed-save").disabled = true;
+      var res = await post("/api/notes", body);
+      $("ed-save").disabled = false;
+      if (!res.ok) { $("ed-msg").textContent = res.data.error || "That didn't save. Try again."; return; }
+      closeEditor();
+      load();
+    }
+
+    document.querySelector(".chips").addEventListener("click", function(e) {
+      var b = e.target.closest(".chip"); if (!b) return;
+      show = b.dataset.show;
+      document.querySelectorAll(".chip").forEach(function(c) { c.setAttribute("aria-pressed", String(c === b)); });
+      draw();
+    });
+    load();
+    // shared lists change under you (someone else adds milk): refresh while nothing is being written
+    setInterval(function() { if (!document.hidden && $("editor").hidden) load(); }, 15000);
+  </script>
+</body>
+</html>

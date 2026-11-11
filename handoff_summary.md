@@ -433,7 +433,17 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   immediately; Claude's suggestions ask yes first / show a ✅ button). New makes = another driver class
   with `discover/status/set/rename` (Shelly and Tasmota have local HTTP APIs). Newer KLAP-only Kasa/Tapo
   devices don't answer on 9999 and aren't supported. No automations yet (e.g. lights on for a person at night).
-- **Talk button** (2026-11-10; `sentinel/engine/phone_talk.py` PhoneTalk, `static/talk.js` on the home page,
+- **Hear alerts in a browser** (2026-11-11; `sentinel/engine/heard.py` HeardAlerts, `static/hear.js` on the home page and the camera page (grid.html; not TVs),
+  `sentinel/web/routes/talk.py` GET `/api/heard?after=N` + `/api/heard/<id>.wav`; role: user): the 🔕 Hear alerts
+  button in the home page's header makes that page poll every 3 s and play each new alert in Jarvis's voice
+  (`AudioAlertSystem.synthesize`, made once per alert; id 0 = the "I'll read alerts out here." hello), words shown
+  at the top. Fed from `_on_object` (same point as the house speaker, so the Alerts groups + cooldown apply),
+  `_on_motion` when objects are off, and `HouseNews` (packages, routine messages, weather warnings). In memory
+  only (last 30; older than 90 s isn't read; ids start at boot time in ms so they rise across restarts). The
+  switch is per device (localStorage `sentinel-hear`); browsers need one tap per page load before sound, so the
+  button turns to "Tap to hear alerts" when autoplay is refused. No neural voice / speaker off -> 404 -> the
+  browser's own speechSynthesis. Not tested on a real Quest 3 or phone yet.
+- **Talk button** (2026-11-10; `sentinel/engine/phone_talk.py` PhoneTalk, `static/talk.js` on the home page and the camera page,
   `sentinel/web/routes/talk.py` POST `/api/talk` + `/api/talk/answer`): the phone records (MediaRecorder: webm/opus
   on Android, mp4/aac on iPhone, 32 kbit/s; stops itself after ~1.3 s quiet once speech was heard, 2.5 s while
   taking a note; level from a WebAudio analyser) and posts base64 JSON (that route alone allows 4 MB; others keep
@@ -485,6 +495,10 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   it. The page polls `/api/lost` every 5 s (fix, last 30 min of points, or since 15 min before the search) and shows
   the viewer's own position via `watchPosition` (https only, i.e. through the tunnel) with distance and heading.
   "lost" is registered before "going out" ("Grace got out" = loose). The yard alert carries the link too.
+- **Heater cost card** (2026-11-11; `remotes.html` only, `#cost`, no server side): $/kWh, watts, hours heating a
+  day, propane $/gal and boiler efficiency -> electric cost per day/month for 4-24 h, the same heat from propane
+  (3,412 BTU/kWh, 91,500 BTU/gal), which is cheaper and the break-even propane price. Inputs in localStorage
+  `sentinel-heat-cost`. Hours are the user's estimate: Sentinel can't see when the heater is heating.
 - **Heater thermostat** (`sentinel/engine/heater.py`, card on `/remotes`, `/api/heater*`, state in
   `recorded_videos/heater.json`): holds a target with a remote-only heater (EdenPURE: 13-step setting, Auto/High
   mode, Power) by stepping its setting with the learned Temp up/down buttons from the BroadLink's HTS2 thermometer
@@ -596,6 +610,38 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   Since 2026-11-07 the grid's script and styles are `static/grid.js` + `static/grid.css` (`grid.html` is only the
   markup). They load with `?v=<boot id>`, so a page that reloads itself after an update gets the new files; `BOOT_ID`
   and the first camera list stay inline in `grid.html` (they come from the server). `/static` needs no login.
+- **Roles** (2026-11-11, `sentinel/web/roles.py`): guest < user < admin < owner. The shared household login
+  (settings `web.auth`) is always the owner, so it can't be locked out; a person's own login carries `people.role`
+  (`location.db`, "user" unless changed; `role_since` = when it was given). `roles.install()` adds one
+  `before_request` that looks the route up in `ACCESS` (endpoint name -> minimum role, or a function of the URL's
+  `<action>`) and answers 403 (JSON for the API, a small page otherwise) below that role. A route missing from
+  `ACCESS` is the owner's only, and `tests/test_roles.py` fails until it is listed. Signed-out requests still get
+  the route's own redirect/401. Rules about *whose* thing it is live in the routes: a user's own picture, timeline
+  history and routines (`routines.owner` = "made by"; household ones are an admin's; a user's routine can't have a
+  Telegram step until each person has their own chat), an admin can't delete or re-key another admin or give the
+  admin role, a guest's recordings start on the day they became a guest. `OWNER_SETTINGS` (the Telegram token and
+  chat ids, Claude, the Spotify client id, remote access, backups) are refused to an admin unless left unchanged
+  (the page saves whole sections). `WebContext.viewer()` gives the request's `Viewer` (role, person); a personal
+  login stops working the moment it is removed (`web_account`, and `WebAuthManager.revoke_user` ends its sessions).
+  Pages: `<body data-role>` + `static/roles.css` hide elements marked `data-min="admin"`; that is tidiness only.
+  **Change log**: `after_request` writes a line to `recorded_videos/changes.db` for the POSTs named in `CHANGES`
+  (who, role, what, the thing's name; never values), repeats within 10 minutes folded into one; Settings → Change
+  log (`/api/changes`, owner and admins). `/api/me` tells a page who is signed in. Not covered: Jarvis by voice and
+  the Telegram chat. Still to come: device approval, guest passes that end by themselves, a Telegram chat per
+  person, a view-only role for TVs.
+- **Timeline privacy** (2026-11-11): a person's timeline is their own. `/api/timeline` lists only the viewer and
+  the pets for a user; the owner and admins also get the others, limited to `OTHERS_TIMELINE_HOURS` (48):
+  `Family.timeline_people(viewer, others, private=True)` drops older days and `timeline_day(..., since=)` reads no
+  point from before the line, so the day that holds it shows nothing earlier. Where people are now is unchanged.
+- **Notes** (2026-11-11, `/notes`, `sentinel/engine/notes.py`, `recorded_videos/notes.db`): notes and lists, each
+  private ("Only me", the default for a note) or shared ("The family", the default for a list). `Notes` decides
+  who may do what from the person asking: a private note exists only for its writer (anyone else, owner and admins
+  included, gets "no longer exists"); a shared one is read and edited by every user; only the writer changes who
+  sees it; the writer or an admin deletes a shared one. The household login is nobody in particular: what it writes
+  is always shared. Lists change one item at a time (`/api/notes/<id>/items`: add / toggle / remove / clear_done) so
+  two phones don't undo each other; the page refreshes every 15 s and keeps half-typed items. Deleting a person
+  deletes their private notes and hands their shared ones to the household. Plain text on disk and in the backup
+  (not encrypted); never part of Telegram, voice or the Claude context. Not in the change log (content, not setup).
 - **Movement history** (`/sensors/history`, `/api/wifi_motion/events?day=`): stretches of indoor movement per path
   (gaps < 2 min merged) in `recorded_videos/wifi_motion.db`, 30 days. `WifiMotion.answer()` answers "any movement
   inside today?" / "anyone in the living room?" (a path named in the text) on Telegram and by voice; camera names or

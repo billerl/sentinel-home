@@ -8,10 +8,12 @@ import re
 import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from flask import jsonify, redirect, request, url_for
+from flask import g, jsonify, redirect, request, url_for
 
 from sentinel.logging_utils import app_logger
 from sentinel.web.auth import _client_ip
+from sentinel.web.changelog import ChangeLog
+from sentinel.web.roles import OWNER, Viewer
 
 if TYPE_CHECKING:
     from sentinel.web.server import WebServer
@@ -35,6 +37,12 @@ class WebContext:
         self.limiter = server._limiter
         self.auth_cfg = auth_cfg  # as read at start (session length)
         self._device_failures: Dict[str, List[float]] = {}  # ip -> recent wrong logins (phones, base station, links)
+        self.changes: Optional[ChangeLog] = None  # who changed what (kept beside the other data)
+        data_db = getattr(getattr(self.engine, "locations", None), "db_path", None)
+        if isinstance(data_db, str):
+            import os
+
+            self.changes = ChangeLog(os.path.dirname(data_db))
 
     def device_login_blocked(self, ip: str) -> bool:
         """Too many wrong phone / base station logins or setup links from one address: refuse for a while."""
@@ -51,26 +59,38 @@ class WebContext:
     def session_token(self) -> Optional[str]:
         return request.cookies.get("sentinel_session")
 
-    def require_session(self):
+    def viewer(self) -> Optional[Viewer]:
+        """Who this request comes from and their role (sentinel/web/roles.py); None = not signed in. The shared
+        household login is the owner. A person's own login stops working the moment it is removed or they are deleted."""
+        if "viewer" in g:
+            return g.viewer
+        g.viewer = None
         auth = self.auth
-        if auth is None:
-            return redirect(url_for("login"))
-        ip = _client_ip(request.remote_addr or "", request.headers)
-        tok = self.session_token()
-        rec = auth.validate_session(tok, ip)
-        if not rec:
+        rec = auth.validate_session(self.session_token(), _client_ip(request.remote_addr or "", request.headers)) \
+            if auth is not None else None
+        if rec is None:
+            return None
+        if not rec.username.startswith(PERSON_PREFIX):
+            g.viewer = Viewer(OWNER, None, rec.username)
+        elif self.engine is not None:
+            person = self.engine.locations.web_account(rec.username[len(PERSON_PREFIX):])
+            if person is not None:
+                g.viewer = Viewer(person.role, person, rec.username)
+        return g.viewer
+
+    def require_session(self):
+        if self.auth is None or self.viewer() is None:
             return redirect(url_for("login"))
         return None
 
     def viewer_person_id(self) -> Optional[int]:
         """The family member signed in with their own password (None = the shared household login)."""
-        auth, engine = self.auth, self.engine
-        rec = auth.validate_session(self.session_token(), _client_ip(request.remote_addr or "", request.headers)) \
-            if auth is not None else None
-        if rec is None or not rec.username.startswith(PERSON_PREFIX) or engine is None:
-            return None
-        name = rec.username[len(PERSON_PREFIX):]
-        return next((p.id for p in engine.locations.people() if p.username == name), None)
+        viewer = self.viewer()
+        return viewer.person_id if viewer is not None else None
+
+    def denied(self, message: str):
+        """A route's own "not yours to change" answer (the role itself was already checked before the route)."""
+        return jsonify({"error": message}), 403
 
     def set_session_cookie(self, resp, token: str, remember: bool) -> None:
         secure = request.headers.get("X-Forwarded-Proto", "").lower() == "https" or request.is_secure

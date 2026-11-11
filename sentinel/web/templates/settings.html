@@ -76,35 +76,37 @@
     details[open] summary { margin-bottom: 6px; }
     .save-row { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
   </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
 </head>
-<body>
+<body data-role="{{ role }}">
   <header>
     <div class="bar">
       <a href="{{ url_for('index') }}">← Home</a>
       <h1>Settings</h1>
-      <a href="{{ url_for('people_page') }}">Family</a>
-      <a href="{{ url_for('vehicles_page') }}">Vehicles</a>
-      <a href="{{ url_for('zones_page') }}">Zones</a>
+      <a href="{{ url_for('people_page') }}" data-min="user">Family</a>
+      <a href="{{ url_for('vehicles_page') }}" data-min="admin">Vehicles</a>
+      <a href="{{ url_for('zones_page') }}" data-min="admin">Zones</a>
     </div>
     <nav>
-      <a href="#status">Status</a>
-      <a href="#cameras">Cameras</a>
-      <a href="#detection">Detection</a>
-      <a href="#telegram">Telegram</a>
-      <a href="#recording">Recording</a>
-      <a href="#backup">Backup</a>
-      <a href="#audio">Audio</a>
-      <a href="#spotify">Spotify</a>
-      <a href="#weather">Weather</a>
-      <a href="#access">Remote access</a>
-      <a href="#security">Password</a>
+      <a href="#status" data-min="admin">Status</a>
+      <a href="#cameras" data-min="admin">Cameras</a>
+      <a href="#detection" data-min="admin">Detection</a>
+      <a href="#telegram" data-min="admin">Telegram</a>
+      <a href="#recording" data-min="admin">Recording</a>
+      <a href="#backup" data-min="owner">Backup</a>
+      <a href="#audio" data-min="admin">Audio</a>
+      <a href="#spotify" data-min="admin">Spotify</a>
+      <a href="#weather" data-min="admin">Weather</a>
+      <a href="#access" data-min="owner">Remote access</a>
+      <a href="#security" data-min="user">Password</a>
+      <a href="#changes" data-min="admin">Change log</a>
       <a href="#help">Help</a>
     </nav>
   </header>
 
   <main>
     <!-- ======================= STATUS ======================= -->
-    <section id="status">
+    <section id="status" data-min="admin">
       <h2>Status</h2>
       <div class="grid" id="stats"></div>
       <h3>Recently seen</h3>
@@ -114,10 +116,10 @@
     </section>
 
     <!-- ======================= CAMERAS ======================= -->
-    <section id="cameras">
+    <section id="cameras" data-min="admin">
       <h2>Cameras</h2>
       <div id="cam-list"></div>
-      <details id="add-cam">
+      <details id="add-cam" data-min="owner">
         <summary>+ Add a camera</summary>
         <div class="row">
           <div class="field" style="flex: 1 1 100%"><span>Camera brand</span>
@@ -163,7 +165,7 @@
     </section>
 
     <!-- ======================= DETECTION ======================= -->
-    <section id="detection">
+    <section id="detection" data-min="admin">
       <h2>Alerts &amp; object detection</h2>
       <div class="card">
         <div class="row"><label><input type="checkbox" data-key="object_detection_enabled"> Recognise people, vehicles and animals</label></div>
@@ -201,13 +203,13 @@
     </section>
 
     <!-- ======================= TELEGRAM ======================= -->
-    <section id="telegram">
+    <section id="telegram" data-min="admin">
       <h2>Telegram</h2>
       <div class="card">
         <div class="row"><label><input type="checkbox" data-key="telegram_enabled"> Telegram bot on</label></div>
         <div class="row">
           <div class="field"><span>Chat IDs (comma separated)</span><input type="text" data-key="telegram_chat_ids" placeholder="123456789"></div>
-          <div class="field"><span>Bot token <i id="token-state"></i></span><input type="password" id="tg-token" placeholder="leave blank to keep the current token" autocomplete="off"></div>
+          <div class="field" data-min="owner"><span>Bot token <i id="token-state"></i></span><input type="password" id="tg-token" placeholder="leave blank to keep the current token" autocomplete="off"></div>
         </div>
         <div class="row"><label><input type="checkbox" data-key="telegram_motion_alerts"> Send motion alerts</label></div>
         <div class="row"><label><input type="checkbox" data-key="telegram_include_video"> Attach the motion clip to alerts (otherwise text only)</label></div>
@@ -236,7 +238,7 @@
     </section>
 
     <!-- ======================= RECORDING ======================= -->
-    <section id="recording">
+    <section id="recording" data-min="admin">
       <h2>Recording &amp; detection</h2>
       <div class="card">
         <div class="row"><label><input type="checkbox" data-key="recording_retention_enabled"> Delete old clips automatically</label></div>
@@ -265,7 +267,7 @@
     </section>
 
     <!-- ======================= BACKUP ======================= -->
-    <section id="backup">
+    <section id="backup" data-min="owner">
       <h2>Backup</h2>
       <div class="card">
         <p id="bk-state" style="margin-top:0">Checking…</p>
@@ -284,7 +286,7 @@
     </section>
 
     <!-- ======================= AUDIO ======================= -->
-    <section id="audio">
+    <section id="audio" data-min="admin">
       <h2>Audio alerts</h2>
       <div class="card">
         <p class="hint" style="margin-top:0">Spoken alerts through this PC's speakers. Volume 0 turns them off.</p>
@@ -311,7 +313,7 @@
     </section>
 
     <!-- ======================= SPOTIFY ======================= -->
-    <section id="spotify">
+    <section id="spotify" data-min="admin">
       <h2>Spotify</h2>
       <div class="card">
         <p class="hint" style="margin-top:0">Lets “Hey Jarvis, play some jazz” (and pause, skip, volume) work, and shows what's playing at the bottom of the live page. The music plays on your own Spotify devices (the TV's Spotify app, phones, computers); Sentinel just tells Spotify what to do. Needs Spotify Premium.</p>
@@ -325,11 +327,11 @@
             <li>Press <b>Connect Spotify</b> and sign in to Spotify in the tab that opens, then press <b>Agree</b>.</li>
             <li>On this PC (through Remote Desktop) it finishes by itself. On any other device the last page says it can't be reached — that's expected: copy the whole address from the address bar, paste it below and press <b>Finish</b>.</li>
           </ol>
-          <div class="save-row"><button class="primary" onclick="spotifyConnect()">Connect Spotify</button><span class="msg" id="msg-sp-connect"></span></div>
+          <div class="save-row" data-min="owner"><button class="primary" onclick="spotifyConnect()">Connect Spotify</button><span class="msg" id="msg-sp-connect"></span></div>
           <div class="row">
             <div class="field" style="flex: 1 1 360px"><span>Address of the last page (only if it didn't finish by itself)</span><input type="text" id="sp-paste" placeholder="http://127.0.0.1:8888/callback?code=…" autocomplete="off" spellcheck="false"></div>
           </div>
-          <div class="save-row"><button onclick="spotifyFinish()">Finish</button><span class="msg" id="msg-sp-finish"></span></div>
+          <div class="save-row" data-min="owner"><button onclick="spotifyFinish()">Finish</button><span class="msg" id="msg-sp-finish"></span></div>
         </div>
         <div id="sp-connected" hidden>
           <div class="row"><div class="field" style="flex: 0 1 320px"><span>Play on this speaker when nothing is playing</span><select data-key="spotify_device" id="sp-device"><option value="">Whichever was used last</option></select></div></div>
@@ -338,7 +340,7 @@
           <p class="hint" style="margin-top:0">Music asked for on this PC (“play it here”, “on Sentinel”) that doesn't start within a few seconds moves to this speaker, and for a day after that it goes straight there.</p>
           <div class="save-row">
             <button class="primary" onclick="saveSection('spotify')">Save</button>
-            <button onclick="spotifyDisconnect()">Disconnect</button>
+            <button onclick="spotifyDisconnect()" data-min="owner">Disconnect</button>
             <span class="msg" id="msg-sp-device"></span>
           </div>
         </div>
@@ -351,18 +353,18 @@
             <li>Press <b>Connect this PC</b> and sign in to Spotify in the tab that opens (the same account), then press <b>Agree</b>.</li>
             <li>On this PC (through Remote Desktop) it finishes by itself. On any other device the last page says it can't be reached — that's expected: copy the whole address from the address bar, paste it below and press <b>Finish</b>.</li>
           </ol>
-          <div class="save-row"><button class="primary" onclick="speakerConnect()">Connect this PC</button><span class="msg" id="msg-spk-connect"></span></div>
+          <div class="save-row" data-min="owner"><button class="primary" onclick="speakerConnect()">Connect this PC</button><span class="msg" id="msg-spk-connect"></span></div>
           <div class="row">
             <div class="field" style="flex: 1 1 360px"><span>Address of the last page (only if it didn't finish by itself)</span><input type="text" id="spk-paste" placeholder="http://127.0.0.1:8898/login?code=…" autocomplete="off" spellcheck="false"></div>
           </div>
-          <div class="save-row"><button onclick="speakerFinish()">Finish</button><span class="msg" id="msg-spk-finish"></span></div>
+          <div class="save-row" data-min="owner"><button onclick="speakerFinish()">Finish</button><span class="msg" id="msg-spk-finish"></span></div>
         </div>
-        <div class="save-row" id="spk-signed-in" hidden><button onclick="speakerSignOut()">Disconnect this PC</button><span class="msg" id="msg-spk-out"></span></div>
+        <div class="save-row" id="spk-signed-in" hidden><button onclick="speakerSignOut()" data-min="owner">Disconnect this PC</button><span class="msg" id="msg-spk-out"></span></div>
       </div>
     </section>
 
     <!-- ======================= WEATHER ======================= -->
-    <section id="weather">
+    <section id="weather" data-min="admin">
       <h2>Weather</h2>
       <div class="card">
         <p class="hint" style="margin-top:0">Shown in the live grid's spare space (and under the cameras on a phone). From the free Open-Meteo service: only this town's rough location is sent, never pictures.</p>
@@ -378,7 +380,7 @@
     </section>
 
     <!-- ======================= REMOTE ACCESS ======================= -->
-    <section id="access">
+    <section id="access" data-min="owner">
       <h2>Remote access</h2>
       <div class="card">
         <div class="row">
@@ -391,17 +393,24 @@
     </section>
 
     <!-- ======================= PASSWORD ======================= -->
-    <section id="security">
+    <section id="security" data-min="user">
       <h2>Web password</h2>
       <div class="card">
-        <p class="hint" style="margin-top:0">Signed in as <b id="web-user"></b>.</p>
+        <p class="hint" style="margin-top:0">Signed in as <b id="web-user">{{ me_name }}</b>{% if role != "owner" %} ({{ role }}){% endif %}.</p>
         <div class="row">
           <div class="field"><span>Current password</span><input type="password" id="pw-current" autocomplete="current-password"></div>
-          <div class="field"><span>New password (10+ characters)</span><input type="password" id="pw-new" autocomplete="new-password"></div>
+          <div class="field"><span>New password ({{ 10 if role == "owner" else 8 }}+ characters)</span><input type="password" id="pw-new" autocomplete="new-password"></div>
           <div class="field"><span>Repeat new password</span><input type="password" id="pw-new2" autocomplete="new-password"></div>
         </div>
         <div class="save-row"><button class="primary" onclick="changePassword()">Change password</button><span class="msg" id="msg-pw"></span></div>
       </div>
+    </section>
+
+    <!-- ======================= CHANGE LOG ======================= -->
+    <section id="changes" data-min="admin">
+      <h2>Change log</h2>
+      <p class="hint">Who changed what in Sentinel's setup, newest first (kept a year). Only the owner and admins see this.</p>
+      <div class="card table-wrap"><table id="change-table"><thead><tr><th>When</th><th>Who</th><th>What</th><th>Which</th></tr></thead><tbody></tbody></table></div>
     </section>
 
     <!-- ======================= HELP ======================= -->
@@ -423,12 +432,14 @@
           <li><b>Fire TV</b> — a Fire TV with <b>ADB debugging</b> turned on (Settings → My Fire TV → Developer Options) shows up as a 📺 tile with the same remote; the first time, press OK on its “Allow USB debugging?” pop-up (tick “Always allow”). Fire TVs without that setting are left alone. A Fire TV showing Sentinel's live view (Fully Kiosk Browser) gets <b>📹 Show cameras</b> and <b>↻ Reload cameras</b> buttons; by voice or Telegram: “put the cameras on the Sentinel TV”, “reload the cameras”, “open Prime Video on the Sentinel TV”. Hold <b>⌂ Home</b> on its remote for a second to open the Fire TV's quick menu (Picture → Backlight dims the screen; Sleep Timer). Say the TV's name when you have more than one; “the TV” alone means the Samsung.</li>
           <li><b>Remotes (BroadLink)</b> — for things that only have a remote, like a heater, a soundbar or ceiling fans. Needs a BroadLink RM4 Pro (infrared and radio) or RM4 mini (infrared only). Set it up once in the BroadLink app: it joins 2.4 GHz Wi-Fi only, and in the device's settings turn <b>Lock device</b> off (a locked BroadLink answers only its app). Then open <a href="/remotes">Remotes</a> from the Home page and tap <b>Look for it</b>. To teach a button: type the remote's name (“Soundbar”) and the button's (“Volume up”), choose <b>Infrared</b> (you point the remote at the thing: TVs, soundbars, heaters) or <b>Radio</b> (works through walls: most ceiling fans), tap <b>Learn this button</b> and follow what the page says, holding the remote about 15 cm (6 in) from the BroadLink. Infrared is one press. Radio is two steps: hold the button until the page changes, then press it once more. Then tap the button on the page, or say or send its names: “Hey Jarvis, soundbar volume up 3 times”, “heater power”, “turn the soundbar up”. <b>✎ Edit</b> renames, re-teaches or deletes buttons. Infrared needs a clear line from the BroadLink to the heater or soundbar; radio goes through walls and floors. If a fan remote won't learn, it may use a radio the BroadLink can't hear (2.4 GHz or Bluetooth). A <b>Power</b> button that turns things both on and off is only pressed when you name it: “turn off the heater” isn't sent to it, because Sentinel can't see whether the heater is on.</li>
           <li><b>Heater thermostat</b> — holds a room temperature with a heater that only has a remote, like an EdenPURE in Auto mode. It needs the BroadLink's temperature sensor cable, and the heater's <b>Temp up</b> and <b>Temp down</b> buttons taught on the <a href="/remotes">Remotes</a> page. The 🔥 card there shows the room temperature; set the temperature with − and +, check that the heater is on with its <b>Auto</b> light lit (not High), and tap <b>Start holding</b>. Sentinel first presses Temp down 14 times to find the bottom of the heater's setting, then every 15 minutes moves it one step warmer or cooler toward your temperature, and remembers which step held it (more than 3° short, it goes to the top step until the room is close). By voice or Telegram: “set the heater to 70”, “keep the room at 68”, “how warm is it inside?”, “stop holding the temperature”. It <b>never presses Power or Mode</b> by itself: those buttons switch back and forth, and Sentinel can't see the heater, so a press could turn it on or to High by mistake. Turn it on and off yourself (the Power button on the page works). Safety: at 78°F, or if the room temperature stops coming in, the setting goes all the way down and you get a Telegram message; if the room stays well over your temperature with the setting at the bottom, the heater may be on High (where the Temp buttons do nothing), and Sentinel tells you to check it. Put the BroadLink where the heater can't shine straight on it, or it reads warm.</li>
+          <li><b>What the heater costs</b> — the 💲 card under the heater thermostat on the <a href="/remotes">Remotes</a> page. Type what you pay for electricity (per kWh, from your bill), the heater's watts, about how many hours a day it's really heating, what you pay for a gallon of propane and your boiler's efficiency (on its label; about 80–85% for an older boiler, 90–95% for a condensing one). It shows what the heater costs per day and per month for different amounts of running, what the boiler would burn to make the same heat, which one is cheaper, and the propane price at which they cost the same. Sentinel can't see when the heater is heating, so the hours are your estimate; the numbers are remembered on each device.</li>
           <li><b>Routines</b> — “when this happens, do that”, on the <a href="/routines">Routines</a> page (or the Routines button on the live page). <b>When</b>: a camera sees a person, vehicle, animal or delivery; any motion on a camera; sunset, sunrise or a set time; someone's phone gets home or leaves; a family car pulls in or drives off. <b>Only</b> (optional): after dark, in daylight, between two times, on certain days, or when nobody's home. <b>Then</b>: turn a switch on (and leave it on, keep it on for some minutes, or until there's been no motion for some minutes) or off, send a Telegram message (with the camera's photo), or say something out loud. Each routine speaks at most every 2 minutes and messages at most every 5, on its own: with one routine per room, walking through the house names each room in turn. <b>Combining Wi-Fi sensors:</b> a sensor routine has three groups, each with its own ＋ Add sensor: <i>any of these</i> starts it, <i>and all of these too</i> must also see movement, <i>but not if any of these</i> must stay still, all within a few seconds of each other (5 unless you change it). “Living room, but not kitchen or dining room” = someone is in the living room, not just walking through. While you edit, a dot on each sensor lights up when it sees movement, a line says whether the routine would go off right now, the routine is read back in plain words, and a 24-hour strip shows when it would have gone off yesterday, so you can tune it before saving. Or just say it: “Hey Jarvis, new routine: when the back yard camera sees someone after dark, turn on the patio lights until there's no motion for 2 minutes.” Claude works it out, Jarvis reads it back, and it's saved when you say “yes” (on Telegram, tap ✅). “What are my routines?” lists them. A light a routine turned on goes off again when its time is up; one someone switched on by hand is left alone. ▶ <b>Try it</b> on the page runs a routine's steps straight away to check it. Routines that only switch lights react to people the camera is less sure about too (someone walking through the yard in the dark), since a light coming on for nothing costs nothing; your alerts and message/speech routines still wait for a clear sighting. “After dark” uses sunrise and sunset for Home on the <a href="/people">Family</a> page, or the weather town.</li>
           <li><b>Wi-Fi motion sensors</b> — the <a href="/sensors">Sensors</a> page (the Sensors button on the live page). Small ESP32 boards notice people moving by how bodies disturb the Wi-Fi signal between them: every board sends a signal and listens to all the others, so each pair of boards is one line through the house (one card on the page). A line notices movement near the straight path between its two boards, most strongly close to either board, so put boards on opposite sides of the rooms people walk through, about waist to chest high, with no stone or brick wall between them. Sitting still doesn't count as movement, and pets set them off too. Each line learns its quiet room by itself (about half a minute after a board starts or the room settles) and shows <b>Movement</b> or <b>Still</b> with a 2-minute chart. <b>Adjust</b> moves a line's movement line (lower = more sensitive) or relearns its quiet level; <b>Rename</b> names a line after the room it watches; under <b>Boards</b>, <b>Flash light</b> shows which board is which. <a href="/sensors/history">History</a> shows when each line saw movement, day by day, and you can ask on Telegram or by voice: “Any movement inside today?”, “Anyone in the living room this morning?”. On the Routines page, “a Wi-Fi sensor notices movement” can start a routine. To set a new board up, plug it in: it makes a Wi-Fi network called <b>Sentinel-Sensor-…</b>; join it with your phone and open <b>192.168.4.1</b> to pick your home Wi-Fi (2.4 GHz). It appears on the page by itself. Holding its BOOT button for 3 seconds makes it forget the Wi-Fi.</li>
           <li id="house"><b>House</b> — the <a href="/house">House</a> page (🏠 on the home page) is a 3D drawing of your home with your devices in it, live. Drag to turn it, pinch or scroll to zoom, <b>Top</b> looks straight down, and <b>Upstairs</b> / <b>Both</b> show the other floor. Each pair of Wi-Fi sensors is a line between the two boards; it turns yellow while it notices movement, and the room the middle of that line runs through lights up. Switches and TVs glow when they're on; tap one to turn it on or off, tap a camera for its picture. Things worked by the BroadLink (heater, ceiling fans, soundbar: the <a href="/remotes">Remotes</a> page) are purple; tap one for its buttons (the heater also shows what its thermostat is doing). <b>＋ Add device</b> lists every switch, TV, camera, sensor board and remote that isn't on the map yet: pick one, then tap the floor where it really is. A device you tap can be moved, turned (TVs) or taken off the map, and <b>Device view</b> opens its own page (a camera full screen, a TV's remote, the Sensors or Remotes page). <b>Show ▾</b> picks what the drawing shows (room names, other labels, device names, sensors, sensor lines, cameras, plugs, TVs, remotes) to make it less busy; each phone or computer remembers its own choice. The drawing itself (rooms, walls, doors, stairs) is made once from a floor plan or photos of your home and saved on this computer only (recordings folder, <code>house.json</code>); Claude Code can redraw it if a room is wrong. On a TV the page starts in the flat Top view.</li>
           <li><b>Notes for Claude</b> — say “Jezebel, take a note for Claude”, wait for “Go ahead”, then say what you'd like changed or fixed (pauses are fine; up to about 90 seconds). She saves it and sends you a copy on Telegram. Next time you work with Claude, say “check notes”. You can also say it in one go: “Jezebel, note for Claude: make the music bar bigger.”</li>
           <li><b>Music (Spotify)</b> — once Spotify is connected under <a href="#spotify">Spotify</a>: “Hey Jarvis, play some jazz”, “play Tom Petty”, “play Free Fallin'”, “pause” (“pause the music” while the TV is on: plain “pause” is the TV's then), “skip”, “go back”, “volume up / down”, “volume 40”, “what's playing?”, “play on the TV”, “play Spotify on Sentinel” (any speaker's name; if Jezebel doesn't know the name she offers to read out the list — say “yes”). “Play Spotify here” or “on this speaker” means the speaker plugged into this PC (see <b>This PC as a speaker</b> under <a href="#spotify">Spotify</a>). Jarvis learns your Spotify artists (top, followed and recently played, once a day), so band names like Mötley Crüe are heard right; a Spotify connection made before November 2026 needs <b>Connect Spotify</b> once more for that.</li>
-          <li><b>Talk from your phone</b> — the round 🎙️ button at the bottom right of the home page talks to Jarvis through your phone's microphone (or a headset connected to the phone), from anywhere. Tap it, ask as you would in the house, and it stops listening by itself when you stop talking (or tap it again). The answer appears above the button and Jarvis says it on the phone; nothing is said out loud in the house. A question back (“Should I do that?”) shows <b>Yes</b> / <b>No</b> buttons; “take a note for Claude” listens again for the note. The first time, the browser asks to use the microphone: allow it. It needs the https:// address you use away from home (phones only give the microphone to secure pages), and the voice assistant turned on under Audio.</li>
+          <li><b>Hear alerts in a browser</b> — the <b>🔕 Hear alerts</b> button at the top of the home page and the camera page makes that page read alerts out loud in Jarvis's voice while it's open (turn it on once and it stays on as you move between the two): someone at the door, a car pulling in, a package, a weather warning. The words also show at the top of the page. It's per device: it only talks where you turned it on, and tapping <b>🔔 Alerts on</b> turns it off again. Browsers only let a page make sound after you've touched it, so after reopening the page the button may say <b>Tap to hear alerts</b>: tap it once. The page doesn't have to be the window you're clicked into, but it has to stay open and showing; a phone with the screen off, or a tab hidden behind another, usually goes quiet (Telegram is the dependable way to get alerts on a phone). It reads the same alerts the house speaker would, chosen under <b>Alerts</b>; not for guests.</li>
+          <li><b>Talk from your phone</b> — the round 🎙️ button at the bottom right of the home page and the camera page talks to Jarvis through your phone's microphone (or a headset connected to the phone), from anywhere. Tap it, ask as you would in the house, and it stops listening by itself when you stop talking (or tap it again). The answer appears above the button and Jarvis says it on the phone; nothing is said out loud in the house. A question back (“Should I do that?”) shows <b>Yes</b> / <b>No</b> buttons; “take a note for Claude” listens again for the note. The first time, the browser asks to use the microphone: allow it. It needs the https:// address you use away from home (phones only give the microphone to secure pages), and the voice assistant turned on under Audio.</li>
           <li><b>Volume</b> — “turn the PC volume down / up” or “PC volume 40” changes everything this PC plays (voice, alerts and music). “Speak up”, “talk quieter” or “set your volume to 60” changes just the voice. “Volume up / down” on its own is the music's (Spotify) volume. The music plays on whichever Spotify device is playing (or the one picked under Spotify); if none is, open Spotify on the TV or your phone first. The bar at the bottom of the live page shows the song and has ⏮ ⏯ ⏭ and volume buttons.</li>
           <li><b>Weather</b> — with 3 cameras the grid has a spare space, which shows the weather (set your town or ZIP under <a href="#weather">Weather</a>). On a phone it's under the cameras. When it's windy it warns you to expect motion clips from trees. <b>Tap it</b> (or press OK on a Fire TV remote) for the full forecast: now in detail (sunrise and sunset under the temperature; wind and its direction, humidity and dew point, UV, pressure, visibility, clouds), the next 48 hours as a chart (hover or tap for any hour) and the next 7 days, with the time as big as on the card. ✕, Esc or Back closes it, and it closes by itself after 2 minutes so a TV goes back to the cameras.</li>
           <li><b>Planes overhead</b> — ask Jarvis or Telegram “what plane is that?” (the one nearest overhead) or “any planes around?” (the closest few within about 30 miles): the airline and flight number, the kind of plane, how high it is, which way, and for airline flights where it came from and where it's going. Say “show me the planes” for a map of them on the TV (yellow = below 5,000 feet). Positions come from <a href="https://adsb.lol" target="_blank" rel="noopener">adsb.lol</a>, a free network of people's home receivers; routes come from adsbdb.com by flight number, and Sentinel only tells a route when the plane is really between those two airports (airlines reuse flight numbers, so a looked-up route is sometimes another leg). Small private planes and helicopters don't share routes, and some military planes don't show at all. “What was that?” right after one goes over looks back about 3 minutes for the plane that passed closest. “Any military planes around?” (or “any C-130s nearby?”) looks out about 170 miles and lists only military aircraft; on the map they're red and labeled “military”. Needs <b>Home</b> saved on the Family page. <b>Away from home</b> (more than about 6 miles), it tells you about the planes over <i>you</i>: the <b>✈️ Planes</b> tile on the Home page asks your phone for its location (allow it once) and shows the planes around you; after that the 🎙️ Talk button uses it too. On Telegram it goes by your phone's last report (the Family page), matching your Telegram first name to a name or nickname there.</li>
@@ -438,6 +449,37 @@
           <li><b>Timeline</b> (under the cameras) — a mark for every clip, coloured by what was in it: <b style="color:#ff4d6d">people</b>, <b style="color:#4da3ff">vehicles</b>, <b style="color:#5fd38a">animals</b>, <b style="color:#b98cff">deliveries</b>, grey for motion with nothing recognised, orange for clips you requested from Telegram. The buttons next to the zoom filter by type. Tap a mark to play it. Use <b>◀ ▶</b> or the date box to change day, <b>24h / 6h / 1h</b> to zoom, and <b>▶ Latest clip</b> to jump to the newest. In the player, <b>Previous / Next</b> step through that camera's clips.</li>
           <li><b>Zones</b> — tell Sentinel which parts of each picture matter.</li>
           <li><b>Settings</b> — this page.</li>
+        </ul>
+      </details>
+
+      <details>
+        <summary>Roles — who can do what</summary>
+        <ul>
+          <li><b>Owner</b> — the shared household login. It can do everything, and it alone handles logins (login links,
+            removing a login, making someone an admin) and the household's accounts: the Telegram bot and who gets its
+            messages, adding or removing cameras, Spotify and Claude, remote access and backups. It is always the owner,
+            so it can't be locked out.</li>
+          <li><b>Admin</b> — a family member's own login that may also change the shared setup: vehicles, people and
+            places, every routine, camera zones, Wi-Fi sensors, remotes and the heater, the house map and alerts.
+            An admin can set others to user or guest, but can't make admins or change another admin.</li>
+          <li><b>User</b> — uses everything: cameras and recordings, their own timeline (and deleting their own history),
+            switches, TV remotes, the heater, Talk, planes, recipes, notes and mesh chat. They change their own picture and
+            password, and make routines of their own; household routines and other people's are an admin's to change.
+            A user's own routine can't send Telegram messages yet.</li>
+          <li><b>Guest</b> — live cameras, switches, the lost-dog page, and recordings from the day they became a guest.
+            No family locations.</li>
+          <li><b>Timeline privacy</b> — a person's timeline is their own. Other users can't open it. The owner and
+            admins see only the last 48 hours of someone else's (enough to help find someone), nothing further back.
+            Pets' history is open to everyone. Where people are <i>right now</i> (the home page, “Where is Liz?”) is unchanged.</li>
+          <li><b>Notes</b> — the <a href="/notes">Notes</a> page holds notes and lists. <b>🔒 Only me</b> (how a new note
+            starts) is shown to nobody else, whatever their role: good for a journal. <b>👪 The family</b> (how a new
+            list starts) can be seen and changed by everyone: good for the grocery list, where anyone adds or ticks off.
+            Only the writer changes who sees a note; the writer or an admin deletes a shared one. Notes written on the
+            shared household login are always shared. Private notes are never sent to Telegram, Jarvis or Claude; they
+            are kept on the Sentinel PC and in its backup as ordinary text.</li>
+          <li>Set a person's role on the <a href="/people">Family</a> page, on their card (<b>Role</b>). A new login starts as a user.</li>
+          <li><b>Change log</b> (Settings, for the owner and admins) — who changed what in the setup, and when.</li>
+          <li>Jarvis by voice and the Telegram chat aren't covered by roles: anyone in the room, or in the chat, can use them.</li>
         </ul>
       </details>
 
@@ -570,10 +612,14 @@
     }
 
     // ---------------- settings form ----------------
+    var ROLE = document.body.dataset.role;  // (the server checks every request itself: sentinel/web/roles.py)
     function fillForm() {
       var v = settings.values;
       document.querySelectorAll("[data-key]").forEach(function(el) {
         var val = v[el.dataset.key];
+        if (ROLE !== "owner" && (settings.owner_only || []).indexOf(el.dataset.key) >= 0) {
+          el.disabled = true; el.title = "Only the household (owner) login can change this";
+        }
         if (el.type === "checkbox") el.checked = !!val;
         else el.value = val == null ? "" : val;
         if (el.type === "range") el.dispatchEvent(new Event("input"));
@@ -588,7 +634,7 @@
         i.checked = (v.object_alert_groups || []).indexOf(i.value) >= 0;
       });
       $("token-state").textContent = settings.secrets.telegram_bot_token ? "(set)" : "(not set)";
-      $("web-user").textContent = settings.web_username || "?";
+      if (ROLE === "owner") $("web-user").textContent = settings.web_username || "?";
       var sel = $("voice-select");
       sel.innerHTML = "";
       var opt0 = document.createElement("option"); opt0.value = ""; opt0.textContent = "System default"; sel.appendChild(opt0);
@@ -651,7 +697,9 @@
 
     async function saveSection(name) {
       var body = {};
-      SECTIONS[name].forEach(function(k) { body[k] = readField(k); });
+      SECTIONS[name].forEach(function(k) {
+        if (!document.querySelector('[data-key="' + k + '"]').disabled) body[k] = readField(k);  // (not the owner's settings)
+      });
       if (name === "telegram" && $("tg-token").value.trim()) body.telegram_bot_token = $("tg-token").value.trim();
       if (name === "detection") {
         body.object_alert_groups = Array.prototype.filter.call(
@@ -1022,11 +1070,28 @@
       } catch (e) { $("stats").textContent = "Status unavailable: " + e.message; }
     }
 
-    loadSettings().catch(function(e) { say("msg-telegram", e.message, false); });
-    loadCameras();
-    loadStatus();
-    loadBackup();
-    setInterval(function() { if (!document.hidden) loadStatus(); }, 15000);
+    async function loadChanges() {
+      try {
+        var d = await api("/api/changes"), tbody = $("change-table").querySelector("tbody");
+        tbody.innerHTML = d.changes.length ? "" : '<tr><td colspan="4" class="hint">Nothing has been changed yet.</td></tr>';
+        d.changes.forEach(function(c) {
+          var tr = document.createElement("tr");
+          tr.innerHTML = '<td>' + esc(fmtTime(new Date(c.ts * 1000).toISOString())) + '</td><td>' + esc(c.who) +
+            (c.role === "owner" ? "" : " (" + esc(c.role) + ")") + '</td><td style="white-space:normal">' + esc(c.what) +
+            (c.times > 1 ? " ×" + c.times : "") + '</td><td style="white-space:normal">' + esc(c.detail) + '</td>';
+          tbody.appendChild(tr);
+        });
+      } catch (e) {}
+    }
+
+    if (ROLE === "owner" || ROLE === "admin") {  // (a user or guest gets their password and the Help only)
+      loadSettings().catch(function(e) { say("msg-telegram", e.message, false); });
+      loadCameras();
+      loadStatus();
+      loadChanges();
+      if (ROLE === "owner") loadBackup();
+      setInterval(function() { if (!document.hidden) loadStatus(); }, 15000);
+    }
   </script>
 </body>
 </html>

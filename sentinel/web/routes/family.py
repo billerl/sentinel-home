@@ -13,6 +13,10 @@ from flask import Flask, Response, jsonify, redirect, render_template, request, 
 from sentinel.logging_utils import app_logger
 from sentinel.web.auth import _client_ip
 from sentinel.web.context import PERSON_PREFIX, WebContext
+from sentinel.web.roles import ADMIN, GUEST, OWNER, USER
+
+
+OTHERS_TIMELINE_HOURS = 48  # how far back the owner and admins see someone else's timeline
 
 
 def register(app: Flask, ctx: WebContext) -> None:
@@ -139,6 +143,11 @@ def register(app: Flask, ctx: WebContext) -> None:
         return jsonify({"ok": True, "url": url,
                         "qr": segno.make(url, error="m").svg_inline(scale=5, dark="#000", light="#fff", border=2)})
 
+    def _others_since(viewer):
+        """From when this login may see another person's history: the last 48 hours for the owner and admins
+        (enough to help find someone), never for anyone else. Their own, and pets', are not limited."""
+        return time.time() - OTHERS_TIMELINE_HOURS * 3600 if viewer.at_least(ADMIN) else None
+
     @app.route("/timeline")
     def timeline_page():
         redir = _require_session()
@@ -153,14 +162,24 @@ def register(app: Flask, ctx: WebContext) -> None:
             return jsonify({"error": "unauthorized"}), 401
         if engine is None:
             return jsonify({"error": "configuration unavailable"}), 503
-        return jsonify({"me": _viewer_person_id(), "people": engine.family.timeline_people()})
+        viewer = ctx.viewer()
+        return jsonify({"me": viewer.person_id, "others_hours": OTHERS_TIMELINE_HOURS if viewer.at_least(ADMIN) else 0,
+                        "people": engine.family.timeline_people(viewer.person_id, _others_since(viewer), private=True)})
 
     @app.route("/api/timeline/<int:person_id>/<date>")
     def api_timeline_day(person_id: int, date: str):
         redir = _require_session()
         if redir:
             return jsonify({"error": "unauthorized"}), 401
-        view = engine.family.timeline_day(person_id, date) if engine is not None else None
+        if engine is None:
+            return jsonify({"error": "not found"}), 404
+        viewer, person = ctx.viewer(), engine.locations.person(person_id)
+        since = None
+        if person is not None and person.id != viewer.person_id and not person.is_pet:
+            since = _others_since(viewer)  # someone else's history: the last two days for an admin, else none
+            if since is None:
+                return ctx.denied("A person's timeline is their own.")
+        view = engine.family.timeline_day(person_id, date, since)
         if view is None:
             return jsonify({"error": "not found"}), 404
         return jsonify(view)
@@ -286,7 +305,13 @@ def register(app: Flask, ctx: WebContext) -> None:
             return jsonify({"error": "unauthorized"}), 401
         if engine is None:
             return jsonify({"error": "configuration unavailable"}), 503
-        return jsonify(engine.family.people_view(_base_url()))
+        view = engine.family.people_view(_base_url())
+        viewer = ctx.viewer()
+        view["me"] = {"role": viewer.role, "person": viewer.person_id}
+        if not viewer.at_least(ADMIN):  # a phone's setup link is its key: only for those who set phones up
+            for p in view["people"]:
+                p["invite"] = None
+        return jsonify(view)
 
     @app.route("/api/people", methods=["POST"])
     def api_people_save():
@@ -310,7 +335,37 @@ def register(app: Flask, ctx: WebContext) -> None:
         err = _config_guard()
         if err:
             return err
-        return _result(*engine.family.people_action(person_id, action, _base_url()))
+        person = engine.locations.person(person_id)
+        if (person is not None and person.role == ADMIN and action in ("delete", "new-password")
+                and not ctx.viewer().at_least(OWNER)):
+            return ctx.denied("Only the household (owner) login can do that to an admin.")
+        ok, message = engine.family.people_action(person_id, action, _base_url())
+        if ok and person is not None and action in ("delete", "remove-login") and auth is not None:
+            auth.revoke_user(PERSON_PREFIX + person.username)  # signed out everywhere, at once
+        if ok and action == "delete":
+            engine.notes.forget_person(person_id)  # their private notes go with them
+        return _result(ok, message)
+
+    @app.route("/api/people/<int:person_id>/role", methods=["POST"])
+    def api_people_role(person_id: int):
+        # {"role": "guest" | "user" | "admin"}: what this person's own login may do (sentinel/web/roles.py)
+        err = _config_guard()
+        if err:
+            return err
+        role = (request.get_json(silent=True) or {}).get("role")
+        person = engine.locations.person(person_id)
+        if person is None:
+            return jsonify({"error": "That person no longer exists."}), 400
+        if role not in (GUEST, USER, ADMIN):
+            return jsonify({"error": "Choose guest, user or admin."}), 400
+        if person.is_pet:
+            return jsonify({"error": f"{person.name} is a pet: no login, so no role."}), 400
+        if not ctx.viewer().at_least(OWNER) and ADMIN in (role, person.role):
+            return ctx.denied("Only the household (owner) login can make someone an admin or change an admin.")
+        engine.locations.set_role(person_id, role)
+        app_logger.log("info", "web_role_set", person=person.name, role=role, by=ctx.viewer().name,
+                       component="web_server", action="roles")
+        return _result(True, f"{person.name} is now {'an admin' if role == ADMIN else 'a ' + role}.")
 
     @app.route("/api/people/<int:person_id>/photo", methods=["POST"])
     def api_people_photo(person_id: int):
@@ -321,6 +376,9 @@ def register(app: Flask, ctx: WebContext) -> None:
         body = request.get_json(silent=True)
         if not isinstance(body, dict) or "image" not in body:
             return jsonify({"error": "expected {\"image\": ...}"}), 400
+        viewer = ctx.viewer()
+        if viewer.person_id != person_id and not viewer.at_least(ADMIN):
+            return ctx.denied("You can change your own picture; an admin changes the others.")
         return _result(*engine.family.set_photo(person_id, body["image"]))
 
     @app.route("/person_photo/<int:person_id>.jpg")

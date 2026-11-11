@@ -438,6 +438,7 @@ class Routine:
     enabled: bool
     spec: Dict[str, Any]
     last_run: Optional[float]
+    owner: Optional[int] = None  # the person who made it with their own login (None = a household routine)
 
 
 class RoutineStore:
@@ -448,6 +449,8 @@ class RoutineStore:
         with self._connect() as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS routines (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,"
                          " enabled INTEGER NOT NULL DEFAULT 1, spec TEXT NOT NULL, created REAL NOT NULL, last_run REAL)")
+            if "owner" not in {row[1] for row in conn.execute("PRAGMA table_info(routines)")}:
+                conn.execute("ALTER TABLE routines ADD COLUMN owner INTEGER")  # "made by" (people.id in location.db)
         try:
             os.chmod(self.db_path, 0o600)
         except OSError:
@@ -460,17 +463,18 @@ class RoutineStore:
 
     def all(self) -> List[Routine]:
         with self._connect() as conn:
-            return [Routine(r["id"], r["name"], bool(r["enabled"]), json.loads(r["spec"]), r["last_run"])
+            return [Routine(r["id"], r["name"], bool(r["enabled"]), json.loads(r["spec"]), r["last_run"], r["owner"])
                     for r in conn.execute("SELECT * FROM routines ORDER BY id")]
 
     def get(self, routine_id: int) -> Optional[Routine]:
         return next((r for r in self.all() if r.id == routine_id), None)
 
-    def save(self, spec: Dict[str, Any], routine_id: Optional[int] = None) -> int:
+    def save(self, spec: Dict[str, Any], routine_id: Optional[int] = None, owner: Optional[int] = None) -> int:
+        """(``owner`` is set when a routine is made and stays with it through later edits.)"""
         with self._lock, self._connect() as conn:
             if routine_id is None:
-                cur = conn.execute("INSERT INTO routines (name, spec, created) VALUES (?, ?, ?)",
-                                   (spec["name"], json.dumps(spec), time.time()))
+                cur = conn.execute("INSERT INTO routines (name, spec, created, owner) VALUES (?, ?, ?, ?)",
+                                   (spec["name"], json.dumps(spec), time.time(), owner))
                 return int(cur.lastrowid)
             conn.execute("UPDATE routines SET name = ?, spec = ? WHERE id = ?", (spec["name"], json.dumps(spec), routine_id))
             return routine_id

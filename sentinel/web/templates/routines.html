@@ -128,14 +128,15 @@
       .part > .label { padding-top: 0; }
     }
   </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
 </head>
-<body>
+<body data-role="{{ role }}">
   <header>
     <div class="bar">
       <a href="{{ url_for('index') }}">← Home</a>
       <h1>Routines</h1>
       <a href="{{ url_for('people_page') }}">Family</a>
-      <a href="{{ url_for('settings_page') }}">Settings</a>
+      <a href="{{ url_for('settings_page') }}" data-min="admin">Settings</a>
     </div>
   </header>
 
@@ -287,10 +288,16 @@
           '<p class="text">' + esc(r.text) + '</p>' +
           '<div class="meta"><span>' + (r.last_run ? "Last ran " + when(r.last_run) : "Hasn't run yet") + '</span>' +
           (live ? '<span class="hold">💡 Holding a light on right now</span>' : "") +
-          (r.enabled ? "" : "<span>Paused</span>") + '</div>' +
+          (r.enabled ? "" : "<span>Paused</span>") +
+          '<span>' + (r.by ? "Made by " + esc(r.by) : "Household routine") + '</span></div>' +
           '<div class="acts"><button type="button" class="ghost" data-a="try" title="Do its steps now, whatever the time">▶ Try it</button>' +
           '<button type="button" class="ghost" data-a="edit">✎ Edit</button>' +
           '<button type="button" class="danger" data-a="delete">Delete</button></div>';
+        if (!r.mine) {  // someone else's or a household routine: an admin's to change (the server says so too)
+          card.querySelector(".acts").hidden = true;
+          card.querySelector(".tog").disabled = true;
+          card.querySelector(".tog").title = "Only its maker or an admin can change this routine";
+        }
         card.querySelector(".tog").onclick = async function() {
           var res = await post("/api/routines/" + r.id + "/enable", { on: !r.enabled });
           if (res.ok) load();
@@ -551,7 +558,8 @@
       step.className = "step";
       var kind = a.do === "switch" ? (a.on ? "on" : "off") : a.do;
       step.innerHTML = '<div class="line"><select class="s-do"><option value="on">Turn on</option><option value="off">Turn off</option>' +
-        '<option value="telegram">Send a Telegram message</option><option value="say">Say out loud</option>' +
+        (data.me && data.me.role === "user" ? "" : '<option value="telegram">Send a Telegram message</option>') +
+        '<option value="say">Say out loud</option>' +
         '<option value="tv_camera">Show a camera on a TV</option></select>' +
         '<button type="button" class="x" title="Remove this step">✕</button></div><div class="s-fields"></div>';
       step.querySelector(".s-do").value = kind;

@@ -166,6 +166,9 @@ class Engine:
         from sentinel.engine.location import LocationStore
 
         self.locations = LocationStore(VIDEO_DIR)  # family phones (OwnTracks) and named places
+        from sentinel.engine.notes import Notes
+
+        self.notes = Notes(VIDEO_DIR)  # each person's notes and lists, private or shared (the Notes page)
         from sentinel.engine.reminders import ReminderStore
 
         self.reminders = ReminderStore(VIDEO_DIR)  # "remind me ..." -> a Telegram message at that time
@@ -236,12 +239,15 @@ class Engine:
             VIDEO_DIR, self.settings, self.settings_manager, self.locations.authenticate, self.telegram,
             trackers=lambda: [p.tracker for p in self.locations.people() if p.tracker],
             speak=lambda text: self.audio.speak(text) if self.audio is not None else None)
+        from sentinel.engine.heard import HeardAlerts
         from sentinel.engine.news import HouseNews
 
+        self.heard = HeardAlerts()  # alerts for a browser to read out (the home page's "Hear alerts" switch)
         self.news = HouseNews(  # package news, the morning recap, routine and weather messages
             self.settings, self.telegram, self.recording_store, self.weather, packages=lambda: self.packages,
             weather_warnings=lambda: self.weather_alerts.active(), home_coords=self.family.home_coords,
             seen=lambda camera, group, jpeg: self.routines.seen(camera, group, jpeg))
+        self.news.heard = self.heard.add
         from sentinel.engine.routines import HOLDS_FILE, RoutineRunner, RoutineStore
 
         self._last_motion: Dict[str, float] = {}  # camera -> last frame with motion (routines' "until quiet")
@@ -566,6 +572,7 @@ class Engine:
         if event.timestamp - self._object_alert_times.get(key, 0.0) < cooldown:
             return
         self._object_alert_times[key] = event.timestamp
+        self.heard.add(event.description)
         if self.audio is not None:
             self.audio.trigger_alert(event.description.split(" ", 1)[1])  # drop the emoji
         if self.settings.get("telegram_motion_alerts", True) and jpeg:
@@ -584,6 +591,7 @@ class Engine:
         self.routines.motion(pipeline.host)
         if self.objects_active():
             return  # alerts come from recognised objects instead (see _on_object)
+        self.heard.add(f"Motion on {pipeline.display_name}.")
         if self.audio is not None:
             self.audio.trigger_alert()
         if self.settings.get("telegram_motion_alerts", True) and not self.telegram.include_video:
@@ -1319,7 +1327,8 @@ class Engine:
         sun = sun_times(coords[0], coords[1], time.time()) if coords else None
         return {
             "routines": [{"id": r.id, "name": r.name, "enabled": r.enabled, "spec": r.spec, "text": describe(r.spec, cat),
-                          "last_run": r.last_run, "holding_until": holding.get(r.id)} for r in self.routines.store.all()],
+                          "last_run": r.last_run, "holding_until": holding.get(r.id), "owner": r.owner}
+                         for r in self.routines.store.all()],
             "catalog": {k: [{"id": i, "name": n} for i, n in getattr(cat, k).items()]
                         for k in ("cameras", "switches", "people", "cars", "sensors", "tvs")},
             "dark": self.routines.is_dark(), "located": coords is not None,
@@ -1346,7 +1355,7 @@ class Engine:
                              "recorded_from": self.wifi_motion.first_moment()}
         return out
 
-    def routine_save(self, body: Dict[str, Any]) -> Tuple[bool, str]:
+    def routine_save(self, body: Dict[str, Any], owner: Optional[int] = None) -> Tuple[bool, str]:
         from sentinel.engine.routines import normalize
 
         rid = body.get("id")
@@ -1356,7 +1365,7 @@ class Engine:
             spec = normalize(body.get("spec"), self.routine_catalog())
         except ValueError as e:
             return False, str(e)
-        rid = self.routines.store.save(spec, rid)
+        rid = self.routines.store.save(spec, rid, owner)
         self.routines.reload()
         app_logger.log("info", "routine_saved", routine=spec["name"], routine_id=rid, component="engine", action="web")
         return True, str(rid)

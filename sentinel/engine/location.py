@@ -47,6 +47,7 @@ HISTORY_DAYS = 30
 INVITE_DAYS = 7
 LOGIN_LINK_DAYS = 7  # a personal "choose your Sentinel password" link
 MIN_WEB_PASSWORD = 8
+PERSON_ROLES = ("guest", "user", "admin")  # a person's own web login; the shared household login is the owner
 # The yard (trackers only): outside means beyond the edge by more than the fix's own uncertainty (at least
 # YARD_MARGIN_M: a collar GPS wanders a few metres); fixes vaguer than YARD_MAX_ACC_M never move the dog.
 # In or out takes two readings in a row: a collar left indoors strays 10-25 m while claiming ~6 m, and single
@@ -163,6 +164,14 @@ class Person:
     username: str = ""  # what the phone app logs in with
     token: str = ""  # the phone app's password (a random device key, shown in the setup QR code)
     tracker: str = ""  # a collar GPS tracker instead of a phone (its Meshtastic id, "!a1cacb2a"): a pet
+    role: str = "user"  # what their own web login may do: "guest", "user" or "admin" (sentinel/web/roles.py)
+    role_since: float = 0.0  # when that role was given (a guest sees recordings from that day on)
+    pet: bool = False  # marked as a pet on the Family page (one without a collar tracker)
+
+    @property
+    def is_pet(self) -> bool:
+        """A pet has no phone, login or role (a collar tracker makes it one too)."""
+        return self.pet or bool(self.tracker)
 
     def words(self) -> List[str]:
         return [w for w in dict.fromkeys([self.name.lower()] + [a.lower() for a in self.aliases]) if w]
@@ -240,6 +249,11 @@ class LocationStore:
                 conn.execute("ALTER TABLE people ADD COLUMN web_hash TEXT NOT NULL DEFAULT ''")
                 conn.execute("ALTER TABLE people ADD COLUMN login_code TEXT NOT NULL DEFAULT ''")
                 conn.execute("ALTER TABLE people ADD COLUMN login_expires REAL NOT NULL DEFAULT 0")
+            if "role" not in columns:  # what the person's own web login may do (sentinel/web/roles.py)
+                conn.execute("ALTER TABLE people ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+                conn.execute("ALTER TABLE people ADD COLUMN role_since REAL NOT NULL DEFAULT 0")
+            if "pet" not in columns:  # a pet without a collar tracker (no phone, login or role)
+                conn.execute("ALTER TABLE people ADD COLUMN pet INTEGER NOT NULL DEFAULT 0")
             # The places last sent to each phone (places_signature) and {place id: [name, tst]}, so a
             # renamed or deleted one can be replaced or removed. No row: never sent since setup.
             # Spots offered as new places on Telegram (frequent_spots); answer "", "save" or "no".
@@ -261,8 +275,12 @@ class LocationStore:
     # ------------------------------------------------------------ people
     @staticmethod
     def _person(r) -> Person:
+        keys = r.keys()
         return Person(r["id"], r["name"], [a for a in r["aliases"].split(",") if a], r["username"], r["token"],
-                      r["tracker"] if "tracker" in r.keys() else "")
+                      r["tracker"] if "tracker" in keys else "",
+                      (r["role"] if r["role"] in PERSON_ROLES else "user") if "role" in keys else "user",
+                      r["role_since"] if "role_since" in keys else 0.0,
+                      bool(r["pet"]) if "pet" in keys else False)
 
     def people(self) -> List[Person]:
         with self._connect() as conn:
@@ -288,6 +306,14 @@ class LocationStore:
                 return int(cur.lastrowid)
             conn.execute("UPDATE people SET name = ?, aliases = ? WHERE id = ?", (name, alias_text, person_id))
             return person_id
+
+    def set_pet(self, person_id: int, pet: bool) -> None:
+        """Mark as a pet (or a person again); a pet's web login, if it somehow had one, goes."""
+        with self._lock, self._connect() as conn:
+            conn.execute("UPDATE people SET pet = ? WHERE id = ?", (int(bool(pet)), person_id))
+            if pet:
+                conn.execute("UPDATE people SET web_hash = '', login_code = '', login_expires = 0, role = 'user'"
+                             " WHERE id = ?", (person_id,))
 
     def set_tracker(self, person_id: int, tracker: str) -> None:
         with self._lock, self._connect() as conn:
@@ -415,6 +441,20 @@ class LocationStore:
         with self._lock, self._connect() as conn:
             conn.execute("UPDATE people SET web_hash = '', login_code = '', login_expires = 0 WHERE id = ?",
                          (person_id,))
+
+    def web_account(self, username: str) -> Optional[Person]:
+        """The person whose own web login this username is (None once the login is removed or the person deleted)."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM people WHERE username = ? AND web_hash != ''", (str(username or ""),)).fetchone()
+        person = self._person(row) if row is not None else None
+        return person if person is not None and not person.is_pet else None
+
+    def set_role(self, person_id: int, role: str, now: Optional[float] = None) -> None:
+        if role not in PERSON_ROLES:
+            raise ValueError("unknown role")
+        with self._lock, self._connect() as conn:
+            conn.execute("UPDATE people SET role = ?, role_since = ? WHERE id = ? AND role != ?",
+                         (role, time.time() if now is None else now, person_id, role))
 
     def web_login(self, username: str, password: str) -> Optional[Person]:
         """The person with this username and Sentinel password, or None."""

@@ -242,6 +242,15 @@ class WebAuthManager:
             self._save_sessions()
         return rec
 
+    def revoke_user(self, username: str) -> int:
+        """Sign this login out everywhere (a removed personal login); how many sessions that ended."""
+        keys = [k for k, r in list(self._sessions.items()) if r.username == username]
+        for k in keys:
+            self._sessions.pop(k, None)
+        if keys:
+            self._save_sessions()
+        return len(keys)
+
     def validate_session(self, token: Optional[str], client_ip: str) -> Optional[SessionRecord]:
         if not token:
             return None

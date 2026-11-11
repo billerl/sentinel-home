@@ -454,10 +454,23 @@ class Family:
         """The family member signing in to the web page with their own password, or None."""
         return self.locations.web_login(username, password)
 
-    def timeline_people(self) -> List[Dict[str, Any]]:
-        return [{"id": p.id, "name": p.name, "days": self.locations.point_days(p.id)} for p in self.locations.people()]
+    def timeline_people(self, viewer: Optional[int] = None, others: Optional[float] = None,
+                        private: bool = False) -> List[Dict[str, Any]]:
+        """Whose history the Timeline page offers, and which days. ``private``: a person's history is their own;
+        someone else sees it only from ``others`` on (None = not at all). Pets' history is everyone's."""
+        out = []
+        for p in self.locations.people():
+            days = self.locations.point_days(p.id)
+            if private and p.id != viewer and not p.is_pet:
+                if others is None:
+                    continue
+                first = time.strftime("%Y-%m-%d", time.localtime(others))
+                days = [d for d in days if d >= first]
+            out.append({"id": p.id, "name": p.name, "days": days})
+        return out
 
-    def timeline_day(self, person_id: int, date: str) -> Optional[Dict[str, Any]]:
+    def timeline_day(self, person_id: int, date: str, since: Optional[float] = None) -> Optional[Dict[str, Any]]:
+        """One day of someone's history; ``since``: nothing from before then (someone else looking)."""
         from sentinel.engine.timeline import day_view, day_window
 
         if self.locations.person(person_id) is None:
@@ -468,6 +481,10 @@ class Family:
             return None
         # A day and a half either side, so a stay across midnight (asleep at home) is whole.
         reach = (start - 36 * 3600, end + 36 * 3600)
+        if since is not None:
+            if end <= since:
+                return None
+            start, reach = max(start, since), (max(reach[0], since), reach[1])
         points = self.locations.points(person_id, *reach)
         fix = self.locations.fix(person_id)
         view = day_view(points, self.locations.places(), start, end,
@@ -592,7 +609,7 @@ class Family:
                 "home": bool(v.place and v.place.is_home), "ts": fix.get("ts"), "batt": fix.get("batt"),
                 "lat": fix.get("lat"), "lon": fix.get("lon"), "cars": [c.name for c in v.cars],
                 "invite": {"url": self.join_url(base_url, invite[0]), "expires": invite[1]} if invite else None,
-                "username": p.username, "has_login": self.locations.has_web_login(p.id),
+                "username": p.username, "has_login": self.locations.has_web_login(p.id), "role": p.role, "pet": p.is_pet,
                 "tracker": p.tracker, "in_yard": fix.get("in_yard"), "photo": self.locations.photo_version(p.id),
             })
         vehicles = self.household.vehicles()
@@ -642,6 +659,8 @@ class Family:
         new_id = self.locations.save_person(name, aliases, person_id)
         if tracker is not None:
             self.locations.set_tracker(new_id, tracker)
+        if isinstance(body.get("pet"), bool):
+            self.locations.set_pet(new_id, body["pet"])
         app_logger.log("info", "location_person_saved", new=person_id is None, component="engine", action="location")
         return True, str(new_id)
 
@@ -649,6 +668,8 @@ class Family:
         person = self.locations.person(person_id)
         if person is None:
             return False, "That person no longer exists."
+        if person.is_pet and action in ("invite", "login-link", "new-password"):
+            return False, f"{person.name} is a pet: no phone or login."
         if action == "delete":
             self.locations.delete_person(person_id)
         elif action == "forget":

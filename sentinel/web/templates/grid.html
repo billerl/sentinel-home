@@ -10,8 +10,9 @@
   <meta name="theme-color" content="#001525">
   <title>Sentinel — Live</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='grid.css') }}?v={{ boot_id }}">
+  <link rel="stylesheet" href="/static/roles.css?v=1">
 </head>
-<body>
+<body data-role="{{ role }}">
   <div id="wx-alert" class="wx-alert" role="alert" hidden></div>
   <header>
     <a class="header-btn home-link" href="{{ url_for('index') }}" title="Home: family, switches, sensors, routines, settings">⌂ Home</a>
@@ -230,5 +231,7 @@
   <script>var BOOT_ID = "{{ boot_id }}";</script>
   <script src="{{ url_for('static', filename='slowlog.js') }}?v={{ boot_id }}"></script>
   <script src="{{ url_for('static', filename='grid.js') }}?v={{ boot_id }}"></script>
+  {% if role != "guest" %}<script src="{{ url_for('static', filename='talk.js') }}?v={{ boot_id }}"></script>
+  <script src="{{ url_for('static', filename='hear.js') }}?v={{ boot_id }}"></script>{% endif %}
 </body>
 </html>

@@ -11,10 +11,19 @@ from typing import Dict, List
 from flask import Flask, jsonify, request, send_file
 
 from sentinel.web.context import WebContext
+from sentinel.web.roles import GUEST
 
 
 def register(app: Flask, ctx: WebContext) -> None:
     broker, recordings, _require_session = ctx.broker, ctx.recordings, ctx.require_session
+
+    def _guest_from() -> float:
+        """A guest sees recordings from the day their pass began (0 = everything: any other role)."""
+        viewer = ctx.viewer()
+        if viewer is None or viewer.role != GUEST:
+            return 0.0
+        day = time.localtime(viewer.person.role_since or time.time())
+        return time.mktime(day[:3] + (0, 0, 0, 0, 0, -1))
 
     @app.route("/api/recordings")
     def api_recordings():
@@ -35,7 +44,8 @@ def register(app: Flask, ctx: WebContext) -> None:
         except ValueError:
             return jsonify({"error": "bad date"}), 400
 
-        clips = recordings.query(day_start, day_end)
+        earliest = _guest_from()
+        clips = [c for c in recordings.query(day_start, day_end) if c["start_ts"] >= earliest]
 
         # Rows: live cameras first (keyed by host, as the detector names clips),
         # then any other cameras seen that day, with "unknown" last.
@@ -87,6 +97,10 @@ def register(app: Flask, ctx: WebContext) -> None:
             return redir
         if recordings is None:
             return "Recordings unavailable", 503
+        earliest = _guest_from()
+        clip = recordings.get(recording_id) if earliest else None
+        if earliest and (clip is None or clip["start_ts"] < earliest):
+            return "Clip not found or could not be converted", 404
         path = recordings.web_playable_path(recording_id)
         if not path:
             return "Clip not found or could not be converted", 404

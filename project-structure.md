@@ -36,6 +36,7 @@ sentinel-home/                         # repository root
     │   ├── recipes.py                 # RecipeBox: family recipes from links (schema.org data, else Claude) and
     │   │                              #   cooking videos (yt-dlp + Whisper + Claude), family version beside the
     │   │                              #   original, swaps/twists, what-can-I-make, cooking mode + Jarvis (recipes.db)
+    │   ├── notes.py                   # Notes and lists, private to their writer or shared with the family (notes.db)
     │   ├── backup.py                  # Backup: nightly copy to a USB drive (databases, settings, photos, recent
     │   │                              #   video) and optionally the snapshot to another computer over SSH
     │   ├── news.py                    # HouseNews: unprompted messages (packages, recap, routines, weather)
@@ -59,6 +60,7 @@ sentinel-home/                         # repository root
     │   ├── reminders.py               # "Remind me ..." -> Telegram message at that time (reminders.db)
     │   ├── switches.py                # Smart plugs/switches (Kasa, local protocol): Live page panel, voice, Telegram
     │   ├── phone_talk.py              # Talk button: a phone's recording -> Whisper -> answer_voice -> words + WAV
+    │   ├── heard.py                   # "Hear alerts" switch: the last alerts for a browser to read out (+ their WAV)
     │   ├── samsung_tv.py              # Samsung TVs as a switch (Wake-on-LAN + power key), apps, volume, mute
     │   ├── remotes.py                 # Learned IR/RF remote buttons sent by a BroadLink RM4 (Remotes page, voice, Telegram)
     │   ├── heater.py                  # Heater thermostat: steps a remote-only heater's setting toward a target
@@ -87,10 +89,13 @@ sentinel-home/                         # repository root
     ├── web/                           # Web viewer = the user interface
     │   ├── server.py                  # Flask app: settings, sign-in setup, listeners; calls each routes/ module
     │   ├── context.py                 # WebContext: what every area's routes share (session check, write guard)
+    │   ├── roles.py                   # Who may do what: every route's minimum role (guest < user < admin < owner),
+    │   │                              #   checked before the route runs; which requests go in the change log
+    │   ├── changelog.py               # The change log (recorded_videos/changes.db): who changed what in the setup
     │   ├── map_tiles.py               # Location map pictures fetched by Sentinel and kept a week (the TV browser was turned away)
     │   ├── routes/                    # Pages + API, one module per area, each with register(app, ctx):
     │   │                              #   signin, live, cameras, recordings, family, vehicles, switches (+ TV
-    │   │                              #   remote), spotify, sensors, house, routines, settings, mesh, recipes, talk
+    │   │                              #   remote), spotify, sensors, house, routines, settings, mesh, recipes, notes, talk
     │   ├── auth.py                    # Bcrypt login, sessions (saved as hashes in .web_sessions.json),
     │   │                              #   lockout / backoff, QR sign-in pairing for TVs
     │   ├── frame_broker.py            # Latest frame per camera; opaque ids; lazy JPEG encoding
@@ -100,6 +105,8 @@ sentinel-home/                         # repository root
     │   │                              #   three/ = three.js r128 + OrbitControls (MIT, the House page),
     │   │                              #   grid.js + grid.css = the live page's script and styles (?v=boot id),
     │   │                              #   talk.js = the home page's 🎙️ Talk button (phone mic -> Jarvis)
+    │   │                              #   hear.js = the home page's 🔔 Hear alerts switch (alerts read out in the browser)
+    │   │                              #   roles.css = hides what the signed-in role can't use (data-min on elements)
     │   └── templates/                 # login (+ QR), pair (phone approves a TV), home (`/`: weather, who's home,
     │                                  #   page tiles, switches), grid (`/live`: cameras + weather/clock +
     │                                  #   family lights + switches + timeline + player), zones, settings, vehicles,
@@ -109,7 +116,7 @@ sentinel-home/                         # repository root
     │                                  #   timeline (Family timeline), account (a person picks their own password),
     │                                  #   mesh (Mesh chat: conversations, invite QR codes, radios heard),
     │                                  #   recipes (recipe box, one recipe, cooking mode),
-    │                                  #   remotes (learned IR/RF buttons: teach, press, rename),
+    │                                  #   remotes (learned IR/RF buttons: teach, press, rename), notes (private notes, shared lists),
     │                                  #   lost (Lost dog: live collar map, search on/off, beep),
     │                                  #   where (full-screen "where is everyone" map for a TV, pictures as pins)
     ├── notifications/

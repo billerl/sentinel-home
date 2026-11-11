@@ -171,8 +171,9 @@
       .ed-ing { grid-template-columns: 4em 4.4em minmax(0, 1fr) 32px; }
     }
   </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
 </head>
-<body>
+<body data-role="{{ role }}">
   <header>
     <div class="bar">
       <a href="{{ url_for('index') }}">← Home</a>

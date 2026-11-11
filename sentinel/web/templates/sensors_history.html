@@ -76,8 +76,9 @@
     .ev .d { color: #6f97a5; flex: none; }
     .empty { text-align: center; padding: 28px 16px; border: 1px dashed #1d3a44; border-radius: 14px; color: #8fb6c4; }
   </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
 </head>
-<body>
+<body data-role="{{ role }}">
   <header>
     <div class="bar">
       <a href="{{ url_for('sensors_page') }}">← Sensors</a>
