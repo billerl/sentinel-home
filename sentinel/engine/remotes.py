@@ -264,6 +264,10 @@ class Remotes:
 
     def _step(self, step: str, message: str) -> None:
         self.learning = {**self.learning, "step": step, "message": message, "at": self._clock()}
+        if step != "done":  # (each step logged: only successes were, and a fan that wouldn't learn left no trace)
+            app_logger.log("info", "remote_learn_step", step=step, message=message[:160],
+                           remote=self.learning.get("remote"), button=self.learning.get("button"),
+                           component="remotes", action="learn")
 
     def _wait(self, check: Callable[[], Any]) -> Any:
         """check() until it gives something (the BroadLink raises while it has nothing yet), or time's up."""
