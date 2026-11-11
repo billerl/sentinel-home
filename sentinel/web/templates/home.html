@@ -222,6 +222,7 @@
     loadWeatherAlerts(); setInterval(loadWeatherAlerts, 60 * 1000);
     refresh(); setInterval(refresh, 10000);
   </script>
+  <script src="{{ url_for('static', filename='slowlog.js') }}?v={{ boot_id }}"></script>
   <script src="{{ url_for('static', filename='talk.js') }}?v={{ boot_id }}"></script>
 </body>
 </html>

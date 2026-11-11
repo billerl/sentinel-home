@@ -228,6 +228,7 @@
   <script type="application/json" id="initial-cameras">{{ cameras | tojson }}</script>
   
   <script>var BOOT_ID = "{{ boot_id }}";</script>
+  <script src="{{ url_for('static', filename='slowlog.js') }}?v={{ boot_id }}"></script>
   <script src="{{ url_for('static', filename='grid.js') }}?v={{ boot_id }}"></script>
 </body>
 </html>

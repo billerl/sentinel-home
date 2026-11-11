@@ -179,6 +179,18 @@ class TestWeb(unittest.TestCase):
     def post(self, path, body, header=True):
         return self.client.post(path, json=body, headers={"X-Sentinel-Request": "1"} if header else {})
 
+    def test_slow_requests_are_reported_and_timed(self):
+        resp = self.client.get("/api/house")
+        self.assertRegex(resp.headers["Server-Timing"], r"^app;dur=\d+$")  # (what the page's report reads)
+        with mock.patch("sentinel.web.routes.live.app_logger") as log:
+            report = {"page": "/live", "conn": "4g", "items": [{"path": "/api/switches", "type": "fetch", "ms": 5200,
+                                                                  "wait": 5100, "took": 3}, "junk"]}
+            self.assertEqual(self.post("/api/slow", report).status_code, 200)
+            self.assertEqual(self.post("/api/slow", report).status_code, 429)  # (one report per 5 s per device)
+        kw = log.log.call_args.kwargs
+        self.assertEqual((log.log.call_args.args[1], kw["page"], kw["conn"]), ("web_slow", "/live", "4g"))
+        self.assertEqual(kw["items"], [{"path": "/api/switches", "type": "fetch", "ms": 5200, "wait": 5100, "took": 3}])
+
     def test_page_and_drawing(self):
         self.assertEqual(self.client.get("/house").status_code, 200)
         self.assertEqual(len(self.client.get("/api/house").get_json()["drawing"]["rooms"]), 3)

@@ -582,6 +582,11 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   remembered per browser (localStorage `house.show`). **Device view** opens the device's own page: a camera full
   screen (`/live#cam=<web id>`), a TV's remote (`/live#remote=<switch id>`, read in grid.js), `/live#switches`,
   `/sensors` or `/remotes`.
+- **Slow-page timing** (2026-11-11): every response carries `Server-Timing: app;dur=<ms>` and requests Sentinel took
+  over 1 s are logged (`web_slow_server`, except `/stream`, `/api/talk`, TV screens). `static/slowlog.js` (home, live,
+  house pages) watches the browser's resource timing and posts requests over 2.5 s to `/api/slow` (logged `web_slow`:
+  path, total ms, wait to first byte, Sentinel's own ms, connection type). Big total with small `took` = the
+  connection (phone network or Cloudflare tunnel), not Sentinel.
 - **Telegram commands added:** `access` (remote-access guide) and `videos <when> [people|vehicles|animals] [camera]` (`sentinel/engine/queries.py`).
 - **Web:** `/settings` covers status, cameras, detection, Telegram, recording, audio, remote access, password and help.
 - **Home page** (`/`, `home.html`, 2026-11-04): weather, who's home, navigation tiles with live status (cameras, indoor

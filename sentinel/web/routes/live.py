@@ -5,9 +5,11 @@ The home page, the Live page and what it shows: camera list, snapshots, MJPEG st
 from __future__ import annotations
 
 import time
+from typing import Dict
 
 from flask import Flask, Response, jsonify, render_template, request
 
+from sentinel.logging_utils import app_logger
 from sentinel.web.auth import _client_ip
 from sentinel.web.context import TV_BROWSER, WebContext
 
@@ -55,6 +57,32 @@ def register(app: Flask, ctx: WebContext) -> None:
         resp = jsonify(cams)
         resp.headers["X-Sentinel-Boot"] = BOOT_ID  # open pages reload themselves after an update
         return resp
+
+    slow_reports: Dict[str, float] = {}
+
+    @app.route("/api/slow", methods=["POST"])
+    def api_slow():
+        """A page's report of requests that took long on the device (static/slowlog.js): logged as web_slow, with
+        how long Sentinel itself took for each, so the log shows whether the time went in the connection or here."""
+        redir = _require_session()
+        if redir:
+            return jsonify({"error": "unauthorized"}), 401
+        now, who = time.time(), request.headers.get("CF-Connecting-IP") or request.remote_addr or ""
+        if now - slow_reports.get(who, 0) < 5:
+            return jsonify({"ok": False}), 429
+        slow_reports[who] = now
+        body = request.get_json(silent=True) or {}
+        items = []
+        for it in (body.get("items") if isinstance(body.get("items"), list) else [])[:20]:
+            if isinstance(it, dict):
+                items.append({k: (str(it.get(k))[:80] if k in ("path", "type") else it.get(k) if isinstance(it.get(k), (int, float)) else None)
+                              for k in ("path", "type", "ms", "wait", "took")})
+        if items:
+            app_logger.log("info", "web_slow", page=str(body.get("page") or "")[:60], conn=str(body.get("conn") or "")[:12],
+                           hidden=body.get("hidden") is True, items=items,
+                           via="tunnel" if request.remote_addr == "127.0.0.1" else request.remote_addr,
+                           component="web", action="report")
+        return jsonify({"ok": True})
 
     @app.route("/api/weather")
     def api_weather():

@@ -7,9 +7,10 @@ from __future__ import annotations
 import ipaddress
 import os
 import threading
+import time
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from flask import Flask, send_from_directory
+from flask import Flask, g, request, send_from_directory
 from werkzeug.serving import make_server
 
 from sentinel.logging_utils import app_logger
@@ -24,6 +25,10 @@ from sentinel.web.routes.signin import _from_this_home, _home_nets  # noqa: F401
 if TYPE_CHECKING:
     from sentinel.recordings import RecordingStore
     from sentinel.settings import SettingsManager
+
+
+SLOW_SECONDS = 1.0  # a request Sentinel took longer than this over is logged (web_slow_server)
+LONG_PATHS = ("/stream", "/api/talk")  # (meant to take long: live video, speech recognition)
 
 
 def _home_lan_address(host: str) -> bool:
@@ -155,8 +160,20 @@ class WebServer:
         app.secret_key = auth_cfg["session_secret"]
         app.config["MAX_CONTENT_LENGTH"] = 256 * 1024  # forms and config JSON only
 
+        @app.before_request
+        def _clock_in():
+            g.started = time.perf_counter()
+
         @app.after_request
         def _security_headers(resp):
+            # How long Sentinel itself took: a header the page's slow-request report reads (static/slowlog.js),
+            # and a log line when it's over a second, so "it's slow" can be told apart from the phone's connection
+            took = time.perf_counter() - g.get("started", time.perf_counter())
+            resp.headers["Server-Timing"] = f"app;dur={took * 1000:.0f}"
+            if took > SLOW_SECONDS and not request.path.startswith(LONG_PATHS) and "/screen" not in request.path:
+                app_logger.log("info", "web_slow_server", path=request.path, ms=round(took * 1000),
+                               via="tunnel" if request.remote_addr == "127.0.0.1" else request.remote_addr,
+                               component="web", action="request")
             resp.headers.setdefault("X-Content-Type-Options", "nosniff")
             # SAMEORIGIN, not DENY: the TV's camera page shows the location map (/where) in a frame of its own
             # (DENY left the TV blank, 2026-11-10); other sites still can't frame Sentinel's pages
