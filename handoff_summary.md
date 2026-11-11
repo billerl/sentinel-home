@@ -566,6 +566,14 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   (address + current web id for snapshots). A path's line lights up while it sees movement, and the room its
   midpoint is in lights up with it (a simple first rule; the routines' any/all/but-not rules could drive rooms
   later). Fire TV / smart-TV browsers start in the flat Top view with antialiasing off.
+  Since 2026-11-11: remotes taught to the BroadLink are devices too (`remote:<remote name>`: spaces allowed for this
+  kind only; `Remotes.renamed` -> `HouseLayout.rename_ref` keeps a renamed remote's place), drawn purple (a fan = a
+  disc at the ceiling, soundbar = a bar, heater = a box); their card has a button per learned button
+  (`/api/remotes/press`) and the heater's thermostat state (`house_live` adds `remotes` + `heater`). **Show ▾** hides
+  room names, marks, device names, sensor lines or whole kinds of device (sensors, cameras, plugs, TVs, remotes),
+  remembered per browser (localStorage `house.show`). **Device view** opens the device's own page: a camera full
+  screen (`/live#cam=<web id>`), a TV's remote (`/live#remote=<switch id>`, read in grid.js), `/live#switches`,
+  `/sensors` or `/remotes`.
 - **Telegram commands added:** `access` (remote-access guide) and `videos <when> [people|vehicles|animals] [camera]` (`sentinel/engine/queries.py`).
 - **Web:** `/settings` covers status, cameras, detection, Telegram, recording, audio, remote access, password and help.
 - **Home page** (`/`, `home.html`, 2026-11-04): weather, who's home, navigation tiles with live status (cameras, indoor

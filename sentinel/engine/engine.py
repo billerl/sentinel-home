@@ -200,6 +200,7 @@ class Engine:
         from sentinel.engine.house import HouseLayout
 
         self.house = HouseLayout(VIDEO_DIR)  # the House page's 3D drawing and where each device sits on it
+        self.remotes.renamed = lambda old, new: self.house.rename_ref("remote", old, new)
         self.presence = None  # PresenceTracker, when object detection + CLIP are available
         self.packages = None  # PackageWatch (parcels left at a door camera), likewise
         from sentinel.engine.camera_light import CameraLights
@@ -1181,11 +1182,17 @@ class Engine:
     def house_live(self) -> Dict[str, Any]:
         """What the House page shows moving or switched on, in one small poll (no score graphs)."""
         wm = self.wifi_motion.view()
+        rv, hv = self.remotes.view(), self.heater.view()
         return {
             "now": wm["now"],
             "paths": [{k: p[k] for k in ("id", "name", "online", "motion", "last_motion")} for p in wm["sensors"]],
             "boards": [{k: b[k] for k in ("id", "name", "online")} for b in wm["boards"]],
             "switches": self.switches.view()["switches"],
+            # the BroadLink's remotes (heater, fans, soundbar): pressed from the page; the heater's thermostat beside it
+            "remotes": [{"id": r["name"], "name": r["name"], "online": rv["connected"],
+                         "buttons": [b["name"] for b in r["buttons"]]} for r in rv["remotes"]],
+            "heater": {k: hv[k] for k in ("enabled", "target_f", "room_f", "celsius")}
+                      | {"remote": (hv["buttons"] or {}).get("remote")},
         }
 
     def _camera_page(self, words: str) -> Optional[Tuple[str, str]]:

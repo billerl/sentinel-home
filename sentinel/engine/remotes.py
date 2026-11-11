@@ -105,6 +105,7 @@ class Remotes:
         self._failed_at = -1e9
         self.error = ""  # why the BroadLink isn't reachable (shown on the page)
         self.learning: Dict[str, Any] = {}  # the button being taught: remote, button, kind, step, message
+        self.renamed: Optional[Callable[[str, str], None]] = None  # (old, new) remote name: the House map follows it
         self._cancel = threading.Event()
         self.hub: Dict[str, Any] = {}
         self.remotes: List[Dict[str, Any]] = []  # [{name, buttons: [{name, kind, code (base64)}]}]
@@ -227,8 +228,10 @@ class Remotes:
                 other = self._remote(new)
                 if other is not None and other is not r:
                     return False, f"There's already a remote called {other['name']}."
-                r["name"] = new
+                old, r["name"] = r["name"], new
         self._save()
+        if not button and self.renamed is not None:
+            self.renamed(old, new)
         return True, "Renamed."
 
     def delete(self, remote: str, button: Optional[str] = None) -> Tuple[bool, str]:

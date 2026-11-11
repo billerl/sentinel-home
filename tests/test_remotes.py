@@ -272,7 +272,10 @@ class TestRemotes(unittest.TestCase):
         self.assertTrue(self.remotes.rename("Soundbar", "Vol up", "Volume up")[0])
         self.assertFalse(self.remotes.rename("Soundbar", "Mute", "volume up")[0])  # taken
         self.assertFalse(self.remotes.rename("Soundbar", None, "bad/name")[0])
+        seen = []
+        self.remotes.renamed = lambda old, new: seen.append((old, new))  # (the House map follows a renamed remote)
         self.assertTrue(self.remotes.rename("Soundbar", None, "Living room soundbar")[0])
+        self.assertEqual(seen, [("Soundbar", "Living room soundbar")])
         self.assertEqual(self.remotes.parse("living room soundbar volume up")[1], "Volume up")
         self.assertTrue(self.remotes.delete("Living room soundbar", "Mute")[0])
         self.assertTrue(self.remotes.delete("Living room soundbar", "Volume up")[0])

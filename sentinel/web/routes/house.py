@@ -37,7 +37,7 @@ def register(app: Flask, ctx: WebContext) -> None:
         if redir:
             return jsonify({"error": "unauthorized"}), 401
         if engine is None:
-            return jsonify({"paths": [], "boards": [], "switches": [], "cameras": []})
+            return jsonify({"paths": [], "boards": [], "switches": [], "cameras": [], "remotes": [], "heater": {}})
         live = engine.house_live()
         # cameras are placed by address (the web id changes at every start); the page snapshots by web id
         live["cameras"] = [{"id": host or cid, "web": cid, "name": disp} for cid, host, disp in broker.list_camera_addresses()]

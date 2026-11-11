@@ -39,6 +39,8 @@
     .lbl i { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }
     .lbl.on i { background: var(--live); box-shadow: 0 0 7px var(--live); }
     .lbl.on { border-color: #6b5a2a; color: var(--bright); }
+    .lbl.rc { border-color: #4a3a6e; }
+    .lbl.rc i { background: #b48cff; }
     .lbl.off-line { opacity: 0.55; }
     .lbl.sel { border-color: var(--accent); box-shadow: 0 0 12px -3px var(--accent); }
     .lbl.room { background: none; border: 0; color: var(--muted); font-size: 0.7rem; letter-spacing: 0.08em;
@@ -65,6 +67,14 @@
     .placing small { color: var(--muted); font-size: 0.72rem; flex-basis: 100%; text-align: center; margin-top: 2px; }
     .chip { font: inherit; font-size: 0.78rem; border-radius: 999px; padding: 5px 11px; background: var(--panel-2);
             border: 1px solid var(--line-2); color: var(--fg); cursor: pointer; }
+    .show-wrap { flex-basis: 100%; }
+    .show-menu { display: inline-flex; flex-direction: column; gap: 2px; background: rgba(5,16,21,0.95); border: 1px solid var(--line-2);
+                 border-radius: 10px; padding: 6px 8px; max-width: 100%; }
+    .show-menu label { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; padding: 4px 4px; cursor: pointer; }
+    .show-menu input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+    .show-menu .acts { display: flex; gap: 6px; margin-top: 4px; }
+    .show-menu .acts button { font: inherit; font-size: 0.74rem; color: var(--muted); background: none; border: 1px solid var(--line); border-radius: 7px;
+                              padding: 3px 8px; cursor: pointer; }
     .empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
              padding: 30px; color: #8fb6c4; line-height: 1.6; }
 
@@ -117,6 +127,8 @@
           <button type="button" data-floor="all" aria-pressed="false">Both</button>
         </div>
         <button type="button" class="btn primary" id="add">＋ Add device</button>
+        <button type="button" class="btn" id="show-btn" aria-expanded="false" aria-controls="show-menu">Show ▾</button>
+        <div class="show-wrap" id="show-wrap" hidden><div class="show-menu" id="show-menu" role="group" aria-label="What the house shows"></div></div>
       </div>
       <div class="hint" id="hint" hidden>Drag to turn · pinch or scroll to zoom · tap a device</div>
       <div class="placing" id="placing" hidden></div>
@@ -141,7 +153,8 @@
         <div class="log" id="log" aria-live="polite"></div>
       </div>
       <p class="note">A room lights up when a sensor path through the middle of it notices movement.
-        Use ＋ Add device to put your switches, cameras and Wi-Fi sensors where they really are.</p>
+        Use ＋ Add device to put your switches, cameras, Wi-Fi sensors and the things the BroadLink works (heater, fans,
+        soundbar) where they really are; Show ▾ picks what the drawing shows.</p>
     </aside>
   </main>
 
@@ -151,7 +164,7 @@
   (function () {
     var TV = {{ 'true' if tv else 'false' }};  // Fire TV / smart-TV browsers: start flat and draw lighter
     var REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    var C = { cyan: 0x00ffff, live: 0xffc94d, garage: 0xfff3a0, outside: 0x4ade80, off: 0x5a6b73, wood: 0xc8955a, glass: 0xbfefff };
+    var C = { remote: 0xb48cff, cyan: 0x00ffff, live: 0xffc94d, garage: 0xfff3a0, outside: 0x4ade80, off: 0x5a6b73, wood: 0xc8955a, glass: 0xbfefff };
     var H = 3.0, OPEN_TOP = 2.1;  // ceiling height and the top of a doorway, in drawing heights (1 ≈ 2.7 ft)
 
     function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
@@ -177,7 +190,7 @@
     }
 
     var stage = document.getElementById("stage"), labels = document.getElementById("labels");
-    var drawing = null, placed = [], live = { paths: [], boards: [], switches: [], cameras: [] };
+    var drawing = null, placed = [], live = { paths: [], boards: [], switches: [], cameras: [], remotes: [], heater: {} };
     var S = 1 / 40, CX = 0, CY = 0;  // plan units -> scene: set from the drawing's size
     function at(x, y, h) { return new THREE.Vector3((x - CX) * S, h || 0, (y - CY) * S); }
     function toPlan(v) { return [v.x / S + CX, v.z / S + CY]; }
@@ -324,6 +337,7 @@
     function liveOf(dv) {
       if (dv.kind === "switch") return live.switches.find(function (s) { return s.id === dv.ref; }) || null;
       if (dv.kind === "camera") return live.cameras.find(function (c) { return c.id === dv.ref; }) || null;
+      if (dv.kind === "remote") return (live.remotes || []).find(function (r) { return r.id === dv.ref; }) || null;
       return live.boards.find(function (b) { return b.id === dv.ref; }) || null;
     }
     function nameOf(dv) { var l = liveOf(dv); return (l && l.name) || dv.name || dv.ref; }
@@ -344,14 +358,65 @@
       if (dv.kind === "camera") return "live";
       if (!l.online) return "offline";
       if (dv.kind === "sensor") return sensorMoving(dv) ? "movement" : "still";
+      if (dv.kind === "remote") return heaterWords(dv) || "remote";
       return l.on ? "on" : "off";
     }
+
+    function temp(f, c) { return f == null ? "" : c ? Math.round((f - 32) * 5 / 9) + "°C" : Math.round(f) + "°F"; }
+    function heaterWords(dv) {   // the heater's remote: what its thermostat (sentinel/engine/heater.py) is doing
+      var h = live.heater || {};
+      if (!h.remote || h.remote !== dv.ref) return "";
+      var room = h.room_f != null ? "room " + temp(h.room_f, h.celsius) : "";
+      return (h.enabled ? "holding " + temp(h.target_f, h.celsius) + (room ? " · " + room : "") : room || "thermostat off");
+    }
+    // ---------- what's shown (the Show menu; remembered on this device) ----------
+    var SHOW = [["rooms", "Room names"], ["marks", "Other labels (doors, stairs…)"], ["names", "Device names"],
+                ["sensors", "Wi-Fi sensors"], ["paths", "Sensor lines"], ["cameras", "Cameras"],
+                ["plugs", "Smart plugs & lights"], ["tvs", "TVs"], ["remotes", "Remote-controlled (RM4)"]];
+    var show = {};
+    SHOW.forEach(function (s) { show[s[0]] = true; });
+    try { var kept = JSON.parse(localStorage.getItem("house.show") || "{}"); Object.keys(show).forEach(function (k) { if (kept[k] === false) show[k] = false; }); } catch (e) {}
+    function catOf(dv) {
+      if (dv.kind === "sensor") return "sensors";
+      if (dv.kind === "camera") return "cameras";
+      if (dv.kind === "remote") return "remotes";
+      return isTv(dv) ? "tvs" : "plugs";
+    }
+    function drawShowMenu() {
+      var menu = document.getElementById("show-menu");
+      menu.innerHTML = SHOW.map(function (s) {
+        return '<label><input type="checkbox" data-show="' + s[0] + '"' + (show[s[0]] ? " checked" : "") + "> " + esc(s[1]) + "</label>";
+      }).join("") + '<div class="acts"><button type="button" data-all="1">Show all</button><button type="button" data-all="0">Just the rooms</button></div>';
+    }
+    function keepShow() { try { localStorage.setItem("house.show", JSON.stringify(show)); } catch (e) {} }
+    document.getElementById("show-menu").addEventListener("change", function (e) {
+      var k = e.target.dataset.show;
+      if (k) { show[k] = e.target.checked; keepShow(); }
+    });
+    document.getElementById("show-menu").addEventListener("click", function (e) {
+      var a = e.target.dataset.all;
+      if (a == null) return;
+      Object.keys(show).forEach(function (k) { show[k] = a === "1" || k === "rooms"; });
+      keepShow(); drawShowMenu();
+    });
+    function toggleShowMenu(open) {
+      var wrap = document.getElementById("show-wrap"), btn = document.getElementById("show-btn");
+      if (open == null) open = wrap.hidden;
+      if (open) drawShowMenu();
+      wrap.hidden = !open;
+      btn.setAttribute("aria-expanded", open);
+    }
+    document.getElementById("show-btn").onclick = function () { toggleShowMenu(); };
 
     function makeDevice(dv) {
       var lvl = dv.level || 0, g = new THREE.Group(), mesh, mat = new THREE.MeshBasicMaterial({ color: C.cyan });
       if (dv.kind === "sensor") { mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.16, 20), mat); mesh.position.y = 1.0; }
       else if (dv.kind === "camera") { mesh = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.6, 16), mat); mesh.rotation.x = Math.PI / 2; mesh.position.y = 2.2; }
       else if (isTv(dv)) { mesh = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.9, 1.5), mat); mesh.position.y = 1.3; }
+      else if (dv.kind === "remote" && /fan/i.test(dv.ref)) { mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.08, 24), mat); mesh.position.y = 2.7; }  // up on the ceiling
+      else if (dv.kind === "remote" && /sound ?bar|speaker/i.test(dv.ref)) { mesh = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 1.1), mat); mesh.position.y = 0.7; }
+      else if (dv.kind === "remote" && /heat/i.test(dv.ref)) { mesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.75, 0.4), mat); mesh.position.y = 0.38; }
+      else if (dv.kind === "remote") { mesh = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), mat); mesh.position.y = 0.5; }
       else { mesh = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), mat); mesh.position.y = 0.3; }
       var halo = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.62, 32),
         new THREE.MeshBasicMaterial({ color: C.live, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
@@ -364,7 +429,8 @@
       var el = document.createElement("div");
       el.className = "lbl";
       labels.appendChild(el);
-      devObjs[dv.id] = { dv: dv, group: g, mesh: mesh, halo: halo, mat: mat, el: el, top: mesh.position.y + 0.5, tv: isTv(dv) };
+      devObjs[dv.id] = { dv: dv, group: g, mesh: mesh, halo: halo, mat: mat, el: el, top: mesh.position.y + 0.5, tv: isTv(dv),
+                         color: dv.kind === "remote" ? C.remote : C.cyan };
     }
     function dropDevice(id) {
       var o = devObjs[id];
@@ -426,7 +492,7 @@
       }).join("") : '<p class="note">Nothing on the map yet: use ＋ Add device.</p>';
       Object.keys(devObjs).forEach(function (id) {
         var o = devObjs[id], dv = o.dv;
-        o.el.className = "lbl" + (isOn(dv) ? " on" : "") + (online(dv) ? "" : " off-line") + (id === selected ? " sel" : "");
+        o.el.className = "lbl" + (dv.kind === "remote" ? " rc" : "") + (isOn(dv) ? " on" : "") + (online(dv) ? "" : " off-line") + (id === selected ? " sel" : "");
         o.el.innerHTML = "<i></i>" + esc(nameOf(dv));
       });
     }
@@ -435,6 +501,13 @@
       var o = selected && devObjs[selected];
       if (!o) return "";
       return selected + "|" + stateWords(o.dv) + "|" + live.paths.map(function (p) { return p.id + p.online + p.motion; }).join();
+    }
+    function viewUrl(dv, l) {   // the device's own page: Device view on the Selected card
+      if (dv.kind === "camera") return l ? "/live#cam=" + encodeURIComponent(l.web) : "/live";
+      if (dv.kind === "sensor") return "/sensors";
+      if (dv.kind === "remote") return "/remotes";
+      if (isTv(dv) && /^(samsung|firetv)-/.test(dv.ref)) return "/live#remote=" + encodeURIComponent(dv.ref);  // its TV remote
+      return "/live#switches";
     }
     function drawSelected() {
       var box = document.getElementById("sel");
@@ -451,13 +524,18 @@
       } else if (dv.kind === "camera") {
         meta.push("Camera");
         if (l) html += '<img id="snap" alt="' + esc(nameOf(dv)) + ' camera" src="/snapshot.jpg?w=480&id=' + encodeURIComponent(l.web) + "&t=" + Date.now() + '">';
+      } else if (dv.kind === "remote") {
+        meta.push("Worked by the BroadLink" + (l && !l.online ? " · <b>not connected</b>" : ""));
+        if (heaterWords(dv)) meta.push("Thermostat: " + esc(heaterWords(dv)));
       } else {
         meta.push((isTv(dv) ? "TV" : "Switch") + " · " + esc(stateWords(dv)));
       }
       html += '<div class="meta">' + meta.join("<br>") + '</div><div class="acts">';
       if (dv.kind === "switch" && l && l.online) html += '<button type="button" class="btn' + (l.on ? " on" : "") + '" id="a-toggle">' + (l.on ? "Turn off" : "Turn on") + "</button>";
-      if (dv.kind === "camera") html += '<a class="btn" href="/live" style="text-decoration:none">Live view</a>';
-      if (dv.kind === "sensor") html += '<a class="btn" href="/sensors" style="text-decoration:none">Sensors page</a>';
+      html += '<a class="btn" href="' + esc(viewUrl(dv, l)) + '" style="text-decoration:none">Device view</a>';
+      if (dv.kind === "remote" && l) {
+        html += l.buttons.map(function (b, i) { return '<button type="button" class="btn" data-press="' + i + '">' + esc(b) + "</button>"; }).join("");
+      }
       html += '<button type="button" class="btn" id="a-move">Move</button>';
       if (o.tv) html += '<button type="button" class="btn" id="a-turn">Turn ↻</button>';
       html += '<button type="button" class="btn" id="a-remove">Take off the map</button></div>';
@@ -468,6 +546,15 @@
         try { var j = await postJson("/api/switches/set", { id: dv.ref, on: !l.on }); live.switches = j.switches || live.switches; refresh(); }
         catch (e) { alert(e.message); bt.disabled = false; }
       };
+      box.querySelectorAll("[data-press]").forEach(function (b) {
+        b.onclick = async function () {
+          var button = l.buttons[+b.dataset.press];
+          b.disabled = true;
+          try { await postJson("/api/remotes/press", { remote: dv.ref, button: button }); log(esc(nameOf(dv)) + ": <b>" + esc(button) + "</b>"); }
+          catch (e) { alert(e.message); }
+          b.disabled = false;
+        };
+      });
       document.getElementById("a-move").onclick = function () { startPlacing({ kind: dv.kind, ref: dv.ref, name: nameOf(dv), turn: dv.turn }); };
       var tb = document.getElementById("a-turn");
       if (tb) tb.onclick = function () { save({ kind: dv.kind, ref: dv.ref, at: dv.at, level: dv.level, turn: ((dv.turn || 0) + 45) % 360 }); };
@@ -508,6 +595,7 @@
       live.boards.forEach(function (b) { if (!on["sensor:" + b.id]) out.push({ kind: "sensor", ref: b.id, name: b.name, group: "Wi-Fi sensors" }); });
       live.switches.forEach(function (s) { if (!on["switch:" + s.id]) out.push({ kind: "switch", ref: s.id, name: s.name, group: s.icon === "tv" ? "TVs" : "Switches" }); });
       live.cameras.forEach(function (c) { if (!on["camera:" + c.id]) out.push({ kind: "camera", ref: c.id, name: c.name, group: "Cameras" }); });
+      (live.remotes || []).forEach(function (r) { if (!on["remote:" + r.id]) out.push({ kind: "remote", ref: r.id, name: r.name, group: "Remote-controlled (RM4)" }); });
       return out;
     }
     var bar = document.getElementById("placing");
@@ -534,7 +622,10 @@
       try {
         var j = await postJson("/api/house/device", body);
         placed = j.devices; syncDevices();
-        selected = body.kind + ":" + body.ref; refresh();
+        selected = body.kind + ":" + body.ref;
+        var o = devObjs[selected];
+        if (o && !show[catOf(o.dv)]) { show[catOf(o.dv)] = true; keepShow(); }  // (just placed: don't leave it hidden)
+        refresh();
       } catch (e) { alert(e.message); }
     }
 
@@ -555,7 +646,8 @@
         save({ kind: dev.kind, ref: dev.ref, name: dev.name, at: [Math.round(p[0]), Math.round(p[1])], level: hits[0].object.userData.level, turn: dev.turn || 0 });
         return;
       }
-      var hit = ray.intersectObjects(pickables.filter(function (m) { return m.parent.parent.visible; }))[0];
+      toggleShowMenu(false);
+      var hit = ray.intersectObjects(pickables.filter(function (m) { return m.parent.visible && m.parent.parent.visible; }))[0];
       select(hit ? hit.object.userData.dev : null);
     });
 
@@ -646,6 +738,7 @@
         var on = p.online && p.motion;
         o.mat.color.setHex(on ? C.live : C.cyan);
         o.mat.opacity = on ? 0.55 + 0.4 * pulse : p.online ? 0.18 : 0.05;
+        o.line.visible = show.paths;
       });
       Object.keys(roomObjs).forEach(function (id) {
         var o = roomObjs[id], dimmed = floorMode === "up" && !o.lvl;
@@ -654,21 +747,22 @@
       });
       Object.keys(devObjs).forEach(function (id) {
         var o = devObjs[id], on = isOn(o.dv);
-        o.mat.color.setHex(!online(o.dv) ? C.off : on && o.dv.kind === "switch" ? C.live : C.cyan);
+        o.group.visible = show[catOf(o.dv)];
+        o.mat.color.setHex(!online(o.dv) ? C.off : on && o.dv.kind === "switch" ? C.live : o.color);
         o.halo.material.opacity = on ? 0.25 + 0.5 * pulse : id === selected ? 0.4 : 0;
         o.halo.material.color.setHex(on ? C.live : C.cyan);
       });
       renderer.render(scene, camera);
       Object.keys(devObjs).forEach(function (id) {
         var o = devObjs[id];
-        place(o.el, o.group.position.clone().setY(o.group.position.y + o.top), shown(o.dv.level || 0));
+        place(o.el, o.group.position.clone().setY(o.group.position.y + o.top), shown(o.dv.level || 0) && show.names && o.group.visible);
       });
       Object.keys(roomObjs).forEach(function (id) {
         var o = roomObjs[id];
         o.el.classList.toggle("busy", o.busy);
-        place(o.el, o.center, shown(o.lvl));
+        place(o.el, o.center, shown(o.lvl) && show.rooms);
       });
-      markObjs.forEach(function (m) { place(m.el, m.p, shown(m.lvl)); });
+      markObjs.forEach(function (m) { place(m.el, m.p, shown(m.lvl) && show.marks); });
       requestAnimationFrame(frame);
     }
 

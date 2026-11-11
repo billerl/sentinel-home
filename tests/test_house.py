@@ -79,7 +79,10 @@ class TestClean(unittest.TestCase):
         self.assertEqual(dev["id"], "switch:kasa-9c532256c25f-1")
         self.assertEqual((dev["at"], dev["level"], dev["turn"]), ([10, 20], 1, 45))
         self.assertEqual(clean_device({"kind": "camera", "ref": "192.168.0.10", "at": [0, 0]})["id"], "camera:192.168.0.10")
+        # a remote taught to the BroadLink goes by its name (spaces allowed there only)
+        self.assertEqual(clean_device({"kind": "remote", "ref": "Bedroom Ceiling Fan", "at": [5, 5]})["id"], "remote:Bedroom Ceiling Fan")
         for bad in ({"kind": "toaster", "ref": "a", "at": [0, 0]}, {"kind": "sensor", "ref": "a b", "at": [0, 0]},
+                    {"kind": "remote", "ref": "fan<script>", "at": [0, 0]}, {"kind": "remote", "ref": "", "at": [0, 0]},
                     {"kind": "sensor", "ref": "8d24", "at": [0]}, {"kind": "sensor", "ref": None, "at": [0, 0]}, None):
             with self.assertRaises(ValueError):
                 clean_device(bad)
@@ -109,6 +112,14 @@ class TestLayout(unittest.TestCase):
         self.assertEqual(house.remove("sensor:8d24"), (True, "removed"))
         self.assertEqual(house.remove("sensor:8d24"), (False, "it isn't on the map"))
         self.assertEqual(house.remove(None)[0], False)
+
+    def test_renamed_remote_keeps_its_place(self):
+        house = HouseLayout(self.dir)
+        house.place({"kind": "remote", "ref": "Fan", "name": "Fan", "at": [100, 100], "level": 1})
+        house.rename_ref("remote", "Fan", "Bedroom fan")
+        house.rename_ref("remote", "Nothing", "Else")  # (not on the map: nothing happens)
+        dev = HouseLayout(self.dir).view()["devices"][0]
+        self.assertEqual((dev["id"], dev["ref"], dev["at"], dev["level"]), ("remote:Bedroom fan", "Bedroom fan", [100, 100], 1))
 
     def test_bad_drawing_keeps_the_old_one(self):
         house = HouseLayout(self.dir)
@@ -197,3 +208,21 @@ class TestWeb(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestHouseLive(unittest.TestCase):
+    def test_remotes_and_heater_in_the_poll(self):
+        from sentinel.engine.engine import Engine
+
+        fake = mock.Mock()
+        fake.wifi_motion.view.return_value = {"now": 1.0, "sensors": [], "boards": []}
+        fake.switches.view.return_value = {"switches": []}
+        fake.remotes.view.return_value = {"connected": True, "remotes": [
+            {"name": "Heater", "buttons": [{"name": "Power", "kind": "ir"}, {"name": "Temp up", "kind": "ir"}]}]}
+        fake.heater.view.return_value = {"enabled": True, "target_f": 68, "room_f": 70.2, "celsius": False,
+                                         "buttons": {"remote": "Heater", "up": "Temp up", "down": "Temp down"}}
+        live = Engine.house_live(fake)
+        self.assertEqual(live["remotes"], [{"id": "Heater", "name": "Heater", "online": True, "buttons": ["Power", "Temp up"]}])
+        self.assertEqual(live["heater"], {"enabled": True, "target_f": 68, "room_f": 70.2, "celsius": False, "remote": "Heater"})
+        fake.heater.view.return_value["buttons"] = None  # no heater remote found yet
+        self.assertIsNone(Engine.house_live(fake)["heater"]["remote"])

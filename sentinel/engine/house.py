@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sentinel.logging_utils import app_logger
 
 FILE_NAME = "house.json"
-KINDS = ("sensor", "switch", "camera")
+KINDS = ("sensor", "switch", "camera", "remote")  # remote = a remote taught to the BroadLink, by its name
 ROOM_KINDS = ("", "garage", "outside")
 FEATURES = ("steps", "window", "door", "box", "rail")
 MAX_ROOMS = 80
@@ -34,6 +34,7 @@ COORD = 10000.0  # plan units either way
 HEIGHT = 20.0
 ID_OK = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 REF_OK = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+REMOTE_REF_OK = re.compile(r"^[\w '&().\-]{1,64}$")  # a remote's name (sentinel/engine/remotes.py NAME_OK)
 COLOR_OK = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
@@ -191,7 +192,7 @@ def clean_device(raw: Any) -> Dict[str, Any]:
     kind, ref = raw.get("kind"), raw.get("ref")
     if kind not in KINDS:
         raise ValueError("unknown kind of device")
-    if not isinstance(ref, str) or not REF_OK.match(ref):
+    if not isinstance(ref, str) or not (REMOTE_REF_OK if kind == "remote" else REF_OK).match(ref):
         raise ValueError("which device?")
     at = _point(raw.get("at"))
     if not at:
@@ -266,6 +267,16 @@ class HouseLayout:
             self._devices[dev["id"]] = dev
             self._save()
         return True, "placed"
+
+    def rename_ref(self, kind: str, old: str, new: str) -> None:
+        """A device was renamed where it's known by its name (a remote): it keeps its place on the map."""
+        with self._lock:
+            dev = self._devices.pop(f"{kind}:{old}", None)
+            if dev is None:
+                return
+            dev.update(id=f"{kind}:{new}", ref=new, name=new)
+            self._devices[dev["id"]] = dev
+            self._save()
 
     def remove(self, device_id: Any) -> Tuple[bool, str]:
         with self._lock:

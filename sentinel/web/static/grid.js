@@ -865,7 +865,7 @@ async function openRemote(id) {
   var first = document.querySelector("#tvr-dpad .ok");
   if (first && !isPhone()) first.focus();
 }
-async function openRemoteFromHome() {
+async function openRemoteFromHome(want) {
   try {
     var r = await fetch("/api/switches");
     if (r.ok) renderSwitches(await r.json());
@@ -876,7 +876,8 @@ async function openRemoteFromHome() {
     switchMsg("No TV with a remote was found.");
     return;
   }
-  openRemote(tvs.some(function(s) { return s.id === last; }) ? last : tvs[0].id);
+  if (!tvs.some(function(s) { return s.id === want; })) want = tvs.some(function(s) { return s.id === last; }) ? last : tvs[0].id;
+  openRemote(want);
 }
 // ---- the TV's screen on the phone (Fire TV: sentinel/engine/tv_mirror.py) ----
 var screenFor = null, screenRetry = null;
@@ -1438,7 +1439,8 @@ function closePlayer() {
   // The Home page's tiles: Cameras (the cameras, not whichever tab was used last), Switches (#switches), Remotes (#remote)
   setTab(location.hash === "#switches" && isPhone() ? "switches" : "live");
   if (location.hash === "#switches" && !isPhone()) toggleSwitches(true);
-  if (location.hash === "#remote") openRemoteFromHome();
+  var rm = /^#remote(?:=([\w.:-]+))?$/.exec(location.hash);  // (#remote=<id>: that TV, from the House page)
+  if (rm) openRemoteFromHome(rm[1]);
   PHONE_QUERY.addEventListener("change", function() {
     if (isPhone()) setTab(currentTab);
     else toggleTimeline(recall("sentinel.timeline") !== "0");  // back to the desktop preference
