@@ -97,6 +97,7 @@ class Remotes:
         self._lib = lib  # python-broadlink (imported when first needed; tests pass a fake)
         self._clock = clock
         self._sleep = sleep
+        self._found_mhz: Optional[float] = None  # the radio frequency the button being taught came in on
         self._lock = threading.Lock()  # the store
         self._io = threading.Lock()  # one conversation with the BroadLink at a time
         self._device: Any = None
@@ -285,9 +286,12 @@ class Remotes:
         return None
 
     def _learn(self, remote: str, button: str, kind: str) -> None:
+        with self._lock:
+            known = (self._remote(remote) or {}).get("mhz") if kind == "rf" else None
+        self._found_mhz = None
         with self._io:
             try:
-                code = self._record(kind)
+                code = self._record(kind, known)
             except Exception as e:
                 self._device = None
                 code = None
@@ -319,12 +323,14 @@ class Remotes:
                 r["buttons"][r["buttons"].index(b)] = entry
             else:
                 r["buttons"].append(entry)
+            if kind == "rf" and self._found_mhz:  # its other buttons: no holding to find the frequency again
+                r["mhz"] = round(float(self._found_mhz), 2)
         self._save()
         app_logger.log("info", "remote_learned", remote=remote, button=button, kind=kind, component="remotes",
                        action="learn")
         self._step("done", f"Got it: {remote} {button}. Tap it to try it.")
 
-    def _record(self, kind: str) -> Optional[bytes]:
+    def _record(self, kind: str, known_mhz: Optional[float] = None) -> Optional[bytes]:
         dev = self._connect(force=True)
         if dev is None:
             self._step("failed", self.error)
@@ -347,6 +353,12 @@ class Remotes:
         if not hasattr(dev, "sweep_frequency"):
             self._step("failed", "This BroadLink can only learn infrared (radio needs the RM4 Pro).")
             return None
+        if known_mhz:  # this remote's frequency is known from an earlier button: one press is enough
+            dev.find_rf_packet(known_mhz)
+            self._found_mhz = known_mhz
+            self._step("press", f"Press the button once, close to the BroadLink ({known_mhz:.1f} MHz, this remote's "
+                                "radio). If nothing happens, press it again.")
+            return self._wait(fresh)
         dev.sweep_frequency()
         self._step("hold", "Hold the button down on the remote, close to the BroadLink, until this changes.")
         found = self._wait(lambda: (lambda f: f[1] if f[0] else None)(dev.check_frequency()))
@@ -366,6 +378,7 @@ class Remotes:
         if self._cancel.is_set():
             return None
         dev.find_rf_packet(found)
+        self._found_mhz = found
         self._step("again", "Now press the button once (a short press). If nothing happens, press it again.")
         return self._wait(fresh)
 

@@ -178,6 +178,23 @@ class TestRemotes(unittest.TestCase):
         self.dev.code = None
         self.assertEqual(self.teach("Fan", "Power", kind="rf", code=fan)["step"], "done")
 
+    def test_the_remotes_frequency_is_remembered(self):
+        # "Why do I need to hold the button?" (2026-11-10): only to find the frequency, once per remote
+        self.teach("Fan", "Light On", kind="rf", code=b"\xb2ON")
+        self.assertEqual(self.dev.calls.count("sweep"), 1)
+        start, self.dev.calls = self.t, []
+
+        def press():
+            if self.t - start >= 2 and ("find", 433.92) in self.dev.calls:
+                self.dev.code = b"\xb2LOW"
+        self.on_sleep = press
+        self.remotes.learning = {"remote": "Fan", "button": "Fan Low", "kind": "rf"}
+        self.remotes._learn("Fan", "Fan Low", "rf")
+        self.assertEqual(self.remotes.learning["step"], "done")
+        self.assertNotIn("sweep", self.dev.calls)  # straight to listening on 433.92
+        self.remotes.press("Fan", "Fan Low")
+        self.assertEqual(self.dev.sent, [b"\xb2LOW"])
+
     def test_teaching_again_replaces_the_button(self):
         self.teach("Heater", "Power", code=b"old")
         self.teach("heater", "power", code=b"new")
