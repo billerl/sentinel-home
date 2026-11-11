@@ -93,7 +93,7 @@ class TelegramNotifier:
             "- What plane is that? / Any planes around? — planes near the house (near you, when you're away): airline, type, height, where from and to\n"
             "- Any military planes around? — military aircraft within about 170 miles\n"
             "- Show me the planes (on the TV) — a map of the planes near the house\n"
-            "- Soundbar volume up 3 times / Heater power — a button taught on the Remotes page (BroadLink)\n"
+            "- Soundbar volume up 3 times / Heater power — a button taught on the Remotes page (BroadLink)\n"            "- (voice) Set the speaker volume to 50 / Turn the Jabra down / Speak quieter — Jarvis's own speaker (the Jabra, in percent)\n"
             "- Set the heater to 70 / How warm is it inside? / Stop holding the temperature — the heater thermostat\n\n"
             "Routines (when this happens, do that):\n"
             "- New routine: when the back yard camera sees a person after dark, turn on the patio lights until there's no motion for 2 minutes — in plain words (Claude reads it back; tap ✅ to save)\n"

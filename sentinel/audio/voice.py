@@ -64,7 +64,8 @@ HALLUCINATIONS = {"you", "thank you", "thanks", "thank you very much", "thanks f
 PROMPT_START = "Sentinel. Who's home? "
 PROMPT_REST = ("Did anyone come by today? Any deliveries? What's the weather? Front door, back yard, garage, driveway. "
                "Enable messages. Play some Tom Petty. Pause. Skip. Volume up. What's playing? Take a note for Claude. "
-               "Read my mesh messages. Next step. How much garlic? Set a timer for 10 minutes. Never mind. Cancel.")
+               "Read my mesh messages. Next step. How much garlic? Set a timer for 10 minutes. Turn the Jabra down. "
+               "Fan high. What plane is that? Never mind. Cancel.")  # ("Jabra" came out "job roast", 2026-11-10)
 PROMPT = PROMPT_START + PROMPT_REST
 MAX_PROMPT_NAMES = 10
 MAX_PROMPT_PETS = 4

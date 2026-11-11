@@ -102,14 +102,16 @@ def parse_volume_command(text: str) -> Optional[Tuple[str, str]]:
     from sentinel.engine.spotify import _NUMBERS
 
     t = re.sub(r"^(please |can you |could you |would you )|( please)$", "", (text or "").lower().strip(" .?!"))
-    t = re.sub(r"\s+", " ", t)
+    t = re.sub(r"\s+", " ", re.sub(r"\s*%", " percent", t)).strip()
 
     def level(word: str) -> Optional[str]:
         if word.isdigit():
             return str(min(100, int(word)))
         return str(_NUMBERS[word]) if word in _NUMBERS else None
 
-    m = re.fullmatch(rf"(?:turn |set |put )?{_PC} volume (?:to |at )?(\d{{1,3}}|[a-z ]+?)(?: percent)?", t)
+    m = (re.fullmatch(rf"(?:turn |set |put )?{_PC} volume (?:to |at )?(\d{{1,3}}|[a-z ]+?)(?: percent)?", t)
+         # "set the Jabra speaker to 50%" (2026-11-10: no "volume", so it went to Claude)
+         or re.fullmatch(rf"(?:turn |set |put )?{_PC} (?:to|at) (\d{{1,3}}|[a-z ]+?) percent", t))
     if m and level(m.group(1)):
         return ("pc", level(m.group(1)))
     m = (re.fullmatch(rf"turn {_PC}(?: volume)? (up|down){_STEP}", t)

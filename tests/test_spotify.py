@@ -396,6 +396,8 @@ class TestEngineMusic(unittest.TestCase):
                  "set your volume to 30": ("voice", "30"),
                  "turn the jabra down": ("pc", "-"), "set the jabra volume to 50": ("pc", "50"),
                  "turn up the speaker phone": ("pc", "+"), "turn the tv down": None,
+                 "Set the Jabra speaker to 50%.": ("pc", "50"), "set the speaker to 40 percent": ("pc", "40"),
+                 "set the speaker to music": None,
                  "turn it down": None, "volume 40": None, "turn the music down": None}
         for text, want in cases.items():
             self.assertEqual(parse_volume_command(text), want, text)
