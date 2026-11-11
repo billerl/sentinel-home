@@ -60,6 +60,7 @@ sentinel-home/                         # repository root
     │   ├── reminders.py               # "Remind me ..." -> Telegram message at that time (reminders.db)
     │   ├── switches.py                # Smart plugs/switches (Kasa, local protocol): Live page panel, voice, Telegram
     │   ├── phone_talk.py              # Talk button: a phone's recording -> Whisper -> answer_voice -> words + WAV
+    │   ├── quiet.py                   # "pause the garage camera for 2 hours": one camera's alerts paused (voice + Telegram)
     │   ├── heard.py                   # "Hear alerts" switch: the last alerts for a browser to read out (+ their WAV)
     │   ├── samsung_tv.py              # Samsung TVs as a switch (Wake-on-LAN + power key), apps, volume, mute
     │   ├── remotes.py                 # Learned IR/RF remote buttons sent by a BroadLink RM4 (Remotes page, voice, Telegram)

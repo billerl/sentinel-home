@@ -243,6 +243,9 @@ class Engine:
         from sentinel.engine.news import HouseNews
 
         self.heard = HeardAlerts()  # alerts for a browser to read out (the home page's "Hear alerts" switch)
+        from sentinel.engine.quiet import QuietCameras
+
+        self.quiet = QuietCameras(VIDEO_DIR)  # "pause the garage camera for two hours": its alerts only
         self.news = HouseNews(  # package news, the morning recap, routine and weather messages
             self.settings, self.telegram, self.recording_store, self.weather, packages=lambda: self.packages,
             weather_warnings=lambda: self.weather_alerts.active(), home_coords=self.family.home_coords,
@@ -567,6 +570,8 @@ class Engine:
         # Deliveries are vehicles too: "Vehicles" covers them, "Deliveries" alone means only those.
         if not self.objects_active() or not (group in wanted or (group == "delivery" and "vehicle" in wanted)):
             return
+        if self.quiet.is_quiet(pipeline.display_name):
+            return  # its alerts are paused for now (still in the history, and routines above still ran)
         key = (pipeline.host, group)
         cooldown = float(self.settings.get("object_alert_cooldown", 60))
         if event.timestamp - self._object_alert_times.get(key, 0.0) < cooldown:
@@ -591,6 +596,8 @@ class Engine:
         self.routines.motion(pipeline.host)
         if self.objects_active():
             return  # alerts come from recognised objects instead (see _on_object)
+        if self.quiet.is_quiet(pipeline.display_name):
+            return
         self.heard.add(f"Motion on {pipeline.display_name}.")
         if self.audio is not None:
             self.audio.trigger_alert()
@@ -677,6 +684,17 @@ class Engine:
         """Movement inside the house (the Wi-Fi sensors), unless a camera is named."""
         return self.wifi_motion.indoor_question(text, [p.display_name for p in self.cameras.values()])
 
+    def _quiet_command(self, text: str):
+        from sentinel.engine.quiet import quiet_command
+        from sentinel.engine.routines import REQUEST as NEW_ROUTINE
+
+        if NEW_ROUTINE.search(text.lower()):
+            return None  # "when someone's in the driveway, ...": a routine being described
+        cams = {id(p): p for p in self.cameras.values()}.values()  # (some are listed under two keys)
+        profiles = [(p.display_name, getattr(p, "profile", None) or {}) for p in cams]
+        return quiet_command(text, [(name, [n for n in (profile.get("zone_names") or []) if n])
+                                    for name, profile in profiles if profile.get("enabled", True)])
+
     def _build_commands(self) -> Commands:
         """What both Telegram and voice understand, each once, in the order Telegram checks them."""
         from sentinel.audio.voice import first_sentence, to_speech
@@ -695,6 +713,9 @@ class Engine:
                 self.telegram.send_location(chat_id, lat, lon)
 
         commands = Commands(lambda chat_id, text: self.telegram.reply_to_chat(chat_id, text))
+        commands.add(Command(  # "pause the garage camera for two hours": that camera's alerts, nothing else
+            "quiet cameras", self._quiet_command, lambda m, _t: self.quiet.run(m), speak=lambda said: said,
+            prefix="🔕 "))
         commands.add(Command(
             "recap", lambda t: RECAP.match(t.strip()), lambda _m, _t: "",
             telegram=lambda chat_id, _m, _t: self.recap.run(chat_id)))  # last night until now, to this chat
@@ -1481,7 +1502,9 @@ class Engine:
                 continue
             state = "online" if pipeline.connected else "OFFLINE"
             rec = on(pipeline.detector.recording_enabled)
-            lines.append(f"{pipeline.display_name}: {state}, recording {rec}")
+            paused = self.quiet.view().get(pipeline.display_name)
+            lines.append(f"{pipeline.display_name}: {state}, recording {rec}"
+                         + (f", alerts paused ({paused} min left)" if paused else ""))
         lines.append(f"Telegram motion alerts: {on(s.get('telegram_motion_alerts', True))}")
         lines.append(f"Motion clip uploads (Telegram): {on(s.get('telegram_include_video', False))}")
         lines.append(f"Night bug filter: {on(s.get('night_bug_filter_enabled', True))}")

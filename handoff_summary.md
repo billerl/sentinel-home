@@ -433,6 +433,15 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   immediately; Claude's suggestions ask yes first / show a ✅ button). New makes = another driver class
   with `discover/status/set/rename` (Shelly and Tasmota have local HTTP APIs). Newer KLAP-only Kasa/Tapo
   devices don't answer on 9999 and aren't supported. No automations yet (e.g. lights on for a person at night).
+- **Quiet cameras** (2026-11-11; `sentinel/engine/quiet.py`, first in the `Commands` registry so voice and Telegram
+  share it): "pause the garage camera [notifications] for 2 hours" / "mute the driveway alerts" (a zone name finds
+  its camera) / "pause all cameras for 30 minutes" / "resume the garage camera" / "which cameras are paused?".
+  Stops only that camera's alerts in `_on_object` / `_on_motion` (house speaker, Telegram photo + its clip, Hear
+  alerts); events are still stored and `routines.seen` still runs. Default 60 min, max 24 h, by camera display
+  name, kept in `recorded_videos/quiet_cameras.json` across restarts; shown in Status. A camera (or "all cameras")
+  must be named, so bare "pause" (music), "Pause 30" (a chat) and "pause the TV" are untouched. In the Telegram
+  help text, so the Claude assistant knows it. Asked for after Jarvis answered "I can't pause just the garage
+  camera" (2026-11-11 16:04). No web button yet.
 - **Hear alerts in a browser** (2026-11-11; `sentinel/engine/heard.py` HeardAlerts, `static/hear.js` on the home page and the camera page (grid.html; not TVs),
   `sentinel/web/routes/talk.py` GET `/api/heard?after=N` + `/api/heard/<id>.wav`; role: user): the 🔕 Hear alerts
   button in the home page's header makes that page poll every 3 s and play each new alert in Jarvis's voice
