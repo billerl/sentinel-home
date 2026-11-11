@@ -212,6 +212,12 @@ _TV_MUTE_BARE = re.compile(r"^(mute|unmute)$", re.IGNORECASE)
 _TV_MUTE_FOR = re.compile(r"^mute" + _ON_TV + r"\s+for\s+(.+?)" + _ON_TV + r"$", re.IGNORECASE)
 # "rewind 30 seconds", "fast forward the TV 2 minutes", "skip ahead a minute and a half". "Go back" and "skip"
 # alone are Spotify's (previous song, next song): those words need a time or "TV".
+# "go back to YouTube", "back to the show", "take me back to what I was watching": after a camera or map covered an
+# app on a TV, back to it where it was (the remote's Back button). 2026-11-11 this went to Claude, which reopened it.
+_TV_BACK = re.compile(r"^(?:please )?(?:(?:go|switch|flip|take me|take us|put it|bring it|turn it) )?back to (.+?)"
+                      r"(?: on " + _TV + r")?(?: please)?$", re.IGNORECASE)
+_BACK_ANY = re.compile(r"^(?:the |my |our )?(?:show|program|movie|game|it|that|what (?:i|we) (?:was|were) watching|"
+                       r"(?:the )?(?:tv|television))$", re.IGNORECASE)
 _TV_SEEK = re.compile(r"^(rewind|fast[ -]?forward|go back|skip back|jump back|back up|skip ahead|skip forward|"
                       r"jump ahead|go forward)" + _ON_TV + r"(?:\s+(?:by\s+)?(.+?))?" + _ON_TV + r"$", re.IGNORECASE)
 _BACK_WORDS = ("rewind", "go back", "skip back", "jump back", "back up")
@@ -586,6 +592,25 @@ class SmartSwitches:
                     return app_id, name
         return None
 
+    def _back_to(self, words: str, tv, tvs) -> Optional[Tuple[str, Any]]:
+        """("back", (tv, app name)) when a TV has an app behind the cameras that the words name (or "the show"),
+        else None (then "back to YouTube" is just "open YouTube")."""
+        named = words.lower().strip()
+        for x in [tv] + [x for x in tvs if x is not tv]:
+            if not hasattr(x[1], "live_return"):
+                continue
+            try:
+                app = x[1].live_return(x[2])
+            except (OSError, ValueError):
+                app = None
+            said = _app_words(named)  # ("YouTube" for YouTube TV too)
+            if app and (_BACK_ANY.match(named) or (said and _app_words(app)[:len(said)] == said)):
+                return "back", (x, app)
+        if _BACK_ANY.match(named):
+            return None
+        app = self._find_app(words, tv[1], tv[2])
+        return ("app", (tv, app[0], app[1])) if app else None
+
     def tv_parse(self, text: str, bare: bool = False) -> Optional[Tuple[str, Any]]:
         """('app', (tv, app id, app name)) / ('volume', (tv, 'up')) / ('mute', (tv, 'mute')) / ('what', tv) /
         ('play', (tv, 'pause')) / ('seek', (tv, back?, seconds)) / ('mute_for', (tv, seconds)), or None.
@@ -608,6 +633,11 @@ class SmartSwitches:
         found = self.camera_lookup(m.group(1)) if m and cam_tvs and self.camera_lookup else None
         if found:
             return "camera", (tv if tv in cam_tvs else self._pick_tv(t, cam_tvs), found)
+        m = _TV_BACK.match(t)
+        if m:
+            back = self._back_to(m.group(1), tv, tvs)
+            if back is not None:
+                return back
         m = _TV_VOLUME.match(t)
         if m:
             way = next(g for g in m.groups() if g).lower()
@@ -677,6 +707,12 @@ class SmartSwitches:
                 return f"The {sw.name} didn't do it ({e})."
             app_logger.log("info", "tv_live_view", tv=sw.name, reload=detail[1], source=source, component="switches", action="tv")
             return f"Okay, {'reloading' if detail[1] else 'showing'} the cameras on the {sw.name}."
+        if what == "back":
+            ok, name = self.tv_live(sw.id, False, back=True)
+            if not ok:
+                return name
+            app_logger.log("info", "tv_back", tv=sw.name, app=name, source=source, component="switches", action="tv")
+            return f"Okay, back to {name} on the {sw.name}."
         if what == "no_app":
             return f"I couldn't find {detail[1]} on the {sw.name}. I can open its apps, like {', '.join(self._list_tv_apps()[:4])}."
         try:

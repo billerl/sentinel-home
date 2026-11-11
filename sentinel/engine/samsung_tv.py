@@ -61,6 +61,7 @@ COMMON_APPS = {
     "3201710015037": "Gallery", "3201908019041": "Paramount+", "3201508004642": "Sling TV",
 }
 PAGE_WAIT = 6.0  # after bringing the browser forward, how long its camera page has to check in (it asks every 2 s)
+RESUME_WAIT = 3.0  # seconds for a running app to come forward by NATIVE_LAUNCH before a DEEP_LINK is tried
 BROWSER_APP = "org.tizen.browser"  # the TV's "Internet": Sentinel's camera page opens in it (Chrome 56 on a 2018 TV)
 # YouTube and YouTube TV draw their own search keyboard, so text sent for the TV's keyboard never gets there
 # (2026-11-10). Their grid, as on this TV: four rows of seven, letters or (after the key right of N) numbers and
@@ -557,15 +558,30 @@ class SamsungTVDriver:
         return found or dict(tv.get("apps") or {})
 
     def launch(self, host: str, app_id: str) -> None:
-        """Open an app. One already running behind another is brought back where it was (the way the TV's own app
-        bar does it); starting it over the REST API instead began it again from its first screen (2026-11-10)."""
+        """Open an app. One already running behind another is brought back where it was: starting it over the REST
+        API began it again from its first screen (2026-11-10), and so did a DEEP_LINK for YouTube (2026-11-11: back
+        at "Who's watching"; YouTube TV took it fine). NATIVE_LAUNCH, the way the browser is brought forward
+        unchanged, goes first; DEEP_LINK only if the app hasn't come forward after RESUME_WAIT seconds."""
         try:
-            running = self._rest(host, f"applications/{app_id}").get("running")
+            info = self._rest(host, f"applications/{app_id}")
         except (OSError, ValueError):
-            running = False
-        if running:
-            self._send(host, [{"method": "ms.channel.emit", "params": {"event": "ed.apps.launch", "to": "host",
-                                                                       "data": {"appId": app_id, "action_type": "DEEP_LINK"}}}])
+            info = {}
+        if info.get("visible"):
+            return  # already on screen: nothing to do (opening it again could start it over)
+        if info.get("running"):
+            for action in ("NATIVE_LAUNCH", "DEEP_LINK"):
+                self._send(host, [{"method": "ms.channel.emit", "params": {"event": "ed.apps.launch", "to": "host",
+                                                                           "data": {"appId": app_id, "action_type": action}}}])
+                until = time.time() + RESUME_WAIT
+                while action == "NATIVE_LAUNCH" and time.time() < until:
+                    time.sleep(0.5)
+                    try:
+                        if self._rest(host, f"applications/{app_id}").get("visible"):
+                            app_logger.log("info", "tv_resumed", app=app_id, how=action, component="samsung_tv", action="launch")
+                            return
+                    except (OSError, ValueError):
+                        pass
+            app_logger.log("info", "tv_resumed", app=app_id, how="DEEP_LINK", component="samsung_tv", action="launch")
             return
         self._rest(host, f"applications/{app_id}", method="POST", timeout=5.0)
 

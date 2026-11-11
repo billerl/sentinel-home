@@ -334,6 +334,29 @@ class TestTV(unittest.TestCase):
         self.assertEqual(self.tv.calls, [("power", True)])
         self.assertEqual(self.sw.command("is the tv on", "telegram"), "TV is on.")
 
+    def test_back_to_the_app_the_cameras_covered(self):
+        # (2026-11-11: "go back to YouTube" went to Claude, whose "open YouTube" started the app over)
+        tv = self.tv
+        tv.behind = "YouTube TV"
+        tv.show_live = lambda host, reload=False, path="": None
+        tv.live_return = lambda host: tv.behind
+        def live_back(host):
+            tv.calls.append(("back",))
+            name, tv.behind = tv.behind, None
+            return name
+        tv.live_back = live_back
+        self.sw.command("turn on the TV", "voice")
+        for said in ("go back to YouTube TV", "back to youtube", "Go back to the show", "take me back to what I was watching"):
+            tv.behind = "YouTube TV"
+            self.assertEqual(self.sw.command(said, "voice"), "Okay, back to YouTube TV on the TV.", said)
+        self.assertEqual(tv.calls.count(("back",)), 4)
+        self.assertNotIn(("launch", "3201707014489"), tv.calls)
+        # nothing behind the cameras: "back to Netflix" just opens it; "back to the show" isn't a TV command
+        self.assertEqual(self.sw.command("go back to Netflix", "voice"), "Okay, Netflix on the TV.")
+        self.assertIsNone(self.sw.command("go back to the show", "voice"))
+        # (still seeking, not this)
+        self.assertEqual(self.sw.tv_parse("go back 30 seconds", bare=True)[0], "seek")
+
     def test_apps_by_name(self):
         self.assertEqual(self.sw.command("put on Netflix", "voice"), "Okay, Netflix on the TV.")
         self.assertEqual(self.tv.calls, [("power", True), ("launch", "11101200001")])  # it was off: on first
@@ -551,9 +574,28 @@ class TestSamsungLiveView(unittest.TestCase):
         drv.show_live("tv")  # Netflix was on
         apps["11101200001"]["visible"] = False  # ...and keeps running behind the browser
         self.assertEqual(drv.live_return("tv"), "Netflix")
-        self.assertEqual(drv.live_back("tv"), "Netflix")
-        self.assertEqual(sent[-1]["params"]["data"], {"appId": "11101200001", "action_type": "DEEP_LINK"})  # resumed
+        native = {"works": True}
+
+        def send(host, messages):
+            sent.extend(messages)
+            data = messages[-1]["params"]["data"]
+            if data["appId"] in apps and (data["action_type"] == "DEEP_LINK" or native["works"]):
+                apps[data["appId"]]["visible"] = True  # it came forward
+            return drv.page_poll("tv")
+        drv._send = send
+        with mock.patch("sentinel.engine.samsung_tv.time.sleep"):
+            self.assertEqual(drv.live_back("tv"), "Netflix")
+        # resumed the way the browser is brought forward (a DEEP_LINK started YouTube over, 2026-11-11)
+        self.assertEqual(sent[-1]["params"]["data"], {"appId": "11101200001", "action_type": "NATIVE_LAUNCH"})
         self.assertEqual(posted, [])  # not started over
+        sent.clear()
+        drv.launch("tv", "11101200001")  # already on screen: left alone
+        self.assertEqual(sent, [])
+        apps["11101200001"]["visible"], native["works"] = False, False  # an app that ignores NATIVE_LAUNCH
+        with mock.patch("sentinel.engine.samsung_tv.RESUME_WAIT", 0.01):
+            drv.launch("tv", "11101200001")
+        self.assertEqual([m["params"]["data"]["action_type"] for m in sent], ["NATIVE_LAUNCH", "DEEP_LINK"])
+        self.assertEqual(posted, [])
         self.assertIsNone(drv.live_return("tv"))  # once back, the button goes
         apps["11101200001"]["visible"] = True  # watching Netflix again
         drv.show_live("tv")
