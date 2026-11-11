@@ -93,7 +93,7 @@ def _display_name(value: Any) -> Optional[str]:
 
 
 # "Turn the PC down" (the whole PC: voice, alerts and music) vs "speak quieter" (just the voice).
-_PC = r"(?:the |this |your )?(?:p ?c|computer|speakers?|system)(?:'s)?"
+_PC = r"(?:the |this |your )?(?:p ?c|computer|speakers?|system|jabra(?: speaker)?|speaker ?phone)(?:'s)?"  # (Jarvis's own)
 _STEP = r"(?: a (?:bit|little|lot))?"
 
 
