@@ -63,7 +63,10 @@ def register(app: Flask, ctx: WebContext) -> None:
             return jsonify({"error": "unauthorized"}), 401
         if engine is None:
             return jsonify({"configured": False})
-        return jsonify(engine.weather.current())
+        data = dict(engine.weather.current())
+        heater = getattr(engine, "heater", None)
+        data["inside"] = heater.inside() if heater is not None else None  # the BroadLink's thermometer (RM4 Pro)
+        return jsonify(data)
 
     @app.route("/api/weather/alerts")
     def api_weather_alerts():

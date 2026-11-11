@@ -132,6 +132,10 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     spider web swinging in front of the Garage lens in IR (~1500 clips one night).
   - Weather tile (`sentinel/engine/weather.py`, settings `weather_location`/`weather_units`, `/api/weather`):
     Open-Meteo, free/no key, server-side, 10-min cache; shown only in a grid cell that would be empty.
+    `/api/weather` also carries `inside` (the BroadLink RM4's thermometer via `HeaterControl.inside()`, in the
+    weather's units; null when no reading in 10 min). On a TV (`TV_PAGE`, class `tv`: `renderWeatherTv`) the tile
+    shows only big things: outside + inside temperature, clock, "words · High · Low · wind" (shrinks to fit:
+    `fitWxLine`), the next 4 hours and the family row; sizes from `--cqh`/`--cqw` so Chrome 56 gets the same.
   - QR sign-in for the Fire TV: `/login` shows a QR on wide screens (`POST /login/pair`), a signed-in phone
     approves at `/pair/<code>`, the TV's poll (`/login/pair/<code>`) gets the session cookie. Codes: one use,
     3 min, bound to the requesting IP, 3 per IP. Sessions persist as SHA-256 token hashes in

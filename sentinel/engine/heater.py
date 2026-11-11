@@ -185,6 +185,14 @@ class HeaterControl:
         self.humidity = got.get("humidity")
         self.read_at = self.clock()
 
+    def inside(self) -> Optional[Dict[str, Any]]:
+        """The room temperature for the weather tile, in the weather's units; None when there's no recent reading."""
+        if self.temp_f is None or self.clock() - self.read_at > STALE_SECONDS:
+            return None
+        celsius = str(self.settings.get("weather_units") or "fahrenheit").startswith("c")
+        temp = (self.temp_f - 32) * 5 / 9 if celsius else self.temp_f
+        return {"temp": round(temp), "humidity": round(self.humidity) if self.humidity is not None else None}
+
     def tick(self) -> None:
         now = self.clock()
         if now - self._last_read_try >= READ_SECONDS - 1:

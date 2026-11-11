@@ -207,6 +207,8 @@ function renderWeatherOnly(w) {
     return;
   }
   var deg = "°";
+  weatherTile.classList.toggle("tv", TV_PAGE);
+  if (TV_PAGE) { renderWeatherTv(w); return; }
   var hours = (w.hours || []).map(function(h) {
     return '<div><span>' + esc(h.label) + '</span><span>' + esc(h.icon) + '</span><span>' + esc(h.temp) + deg +
       '</span><span class="r">' + (h.rain >= 20 ? "☔ " + esc(h.rain) + "%" : "") + '</span></div>';
@@ -217,12 +219,37 @@ function renderWeatherOnly(w) {
     '<div class="wx-now"><b>' + esc(w.words) + '</b><span>Feels like ' + esc(w.feels) + deg + '</span>' +
     '<span>High ' + esc(w.high) + deg + ' · Low ' + esc(w.low) + deg + '</span></div>' +
     '<div class="wx-clock">' + clockHtml() + '</div></div>' +
-    '<div class="wx-meta"><span>💨 ' + esc(w.wind) + ' mph' + (w.gusts > w.wind + 4 ? ', gusts ' + esc(w.gusts) : '') + '</span>' +
+    '<div class="wx-meta">' + (w.inside ? '<span>🏠 Inside ' + esc(w.inside.temp) + deg + '</span>' : '') + '<span>💨 ' + esc(w.wind) + ' mph' + (w.gusts > w.wind + 4 ? ', gusts ' + esc(w.gusts) : '') + '</span>' +
     '<span>💧 ' + esc(w.humidity) + '%</span><span>☔ ' + esc(w.rain_today) + '% today</span>' +
     '<span>🌅 ' + esc(w.sunrise) + '</span><span>🌇 ' + esc(w.sunset) + '</span></div>' +
     '<div class="wx-hours">' + hours + '</div>' +
     '<div class="wx-foot">' + (w.windy ? '<span class="wx-windy">Windy: expect motion clips from trees. </span>' : '') +
     'Updated ' + esc(w.updated) + '</div>';
+}
+
+// On a TV, read from the couch: only the big things (outside, inside, the clock, today's range, the next 4 hours)
+function renderWeatherTv(w) {
+  var deg = "°";
+  var hours = (w.hours || []).slice(0, 4).map(function(h) {
+    return '<div><span>' + esc(h.label) + '</span><span>' + esc(h.icon) + '</span><span>' + esc(h.temp) + deg + '</span></div>';
+  }).join("");
+  weatherTile.innerHTML =
+    '<div class="wx-top"><div class="wx-icon">' + esc(w.icon) + '</div>' +
+    '<div class="wx-temp">' + esc(w.temp) + deg + '<small>Outside</small></div>' +
+    (w.inside ? '<div class="wx-in">' + esc(w.inside.temp) + deg + '<small>Inside</small></div>' : '') +
+    '<div class="wx-clock">' + clockHtml() + '</div></div>' +
+    '<div class="wx-line"><b>' + esc(w.words) + '</b> · High ' + esc(w.high) + deg + ' · Low ' + esc(w.low) + deg +
+    ' · 💨 ' + esc(w.wind) + (w.gusts > w.wind + 4 ? '–' + esc(w.gusts) : '') + ' mph</div>' +
+    '<div class="wx-hours">' + hours + '</div>';
+  setTimeout(fitWxLine, 0);
+}
+// The TV's "Fog · High · Low · wind" line: a long day ("Partly cloudy", gusts) shrinks a little rather than being cut off
+function fitWxLine() {
+  var el = weatherTile.querySelector(".wx-line");
+  if (!el) return;
+  el.style.fontSize = "";
+  var size = parseFloat(getComputedStyle(el).fontSize), floor = size * 0.7;
+  while (el.scrollWidth > el.clientWidth + 1 && size > floor) { size *= 0.94; el.style.fontSize = size + "px"; }
 }
 
 function clockHtml() {
@@ -1229,6 +1256,7 @@ function layoutGrid() {
   grid.style.gridAutoRows = th + "px";
   weatherTile.style.setProperty("--cqh", th / 100 + "px");  // for browsers without container units (grid.css)
   weatherTile.style.setProperty("--cqw", tw / 100 + "px");
+  fitWxLine();
   if (!GRID_CSS) {  // see grid.css: the same sizes, on each tile
     Array.prototype.forEach.call(grid.querySelectorAll(".tile"), function(t) {
       t.style.width = tw + "px";

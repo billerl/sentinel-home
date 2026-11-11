@@ -140,6 +140,42 @@ h1 { font-size: 0.9rem; margin: 0; flex: 1; }
   .wx-hours div { flex: 1; margin: 0 calc(var(--cqw) * 0.5); }
 }
 .tile.weather:focus-visible { outline: 3px solid #fff; outline-offset: -3px; }
+/* On a TV (grid.js renderWeatherTv): fewer, bigger things, readable from the couch. Sizes from --cqh / --cqw
+   (always set by layoutGrid), so one set of rules serves every TV browser. */
+.tile.weather.tv { gap: calc(var(--cqh) * 4); padding: calc(var(--cqh) * 5) calc(var(--cqw) * 4) calc(var(--cqh) * 3); }
+.tile.weather.tv.fam { gap: calc(var(--cqh) * 3); }
+.tile.weather.tv .wx-top { gap: calc(var(--cqw) * 3); }
+.tile.weather.tv .wx-icon { font-size: calc(var(--cqh) * 16); }
+.tile.weather.tv .wx-temp, .tile.weather.tv .wx-in { font-size: calc(var(--cqh) * 24); font-weight: 600; line-height: 1; text-align: center; }
+.tile.weather.tv .wx-in { color: #ffd9a0; }
+.tile.weather.tv .wx-temp small, .tile.weather.tv .wx-in small { display: block; font-size: calc(var(--cqh) * 6.5); font-weight: 400;
+                                                                 color: #9fd3ee; margin-top: calc(var(--cqh) * 1.5); }
+.tile.weather.tv .wx-clock .t { font-size: calc(var(--cqh) * 21); }
+.tile.weather.tv .wx-clock .ap { font-size: calc(var(--cqh) * 8); }
+.tile.weather.tv .wx-clock .d { font-size: calc(var(--cqh) * 7); margin-top: calc(var(--cqh) * 1.5); }
+.tile.weather.tv .wx-line { font-size: calc(var(--cqh) * 8.5); color: #cfefff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile.weather.tv .wx-line b { color: #fff; }
+.tile.weather.tv .wx-hours { grid-template-columns: repeat(4, 1fr); gap: calc(var(--cqw) * 2); }
+.tile.weather.tv .wx-hours div { font-size: calc(var(--cqh) * 7); padding: calc(var(--cqh) * 1.5) 0; gap: calc(var(--cqh) * 0.5); }
+.tile.weather.tv .wx-hours span:last-child { color: #fff; font-weight: 600; }
+.tile.weather.tv .wx-family { font-size: calc(var(--cqh) * 6); gap: calc(var(--cqh) * 1) calc(var(--cqw) * 3); }
+/* with the people and pets row too: a little smaller, so it all still fits */
+.tile.weather.tv.fam { padding-top: calc(var(--cqh) * 3); padding-bottom: calc(var(--cqh) * 2); }
+.tile.weather.tv.fam .wx-icon { font-size: calc(var(--cqh) * 13); }
+.tile.weather.tv.fam .wx-temp, .tile.weather.tv.fam .wx-in { font-size: calc(var(--cqh) * 19); }
+.tile.weather.tv.fam .wx-temp small, .tile.weather.tv.fam .wx-in small { font-size: calc(var(--cqh) * 5.5); margin-top: calc(var(--cqh) * 1); }
+.tile.weather.tv.fam .wx-clock .t { font-size: calc(var(--cqh) * 17); }
+.tile.weather.tv.fam .wx-clock .d { font-size: calc(var(--cqh) * 6); }
+.tile.weather.tv.fam .wx-line { font-size: calc(var(--cqh) * 7); }
+.tile.weather.tv.fam .wx-hours div { font-size: calc(var(--cqh) * 5.5); padding: calc(var(--cqh) * 1) 0; gap: 0; }
+.tile.weather.tv.fam .wx-family { padding-top: calc(var(--cqh) * 1.5); }
+@supports not (height: 1cqh) {
+  .tile.weather.tv > * + * { margin-top: calc(var(--cqh) * 4); }
+  .tile.weather.tv.fam > * + * { margin-top: calc(var(--cqh) * 3); }
+  .tile.weather.tv .wx-top > * + * { margin-left: calc(var(--cqw) * 3); }
+  .tile.weather.tv .wx-clock { margin-left: auto; }
+  .tile.weather.tv .wx-hours div { margin: 0 calc(var(--cqw) * 1); }
+}
 
 /* ---- Full-screen weather (tap the weather tile) ---- */
 #wxf { position: fixed; inset: 0; z-index: 1100; display: none; overflow-y: auto; color: #d9f6ff;
