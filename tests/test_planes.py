@@ -2,7 +2,7 @@ import _test_env  # noqa: F401  (keeps tests off the production log)
 
 import unittest
 
-from sentinel.engine.planes import Planes, plane_map_words, plane_question, route_fits
+from sentinel.engine.planes import Planes, pick_leg, plane_map_words, plane_question, route_fits
 
 HOME = (41.1145, -88.1780)  # the docs' made-up example spot
 
@@ -20,14 +20,30 @@ ROUTES = {  # adsbdb answers, by flight number
 }
 
 
+def stop(city, code, lat, lon):
+    return {"location": city, "iata": code, "lat": lat, "lon": lon}
+
+
+STOPS = {  # adsb.lol's route list, by flight number (stops in order); others are a 404
+    # adsbdb has Southwest 3232 as another leg; adsb.lol knows its stops, the middle leg passing over the plane
+    "SWA3232": {"_airports": [stop("Detroit", "DTW", 42.21, -83.35), stop("Chicago", "MDW", 41.79, -87.75),
+                              stop("Denver", "DEN", 39.86, -104.67)]},
+}
+
+
 class FakeNet:
     def __init__(self, aircraft):
         self.aircraft, self.asked = aircraft, []
 
     def __call__(self, url):
         self.asked.append(url)
-        if "adsb.lol" in url:
+        if "/v2/point/" in url:
             return {"ac": self.aircraft}
+        if "vrs-standing-data" in url:
+            callsign = url.rsplit("/", 1)[1].replace(".json", "")
+            if callsign in STOPS:
+                return STOPS[callsign]
+            raise OSError("HTTP Error 404: Not Found")
         callsign = url.rsplit("/", 1)[1]
         if callsign in ROUTES:
             return {"response": {"flightroute": ROUTES[callsign]}}
@@ -77,8 +93,9 @@ class TestPlanes(unittest.TestCase):
         found = {p["callsign"] or p["id"]: p for p in self.planes.nearby()}
         self.assertEqual(len(found), 5)
         self.assertEqual(found["DAL1776"]["route"]["to"]["city"], "Chicago")
-        self.assertIsNone(found["SWA3232"]["route"])  # Los Angeles -> San Francisco can't be over Illinois
-        self.assertEqual(found["SWA3232"]["airline"], "Southwest Airlines")  # (the airline is still right)
+        # adsbdb's Los Angeles -> San Francisco can't be over Illinois; adsb.lol's stops have the leg it's on
+        self.assertEqual((found["SWA3232"]["route"]["from"]["city"], found["SWA3232"]["route"]["to"]["city"]), ("Chicago", "Denver"))
+        self.assertEqual(found["SWA3232"]["airline"], "Southwest Airlines")  # (the name from adsbdb)
         self.assertIsNone(found["N2628U"]["route"])  # private: no lookup at all
         self.assertFalse(any("N2628U" in u for u in self.net.asked))
 
@@ -88,6 +105,15 @@ class TestPlanes(unittest.TestCase):
         self.assertFalse(route_fits(plane, route))
         plane["track"] = 5.0
         self.assertTrue(route_fits(plane, route))
+
+    def test_leg_flown_back_the_other_way(self):
+        # looked up as Tampa -> Chicago (adsbdb's pair), but on that line heading south: the same number flown back
+        tpa, ord_ = {"city": "Tampa", "lat": 27.98, "lon": -82.53}, {"city": "Chicago", "lat": 41.98, "lon": -87.90}
+        plane = {"lat": 41.1745, "lon": -88.2780, "track": 175.0}
+        self.assertEqual(pick_leg(plane, [[tpa, ord_]])["to"]["city"], "Tampa")
+        plane["track"] = 90.0  # heading for neither: nothing said
+        self.assertIsNone(pick_leg(plane, [[tpa, ord_]]))
+        self.assertIsNone(pick_leg(plane, []))
 
     def test_what_plane_is_that(self):
         said = self.planes.answer("that")
@@ -144,18 +170,18 @@ class TestPlanes(unittest.TestCase):
         self.net.aircraft = [dict(SKY[1])]
         self.now += 60
         said = self.planes.answer("list")
-        self.assertIn("Southwest Airlines flight 3232, a Boeing 737, 36,000 feet up", said)
+        self.assertIn("Southwest Airlines flight 3232, a Boeing 737 from Chicago to Denver, 36,000 feet up", said)
         self.assertNotIn("San Francisco", said)
         self.assertIn("A military C-17", Planes(home=lambda: HOME, get_json=FakeNet([SKY[4]])).answer("list"))
 
     def test_fetched_at_most_every_few_seconds(self):
         self.planes.nearby()
         self.planes.nearby()
-        self.assertEqual(sum("adsb.lol" in u for u in self.net.asked), 1)
+        self.assertEqual(sum("/v2/point/" in u for u in self.net.asked), 1)
         self.assertEqual(sum("adsbdb" in u for u in self.net.asked), 3)  # DAL1776, SWA3232, RCH123 (not N2628U)
         self.now += 30
         self.planes.nearby()
-        self.assertEqual(sum("adsb.lol" in u for u in self.net.asked), 2)
+        self.assertEqual(sum("/v2/point/" in u for u in self.net.asked), 2)
         self.assertEqual(sum("adsbdb" in u for u in self.net.asked), 3)  # routes kept for hours
 
     def test_trouble_is_said_plainly(self):
@@ -191,8 +217,8 @@ class TestPlanesNearTheAsker(unittest.TestCase):
             said = self.planes.answer("list")
         finally:
             ASKER.reset(token)
-        self.assertIn("/41.8000/-87.6000/", self.net.asked[-1] if "adsb.lol" in self.net.asked[-1]
-                      else next(u for u in self.net.asked if "adsb.lol" in u))
+        self.assertIn("/41.8000/-87.6000/", self.net.asked[-1] if "/v2/point/" in self.net.asked[-1]
+                      else next(u for u in self.net.asked if "/v2/point/" in u))
         self.assertIn("miles of you", said)
         view = self.planes.map_view(at=away)
         self.assertEqual((view["center"], view["away"], view["home"]), ([41.8, -87.6], True, list(HOME)))
@@ -206,7 +232,7 @@ class TestPlanesNearTheAsker(unittest.TestCase):
         finally:
             ASKER.reset(token)
         self.assertNotIn("of you", said)
-        self.assertTrue(all(f"/{HOME[0]:.4f}/{HOME[1]:.4f}/" in u for u in self.net.asked if "adsb.lol" in u))
+        self.assertTrue(all(f"/{HOME[0]:.4f}/{HOME[1]:.4f}/" in u for u in self.net.asked if "/v2/point/" in u))
         self.assertFalse(self.planes.map_view()["away"])
 
     def test_no_home_but_a_phone(self):

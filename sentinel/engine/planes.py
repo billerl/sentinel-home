@@ -3,9 +3,12 @@ Planes near the house: "what plane is that?", "any planes around?", and a map of
 
 Positions come from adsb.lol, a free community network of home ADS-B receivers (planes broadcast where they are
 about once a second); a USB receiver of our own could feed the same answers later. Where a flight came from and
-is going comes from adsbdb.com by its flight number. Airlines reuse a number for several legs, so the looked-up
-route is often another leg (on 2026-11-10, "Southwest 3232: Los Angeles to San Francisco" for a 737 over Ohio):
-a route is only told when the plane really is between those two airports and heading for the second. Private
+is going comes by its flight number from adsb.lol's route list (the one tar1090 maps use; stops in order, e.g.
+Washington -> Minneapolis) and from adsbdb.com (which also names the airline). Airlines reuse a number for several
+legs, so a looked-up route is often another leg (on 2026-11-10, "Southwest 3232: Los Angeles to San Francisco" for
+a 737 over Ohio; on 11-11 adsbdb had 0 of 5 airliners over the house right, adsb.lol 3): a leg is only told when
+the plane really is between its two airports and heading for the second. The same number flown the other way
+(Chicago -> Philadelphia looked up, the plane on that line heading west) is told the other way round. Private
 planes file no public route; for them it's just what they are.
 """
 
@@ -26,6 +29,7 @@ from sentinel.logging_utils import app_logger
 
 POSITIONS_URL = "https://api.adsb.lol/v2/point/{lat:.4f}/{lon:.4f}/{radius}"
 ROUTE_URL = "https://api.adsbdb.com/v0/callsign/{callsign}"
+STOPS_URL = "https://vrs-standing-data.adsb.lol/routes/{prefix}/{callsign}.json"  # (prefix = first 2 letters)
 USER_AGENT = "SentinelHome/1.0 (self-hosted home security; https://github.com/billerl/sentinel-home)"
 MAP_RADIUS_NM = 40  # what the TV map shows (and what's fetched)
 MIL_RADIUS_NM = 150  # "any military planes around?": they're few, so look much farther (~170 miles)
@@ -127,6 +131,16 @@ def route_fits(plane: Dict[str, Any], route: Dict[str, Any]) -> bool:
         return True
     off = abs((track - bearing(lat, lon, d["lat"], d["lon"]) + 180) % 360 - 180)
     return off < 60
+
+
+def pick_leg(plane: Dict[str, Any], stop_lists: List[List[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
+    """The leg of a flight number's routes ({"from", "to"}) the plane is flying now: each list's legs in order,
+    then the same legs the other way round (an airline flies a number back too); None when none fits."""
+    legs = [(s[i], s[i + 1]) for s in stop_lists for i in range(len(s) - 1)]
+    for a, b in legs + [(b, a) for a, b in legs]:
+        if route_fits(plane, {"from": a, "to": b}):
+            return {"from": a, "to": b}
+    return None
 
 
 def _feet(alt: Any) -> str:
@@ -232,26 +246,38 @@ class Planes:
             route = routes.get(p["callsign"])
             if route:
                 p["airline"] = route.get("airline")
-                if route_fits(p, route):
-                    p["route"] = route
+                leg = pick_leg(p, route["stops"])
+                if leg:
+                    p["route"] = {**leg, "airline": route.get("airline")}
 
     def _lookup_route(self, callsign: str) -> Optional[Dict[str, Any]]:
+        """{"airline": name or None, "stops": [[airport, ...], ...]}: adsb.lol's stops first, then adsbdb's pair."""
+        stops: List[List[Dict[str, Any]]] = []
+        try:
+            data = self._get(STOPS_URL.format(prefix=urllib.parse.quote(callsign[:2]), callsign=urllib.parse.quote(callsign)))
+            got = [{"city": a.get("location") or a.get("name") or "", "code": a.get("iata") or a.get("icao") or "",
+                    "lat": a.get("lat"), "lon": a.get("lon")} for a in (data or {}).get("_airports") or [] if isinstance(a, dict)]
+            if len(got) >= 2:
+                stops.append(got)
+        except (OSError, ValueError, AttributeError):
+            pass  # (an unknown number is a 404)
+        airline = None
         try:
             data = self._get(ROUTE_URL.format(callsign=urllib.parse.quote(callsign)))
-        except (OSError, ValueError):
-            return None
-        fr = (data or {}).get("response")
-        fr = fr.get("flightroute") if isinstance(fr, dict) else None
-        if not isinstance(fr, dict):
-            return None
+            fr = (data or {}).get("response")
+            fr = fr.get("flightroute") if isinstance(fr, dict) else None
+        except (OSError, ValueError, AttributeError):
+            fr = None
+        if isinstance(fr, dict):
+            def airport(a: Any) -> Dict[str, Any]:
+                a = a if isinstance(a, dict) else {}
+                return {"city": a.get("municipality") or a.get("name") or "",
+                        "code": a.get("iata_code") or a.get("icao_code") or "",
+                        "lat": a.get("latitude"), "lon": a.get("longitude")}
 
-        def airport(a: Any) -> Dict[str, Any]:
-            a = a if isinstance(a, dict) else {}
-            return {"city": a.get("municipality") or a.get("name") or "", "code": a.get("iata_code") or a.get("icao_code") or "",
-                    "lat": a.get("latitude"), "lon": a.get("longitude")}
-
-        airline = fr.get("airline") if isinstance(fr.get("airline"), dict) else {}
-        return {"from": airport(fr.get("origin")), "to": airport(fr.get("destination")), "airline": airline.get("name")}
+            airline = (fr.get("airline") if isinstance(fr.get("airline"), dict) else {}).get("name")
+            stops.append([airport(fr.get("origin")), airport(fr.get("destination"))])
+        return {"airline": airline, "stops": stops} if stops or airline else None
 
     # ------------------------------------------------------------ words
     @staticmethod

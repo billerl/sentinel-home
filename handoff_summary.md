@@ -463,6 +463,10 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   signs, kept 6 h; a route is told only when `route_fits` (the plane is within max(60 nm, 15%) of the
   origin->destination path and heading within 60 deg of the destination): adsbdb returns one route per flight number
   and airlines reuse numbers (live check 2026-11-10: 6 of 13 looked-up routes fit, the rest were other legs).
+  Since 2026-11-11 the stops come first from adsb.lol's route list (`STOPS_URL`, vrs-standing-data.adsb.lol, the
+  tar1090 data: stops in order, 404 for unknown numbers), then adsbdb's pair (also the airline's name); `pick_leg`
+  tries every leg in order, then each leg the other way round (a number flown back). Live check 11-11: adsbdb alone
+  0 of 6 airliners over the house fit, with adsb.lol + reverse 5 of 6.
   "That" = nearest by slant distance (ground + height). ICAO type codes -> names in `TYPE_NAMES`. adsb.im's
   position-aware routeset needs prior approval, so it isn't used. A USB ADS-B receiver could feed `nearby` later.
   Away from home (> AWAY_NM 5 nm) it looks over the asker: `planes.ASKER` (a ContextVar) is set by
