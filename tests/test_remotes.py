@@ -77,9 +77,10 @@ class TestRemotes(unittest.TestCase):
         if self.on_sleep:
             self.on_sleep()
 
-    def teach(self, remote, button, kind="ir", code=b"\x26\x00IR"):
+    def teach(self, remote, button, kind="ir", code=None):
         """Learn on this thread (the page starts a thread): the button is 'pressed' after 3 seconds."""
         start = self.t
+        code = code or (b"\x26\x00IR" if button.lower() == "volume up" else b"\x26\x00" + button.encode())
 
         def press():
             if self.t - start >= 3:
@@ -126,6 +127,57 @@ class TestRemotes(unittest.TestCase):
         self.remotes._learn("Fan", "High", "rf")
         self.assertIn("RM4 Pro", self.remotes.learning["message"])
 
+    def test_the_last_recording_is_not_the_new_button(self):
+        # 2026-11-10: the RM4 handed back the light's recording, and Fan Power and Fan Low were saved as the light
+        self.teach("Fan", "Light", kind="rf", code=b"\xb2LIGHT")
+        self.dev.code = b"\xb2LIGHT"  # still in its memory: check_data gives it at once
+        start = self.t
+
+        def press():
+            if self.t - start >= 3:
+                self.dev.freq = 433.92
+                if ("find", 433.92) in self.dev.calls:
+                    self.dev.code = b"\xb2FANLOW"  # ...until the new press comes in
+        self.on_sleep = press
+        self.remotes.learning = {"remote": "Fan", "button": "Low", "kind": "rf"}
+        self.remotes._learn("Fan", "Low", "rf")
+        self.assertEqual(self.remotes.learning["step"], "done")
+        self.remotes.press("Fan", "Low")
+        self.assertEqual(self.dev.sent, [b"\xb2FANLOW"])
+
+    def test_a_copy_of_another_button_is_refused(self):
+        self.teach("Fan", "Light", kind="rf", code=b"\xb2LIGHT")
+        self.dev.code = None
+        result = self.teach("Fan", "Power", kind="rf", code=b"\xb2LIGHT")  # (somehow the same signal again)
+        self.assertEqual(result["step"], "failed")
+        self.assertIn("exactly like Light", result["message"])
+        self.assertEqual([b["name"] for b in self.remotes.view()["remotes"][0]["buttons"]], ["Light"])
+
+    def test_same_command_with_different_timing_is_a_copy(self):
+        from sentinel.engine.remotes import command_of
+
+        def rf(bits, wobble=0):
+            """A BroadLink radio recording: the burst repeated 6 times, gaps between, a little timing wobble."""
+            ticks = []
+            for rep in range(6):
+                for k, bit in enumerate(bits):
+                    long_, short = 28 + (k + rep + wobble) % 3, 13 + (k * wobble) % 2  # (~850 / ~400 us)
+                    ticks += [long_, short] if bit == "1" else [short, long_]
+                ticks += [0, 1, 132]  # (0x00 then 2 bytes: a ~11.8 ms gap)
+            body = bytes(ticks)
+            return bytes([0x78, 0xC0]) + len(body).to_bytes(2, "little") + body
+
+        light, light_again, fan = rf("110100101100"), rf("110100101100", wobble=1), rf("110100110010")
+        self.assertNotEqual(light, light_again)
+        self.assertEqual(command_of(light), command_of(light_again))
+        self.assertNotEqual(command_of(light), command_of(fan))
+        self.assertIsNone(command_of(b"\x26\x00IR"))
+        self.teach("Fan", "Light", kind="rf", code=light)
+        self.dev.code = None
+        self.assertEqual(self.teach("Fan", "Power", kind="rf", code=light_again)["step"], "failed")
+        self.dev.code = None
+        self.assertEqual(self.teach("Fan", "Power", kind="rf", code=fan)["step"], "done")
+
     def test_teaching_again_replaces_the_button(self):
         self.teach("Heater", "Power", code=b"old")
         self.teach("heater", "power", code=b"new")
@@ -146,7 +198,7 @@ class TestRemotes(unittest.TestCase):
         self.remotes._device = None
         ok, _ = self.remotes.press("Soundbar", "Mute")
         self.assertTrue(ok)
-        self.assertEqual(moved.sent, [b"\x26\x00IR"])
+        self.assertEqual(moved.sent, [b"\x26\x00Mute"])
         self.assertEqual(self.remotes.view()["hub"]["host"], "192.168.1.77")
 
     def test_not_found_waits_before_searching_again(self):

@@ -27,6 +27,7 @@ STORE_FILE = "remotes.json"
 NAME_MAX = 30
 NAME_OK = re.compile(r"^[\w '&().\-]{1,%d}$" % NAME_MAX)
 LEARN_SECONDS = 30.0  # each step's wait for the button
+LET_GO_SECONDS = 2.5  # radio: between finding the frequency (button held) and recording the press
 RETRY_SECONDS = 60.0  # after the BroadLink didn't answer: don't search again on every press
 MAX_TIMES = 20  # "volume up 50 times" is a typo
 PRESS_GAP = 0.3
@@ -38,6 +39,47 @@ COUNTS = {"once": 1, "twice": 2, "one": 1, "two": 2, "three": 3, "four": 4, "fiv
 ALIASES = [(re.compile(r"\bturn (.+) up\b|\bturn up\b|\blouder\b"), "volume up"),
            (re.compile(r"\bturn (.+) down\b|\bturn down\b|\bquieter\b|\bsofter\b"), "volume down")]
 LOCKED = "The BroadLink is locked: in the BroadLink app, open its settings and turn off “Lock device”."
+
+
+def command_of(code: bytes) -> Optional[str]:
+    """What a recorded radio signal says, without the timing wobble: the most common burst as long/short pulses.
+    Two recordings of one button differ byte for byte but say the same; two buttons never do. None when it can't
+    be read (infrared, or another layout)."""
+    try:
+        if len(code) < 8:
+            return None
+        n = int.from_bytes(code[2:4], "little")
+        pulses, i = [], 4
+        while i < min(len(code), 4 + n):
+            v = code[i]
+            i += 1
+            if v == 0:
+                v = int.from_bytes(code[i:i + 2], "big")
+                i += 2
+            pulses.append(v * 8192 / 269)  # microseconds
+        bursts, cur = [], []
+        for us in pulses:
+            if us > 5000:  # the gap between repeats
+                if cur:
+                    bursts.append(cur)
+                cur = []
+            else:
+                cur.append(us)
+        if cur:
+            bursts.append(cur)
+        marks = []
+        for b in bursts:
+            if len(b) < 16:
+                continue
+            ordered = sorted(b)
+            cut = (ordered[len(b) // 4] + ordered[3 * len(b) // 4]) / 2
+            marks.append("".join("L" if us > cut else "s" for us in b))
+        if len(marks) < 2:
+            return None
+        best = max(set(marks), key=marks.count)
+        return best if marks.count(best) >= 2 else None
+    except (IndexError, ValueError):
+        return None
 
 
 def _words(text: str) -> List[str]:
@@ -251,13 +293,24 @@ class Remotes:
                 self._step("failed", "Cancelled." if self._cancel.is_set() else
                            "Nothing came through. Try again, closer to the BroadLink (about 15 cm away).")
             return
+        encoded = base64.b64encode(code).decode()
+        mark = command_of(code)
+        with self._lock:
+            r = self._remote(remote)
+            twin = next((x["name"] for x in (r or {}).get("buttons", []) if x["name"].lower() != button.lower()
+                         and (x.get("code") == encoded or (mark and command_of(base64.b64decode(x["code"])) == mark))),
+                        None)
+        if twin:  # (two buttons of one remote never send the very same thing)
+            self._step("failed", f"That came through exactly like {twin}, so it wasn't this button. Try again: "
+                                 "press it a few quick times when asked.")
+            return
         with self._lock:
             r = self._remote(remote)
             if r is None:
                 r = {"name": remote, "buttons": []}
                 self.remotes.append(r)
             b = self._button(r, button)
-            entry = {"name": b["name"] if b else button, "kind": kind, "code": base64.b64encode(code).decode()}
+            entry = {"name": b["name"] if b else button, "kind": kind, "code": encoded}
             if b is not None:
                 r["buttons"][r["buttons"].index(b)] = entry
             else:
@@ -272,10 +325,21 @@ class Remotes:
         if dev is None:
             self._step("failed", self.error)
             return None
+        # The BroadLink keeps its last recording and hands it back again until a new one comes in: three fan buttons
+        # were all saved as the light's signal (2026-11-10). So: what it holds now doesn't count as the new press.
+        try:
+            stale = dev.check_data()
+        except Exception:
+            stale = None
+
+        def fresh():
+            code = dev.check_data()
+            return code if code and code != stale else None
+
         if kind == "ir":
             dev.enter_learning()
             self._step("press", "Point the remote at the BroadLink and press the button once.")
-            return self._wait(dev.check_data)
+            return self._wait(fresh)
         if not hasattr(dev, "sweep_frequency"):
             self._step("failed", "This BroadLink can only learn infrared (radio needs the RM4 Pro).")
             return None
@@ -291,9 +355,15 @@ class Remotes:
                 self._step("failed", "The BroadLink didn't hear a radio signal. The remote may use a radio it "
                                      "can't hear (2.4 GHz or Bluetooth), or try again closer.")
             return None
+        # Let go first: recording straight away caught the button still held (the light's, held to find the fan
+        # remote's frequency, was saved for Fan Power, 2026-11-10)
+        self._step("letgo", f"Found it ({found:.1f} MHz). Let go of the button now…")
+        self._sleep(LET_GO_SECONDS)
+        if self._cancel.is_set():
+            return None
         dev.find_rf_packet(found)
-        self._step("again", f"Found it ({found:.1f} MHz). Let go, then press the button once more.")
-        return self._wait(dev.check_data)
+        self._step("again", "Now press the button once (a short press). If nothing happens, press it again.")
+        return self._wait(fresh)
 
     # ------------------------------------------------------------ pressing buttons
     def climate(self) -> Optional[Dict[str, float]]:
