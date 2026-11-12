@@ -43,7 +43,10 @@ DICTATE_PROMPT = "A note for Claude about changes to the Sentinel home security 
 PRACTICE_CLIPS = 30  # a sitting: more than this and people start saying it oddly
 PRACTICE_WAIT, PRACTICE_SILENCE, PRACTICE_MAX = 6.0, 0.5, 3.0
 PRACTICE_SPEECH = (0.25, 2.0)  # seconds of talking a wake word takes; outside it wasn't one
-FOLLOW_UP_WAIT = 5.0  # after an answer, a follow-up question needs no wake word...
+# After an open-ended answer (an opinion, advice, something to talk over: VoiceReply.chat), a follow-up needs no
+# wake word and has this long to start. Plain facts and Sentinel's own answers end there: "he gives me the price,
+# and that's it" (the user's rule, 2026-11-12; before, every answer was followed by 5 s of listening).
+FOLLOW_UP_WAIT = 30.0
 MAX_TURNS = 5  # ...but a TV can't keep it talking forever
 NO_SPEECH_MAX = 0.6  # Whisper's own "this was noise" score; above it the words are usually invented
 # A follow-up (no wake word) scoring above this is doubtful: acted on only if Sentinel understands it itself,
@@ -116,6 +119,7 @@ class VoiceReply:
     # "Play." was followed by three answers to the song's lyrics, 2026-11-12).
     done: bool = False
     final: bool = False  # a command whose answer is worth hearing ("Playing Tom Petty"), but still the last word
+    chat: bool = False  # an open-ended answer: keep listening for a follow-up (no wake word needed)
 
 
 class BandPass:
@@ -643,7 +647,7 @@ class VoiceAssistant:
             # (four "Let me think"s in a row, 2026-11-05). Not even a "Huh?": she doesn't listen for the
             # answer anyway, so just the closing chime (the user's call, 2026-11-10).
             return False
-        self._final = reply.done or reply.final
+        self._final = reply.done or reply.final or not reply.chat
         if reply.done and self.settings.get("voice_quiet_commands", True):
             self.speaker.tone("done")
             return True

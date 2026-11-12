@@ -112,7 +112,7 @@ class TestConversation(unittest.TestCase):
         return speaker.said, va
 
     def test_answers_and_returns_to_listening(self):
-        said, va = self.run_talk(["who's home", None], VoiceReply("Kate is home."))
+        said, va = self.run_talk(["who's home", None], VoiceReply("Kate is home.", chat=True))
         self.assertEqual(said, ["<listen>", "Kate is home.", "<listen>", "<cancel>"])
         self.assertEqual(va._mode, "wake")
         self.assertTrue(va._wake_reset)
@@ -128,14 +128,14 @@ class TestConversation(unittest.TestCase):
         reply = VoiceReply("Should I turn on alerts?", lambda: done.append(1) or "Done.")
         said, _ = self.run_talk(["enable alerts", "yes please", None], reply)
         self.assertEqual(done, [1])
-        self.assertEqual(said[-3], "Done.")
+        self.assertEqual(said[-1], "Done.")
 
     def test_anything_but_yes_does_nothing(self):
         done = []
         for answer in ("no", None, "what?"):
             reply = VoiceReply("Should I?", lambda: done.append(1) or "Done.")
             said, _ = self.run_talk(["enable alerts", answer, None], reply)
-            self.assertEqual(said[-3], "Okay, I won't.")
+            self.assertEqual(said[-1], "Okay, I won't.")
         self.assertEqual(done, [])
 
     def test_dictation_after_go_ahead(self):
@@ -147,6 +147,14 @@ class TestConversation(unittest.TestCase):
         self.assertEqual(saved, ["make the music bar bigger"])
         self.assertEqual(hear.call_args_list[1].kwargs["silence"], v.DICTATE_SILENCE)
         self.assertIn("Got it.", speaker.said)
+
+    def test_a_plain_answer_is_the_last_word(self):
+        said, _ = self.run_talk(["what time is it", "room talk that must not be heard"], VoiceReply("It's 3:40 pm."))
+        self.assertEqual(said, ["<listen>", "It's 3:40 pm."])
+        said, _ = self.run_talk(["thoughts on pineapple pizza", "why", None], VoiceReply("It's fine.", chat=True))
+        self.assertEqual(said, ["<listen>", "It's fine.", "<listen>", "It's fine.", "<listen>", "<cancel>"])
+        said, _ = self.run_talk(["thoughts on pineapple pizza", "why"], VoiceReply("It's fine.", chat=True), voice_follow_up=False)
+        self.assertEqual(said, ["<listen>", "It's fine."])
 
     def test_a_command_gets_a_chime_and_no_follow_up(self):
         said, _ = self.run_talk(["turn on the porch lamp", "room talk that must not be heard"], VoiceReply("Okay, turning on the Porch lamp.", done=True))
@@ -161,7 +169,7 @@ class TestConversation(unittest.TestCase):
     def test_follow_up_question_needs_no_wake_word(self):
         asked = []
         speaker = FakeSpeaker()
-        va = VoiceAssistant({}, lambda text, say: asked.append(text) or VoiceReply("ok"), speaker)
+        va = VoiceAssistant({}, lambda text, say: asked.append(text) or VoiceReply("ok", chat=True), speaker)
         with mock.patch.object(va, "_hear", side_effect=["who's home", "and the weather", None]):
             va._conversation()
         self.assertEqual(asked, ["who's home", "and the weather"])
@@ -171,13 +179,13 @@ class TestConversation(unittest.TestCase):
         asked = []
         for heard in ("Cancel.", "so I told him the game was at, oh, Jezebel, cancel", "Never mind.", "nothing"):
             speaker = FakeSpeaker()
-            va = VoiceAssistant({}, lambda text, say: asked.append(text) or VoiceReply("ok"), speaker)
+            va = VoiceAssistant({}, lambda text, say: asked.append(text) or VoiceReply("ok", chat=True), speaker)
             with mock.patch.object(va, "_hear", side_effect=[heard, "who's home", None]):
                 va._conversation()
             self.assertEqual(speaker.said, ["<listen>", "<cancel>"], heard)
             self.assertEqual(va._mode, "wake")
         self.assertEqual(asked, [])
-        said, _ = self.run_talk(["who's home", "never mind", "ignored"], VoiceReply("Kate is home."))
+        said, _ = self.run_talk(["who's home", "never mind", "ignored"], VoiceReply("Kate is home.", chat=True))
         self.assertEqual(said, ["<listen>", "Kate is home.", "<listen>", "<cancel>"])  # a follow-up can cancel too
 
     def test_what_is_and_isnt_cancel(self):
@@ -193,7 +201,7 @@ class TestConversation(unittest.TestCase):
         Since 2026-11-10 not even the first "Huh?" is said: she wasn't listening for the answer anyway."""
         said, _ = self.run_talk(["If you say go to my mind", "Get into the front", None], VoiceReply("Huh?"))
         self.assertEqual(said, ["<listen>", "<cancel>"])  # just the closing chime
-        replies = iter([VoiceReply("Kate is home."), VoiceReply("Come again?")])
+        replies = iter([VoiceReply("Kate is home.", chat=True), VoiceReply("Come again?")])
         speaker = FakeSpeaker()
         va = VoiceAssistant({}, lambda text, say: next(replies), speaker)
         with mock.patch.object(va, "_hear", side_effect=["who's home", "put it back towards the TV", "more talk"]):
@@ -203,7 +211,7 @@ class TestConversation(unittest.TestCase):
     def test_stop_inside_room_talk_ends_a_follow_up(self):
         asked = []
         speaker = FakeSpeaker()
-        va = VoiceAssistant({}, lambda text, say: asked.append(text) or VoiceReply("ok"), speaker)
+        va = VoiceAssistant({}, lambda text, say: asked.append(text) or VoiceReply("ok", chat=True), speaker)
         with mock.patch.object(va, "_hear", side_effect=["who's home", "How did the save all this stuff? Stop. But.", None]):
             va._conversation()
         self.assertEqual(asked, ["who's home"])
@@ -224,7 +232,7 @@ class TestConversation(unittest.TestCase):
     def test_hey_jarvis_answers_as_jarvis_in_his_own_voice(self):
         speaker = FakeSpeaker()
         settings = {"voice_name": "Jezebel", "voice_jarvis_id": "kokoro:bm_george"}
-        va = VoiceAssistant(settings, lambda text, say: say("Let me think.") or VoiceReply("Kate is home."), speaker)
+        va = VoiceAssistant(settings, lambda text, say: say("Let me think.") or VoiceReply("Kate is home.", chat=True), speaker)
         va._persona("hey_jarvis_v0.1")
         self.assertEqual(va.speaking_as, "Jarvis")
         with mock.patch.object(va, "_hear", side_effect=["who's home", None]):
@@ -246,7 +254,7 @@ class TestConversation(unittest.TestCase):
 
         def answer(text, say, doubtful=False):
             asked.append((text, doubtful))
-            return None if doubtful and text != "pause" else VoiceReply("ok")
+            return None if doubtful and text != "pause" else VoiceReply("ok", chat=True)
         for follow_up, doubt_score, want in (("I don't want to get in the candy box", 0.42, ["ok", "<listen>", "<cancel>"]),
                                              ("I don't know", 0.2, ["ok", "<listen>", "ok", "<listen>", "<cancel>"]),
                                              ("Get into the front. Put it back towards the TV.", 0.29, ["ok", "<listen>", "<cancel>"]),
@@ -271,7 +279,7 @@ class TestConversation(unittest.TestCase):
         """2026-11-03 19:39: a false wake (Jarvis 0.91) heard "I'm not sure" (0.27) and Claude answered it."""
         for first, doubt_score, asked_claude in (("I'm not sure", 0.27, False), ("turn on the TV", 0.04, True)):
             speaker, asked = FakeSpeaker(), []
-            va = VoiceAssistant({}, lambda text, say, doubtful=False: asked.append(doubtful) or (None if doubtful else VoiceReply("ok")), speaker)
+            va = VoiceAssistant({}, lambda text, say, doubtful=False: asked.append(doubtful) or (None if doubtful else VoiceReply("ok", chat=True)), speaker)
             heard = iter([(first, doubt_score), (None, 0.0)])
 
             def hear(**kwargs):
@@ -287,7 +295,7 @@ class TestConversation(unittest.TestCase):
         for tv, first, doubt_score, answered in ((True, "Pause.", 0.42, False), (False, "Pause.", 0.42, True),
                                                  (True, "turn off the TV", 0.03, True)):
             speaker, asked = FakeSpeaker(), []
-            va = VoiceAssistant({}, lambda text, say, doubtful=False: asked.append(text) or VoiceReply("ok"), speaker,
+            va = VoiceAssistant({}, lambda text, say, doubtful=False: asked.append(text) or VoiceReply("ok", chat=True), speaker,
                                 tv_on=lambda: tv)
             heard = iter([(first, doubt_score), (None, 0.0)])
 
@@ -305,17 +313,17 @@ class TestConversation(unittest.TestCase):
 
     def test_follow_ups_are_capped(self):
         with mock.patch.object(v, "MAX_TURNS", 3):
-            said, _ = self.run_talk(["blah"] * 10, VoiceReply("ok"))
+            said, _ = self.run_talk(["blah"] * 10, VoiceReply("ok", chat=True))
         self.assertEqual(said.count("ok"), 3)
 
     def test_follow_up_can_be_turned_off(self):
-        said, _ = self.run_talk(["who's home"], VoiceReply("Kate is home."), voice_follow_up=False)
+        said, _ = self.run_talk(["who's home"], VoiceReply("Kate is home.", chat=True), voice_follow_up=False)
         self.assertEqual(said, ["<listen>", "Kate is home."])
 
     def test_alerts_stay_quiet_during_a_conversation(self):
         speaker = FakeSpeaker()
         seen = []
-        va = VoiceAssistant({}, lambda text, say: seen.append(speaker.busy) or VoiceReply("ok"), speaker)
+        va = VoiceAssistant({}, lambda text, say: seen.append(speaker.busy) or VoiceReply("ok", chat=True), speaker)
         with mock.patch.object(va, "_hear", side_effect=["hi", None]):
             va._conversation()
         self.assertEqual(seen, [True])
@@ -514,6 +522,21 @@ class TestEngineVoiceAnswers(unittest.TestCase):
         self.assertEqual(reply.text, "It was quiet out back.")
         self.assertEqual(self.said, ["Let me think."])
         self.assertTrue(ask.call_args.kwargs["voice"])
+
+    def test_open_ended_answers_keep_the_conversation_and_remember_it(self):
+        self.engine.settings["assistant_enabled"] = True
+        with mock.patch.object(self.engine.assistant, "ask", side_effect=[
+                "Honestly? It belongs on pizza.\nMORE", "Because sweet and salty works.\nMORE", "About 2,700 kilometres."]) as ask, \
+                mock.patch.object(self.engine, "assistant_context", return_value="DATA"):
+            first = self.ask("What are your thoughts on pineapple on pizza?")
+            self.assertEqual((first.text, first.chat), ("Honestly? It belongs on pizza.", True))
+            second = self.ask("Why do people like that?")
+            self.assertTrue(second.chat)
+            self.assertIn("EARLIER IN THIS CONVERSATION:\nThey said: What are your thoughts on pineapple on pizza?\n"
+                          "You said: Honestly? It belongs on pizza.", ask.call_args.args[1])
+            third = self.ask("How far is it from Chicago to Miami?")  # a plain fact: the last word
+            self.assertEqual((third.text, third.chat), ("About 2,700 kilometres.", False))
+            self.assertEqual(self.engine._voice_chat, [])
 
     def test_claude_command_needs_yes_too(self):
         self.engine.settings["assistant_enabled"] = True

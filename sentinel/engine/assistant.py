@@ -101,7 +101,23 @@ VOICE_SYSTEM_PROMPT = (SYSTEM_PROMPT
              "with just two or three words like \"Huh?\", \"Come again?\" or \"What?\" and nothing else.\n"
              # The family's choice (2026-11-03): "being formal isn't necessary and sarcasm and sassy is ok".
              "- Talk like a laid-back friend, not a butler: casual, a bit of sarcasm and sass is welcome. Never at the "
-             "cost of the facts, and still short."))
+             "cost of the facts, and still short.\n"
+             # Plain facts end the exchange; a real conversation keeps the microphone open (the user's rule, 2026-11-12).
+             "- If what they said is open-ended (your opinion or thoughts on something, advice, an explanation, a topic "
+             "people talk over, or you asked them something back) so that a follow-up is likely, add a last line with "
+             "only the word MORE. For a plain fact (a number, a date, a name, a definition, a conversion, a yes or no) "
+             "or anything about the house, don't. EARLIER IN THIS CONVERSATION, when given, is what was just said: "
+             "answer the new words as its continuation."))
+
+MORE_LINE = re.compile(r"\n?[ \t]*\bMORE\b[.!]?[ \t]*$")
+
+
+def split_more(reply: str) -> Tuple[str, bool]:
+    """Claude's spoken reply without its last "MORE" line, and whether it was there (a follow-up is likely)."""
+    text = (reply or "").rstrip()
+    if text.split("\n")[-1].strip().rstrip(".!") == "MORE":
+        return MORE_LINE.sub("", text).rstrip(), True
+    return reply, False
 
 
 def find_claude(configured: str = "") -> Optional[str]:

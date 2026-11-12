@@ -148,6 +148,8 @@ EDITABLE_PROFILE_FIELDS = {
 }
 
 
+VOICE_CHAT_SECONDS = 180  # a spoken follow-up this soon after an open-ended answer belongs to the same conversation
+
 class Engine:
     """Headless Sentinel runtime."""
 
@@ -283,6 +285,8 @@ class Engine:
             self.settings, self.family.home_coords, self.news.tell_everyone,
             lambda text: self.audio.speak(text) if self.audio is not None else None, VIDEO_DIR)
         self.assistant = Assistant(self.settings)
+        self._voice_chat: List[Tuple[str, str]] = []  # the open-ended talk going on by voice: (they said, Jarvis said)
+        self._voice_chat_at = 0.0
         from sentinel.engine.recipes import RecipeBox
 
         self.recipes = RecipeBox(  # the family recipe box (the Recipes page); Claude for swaps and twists
@@ -1120,7 +1124,7 @@ class Engine:
         """What to say back to a spoken request: Sentinel's own answers first, then Claude (opt-in).
         doubtful (a follow-up that may be room talk): None instead of asking Claude."""
         from sentinel.audio.voice import VoiceReply, to_speech
-        from sentinel.engine.assistant import split_command
+        from sentinel.engine.assistant import split_command, split_more
         from sentinel.engine.questions import _fmt_clock, is_question
 
         # ("50%" lost its % below and "set Jabra speaker to 50%" wasn't understood, 2026-11-10)
@@ -1198,11 +1202,14 @@ class Engine:
             return None
         if not self.assistant.enabled():
             return VoiceReply("Sorry, I can't answer that one. Try asking who's home, or did anyone come by today.")
-        reply = None
+        reply, earlier = None, []
         if self.assistant.remaining_today() > 0:
             say("Let me think.")
+            earlier = self._voice_chat if time.time() - self._voice_chat_at < VOICE_CHAT_SECONDS else []
+            said_before = "".join(f"\nThey said: {q}\nYou said: {a}" for q, a in earlier)
             try:
-                reply = self.assistant.ask(text, self.assistant_context(), voice=True,
+                reply = self.assistant.ask(text, self.assistant_context() + (
+                    "\n\nEARLIER IN THIS CONVERSATION:" + said_before if earlier else ""), voice=True,
                                            name=getattr(self.voice, "speaking_as", ""))
             except Exception as e:
                 self.assistant.last_error = str(e)
@@ -1210,8 +1217,14 @@ class Engine:
             self.assistant.last_error = "today's limit of Claude questions is used up"
         if not reply:
             return VoiceReply(f"Sorry, I couldn't get an answer: {self.assistant.last_error}.")
+        reply, more = split_more(reply)
         text_part, command = split_command(reply)
         spoken = to_speech(text_part or reply, max_lines=6, max_chars=600)
+        # An open-ended answer: the microphone stays open, and the next words are answered knowing these
+        self._voice_chat = (earlier + [(text.strip()[:300], spoken)])[-4:] if more and not command else []
+        self._voice_chat_at = time.time()
+        if more and not command:
+            return VoiceReply(spoken, chat=True)
         changes = parse_feature_toggle(command)[0] if command else None
         if changes:
             return VoiceReply(spoken + " Should I do that? Say yes or no.", self._voice_toggle(changes).confirm)

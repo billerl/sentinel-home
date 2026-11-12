@@ -840,3 +840,4 @@ Nothing in this repo installs or configures `cloudflared`; the user (or next cha
 - Optional: run full unit tests locally; commit and push (agent host may lack `git`).
 
 - Voice, commands vs questions (2026-11-12): `VoiceReply.done` (a switch/TV/music/volume command that worked: `tone("done")` instead of the sentence when `voice_quiet_commands`, default on) and `.final` (spoken, e.g. "Playing ..."); after either, `_conversation` doesn't listen for a follow-up.
+- Voice follow-ups (2026-11-12): only after an open-ended answer. Claude ends such a spoken reply with a last line `MORE` (`assistant.split_more`) -> `VoiceReply.chat` -> `_conversation` listens `FOLLOW_UP_WAIT` (30 s); everything else is the last word. `Engine._voice_chat` (last 4 exchanges, `VOICE_CHAT_SECONDS`) goes into the next prompt as EARLIER IN THIS CONVERSATION.
