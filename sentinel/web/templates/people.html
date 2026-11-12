@@ -166,19 +166,72 @@
       if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
       return d;
     }
-    // A phone photo is several MB: cut the middle square out and shrink it here, so only ~50 KB goes up
+    // A phone photo is several MB: the part picked here (drag to move, slider / pinch / wheel to zoom) is cut out
+    // and shrunk in the browser, so only ~50 KB goes up. Resolves null when cancelled.
     function squarePicture(f) {
       return new Promise(function(resolve, reject) {
         var img = new Image(), url = URL.createObjectURL(f);
-        img.onload = function() {
-          var side = Math.min(img.naturalWidth, img.naturalHeight), size = Math.min(400, side);
-          var c = document.createElement("canvas");
-          c.width = c.height = size;
-          c.getContext("2d").drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, size, size);
-          URL.revokeObjectURL(url);
-          resolve(c.toDataURL("image/jpeg", 0.85));
-        };
         img.onerror = function() { URL.revokeObjectURL(url); reject(new Error("That file isn't a picture this browser can open.")); };
+        img.onload = function() {
+          var nw = img.naturalWidth, nh = img.naturalHeight, full = Math.min(nw, nh);
+          var zoom = 1, cx = nw / 2, cy = nh / 2, MAX = 6;
+          var W = Math.round(Math.min(340, window.innerWidth - 48, window.innerHeight - 230));
+          var back = document.createElement("div");
+          back.style.cssText = "position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;color:#fff;font-size:1rem";
+          var tip = document.createElement("div"); tip.textContent = "Drag to move. Slide or pinch to zoom in.";
+          var wrap = document.createElement("div");
+          wrap.style.cssText = "position:relative;width:" + W + "px;height:" + W + "px;touch-action:none;cursor:grab";
+          var c = document.createElement("canvas"); c.width = c.height = W * 2;
+          c.style.cssText = "width:100%;height:100%;display:block;border-radius:8px";
+          var ring = document.createElement("div");  // the round pin the map shows: what's outside it is dimmed
+          ring.style.cssText = "position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 999px rgba(0,0,0,.5);border:2px solid #fff;pointer-events:none";
+          wrap.style.overflow = "hidden"; wrap.style.borderRadius = "8px";
+          wrap.appendChild(c); wrap.appendChild(ring);
+          var slide = document.createElement("input"); slide.type = "range"; slide.min = 1; slide.max = MAX; slide.step = 0.01; slide.value = 1;
+          slide.style.cssText = "width:" + W + "px;height:36px";
+          var row = document.createElement("div"); row.style.cssText = "display:flex;gap:14px";
+          var ok = document.createElement("button"); ok.textContent = "Save picture"; ok.className = "primary";
+          var no = document.createElement("button"); no.textContent = "Cancel";
+          ok.style.cssText = no.style.cssText = "font-size:1.1rem;padding:12px 22px";
+          row.appendChild(no); row.appendChild(ok);
+          [tip, wrap, slide, row].forEach(function(n) { back.appendChild(n); });
+          document.body.appendChild(back);
+          function draw() {
+            var side = full / zoom, half = side / 2;
+            cx = Math.max(half, Math.min(nw - half, cx)); cy = Math.max(half, Math.min(nh - half, cy));
+            var g = c.getContext("2d"); g.clearRect(0, 0, c.width, c.height);
+            g.drawImage(img, cx - half, cy - half, side, side, 0, 0, c.width, c.height);
+          }
+          function setZoom(z) { zoom = Math.max(1, Math.min(MAX, z)); slide.value = zoom; draw(); }
+          slide.oninput = function() { setZoom(Number(slide.value)); };
+          wrap.addEventListener("wheel", function(e) { e.preventDefault(); setZoom(zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1)); }, { passive: false });
+          var touches = {}, pinch = 0;
+          function spread() { var k = Object.keys(touches); return Math.hypot(touches[k[0]].x - touches[k[1]].x, touches[k[0]].y - touches[k[1]].y); }
+          wrap.addEventListener("pointerdown", function(e) {
+            touches[e.pointerId] = { x: e.clientX, y: e.clientY };
+            try { wrap.setPointerCapture(e.pointerId); } catch (err) {}
+            if (Object.keys(touches).length === 2) pinch = spread() / zoom;
+          });
+          wrap.addEventListener("pointermove", function(e) {
+            var t = touches[e.pointerId]; if (!t) return;
+            var n = Object.keys(touches).length, dx = e.clientX - t.x, dy = e.clientY - t.y;
+            t.x = e.clientX; t.y = e.clientY;
+            if (n >= 2) { if (pinch) setZoom(spread() / pinch); return; }
+            var per = full / zoom / W;  // picture pixels per screen pixel
+            cx -= dx * per; cy -= dy * per; draw();
+          });
+          function up(e) { delete touches[e.pointerId]; pinch = 0; }
+          wrap.addEventListener("pointerup", up); wrap.addEventListener("pointercancel", up);
+          function done(result) { back.remove(); URL.revokeObjectURL(url); resolve(result); }
+          no.onclick = function() { done(null); };
+          ok.onclick = function() {
+            var side = full / zoom, size = Math.round(Math.min(400, side)), out = document.createElement("canvas");
+            out.width = out.height = size;
+            out.getContext("2d").drawImage(img, cx - side / 2, cy - side / 2, side, side, 0, 0, size, size);
+            done(out.toDataURL("image/jpeg", 0.85));
+          };
+          draw();
+        };
         img.src = url;
       });
     }
@@ -296,9 +349,13 @@
         pic.onclick = function() { file.click(); };
         file.onchange = async function() {
           if (!file.files[0]) return;
-          say(msg, "Saving the picture…");
-          try { await api("/api/people/" + p.id + "/photo", { image: await squarePicture(file.files[0]) }); await load(); }
-          catch (e) { say(msg, e.message, false); }
+          try {
+            var cut = await squarePicture(file.files[0]);
+            file.value = "";  // (so the same file can be picked again to frame it differently)
+            if (!cut) return;
+            say(msg, "Saving the picture…");
+            await api("/api/people/" + p.id + "/photo", { image: cut }); await load();
+          } catch (e) { say(msg, e.message, false); }
         };
         var nopic = el("button", null, "Remove picture");
         nopic.hidden = !p.photo;

@@ -476,6 +476,7 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   records the note next; both wait 2 min by id. Needs HTTPS (getUserMedia): the tunnel address; only TVs are
   moved to the home-network http address. Hidden on TV/kiosk browsers.
 - **Samsung page that never opens** (2026-11-12): `show_live` returns False when no page checks in within `PAGE_WAIT` + `OPEN_WAIT` (the TV accepted the remote connection but ignored `ed.apps.launch` and `ed.installedApp.get` until restarted); `tv_command` then says so instead of "Okay" (`tv_page_not_opened` in the log).
+- **Profile picture framing** (2026-11-12, `people.html` `squarePicture`): picking a photo opens a move-and-zoom picker (drag, slider, pinch, wheel; up to 6x) and only the chosen square is uploaded; the server side (`Family.set_photo`) is unchanged. The original isn't kept, so re-framing means picking the file again.
 - **Location map on the TV** (2026-11-10; `Family.map_lookup/map_view/set_photo`, `templates/where.html`, `/where`,
   `/api/where`, `/person_photo/<id>.jpg`, POST `/api/people/<id>/photo`): "show me Kate's location" / "where Kate is" /
   "everyone's location" goes through the same path as "show me the front door": `Engine._camera_page` asks
