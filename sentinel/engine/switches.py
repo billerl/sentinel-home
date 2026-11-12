@@ -683,6 +683,14 @@ class SmartSwitches:
         return None
 
     @staticmethod
+    def _tv_failed(sw, e: Exception) -> str:
+        """A TV that isn't answering gets plain words and what to try, not "[Errno 111] Connection refused"."""
+        if isinstance(e, OSError):
+            return (f"The {sw.name} isn't answering. If it was just turned on, give it a minute and ask again. "
+                    "If it keeps doing this, restart it: hold the power button on its remote until the logo comes up.")
+        return f"The {sw.name} didn't do it ({e})."
+
+    @staticmethod
     def _tv_no_page(sw) -> str:
         return (f"I asked the {sw.name}, but its browser didn't open. If nothing is showing, restart the TV: "
                 "hold the power button on its remote until the logo comes up, then ask again.")
@@ -699,7 +707,7 @@ class SmartSwitches:
             try:
                 shown = driver.show_live(host, path=path)
             except (OSError, ValueError) as e:
-                return f"The {sw.name} didn't do it ({e})."
+                return self._tv_failed(sw, e)
             if shown is False:
                 return self._tv_no_page(sw)
             if path.startswith("#map="):
@@ -711,7 +719,7 @@ class SmartSwitches:
             try:
                 shown = driver.show_live(host, reload=detail[1])
             except (OSError, ValueError) as e:
-                return f"The {sw.name} didn't do it ({e})."
+                return self._tv_failed(sw, e)
             if shown is False:
                 return self._tv_no_page(sw)
             app_logger.log("info", "tv_live_view", tv=sw.name, reload=detail[1], source=source, component="switches", action="tv")
@@ -785,7 +793,7 @@ class SmartSwitches:
                 # the TV a new address. Look for it now, not at the next 15-minute search.)
                 self.request_scan()
                 return f"The {sw.name} isn't answering yet. It may still be starting up: try again in a moment."
-            return f"The {sw.name} didn't do it ({e})."
+            return self._tv_failed(sw, e)
 
     def _tv_press(self, driver, host: str, *keys: str) -> None:
         """A TV's buttons; a Samsung's volume and mute go to the soundbar's infrared buttons when there are some."""
