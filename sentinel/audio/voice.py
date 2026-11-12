@@ -111,6 +111,11 @@ class VoiceReply:
     dictate: Optional[Callable[[str], str]] = None  # take a long message next ("note for Claude"); returns what to say
     # record the wake word after each beep ("train Jezebel"): (the clip, what Whisper heard) -> how many are kept now
     practice: Optional[Callable[[np.ndarray, str], int]] = None
+    # A plain command that was carried out (a light, the music, the volume): with "quiet commands" on, a short
+    # chime instead of the words. Either way nothing more is listened for (the room or the music isn't a follow-up:
+    # "Play." was followed by three answers to the song's lyrics, 2026-11-12).
+    done: bool = False
+    final: bool = False  # a command whose answer is worth hearing ("Playing Tom Petty"), but still the last word
 
 
 class BandPass:
@@ -325,6 +330,7 @@ class VoiceAssistant:
         self._proc = None
         self._mode = "wake"  # wake -> busy -> listen -> busy -> wake
         self._queue: "queue.Queue[tuple]" = queue.Queue()  # (time, audio) while listening
+        self._final = False  # the last reply was to a command: no listening for a follow-up
         self._ignore_until = 0.0  # chunks before this are the chime: kept for Whisper, not judged as speech
         self._noise = 0.003
         self._wake = None
@@ -624,6 +630,7 @@ class VoiceAssistant:
     def _respond(self, text: str, doubtful: bool = False) -> bool:
         """Answer it; False when the conversation should end: a doubtful follow-up that wasn't one of
         Sentinel's own commands (ignored), or words that made no sense ("Huh?")."""
+        self._final = False
         reply = self.answer(text, self._say, doubtful=True) if doubtful else self.answer(text, self._say)
         if reply is None:
             app_logger.log("info", "voice_ignored", text=text[:200], doubt=round(self.last_doubt, 2),
@@ -636,6 +643,10 @@ class VoiceAssistant:
             # (four "Let me think"s in a row, 2026-11-05). Not even a "Huh?": she doesn't listen for the
             # answer anyway, so just the closing chime (the user's call, 2026-11-10).
             return False
+        self._final = reply.done or reply.final
+        if reply.done and self.settings.get("voice_quiet_commands", True):
+            self.speaker.tone("done")
+            return True
         self._say(casual(reply.text))
         if reply.practice is not None:
             self._practice(reply.practice)
@@ -677,7 +688,7 @@ class VoiceAssistant:
                 if not self._respond(text, doubtful=doubtful):
                     self.speaker.tone("cancel")
                     return
-                if turn == MAX_TURNS - 1 or not self.settings.get("voice_follow_up", True):
+                if turn == MAX_TURNS - 1 or self._final or not self.settings.get("voice_follow_up", True):
                     return
                 self.speaker.tone("listen")
                 text = self._hear(wait=FOLLOW_UP_WAIT)

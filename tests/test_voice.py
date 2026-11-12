@@ -148,6 +148,16 @@ class TestConversation(unittest.TestCase):
         self.assertEqual(hear.call_args_list[1].kwargs["silence"], v.DICTATE_SILENCE)
         self.assertIn("Got it.", speaker.said)
 
+    def test_a_command_gets_a_chime_and_no_follow_up(self):
+        said, _ = self.run_talk(["turn on the porch lamp", "room talk that must not be heard"], VoiceReply("Okay, turning on the Porch lamp.", done=True))
+        self.assertEqual(said, ["<listen>", "<done>"])
+        said, _ = self.run_talk(["turn on the porch lamp", "room talk"], VoiceReply("Okay, turning on the Porch lamp.", done=True),
+                                voice_quiet_commands=False)
+        self.assertEqual(len(said), 2)
+        self.assertTrue(said[1].endswith("turning on the Porch lamp."), said)
+        said, _ = self.run_talk(["play tom petty", "lyrics"], VoiceReply("Playing Tom Petty.", final=True))
+        self.assertEqual(said, ["<listen>", "Playing Tom Petty."])  # said, but nothing listened for after
+
     def test_follow_up_question_needs_no_wake_word(self):
         asked = []
         speaker = FakeSpeaker()

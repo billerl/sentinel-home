@@ -838,3 +838,5 @@ Nothing in this repo installs or configures `cloudflared`; the user (or next cha
 
 - **Cloudflare Tunnel:** follow the **“Cloudflare Tunnel (remote HTTPS) — operator checklist”** table above; paste-ready **`config.yml`** and commands live in **`installation-guide.md`** (Tunnel subsection). Prefer **`web.bind_host: "127.0.0.1"`** when using tunnel-only remote access.  
 - Optional: run full unit tests locally; commit and push (agent host may lack `git`).
+
+- Voice, commands vs questions (2026-11-12): `VoiceReply.done` (a switch/TV/music/volume command that worked: `tone("done")` instead of the sentence when `voice_quiet_commands`, default on) and `.final` (spoken, e.g. "Playing ..."); after either, `_conversation` doesn't listen for a follow-up.

@@ -1138,7 +1138,8 @@ class Engine:
             return practice
         volume = parse_volume_command(low)
         if volume:
-            return VoiceReply(self.change_volume(*volume))
+            said = self.change_volume(*volume)
+            return VoiceReply(said, done=said.startswith(("PC volume", "Okay")))
         from sentinel.engine.routines import REQUEST as NEW_ROUTINE
 
         said = self.commands.voice_reply(low, "early")
@@ -1146,7 +1147,7 @@ class Engine:
             return VoiceReply(said)
         switched = None if NEW_ROUTINE.search(low) else self.switches.command(low, source="voice")
         if switched:
-            return VoiceReply(switched)
+            return VoiceReply(switched, done=switched.startswith("Okay"))  # (done; a failure or "is it on?" is said)
         music = parse_music_command(low)
         if music and self.spotify.connected():
             said = self.spotify.command(*music, say=say)
@@ -1154,7 +1155,8 @@ class Engine:
                 return None  # "stop"/"pause" with no music: meant "never mind" (or was room talk): just the end chime
             if said.startswith(NO_SUCH_SPEAKER):
                 return VoiceReply(said + " Do you want to hear the list of speakers?", confirm=self.spotify.speaker_list)
-            return VoiceReply(said)
+            simple = said in ("Paused.", "Playing.", "Skipped.", "Going back.") or said.startswith("Volume ")
+            return VoiceReply(said, done=simple, final=music[0] != "now")  # ("what's playing?" is a question)
         if re.fullmatch(r"(never ?mind|cancel|stop|nothing|no|forget it|no thanks)", low):
             return VoiceReply("Okay.")
         if music and music[0] == "play":

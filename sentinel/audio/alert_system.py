@@ -417,8 +417,8 @@ class AudioAlertSystem:
         return None
 
     def tone(self, kind: str = "listen") -> None:
-        """A short chime: rising = "I'm listening", falling = "never mind"."""
-        notes = (660, 880) if kind == "listen" else (660, 440)
+        """A short chime: rising = "I'm listening", falling = "never mind", two high notes = "done"."""
+        notes = {"listen": (660, 880), "done": (1047, 1319)}.get(kind, (660, 440))
         rate = 22050
         t = np.arange(int(rate * 0.12)) / rate
         fade = np.minimum(1.0, np.minimum(t, t[::-1]) / 0.01)
