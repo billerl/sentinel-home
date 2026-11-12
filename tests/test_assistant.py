@@ -91,6 +91,10 @@ class TestAssistant(unittest.TestCase):
         self.assertIn("too long", a.last_error)
 
     def test_command_has_fixed_system_prompt(self):
+        web = build_command("/c", "p", "sonnet", web=True)
+        self.assertEqual(web[web.index("--tools") + 1], "WebSearch")  # web search and nothing else
+        self.assertEqual(web[web.index("--allowedTools") + 1], "WebSearch")
+        self.assertGreater(int(web[web.index("--max-turns") + 1]), 1)
         cmd = build_command("/c", "p", "haiku")
         self.assertEqual(cmd[cmd.index("--system-prompt") + 1], am.SYSTEM_PROMPT)
 
@@ -180,3 +184,25 @@ class TestTelegramRouting(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWebSearch(unittest.TestCase):
+    def test_only_spoken_questions_search_and_only_when_ticked(self):
+        import sentinel.engine.assistant as am
+
+        for settings, voice, want in (({"assistant_web_search": True}, True, True), ({"assistant_web_search": True}, False, False),
+                                      ({}, True, False)):
+            calls = []
+
+            def run(cmd, **kw):
+                calls.append((cmd, kw))
+                return types.SimpleNamespace(returncode=0, stdout='{"result": "ok"}', stderr="")
+            a = Assistant({"assistant_enabled": True, **settings}, run=run)
+            with mock.patch.object(am, "find_claude", return_value="/c"):
+                self.assertEqual(a.ask("any news today?", "DATA", voice=voice), "ok")
+            cmd, kw = calls[0]
+            self.assertEqual("WebSearch" in cmd, want)
+            self.assertEqual(kw["timeout"], am.WEB_TIMEOUT_SECONDS if want else am.TIMEOUT_SECONDS)
+            system = cmd[cmd.index("--system-prompt") + 1]
+            self.assertEqual("You can search the web" in system, want)
+            self.assertEqual("You can't look anything up" in system, voice and not want)

@@ -141,6 +141,7 @@ class SettingsManager:
             "assistant_enabled": False,
             "assistant_daily_limit": 30,
             "assistant_model": "sonnet",
+            "assistant_web_search": False,  # spoken questions may search the web (news, prices, scores); nothing else
             # "Hey Jarvis" voice assistant (sentinel/audio/voice.py) and where sounds play
             "voice_enabled": False,
             # Spotify (sentinel/engine/spotify.py): public Client ID; the refresh token is stored here too

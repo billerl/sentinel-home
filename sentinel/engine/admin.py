@@ -178,6 +178,7 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "web.show_zones": _bool,
     "weather_location": _place,
     "assistant_enabled": _bool,
+    "assistant_web_search": _bool,
     "voice_enabled": _bool,
     "voice_name": lambda v: (__import__("re").sub(r"[^A-Za-z' -]", "", str(v or "")).strip()[:20] or "Jarvis"),
     "voice_trial_model": lambda v: str(v or "").strip()[:200],
