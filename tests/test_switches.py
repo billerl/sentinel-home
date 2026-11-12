@@ -528,6 +528,22 @@ class TestYouTubeKeyboard(unittest.TestCase):
 class TestSamsungLiveView(unittest.TestCase):
     """"Show cameras" on a Samsung: Sentinel's page in the TV's own browser."""
 
+    def setUp(self):
+        patch = mock.patch("sentinel.engine.samsung_tv.OPEN_WAIT", 0)  # (no page ever checks in here)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_says_when_no_page_came_up(self):
+        from sentinel.engine.samsung_tv import SamsungTVDriver
+        drv = SamsungTVDriver(tempfile.mkdtemp(prefix="sentinel-tv-"))
+        drv.live_url = "http://192.168.1.9:8088/"
+        drv._visible_app = lambda host: None
+        drv._send = lambda host, messages: None  # the TV takes the command and does nothing
+        with mock.patch("sentinel.engine.samsung_tv.PAGE_WAIT", 0):
+            self.assertIs(drv.show_live("tv", path="#map=all"), False)
+        drv._send = lambda host, messages: drv.page_poll("tv")  # the page checks in
+        self.assertIs(drv.show_live("tv", path="#map=all"), True)
+
     def test_opens_the_page_in_the_browser(self):
         from sentinel.engine.samsung_tv import BROWSER_APP, SamsungTVDriver
         drv, sent = SamsungTVDriver(tempfile.mkdtemp(prefix="sentinel-tv-")), []

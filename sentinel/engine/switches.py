@@ -682,6 +682,11 @@ class SmartSwitches:
             return ("seek", (tv, verb in _BACK_WORDS, min(seconds or SEEK_STEP, SEEK_MAX))), named
         return None
 
+    @staticmethod
+    def _tv_no_page(sw) -> str:
+        return (f"I asked the {sw.name}, but its browser didn't open. If nothing is showing, restart the TV: "
+                "hold the power button on its remote until the logo comes up, then ask again.")
+
     def tv_command(self, text: str, source: str) -> Optional[str]:
         parsed = self.tv_parse(text, bare=source == "voice")
         if parsed is None:
@@ -692,9 +697,11 @@ class SmartSwitches:
         if what == "camera":
             name, path = detail[1]
             try:
-                driver.show_live(host, path=path)
+                shown = driver.show_live(host, path=path)
             except (OSError, ValueError) as e:
                 return f"The {sw.name} didn't do it ({e})."
+            if shown is False:
+                return self._tv_no_page(sw)
             if path.startswith("#map="):
                 app_logger.log("info", "tv_map", tv=sw.name, shown=name, source=source, component="switches", action="tv")
                 return f"Okay, {name} is on the {sw.name}."
@@ -702,9 +709,11 @@ class SmartSwitches:
             return f"Okay, the {name} camera is on the {sw.name}."
         if what == "live":
             try:
-                driver.show_live(host, reload=detail[1])
+                shown = driver.show_live(host, reload=detail[1])
             except (OSError, ValueError) as e:
                 return f"The {sw.name} didn't do it ({e})."
+            if shown is False:
+                return self._tv_no_page(sw)
             app_logger.log("info", "tv_live_view", tv=sw.name, reload=detail[1], source=source, component="switches", action="tv")
             return f"Okay, {'reloading' if detail[1] else 'showing'} the cameras on the {sw.name}."
         if what == "back":

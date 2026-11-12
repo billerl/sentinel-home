@@ -61,6 +61,7 @@ COMMON_APPS = {
     "3201710015037": "Gallery", "3201908019041": "Paramount+", "3201508004642": "Sling TV",
 }
 PAGE_WAIT = 6.0  # after bringing the browser forward, how long its camera page has to check in (it asks every 2 s)
+OPEN_WAIT = 12.0  # after opening the address instead, how long the freshly loaded page has to check in
 RESUME_WAIT = 3.0  # seconds for a running app to come forward by NATIVE_LAUNCH before a DEEP_LINK is tried
 BROWSER_APP = "org.tizen.browser"  # the TV's "Internet": Sentinel's camera page opens in it (Chrome 56 on a 2018 TV)
 # YouTube and YouTube TV draw their own search keyboard, so text sent for the TV's keyboard never gets there
@@ -589,8 +590,9 @@ class SamsungTVDriver:
         """The browser, once Sentinel has said where its camera page is (``live_url``)."""
         return BROWSER_APP if self.live_url else None
 
-    def show_live(self, host: str, reload: bool = False, path: str = "") -> None:
-        """Sentinel's camera page in the TV's browser. Opening the address again loads it afresh, so a reload is
+    def show_live(self, host: str, reload: bool = False, path: str = "") -> bool:
+        """Sentinel's camera page in the TV's browser; False when no page checked in afterwards (the TV took
+        the command and did nothing, 2026-11-12: it needed restarting), so nobody is told "okay" for a blank. Opening the address again loads it afresh, so a reload is
         the same (signed in once with the QR code, the browser keeps it). The app that was on is remembered for
         live_back: it keeps running behind the browser."""
         if not self.live_url:
@@ -607,10 +609,17 @@ class SamsungTVDriver:
             "appId": BROWSER_APP, "action_type": "NATIVE_LAUNCH"}}}])
         while time.time() - asked < PAGE_WAIT:
             if self._page_polled.get(host, 0) > asked:
-                return
+                return True
             time.sleep(0.25)
         self._send(host, [{"method": "ms.channel.emit", "params": {"event": "ed.apps.launch", "to": "host", "data": {
             "appId": BROWSER_APP, "action_type": "NATIVE_LAUNCH", "metaTag": self.live_url + path}}}])
+        opened = time.time()
+        while time.time() - opened < OPEN_WAIT:
+            if self._page_polled.get(host, 0) > asked:
+                return True
+            time.sleep(0.25)
+        app_logger.log("warning", "tv_page_not_opened", component="samsung_tv", action="launch", path=path)
+        return False
 
     def page_poll(self, host: str) -> Dict[str, Any]:
         """The open camera page asking what to show (every 2 s, on a TV): {"seq", "path", "reload"}."""
