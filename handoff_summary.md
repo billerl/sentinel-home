@@ -570,6 +570,7 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   ignores motion for 20 s after a routine switched a light), sunset/sunrise/clock time (`tick` every 5 s in the
   command loop), phone arrives/leaves Home (OwnTracks changes), family car arrives/leaves (`_on_household_change`).
   Wi-Fi motion sensor (`sensor`, path ids from `WifiMotion.paths()`; `WifiMotion.on_motion` -> `RoutineRunner.sensor`
+  - Routines and the outdoor temperature (2026-11-12): trigger `{"type": "temp", "below"|"above": degrees}` (checked each minute in `tick`, fires once per crossing, re-arms `TEMP_REARM` back the other side; the first look only notes the side) and `only.temp_below` / `only.temp_above`. The number is the weather card's (`Engine._outdoor_temp`, hook `outdoor_temp`); unknown = the routine waits.
   on each moving reading, at most every 30 s per routine and path; "until quiet" uses `WifiMotion.last_motion`;
   no 20 s settling after a light switches, which only fools cameras). Sensor *rules* add groups to that trigger:
   `sensors` (any of these start it), `all` (must also move), `none` (must stay still), `within` seconds (default 5).

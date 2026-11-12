@@ -32,7 +32,7 @@ from sentinel.logging_utils import app_logger
 DB_NAME = "routines.db"
 HOLDS_FILE = "routine_holds.json"
 SEEN = ("person", "vehicle", "animal", "delivery", "package")  # package: left at a door (packages.py)
-TRIGGERS = ("seen", "motion", "sensor", "time", "arrive", "leave", "car_arrive", "car_leave")
+TRIGGERS = ("seen", "motion", "sensor", "time", "temp", "arrive", "leave", "car_arrive", "car_leave")
 WATCHERS = ("seen", "motion", "sensor")  # triggers that can hold a light on "until quiet"
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 MAX_MINUTES = 12 * 60
@@ -48,6 +48,9 @@ SENSOR_REARM = 30.0  # a Wi-Fi sensor routine fires when movement starts after t
 # They never react at the same instant: walking through, the next room's line fires a few seconds later.
 WITHIN_DEFAULT, WITHIN_MIN, WITHIN_MAX = 5, 2, 60
 REPLAY_HOURS = 24  # the editor shows when a sensor rule would have gone off over this long
+TEMP_CHECK_SECONDS = 60.0  # the outdoor temperature (the weather card's) is looked at this often
+TEMP_REARM = 2.0  # "when it drops below 32": goes again only after it's been back above 34 (no flapping at the line)
+TEMP_RANGE = (-60.0, 140.0)
 SETTLE_SECONDS = 20.0  # after a routine switches a light, the picture changes: that isn't motion
 COMMAND = re.compile(r"^routine\s+(\{.*\})\s*$", re.IGNORECASE | re.DOTALL)
 LIST = re.compile(r"^(?:what are |list |show )?(?:my |the )?routines\??$", re.IGNORECASE)
@@ -164,6 +167,16 @@ def _seconds(value: Any) -> int:
     return n
 
 
+def _degrees(value: Any) -> float:
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("the temperature should be a number of degrees")
+    if isinstance(value, bool) or not TEMP_RANGE[0] <= n <= TEMP_RANGE[1]:
+        raise ValueError("the temperature should be a number of degrees")
+    return int(n) if n == int(n) else round(n, 1)
+
+
 def starts_it(w: Dict[str, Any], path: str) -> bool:
     """Does movement on this Wi-Fi sensor start the rule? The first group ("any of these"), else the
     "all of these" group, else any sensor but the "but not" ones."""
@@ -200,7 +213,7 @@ def normalize(spec: Any, cat: Catalog) -> Dict[str, Any]:
     kind = str(when.get("type") or "")
     if kind not in TRIGGERS:
         raise ValueError("say what starts it (a camera sees something, motion, a Wi-Fi sensor, a time, "
-                         "someone arriving or leaving)")
+                         "the outdoor temperature, someone arriving or leaving)")
     w: Dict[str, Any] = {"type": kind}
     if kind == "seen":
         what = when.get("what") or list(SEEN)
@@ -249,6 +262,14 @@ def normalize(spec: Any, cat: Catalog) -> Dict[str, Any]:
             raise ValueError("the offset should be within 3 hours")
         if offset and at in ("sunset", "sunrise"):
             w["offset"] = offset
+    elif kind == "temp":
+        below, above = when.get("below"), when.get("above")
+        if (below in (None, "")) == (above in (None, "")):
+            raise ValueError("say the temperature: when it drops below, or rises above, how many degrees")
+        if below not in (None, ""):
+            w["below"] = _degrees(below)
+        else:
+            w["above"] = _degrees(above)
     elif kind in ("arrive", "leave"):
         w["people"] = _pick(when.get("people"), cat.people, "person")
     else:
@@ -276,6 +297,11 @@ def normalize(spec: Any, cat: Catalog) -> Dict[str, Any]:
             o["days"] = [d for d in DAYS if d in days]
     if only.get("nobody_home"):
         o["nobody_home"] = True
+    for key in ("temp_below", "temp_above"):
+        if only.get(key) not in (None, ""):
+            o[key] = _degrees(only[key])
+    if "temp_below" in o and "temp_above" in o and o["temp_above"] >= o["temp_below"]:
+        raise ValueError("it can't be both above and below those temperatures")
 
     actions = spec.get("then")
     actions = [actions] if isinstance(actions, dict) else actions
@@ -342,7 +368,8 @@ def default_name(spec: Dict[str, Any], cat: Catalog) -> str:
              "motion": lambda: ", ".join(cat.cameras.get(c, "?") for c in w["cameras"]) or "any camera",
              "sensor": lambda: ", ".join(cat.sensors.get(c, "?") for c in w["sensors"] or w.get("all", []))
              or "any Wi-Fi sensor",
-             "time": lambda: w["at"], "arrive": lambda: "arrivals", "leave": lambda: "departures",
+             "time": lambda: w["at"],
+             "temp": lambda: f"below {w['below']}°" if "below" in w else f"above {w['above']}°", "arrive": lambda: "arrivals", "leave": lambda: "departures",
              "car_arrive": lambda: "car home", "car_leave": lambda: "car leaves"}[w["type"]]()
     return f"{head[:1].upper()}{head[1:]} — {where}"[:60]
 
@@ -386,6 +413,9 @@ def describe(spec: Dict[str, Any], cat: Catalog) -> str:
                     else f"Every day at {w['at']}")
         else:
             when = f"Every day at {_clock_words(w['at'])}"
+    elif w["type"] == "temp":
+        when = (f"When it drops below {w['below']}° outside" if "below" in w
+                else f"When it rises above {w['above']}° outside")
     elif w["type"] in ("arrive", "leave"):
         who = _join([cat.people.get(p, "someone removed") for p in w["people"]]) if w["people"] else "anyone"
         when = f"When {who} {'gets home' if w['type'] == 'arrive' else 'leaves home'}"
@@ -407,6 +437,12 @@ def describe(spec: Dict[str, Any], cat: Catalog) -> str:
                       else "on " + _join([names[d] for d in days], "and"))
     if o.get("nobody_home"):
         limits.append("when nobody's home")
+    if "temp_below" in o and "temp_above" in o:
+        limits.append(f"when it's between {o['temp_above']}° and {o['temp_below']}° outside")
+    elif "temp_below" in o:
+        limits.append(f"when it's below {o['temp_below']}° outside")
+    elif "temp_above" in o:
+        limits.append(f"when it's above {o['temp_above']}° outside")
     if limits:
         when += ", only " + _join(limits, "and")
     steps = []
@@ -515,6 +551,7 @@ class RoutineRunner:
 
     ``hooks`` come from the engine: set_switch(id, on, source) -> (ok, msg), switch_on(id) -> bool|None,
     telegram(text, jpeg|None), say(text), coords() -> (lat, lon)|None, nobody_home() -> bool,
+    outdoor_temp() -> degrees|None (the weather card's, in its unit),
     last_motion(camera key|None) -> ts, last_sensor_motion(Wi-Fi sensor path id|None) -> ts."""
 
     def __init__(self, store: RoutineStore, hooks: Dict[str, Callable], holds_path: str = HOLDS_FILE,
@@ -538,12 +575,19 @@ class RoutineRunner:
         # sensor routines stay quiet. Asked HOUSE_WIDE_WAIT after the movement, once the other paths have reported.
         self.house_wide: Optional[Callable[[float], int]] = None
         self._settle_until = 0.0
+        self._temp_checked = 0.0
+        self._temp_met: Dict[int, bool] = {}  # temperature routine -> was it past its line at the last look
         self._time_checked = clock()
         self._routines: List[Routine] = []
         self.reload()
 
     def reload(self) -> None:
         self._routines = self.store.all()
+        specs = {r.id: json.dumps(r.spec["when"], sort_keys=True) for r in self._routines}
+        if getattr(self, "_temp_specs", None) is not None:  # an edited temperature line starts over
+            for rid in [k for k in self._temp_met if specs.get(k) != self._temp_specs.get(k)]:
+                del self._temp_met[rid]
+        self._temp_specs = specs
 
     # ------------------------------------------------------------ conditions
     def is_dark(self, now: Optional[float] = None) -> bool:
@@ -572,7 +616,41 @@ class RoutineRunner:
                 return False
         if o.get("nobody_home") and not past and not self.hooks["nobody_home"]():
             return False
+        if ("temp_below" in o or "temp_above" in o) and not past:
+            temp = self.outdoor_temp()
+            if temp is None:  # no weather town, or the forecast can't be reached: it waits rather than guesses
+                app_logger.log("info", "routine_skipped_no_temperature", routine_id=r.id, component="routines", action="run")
+                return False
+            if ("temp_below" in o and not temp < o["temp_below"]) or ("temp_above" in o and not temp > o["temp_above"]):
+                return False
         return True
+
+    def outdoor_temp(self) -> Optional[float]:
+        get = self.hooks.get("outdoor_temp")
+        return get() if get else None
+
+    def _temperature(self, now: float) -> None:
+        """Temperature routines go when it crosses their line, then not again until it's been TEMP_REARM back
+        the other side. The first look only notes which side it's on (a restart on a cold night isn't a drop)."""
+        if now - self._temp_checked < TEMP_CHECK_SECONDS:
+            return
+        self._temp_checked = now
+        mine = [r for r in self._routines if r.enabled and r.spec["when"]["type"] == "temp"]
+        temp = self.outdoor_temp() if mine else None
+        if temp is None:
+            return
+        for r in mine:
+            w = r.spec["when"]
+            past = temp < w["below"] if "below" in w else temp > w["above"]
+            back = temp >= w["below"] + TEMP_REARM if "below" in w else temp <= w["above"] - TEMP_REARM
+            was = self._temp_met.get(r.id)
+            if was is None:
+                self._temp_met[r.id] = past
+            elif past and not was:
+                self._temp_met[r.id] = True
+                self._fire(lambda _w: False, None, None, only={r.id})
+            elif back and was:
+                self._temp_met[r.id] = False
 
     # ------------------------------------------------------------ events from the engine
     def seen(self, camera: str, group: str, jpeg: Optional[bytes] = None, sure: bool = True) -> None:
@@ -744,6 +822,7 @@ class RoutineRunner:
                 at = self._time_of(w, day)
                 if at is not None and last < at <= now:
                     self._fire(lambda _w: False, None, None, only={r.id})
+        self._temperature(now)
         self._release(now)
 
     def _time_of(self, w: Dict[str, Any], day: float) -> Optional[float]:

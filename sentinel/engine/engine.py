@@ -265,6 +265,7 @@ class Engine:
             "tv_camera": self._routine_tv_camera,
             "coords": self.family.home_coords,
             "nobody_home": self.family.nobody_home,
+            "outdoor_temp": self._outdoor_temp,
             "last_motion": lambda cam: (max(self._last_motion.values(), default=0.0) if cam is None
                                         else self._last_motion.get(cam, 0.0)),
             "last_sensor_motion": self.wifi_motion.last_motion,
@@ -1031,6 +1032,11 @@ class Engine:
         for v in self.household.vehicles():
             names += ([v.owner] if v.owner else []) + v.aliases
         return names
+
+    def _outdoor_temp(self) -> Optional[float]:
+        """The weather card's temperature right now (its own unit), for routines; None when there's no card."""
+        temp = self.weather.current().get("temp") if self.settings.get("weather_location") else None
+        return float(temp) if isinstance(temp, (int, float)) and not isinstance(temp, bool) else None
 
     def _stop_voice(self) -> None:
         if self.voice is not None:

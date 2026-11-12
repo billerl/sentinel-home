@@ -54,6 +54,19 @@ class TestCheck(unittest.TestCase):
         spec = normalize({"when": {"type": "seen", "what": "something"}, "then": {"do": "say", "text": "hi"}}, CAT)
         self.assertTrue(describe(spec, CAT).startswith("When any camera sees anything"))
 
+    def test_outdoor_temperature(self):
+        spec = normalize({"when": {"type": "time", "at": "20:00"}, "only": {"temp_above": "35"},
+                          "then": [{"do": "switch", "switch": "porch lamp", "on": True}]}, CAT)
+        self.assertEqual(describe(spec, CAT), "Every day at 8 pm, only when it's above 35° outside: turn on the Porch lamp.")
+        spec = normalize({"when": {"type": "temp", "below": 32}, "then": [{"do": "telegram", "text": "Freezing"}]}, CAT)
+        self.assertEqual((spec["when"], spec["name"]), ({"type": "temp", "below": 32}, "Message — below 32°"))
+        self.assertEqual(describe(spec, CAT), "When it drops below 32° outside: send “Freezing” on Telegram.")
+        for bad in ({"type": "temp"}, {"type": "temp", "below": 32, "above": 80}, {"type": "temp", "above": "warm"}):
+            with self.assertRaises(ValueError):
+                normalize({"when": bad, "then": {"do": "say", "text": "hi"}}, CAT)
+        with self.assertRaises(ValueError):
+            normalize({"when": {"type": "motion"}, "only": {"temp_above": 50, "temp_below": 40}, "then": {"do": "say", "text": "hi"}}, CAT)
+
     def test_wifi_sensor_trigger(self):
         spec = normalize({"when": {"type": "sensor", "sensors": ["living room"]},
                           "then": [{"do": "switch", "switch": "porch lamp", "on": True, "until_quiet": 10}]}, CAT)
@@ -147,6 +160,7 @@ class FakeHooks:
         return {"set_switch": set_switch, "switch_on": lambda sid: self.switch.get(sid),
                 "telegram": lambda text, jpeg: self.messages.append((text, jpeg)), "say": self.said.append,
                 "coords": lambda: self.home, "nobody_home": lambda: self.away,
+                "outdoor_temp": lambda: getattr(self, "temp", None),
                 "last_sensor_motion": lambda p: max(self.wifi.values(), default=0) if p is None else self.wifi.get(p, 0),
                 "last_motion": lambda cam: max(self.motion.values(), default=0) if cam is None else self.motion.get(cam, 0)}
 
@@ -444,6 +458,39 @@ class TestRunner(unittest.TestCase):
         self.now += 5
         self.runner.tick()
         self.assertEqual(self.fake.calls, [("kasa-50c7bf000001", True)])
+
+    def test_temperature_trigger_goes_once_per_crossing(self):
+        self.add({"when": {"type": "temp", "below": 32}, "then": [{"do": "switch", "switch": "porch lamp", "on": True}]})
+
+        def at(temp):
+            self.fake.temp = temp
+            self.now += 61
+            self.runner.tick()
+            calls, self.fake.calls = self.fake.calls, []
+            self.fake.switch.clear()
+            return calls
+
+        self.assertEqual(at(30), [])  # already cold at the first look: that's not a drop
+        self.assertEqual(at(33), [])  # not far enough back above the line to count
+        self.assertEqual(at(31), [])
+        self.assertEqual(at(34), [])  # back above: armed again
+        self.assertEqual(at(31), [("kasa-50c7bf000001", True)])
+        self.assertEqual(at(29), [])
+        self.assertEqual(at(None), [])  # the forecast can't be reached: nothing happens
+        self.assertEqual(at(40), [])
+        self.assertEqual(at(20), [("kasa-50c7bf000001", True)])
+
+    def test_only_when_warm_or_cold_outside(self):
+        self.add({"when": {"type": "arrive"}, "only": {"temp_above": 35}, "then": [{"do": "say", "text": "warm"}]})
+        self.add({"when": {"type": "arrive"}, "only": {"temp_below": 35}, "then": [{"do": "telegram", "text": "cold"}]})
+        self.runner.person("arrive", 1)  # no temperature known: neither
+        self.assertEqual((self.fake.said, self.fake.messages), ([], []))
+        self.fake.temp = 50
+        self.runner.person("arrive", 1)
+        self.assertEqual((self.fake.said, self.fake.messages), (["warm"], []))
+        self.fake.temp = 20
+        self.runner.person("arrive", 1)
+        self.assertEqual((self.fake.said, self.fake.messages), (["warm"], [("cold", None)]))
 
     def test_arrive_and_cars(self):
         self.add({"when": {"type": "arrive", "people": ["Kate"]}, "then": [{"do": "say", "text": "Welcome home Kate"}]})

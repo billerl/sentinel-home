@@ -163,6 +163,7 @@
               <option value="motion">there's any motion on…</option>
               <option value="sensor">a Wi-Fi sensor notices movement…</option>
               <option value="time">it's a time of day…</option>
+              <option value="temp">the outdoor temperature…</option>
               <option value="arrive">someone gets home (phone)</option>
               <option value="leave">someone leaves home (phone)</option>
               <option value="car_arrive">a family car pulls in</option>
@@ -185,6 +186,14 @@
             <span id="hours-box" class="line"><input type="time" id="only-from" value="22:00"> and <input type="time" id="only-to" value="06:00"></span>
           </div>
           <div class="chips" id="only-days"></div>
+          <div class="line">
+            <select id="only-temp" onchange="drawOnly()">
+              <option value="">any temperature outside</option>
+              <option value="temp_below">only when it's below</option>
+              <option value="temp_above">only when it's above</option>
+            </select>
+            <span id="temp-box" class="line"><input type="number" id="only-deg" min="-60" max="140" step="1" value="32" style="width:5em">° outside</span>
+          </div>
           <div class="line"><label class="check"><input type="checkbox" id="only-away"> only when nobody's home (everyone sharing their phone's location is away)</label></div>
         </div>
       </div>
@@ -384,6 +393,15 @@
           line.querySelector("#t-clock").hidden = sel.value !== "clock";
         };
         sel.onchange = sync; sync();
+      } else if (type === "temp") {
+        var tl = document.createElement("div");
+        tl.className = "line";
+        tl.innerHTML = '<select id="w-temp-dir"><option value="below">drops below</option><option value="above">rises above</option></select>' +
+          '<input type="number" id="w-temp-deg" min="-60" max="140" step="1" style="width:5em">° ' +
+          '<span class="note">(the weather card\'s temperature, checked every minute; it goes once each time it crosses)</span>';
+        body.appendChild(tl);
+        tl.querySelector("#w-temp-dir").value = w.above != null ? "above" : "below";
+        tl.querySelector("#w-temp-deg").value = w.above != null ? w.above : (w.below != null ? w.below : 32);
       } else if (type === "arrive" || type === "leave") {
         body.appendChild(chipGroup("people", pairs(cat.people), w.people, "none picked = anyone"));
       } else {
@@ -550,6 +568,7 @@
 
     function drawOnly() {
       document.getElementById("hours-box").hidden = !document.getElementById("only-hours").checked;
+      document.getElementById("temp-box").hidden = !document.getElementById("only-temp").value;
     }
 
     function addStep(a) {
@@ -631,6 +650,9 @@
       var days = document.getElementById("only-days");
       days.replaceWith(Object.assign(chipGroup("days", DAYS, o.days || [], "none picked = every day"), { id: "only-days" }));
       document.getElementById("only-away").checked = !!o.nobody_home;
+      document.getElementById("only-temp").value = o.temp_below != null ? "temp_below" : o.temp_above != null ? "temp_above" : "";
+      if (o.temp_below != null || o.temp_above != null) document.getElementById("only-deg").value = o.temp_below != null ? o.temp_below : o.temp_above;
+      drawOnly();
       document.getElementById("steps").innerHTML = "";
       spec.then.forEach(addStep);
       document.getElementById("name").value = r ? r.name : "";
@@ -666,6 +688,7 @@
         if (at === "clock") w.at = document.getElementById("t-clock").value;
         else { w.at = at; w.offset = (Number(document.getElementById("t-min").value) || 0) * Number(document.getElementById("t-dir").value); }
       }
+      if (type === "temp") w[document.getElementById("w-temp-dir").value] = Number(document.getElementById("w-temp-deg").value);
       if (type === "arrive" || type === "leave") w.people = Array.from(chips.people);
       if (type === "car_arrive" || type === "car_leave") w.cars = Array.from(chips.cars);
       var only = {}, sky = document.getElementById("only-sky").value;
@@ -675,6 +698,8 @@
       }
       if (chips.days && chips.days.size) only.days = Array.from(chips.days);
       if (document.getElementById("only-away").checked) only.nobody_home = true;
+      var ot = document.getElementById("only-temp").value;
+      if (ot && document.getElementById("only-deg").value !== "") only[ot] = Number(document.getElementById("only-deg").value);
       var then = [];
       document.querySelectorAll(".step").forEach(function(step) {
         var kind = step.querySelector(".s-do").value;
