@@ -245,6 +245,9 @@ class Engine:
         self.heard = HeardAlerts()  # alerts for a browser to read out (the home page's "Hear alerts" switch)
         from sentinel.engine.quiet import QuietCameras
 
+        from sentinel.audio.wake_samples import WakeSamples
+
+        self.wake_samples = WakeSamples(VIDEO_DIR)  # "train Jezebel": real recordings of the wake word
         self.quiet = QuietCameras(VIDEO_DIR)  # "pause the garage camera for two hours": its alerts only
         self.news = HouseNews(  # package news, the morning recap, routine and weather messages
             self.settings, self.telegram, self.recording_store, self.weather, packages=lambda: self.packages,
@@ -1041,6 +1044,22 @@ class Engine:
                        r"(?: for [\w']+)?|note for (?:claude|cloud|clod|claud|klaus|claws|clause)|"
                        r"tell (?:claude|cloud) (?:that )?)[:,.]?\s*(.*)$", re.IGNORECASE)
 
+    def _practice_reply(self, low: str):
+        """"Train Jezebel": record the second wake word after each beep, to retrain its model on real voices."""
+        from sentinel.audio.voice import VoiceReply
+
+        name = str(self.settings.get("voice_name") or "").strip()
+        model = os.path.splitext(os.path.basename(str(self.settings.get("voice_trial_model") or "")))[0]
+        words = "|".join(re.escape(w.lower()) for w in (name, model) if w)
+        if not re.search(r"\b(train|teach|practi[cs]e|record)\b.*\b(" + (words + "|" if words else "")
+                         + r"wake ?word|(?:your|her|the|my) (?:name|voice))\b", low):
+            return None
+        if not model:
+            return VoiceReply("There's no second wake word to train: only Hey Jarvis, which already works.")
+        return VoiceReply(f"Okay. After each beep, say {name or model}, just the way you normally would. "
+                          "Say stop when you're done.",
+                          practice=lambda pcm, heard: self.wake_samples.add(model, pcm, heard))
+
     def save_claude_note(self, text: str) -> str:
         """A spoken request for Claude (the coding assistant), kept until the next session reads it."""
         text = (text or "").strip()
@@ -1108,6 +1127,9 @@ class Engine:
             if said:
                 return VoiceReply(self.save_claude_note(said))
             return VoiceReply("Go ahead.", dictate=self.save_claude_note)
+        practice = self._practice_reply(low)
+        if practice is not None:
+            return practice
         volume = parse_volume_command(low)
         if volume:
             return VoiceReply(self.change_volume(*volume))

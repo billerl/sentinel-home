@@ -39,6 +39,10 @@ END_SILENCE = 1.0
 # Dictation ("take a note for Claude"): longer, with room to pause and think.
 DICTATE_WAIT, DICTATE_SILENCE, DICTATE_MAX = 8.0, 2.5, 90.0
 DICTATE_PROMPT = "A note for Claude about changes to the Sentinel home security program, Jezebel, Spotify, cameras."
+# "Train Jezebel": the wake word recorded after each beep, for retraining its model (sentinel/audio/wake_samples.py)
+PRACTICE_CLIPS = 30  # a sitting: more than this and people start saying it oddly
+PRACTICE_WAIT, PRACTICE_SILENCE, PRACTICE_MAX = 6.0, 0.5, 3.0
+PRACTICE_SPEECH = (0.25, 2.0)  # seconds of talking a wake word takes; outside it wasn't one
 FOLLOW_UP_WAIT = 5.0  # after an answer, a follow-up question needs no wake word...
 MAX_TURNS = 5  # ...but a TV can't keep it talking forever
 NO_SPEECH_MAX = 0.6  # Whisper's own "this was noise" score; above it the words are usually invented
@@ -105,6 +109,8 @@ class VoiceReply:
     text: str
     confirm: Optional[Callable[[], str]] = None  # run only after a spoken "yes"; returns what to say
     dictate: Optional[Callable[[str], str]] = None  # take a long message next ("note for Claude"); returns what to say
+    # record the wake word after each beep ("train Jezebel"): (the clip, what Whisper heard) -> how many are kept now
+    practice: Optional[Callable[[np.ndarray, str], int]] = None
 
 
 class BandPass:
@@ -172,6 +178,28 @@ class SpeechEnd:
         if not self.heard:
             return self.elapsed >= self.wait
         return self.quiet_for >= self.silence or self.elapsed >= self.max_len
+
+
+def trim_speech(chunks: Sequence[np.ndarray], start_level: float, quiet_level: float,
+                lead: int = 3, tail: int = 4) -> Tuple[np.ndarray, float]:
+    """The spoken part of a recording, with a little room either side, and how many seconds of it were talking."""
+    levels = [rms(c) for c in chunks]
+    loud = [i for i, level in enumerate(levels) if level >= start_level]
+    if not loud:
+        return np.zeros(0, np.float32), 0.0
+    first = loud[0]
+    last = max(i for i, level in enumerate(levels) if level >= quiet_level)
+    kept = chunks[max(0, first - lead):last + 1 + tail]
+    return np.concatenate(kept).astype(np.float32), (last - first + 1) * CHUNK / RATE
+
+
+_PRACTICE_OVER = r"stop|done|i'?m done|all done|that'?s (it|enough|all)|enough|finished|quit|cancel|never ?mind|end"
+
+
+def practice_over(text: str) -> bool:
+    """Said instead of the wake word during "train Jezebel": the sitting is over."""
+    low = re.sub(r"\s+", " ", re.sub(r"[^a-z' ]", " ", (text or "").lower())).strip()
+    return bool(re.fullmatch(rf"(okay |ok )?({_PRACTICE_OVER})( now| please| for now)?", low)) or is_cancel(text)
 
 
 def normalise(audio: np.ndarray, peak: float = 0.9) -> np.ndarray:
@@ -524,6 +552,56 @@ class VoiceAssistant:
         return text, doubt(segments)
 
     # ------------------------------------------------------------ talking
+    def _capture(self) -> Tuple[Optional[np.ndarray], float]:
+        """One short thing said after a beep, as recorded: (the trimmed audio, seconds of talking), or
+        (None, 0) when nothing was said."""
+        while not self._queue.empty():
+            self._queue.get_nowait()
+        self._mode = "listen"
+        end = SpeechEnd(self._noise, wait=PRACTICE_WAIT, max_len=PRACTICE_MAX, silence=PRACTICE_SILENCE)
+        chunks: List[np.ndarray] = []
+        try:
+            while not self._stop.is_set():
+                try:
+                    at, chunk = self._queue.get(timeout=2.0)
+                except queue.Empty:
+                    return None, 0.0  # mic died
+                if at < self._ignore_until:
+                    continue  # the beep's echo
+                chunks.append(chunk)
+                if end.add(rms(chunk)):
+                    break
+        finally:
+            self._mode = "busy"
+        if not end.heard:
+            return None, 0.0
+        return trim_speech(chunks, end.start_level, end.quiet_level)
+
+    def _practice(self, keep: Callable[[np.ndarray, str], int]) -> None:
+        """"Train Jezebel": beep, record the word, again, until "stop", silence or a sitting's worth. Each clip is
+        kept the way the wake model hears the room (this microphone, filter and gain)."""
+        got, total, odd = 0, 0, 0
+        while got < PRACTICE_CLIPS and odd < 3 and not self._stop.is_set():
+            self.speaker.tone("listen")
+            self._ignore_until = time.time() + 0.15
+            audio, talking = self._capture()
+            if audio is None:
+                break  # nobody there any more
+            text, _segments = self._transcribe(normalise(audio))
+            if practice_over(text):
+                break
+            if not PRACTICE_SPEECH[0] <= talking <= PRACTICE_SPEECH[1]:
+                odd += 1  # a cough, or a sentence: not kept
+                continue
+            odd = 0
+            total = keep((np.clip(audio * self._gain(), -1, 1) * 32767).astype(np.int16), text)
+            got += 1
+        app_logger.log("info", "voice_practice", kept=got, total=total, component="voice", action="practice")
+        if not got:
+            self._say("I didn't catch any. Try again when you're ready.")
+        else:
+            self._say(f"Got {got}. That makes {total} altogether." if total > got else f"Got {got}. Thanks.")
+
     def _persona(self, word: str) -> None:
         jarvis = str(self.settings.get("voice_jarvis_id") or "")
         if word.startswith("hey_jarvis") and jarvis:
@@ -559,6 +637,9 @@ class VoiceAssistant:
             # answer anyway, so just the closing chime (the user's call, 2026-11-10).
             return False
         self._say(casual(reply.text))
+        if reply.practice is not None:
+            self._practice(reply.practice)
+            return False
         if reply.dictate is not None:
             self.speaker.tone("listen")
             said = self._hear(wait=DICTATE_WAIT, silence=DICTATE_SILENCE, max_len=DICTATE_MAX, prompt=DICTATE_PROMPT)

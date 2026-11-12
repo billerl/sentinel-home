@@ -433,6 +433,15 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   immediately; Claude's suggestions ask yes first / show a ✅ button). New makes = another driver class
   with `discover/status/set/rename` (Shelly and Tasmota have local HTTP APIs). Newer KLAP-only Kasa/Tapo
   devices don't answer on 9999 and aren't supported. No automations yet (e.g. lights on for a person at night).
+- **Wake word practice** (2026-11-12; `VoiceAssistant._practice` + `_capture` in `sentinel/audio/voice.py`,
+  `sentinel/audio/wake_samples.py`, `Engine._practice_reply`): "train Jezebel" / "practice the wake word" returns a
+  `VoiceReply(practice=...)`; the assistant beeps, records one short utterance (SpeechEnd: 6 s wait, 0.5 s end
+  silence, 3 s max), trims it to the speech (`trim_speech`, 0.24 s lead / 0.32 s tail) and keeps it as the wake
+  model hears the room (band-pass, x `voice_gain`, int16 16 kHz) in `recorded_videos/wake_samples/<model>/*.wav`
+  + `index.jsonl` (Whisper's transcript, to weed out mistakes). Not kept: under 0.25 s or over 2 s of talking;
+  three of those in a row, silence, "stop"/"done" or 30 clips end the sitting. Nothing is retrained by Sentinel:
+  the clips go into the openWakeWord training outside the repo as real positives. Why: the custom model was
+  trained on synthetic voices only (real misses scored 0.11-0.17 against a 0.45 threshold).
 - **Quiet cameras** (2026-11-11; `sentinel/engine/quiet.py`, first in the `Commands` registry so voice and Telegram
   share it): "pause the garage camera [notifications] for 2 hours" / "mute the driveway alerts" (a zone name finds
   its camera) / "pause all cameras for 30 minutes" / "resume the garage camera" / "which cameras are paused?".

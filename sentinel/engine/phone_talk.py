@@ -56,6 +56,8 @@ class PhoneTalk:
         if reply is None:  # room talk / "stop" with nothing playing: nothing to say
             return {"heard": text, "reply": "", "note": "Nothing to do there."}
         words = " ".join([s for s in said if s not in THINKING] + [casual(reply.text)]).strip()
+        if getattr(reply, "practice", None) is not None:  # "train Jezebel": she listens through the house microphone
+            return self._out(text, "That only works at the microphone in the house: say it there.")
         if reply.confirm is not None:
             return self._out(text, words, "confirm", reply.confirm)
         if reply.dictate is not None:
