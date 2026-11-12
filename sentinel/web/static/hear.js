@@ -86,17 +86,28 @@
     say(item, function () { playing = false; next(); });
   }
 
+  // One ask at a time, and each alert once: on a slow phone connection the asks used to pile up while they waited,
+  // then all came back with the same alert, which was read out once per ask (2026-11-12).
+  var asking = false;
   function poll() {
-    if (state !== "on") return;
-    fetch("/api/heard" + (last === null ? "" : "?after=" + last), { credentials: "same-origin" }).then(function (r) {
+    if (state !== "on" || asking) return;
+    asking = true;
+    var stopper = window.AbortController ? new AbortController() : null;
+    var giveUp = setTimeout(function () { if (stopper) stopper.abort(); }, 10000);
+    fetch("/api/heard" + (last === null ? "" : "?after=" + last),
+          { credentials: "same-origin", signal: stopper ? stopper.signal : undefined }).then(function (r) {
       if (r.status === 401 || r.status === 403) { stop(); state = "off"; draw(); throw new Error("signed out"); }
       return r.json();
     }).then(function (d) {
-      (d.items || []).forEach(function (i) { queue.push(i); });
+      (d.items || []).forEach(function (i) {
+        if (last !== null && Number(i.id) <= Number(last)) return;  // already read out
+        if (queue.some(function (q) { return q.id === i.id; })) return;
+        queue.push(i);
+      });
       last = d.latest;  // (also right after Sentinel restarts: the numbers only go up)
       try { sessionStorage.setItem(KEY, String(last)); } catch (e) {}
       next();
-    }).catch(function () {});
+    }).catch(function () {}).then(function () { clearTimeout(giveUp); asking = false; });
   }
 
   function stop() { clearInterval(timer); timer = null; queue = []; try { player.pause(); } catch (e) {} playing = false; }
