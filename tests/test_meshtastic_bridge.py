@@ -28,6 +28,14 @@ class TestBridge(unittest.TestCase):
         self.assertGreater(B.accuracy_m({"precisionBits": 13}), 1000)
         self.assertEqual(B.accuracy_m({}), 10.0)
 
+    def test_asks_a_collar_in_reach_for_its_battery_now_and_then(self):
+        now = 1_800_000_000
+        self.assertFalse(B.battery_due("!a1cacb2a", {}, {}, now))  # not heard yet
+        self.assertTrue(B.battery_due("!a1cacb2a", {"!a1cacb2a": now - 20}, {}, now))
+        self.assertFalse(B.battery_due("!a1cacb2a", {"!a1cacb2a": now - 20}, {"!a1cacb2a": now - 600}, now))  # asked lately
+        self.assertTrue(B.battery_due("!a1cacb2a", {"!a1cacb2a": now - 20}, {"!a1cacb2a": now - 1900}, now))
+        self.assertFalse(B.battery_due("!a1cacb2a", {"!a1cacb2a": now - 900}, {}, now))  # out of reach or asleep
+
     def test_sentinel_asks_for_a_position(self):
         self.assertEqual(B.commands([{"_type": "cmd", "action": "reportLocation"}, {"_type": "cmd", "action": "beep"}]),
                          {"reportLocation", "beep"})

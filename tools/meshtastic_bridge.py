@@ -38,6 +38,8 @@ CHECK_IN_SECONDS = 5  # "recall Xena" shouldn't wait long
 BELL = "\x07"  # a text with the bell character sounds the collar's buzzer (External Notification: alert bell)
 TEXT_PORT = 1  # TEXT_MESSAGE_APP
 NODES_MAX = 300
+BATTERY_ASK_SECONDS = 30 * 60  # how often to ask a collar for its battery level
+IN_REACH_SECONDS = 120  # ...and only when it was heard this recently (it's awake and in range)
 DEFAULT_KEYS = {b"", b"\x01"} | {bytes([i]) for i in range(2, 11)}  # no key, or one everybody knows ("AQ==")
 
 
@@ -62,6 +64,12 @@ def owntracks(packet: dict, battery: dict, now: float) -> dict:
     if battery.get(packet.get("fromId")) is not None:
         msg["batt"] = battery[packet["fromId"]]
     return msg
+
+
+def battery_due(node: str, heard_at: dict, asked_at: dict, now: float) -> bool:
+    """Time to ask this collar for its battery level? Collars don't send it over the radio by themselves (the
+    firmware keeps device telemetry off the mesh unless it's switched on), but they answer when asked."""
+    return now - heard_at.get(node, 0) < IN_REACH_SECONDS and now - asked_at.get(node, 0) >= BATTERY_ASK_SECONDS
 
 
 def post_json(url: str, login: dict, msg: dict):
@@ -181,6 +189,8 @@ def main() -> None:
         config = json.load(f)
     trackers = {k.lower(): v for k, v in config["trackers"].items()}
     battery: dict = {}
+    heard_at: dict = {}  # when each collar was last heard, and last asked for its battery level
+    asked_at: dict = {}
     lost = threading.Event()
     radio = None
     mesh_url = config.get("mesh", config["sentinel"].rsplit("/", 1)[0] + "/mesh/bridge")
@@ -211,6 +221,19 @@ def main() -> None:
         except Exception as e:  # the radio library raises its own kinds
             print(f"{node}: couldn't ask: {e}", flush=True)
 
+    def ask_battery(node: str) -> None:
+        """Ask the collar for its battery level (the answer comes in as a telemetry packet; no waiting here)."""
+        from meshtastic.protobuf import portnums_pb2, telemetry_pb2
+
+        want = telemetry_pb2.Telemetry()
+        want.device_metrics.SetInParent()  # (an empty "device metrics" says which kind of telemetry to answer with)
+        try:
+            radio.sendData(want, destinationId=node, portNum=portnums_pb2.PortNum.TELEMETRY_APP,
+                           wantResponse=True, channelIndex=0)
+            print(f"{node}: asked for its battery level", flush=True)
+        except Exception as e:  # the radio library raises its own kinds
+            print(f"{node}: couldn't ask for its battery level: {e}", flush=True)
+
     def on_receive(packet, interface):
         if mesh_url:
             text = mesh_text(packet, interface.nodes or {})
@@ -223,10 +246,12 @@ def main() -> None:
         sender = str(packet.get("fromId") or "").lower()
         if sender not in trackers:
             return
+        heard_at[sender] = time.time()
         decoded = packet.get("decoded") or {}
         metrics = (decoded.get("telemetry") or {}).get("deviceMetrics") or {}
         if metrics.get("batteryLevel") is not None:
             battery[packet.get("fromId")] = min(100, int(metrics["batteryLevel"]))  # 101 = on the charger
+            print(f"{sender}: battery {battery[packet.get('fromId')]}%", flush=True)
         if "position" not in decoded or not (decoded["position"].get("latitudeI") or decoded["position"].get("latitude")):
             return
         msg = owntracks(packet, battery, time.time())
@@ -311,6 +336,9 @@ def main() -> None:
                     ask(node)
             except OSError:
                 pass  # Sentinel restarting: next time
+            if battery_due(node, heard_at, asked_at, time.time()):
+                asked_at[node] = time.time()
+                ask_battery(node)
         if mesh_url:
             try:
                 mesh_checkin()

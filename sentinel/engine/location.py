@@ -991,7 +991,7 @@ def frequent_spots(stops: Iterable[Stop], places: Iterable[Place], skip: Iterabl
 # --------------------------------------------------------------- questions
 @dataclass
 class LocationQuestion:
-    kind: str  # "where", "at", "arrived", "left", "list"
+    kind: str  # "where", "at", "arrived", "left", "list", "battery"
     person_ids: List[int] = field(default_factory=list)
     place_id: Optional[int] = None  # the place asked about; None with at/arrived/left = home
 
@@ -1020,6 +1020,9 @@ def car_name_words(vehicles: Iterable) -> List[str]:
     return list(dict.fromkeys(out))
 
 
+_BATTERY = r"\b(battery|batteries|charged?|charging)\b"
+
+
 def location_question(text: str, people: List[Person], places: List[Place], vehicles: Iterable = ()) -> Optional[LocationQuestion]:
     """A question about where family members are, or None (cars, visitors and the rest go elsewhere)."""
     t = text.strip().lower()
@@ -1029,6 +1032,9 @@ def location_question(text: str, people: List[Person], places: List[Place], vehi
     if re.search(_CAR_WORDS, t) or _words_in(t, car_name_words(vehicles)):
         return None
     ids = [p.id for p in people if _words_in(t, p.words())]
+    if re.search(_BATTERY, t):  # "what's Xena's battery at?", "how much charge does the tracker have?"
+        ids = ids or ([p.id for p in people if p.tracker] if re.search(r"\b(trackers?|collars?)\b", t) else [])
+        return LocationQuestion("battery", ids) if ids else None
     if not ids:
         return LocationQuestion("list") if any(re.search(p, t) for p in _LIST) else None
     place = next((p for p in sorted(places, key=lambda p: -len(p.name)) if not p.is_home and _words_in(t, p.words())), None)
@@ -1158,6 +1164,15 @@ def _battery(view: PersonView, now: float) -> str:
     return ""
 
 
+def battery_sentence(view: PersonView, now: float) -> str:
+    """'Xena's tracker battery is at 62%.' (with when, if that's old news)."""
+    fix, device = view.fix or {}, "tracker" if view.person.tracker else "phone"
+    if fix.get("batt") is None:
+        return f"{view.person.name}'s {device} hasn't told me its battery level yet."
+    return f"{view.person.name}'s {device} battery is at {fix['batt']}%" + (
+        f" (as of {_when(fix['ts'], now).replace('at ', '', 1)})." if now - fix["ts"] > FRESH_SECONDS else ".")
+
+
 def car_sentence(car: CarLine, now: float) -> str:
     if car.here:
         return f"{_cap(car.name)} is at home."
@@ -1212,6 +1227,9 @@ def answer_location(q: LocationQuestion, views: Dict[int, PersonView], places: L
         if v is None:
             continue
         name = v.person.name
+        if q.kind == "battery":
+            lines.append(battery_sentence(v, now))
+            continue
         if not v.fix:
             lines.append(_no_phone(v, now))
             continue

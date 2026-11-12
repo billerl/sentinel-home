@@ -225,6 +225,9 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     `fixes.in_yard`; a change needs two readings in a row, `_yard_pending`, since 2026-11-07: indoor strays) -> Telegram + map pin + speaker, 5 min cooldown. Pets skip place alerts and person routines
     and don't count for `Family.nobody_home`. "The dogs are going out" (`outing_command`): for an hour, check-ins
     get `reportLocation` every 30 s and the base asks the collar (`sendPosition(wantResponse=True)`).
+    Battery (2026-11-12): collars keep device telemetry off the mesh, so the bridge asks each collar in reach for it
+    every 30 min (`battery_due`, a telemetry request; the answer rides along as `batt` on the next positions).
+    "What's Grace's tracker battery at?" = `LocationQuestion("battery")` -> `battery_sentence` (phones too).
   - Mesh chat (2026-11-08, `sentinel/engine/mesh.py`, page `/mesh`): the same bridge also checks in at
     POST /mesh/bridge (Basic auth = the first tracker's login; `bridge_checkin` refuses non-trackers) with the
     base's id/name, channels (public = default/no key), invite links and every text it heard; Sentinel answers

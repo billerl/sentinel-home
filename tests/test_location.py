@@ -377,6 +377,26 @@ class TestQuestions(unittest.TestCase):
              "place_id": place.id if place else None, "place_since": since}
         return PersonView(person, f, place, list(visits), list(cars))
 
+    def test_battery_questions(self):
+        s = self.store
+        dog = s.save_person("Grace")
+        s.set_tracker(dog, "!a1cacb2a")
+        dog = s.person(dog)
+        for text, want in (("What's Grace's battery at?", [dog.id]), ("How much charge does Liz's phone have?", [self.liz.id]),
+                           ("what is the tracker battery percentage", [dog.id]), ("is the collar charged", [dog.id])):
+            q = location_question(text, s.people(), s.places(), self.vehicles)
+            self.assertEqual((q.kind, q.person_ids), ("battery", want), text)
+        self.assertIsNone(location_question("what's the battery on the door sensor", s.people(), s.places(), self.vehicles))
+        now = time.time()
+        views = {dog.id: self.view(dog, self.home, HOME, now - 60, batt=62),
+                 self.liz.id: self.view(self.liz, self.home, HOME, now - 60)}
+        text, pins = answer_location(LocationQuestion("battery", [dog.id, self.liz.id]), views, s.places(), now)
+        self.assertEqual(text, "Grace's tracker battery is at 62%.\nElizabeth's phone hasn't told me its battery level yet.")
+        self.assertEqual(pins, [])
+        views = {dog.id: self.view(dog, self.home, HOME, now - 3 * 3600, batt=62)}
+        text, _ = answer_location(LocationQuestion("battery", [dog.id]), views, s.places(), now)
+        self.assertRegex(text, r"^Grace's tracker battery is at 62% \(as of (yesterday at )?\d+:\d\d[ap]m\)\.$")
+
     def test_phone_and_car_are_separate(self):
         now = time.time()
         fusion = CarLine("Elizabeth's Fusion", True)
@@ -501,6 +521,11 @@ class TestEndpoints(unittest.TestCase):
         self.wait_for(2)
         self.assertIn("👋 Elizabeth left home.", self.sent)
         self.assertIn("Elizabeth is about", self.engine.family.answer_location_question(self.engine.family.location_question("where is elizabeth"))[0])
+
+    def test_battery_question_by_voice(self):
+        self.post("elizabeth", self.liz.token, dict(fix(*HOME, time.time()), batt=62))
+        for text in ("What's Elizabeth's battery percentage?", "What is Elizabeth's phone battery at?"):
+            self.assertEqual(self.engine.answer_voice(text, lambda _s: None).text, "Elizabeth's phone battery is at 62%.", text)
 
     def test_location_map_for_the_tv(self):
         """"Show me Elizabeth's location" puts her on a map on the TV (#map=<id>), like a camera."""

@@ -77,7 +77,7 @@ class TelegramNotifier:
             "- Videos <when> — send recorded clips, e.g. Videos last 2 hours, Videos 2pm-4pm people\n"
             "- Ask in plain words — Did anyone come by? Any deliveries today? What happened last night?\n"
             "- Movement inside (Wi-Fi sensors) — Any movement inside today? Anyone in the living room this morning?\n"
-            "- Family (phones with OwnTracks) — Where is Elizabeth? Who's home? Is Mom at work? When did Ben get to school?\n"
+            "- Family (phones with OwnTracks) — Where is Elizabeth? Who's home? Is Mom at work? When did Ben get to school? What's Grace's tracker battery at?\n"
             "- Pets with a collar tracker — Where's Grace? The dogs are going out / Keep an eye on Grace (checks often for an hour) / The dogs are in / Recall Grace (her collar beeps) / Grace is lost (everyone gets the live map; her collar reports every 30 s) / We found Grace\n"
             "- Send a 📍 location pin, then a name, to add a place (home, school, the salon)\n"
             "- Help — this message\n\n"
