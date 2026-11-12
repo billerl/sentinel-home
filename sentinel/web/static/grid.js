@@ -1093,10 +1093,25 @@ document.querySelectorAll("#tvr [data-key]").forEach(function(btn) {
   btn.addEventListener("pointerdown", function(e) {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     if (btn.closest("#tvr-dpad") && e.pointerType !== "mouse") return;  // the circle's own swipe/tap handling below
+    var hold = btn.dataset.hold && tvKeys && tvKeys.indexOf(btn.dataset.hold) >= 0 ? btn.dataset.hold : null;
+    if (e.pointerType !== "mouse") {
+      // A finger: nothing is sent until it lifts without having moved (a tap) or has rested there (a hold).
+      // Sending on touch-down pressed whatever button a scroll happened to start on (2026-11-12).
+      stopRepeat();
+      btn.classList.add("pressed");
+      var mine = tvRepeat = { btn: btn, t: 0, i: 0, hold: hold, held: false, touch: true, x: e.clientX, y: e.clientY };
+      if (hold || repeat) mine.t = setTimeout(function() {
+        if (tvRepeat !== mine) return;  // lifted, or it turned into a scroll
+        mine.held = true;
+        if (hold) { remoteKey(hold); remoteMsg("Held ✓ (the quick menu takes a few seconds to appear)", true); return; }
+        remoteKey(key);
+        mine.i = setInterval(function() { remoteKey(key); }, 220);
+      }, hold ? 700 : 450);
+      return;
+    }
     e.preventDefault();
     stopRepeat();
     btn.classList.add("pressed");
-    var hold = btn.dataset.hold && tvKeys && tvKeys.indexOf(btn.dataset.hold) >= 0 ? btn.dataset.hold : null;
     tvRepeat = { btn: btn, t: 0, i: 0, hold: hold, held: false };
     if (hold) {  // a tap sends the button when it's let go; holding it sends the TV's long press (Home: quick menu)
       tvRepeat.t = setTimeout(function() {
@@ -1110,8 +1125,12 @@ document.querySelectorAll("#tvr [data-key]").forEach(function(btn) {
     remoteKey(key);
     if (repeat) tvRepeat.t = setTimeout(function() { if (tvRepeat) tvRepeat.i = setInterval(function() { remoteKey(key); }, 220); }, 450);
   });
+  btn.addEventListener("pointermove", function(e) {  // the finger slid: a scroll or a slip, not a press
+    if (tvRepeat && tvRepeat.btn === btn && tvRepeat.touch && !tvRepeat.held
+        && Math.max(Math.abs(e.clientX - tvRepeat.x), Math.abs(e.clientY - tvRepeat.y)) > 10) stopRepeat();
+  });
   btn.addEventListener("pointerup", function() {
-    if (tvRepeat && tvRepeat.btn === btn && tvRepeat.hold && !tvRepeat.held) remoteKey(key);  // let go early: a tap
+    if (tvRepeat && tvRepeat.btn === btn && (tvRepeat.hold || tvRepeat.touch) && !tvRepeat.held) remoteKey(key);  // let go early: a tap
   });
   btn.addEventListener("click", function(e) { if (e.detail === 0) remoteKey(key); });  // keyboard / TV-browser "click"
 });
