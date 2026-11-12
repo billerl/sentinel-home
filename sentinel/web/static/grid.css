@@ -97,7 +97,11 @@ h1 { font-size: 0.9rem; margin: 0; flex: 1; }
 .wx-family a:hover { text-decoration: underline; }
 .wx-family .dot { width: 0.75em; height: 0.75em; border-radius: 50%; display: inline-block; }
 .wx-family .dot.home { background: #3f3; box-shadow: 0 0 0.4em #3f3; }
-.wx-family .dot.out { background: #fb3; box-shadow: 0 0 0.4em #fb3; }
+/* green = home, blue = another saved place, yellow (pulsing) = on the way, orange-red = stopped somewhere unsaved */
+.wx-family .dot.place { background: #2f8fff; box-shadow: 0 0 0.4em #2f8fff; }
+.wx-family .dot.moving, .wx-family .dot.out { background: #ffe53b; box-shadow: 0 0 0.4em #ffe53b; animation: fam-move 1.2s ease-in-out infinite; }
+.wx-family .dot.stopped { background: #ff5a1f; box-shadow: 0 0 0.4em #ff5a1f; }
+@keyframes fam-move { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .wx-family .dot.off { background: #555; }
 /* Unread mesh messages: a pill at the end of the family row, gently pulsing until they're read. */
 .wx-family a.mesh { color: #001; background: #00e5ff; border-radius: 1em; padding: 0 0.55em; font-weight: 700;

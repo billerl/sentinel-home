@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sentinel.logging_utils import app_logger
 
+LIGHT_STOPPED_S = 15 * 60  # the live page's light: this long in one unsaved spot = stopped there (orange), not on the way
 LOCATION_STALE_S = 10 * 60  # a family phone's position older than this: ask the phone for a fresh one
 SPOT_CHECK_HOUR = 18  # new spots worth saving are looked for once a day, from this hour on
 SPOT_ASK_AGAIN_DAYS = 14  # a suggestion nobody answered may come back after this
@@ -506,8 +507,22 @@ class Family:
                        component="engine", action="location")
         return True, "Deleted." if n else "There was nothing to delete."
 
+    def _stopped_since(self, person_id: int, fix: Dict[str, Any], now: float) -> float:
+        """Since when this phone has been where it is now: the first of its latest run of positions within
+        SPOT_STAY_M of the newest one (a phone that goes quiet is taken to have stayed put)."""
+        from sentinel.engine.location import SPOT_STAY_M, distance_m
+
+        since = fix["ts"]
+        for ts, lat, lon, acc, _vel in reversed(self.locations.points(person_id, now - 12 * 3600, now)):
+            if distance_m(fix["lat"], fix["lon"], lat, lon) > SPOT_STAY_M + min(acc or 0, 200.0):
+                break
+            since = min(since, ts)
+        return since
+
     def family_lights(self) -> List[Dict[str, Any]]:
-        """Live page: one light per person (home / out / not sharing) with a map position."""
+        """Live page: one light per person with a map position. home (green), place = at another saved place
+        (blue), moving = out and on the way (yellow), stopped = somewhere unsaved for LIGHT_STOPPED_S or more
+        (orange), off = not sharing (grey)."""
         from sentinel.engine.location import whereabouts
 
         places = self.locations.places()
@@ -519,8 +534,12 @@ class Family:
                 out.append({"id": v.person.id, "name": v.person.name, "state": "off", "label": "not sharing location",
                             "photo": photo})
                 continue
-            home = v.place is not None and v.place.is_home
-            out.append({"id": v.person.id, "name": v.person.name, "state": "home" if home else "out",
+            if v.place is not None:
+                state = "home" if v.place.is_home else "place"
+            else:
+                stopped = now - self._stopped_since(v.person.id, v.fix, now) >= LIGHT_STOPPED_S
+                state = "stopped" if stopped else "moving"
+            out.append({"id": v.person.id, "name": v.person.name, "state": state,
                         "label": whereabouts(v, places, now), "lat": round(v.fix["lat"], 6),
                         "lon": round(v.fix["lon"], 6), "ts": v.fix["ts"], "photo": photo})
         return out

@@ -41,6 +41,7 @@
   var player = new Audio();
   var SILENCE = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
   var state = "idle";  // idle -> rec -> busy -> (playing) -> idle
+  var nextTimer = null, starting = false;
   var rec = null, stream = null, chunks = [], audioCtx = null, timer = null, pending = "", dictating = false;
 
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
@@ -63,14 +64,16 @@
   }
   function stopAll() {
     if (rec && rec.state !== "inactive") { rec.onstop = null; try { rec.stop(); } catch (e) {} }
-    rec = null; release(); player.pause(); pending = ""; dictating = false; setState("idle");
+    rec = null; release(); player.pause(); clearTimeout(nextTimer); pending = ""; dictating = false; setState("idle");
   }
 
   btn.onclick = function () {
     if (state === "rec") { if (rec && rec.state !== "inactive") rec.stop(); return; }
     if (state === "busy") return;
     player.pause();
-    pending = ""; dictating = false;
+    clearTimeout(nextTimer);
+    // Waiting for a note ("Go ahead"): this tap starts the note, not a new request (✕ gives the note up)
+    if (!(dictating && pending)) { pending = ""; dictating = false; }
     // A phone only lets a page play sound it started from a tap: start the player now, for the answer later
     player.src = SILENCE; player.play().catch(function () {});
     start();
@@ -91,15 +94,18 @@
   }
 
   function start() {
+    if (starting) return;  // (a tap while the microphone is already opening for a note)
     locate();
     if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
       show('<div class="err">This page can’t use the microphone here. Open Sentinel by its https:// address '
         + "(the one you use away from home) in Chrome or Safari.</div>");
       return;
     }
+    starting = true;
     navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
-      .then(record)
+      .then(function (s) { starting = false; record(s); })
       .catch(function (e) {
+        starting = false;
         setState("idle");
         show('<div class="err">' + (e && e.name === "NotAllowedError"
           ? "The microphone is blocked for this site. Allow it in the browser's site settings (the 🔒 by the address), then try again."
@@ -147,7 +153,9 @@
   function send(blob, spoke) {
     if (!spoke || !blob.size) {
       setState("idle");
-      show('<div class="you">I didn’t hear anything. Tap 🎙️ and try again.</div>');
+      show(dictating && pending
+        ? '<div class="jarvis">I’m still waiting for your note.</div><div class="you">Tap 🎙️ and say it (✕ to forget it).</div>'
+        : '<div class="you">I didn’t hear anything. Tap 🎙️ and try again.</div>');
       return;
     }
     setState("busy");
@@ -190,7 +198,14 @@
         };
       });
     }
-    var next = d.ask === "dictate" ? function () { pending = d.id; dictating = true; start(); } : null;
+    // A note comes next: the microphone opens again by itself once "Go ahead" has been said. Some phones never
+    // say when the sound ended, so it opens after a few seconds regardless; and a tap on 🎙️ starts the note too.
+    var went = false;
+    var next = d.ask === "dictate" ? function () {
+      if (went || state !== "idle" || pending !== d.id) return;
+      went = true; clearTimeout(nextTimer); start();
+    } : null;
+    if (next) { pending = d.id; dictating = true; nextTimer = setTimeout(next, 4000); }
     setState("idle");
     if (d.audio) {
       player.onended = function () { player.onended = null; if (next) next(); };

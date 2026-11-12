@@ -527,6 +527,22 @@ class TestEndpoints(unittest.TestCase):
         for text in ("What's Elizabeth's battery percentage?", "What is Elizabeth's phone battery at?"):
             self.assertEqual(self.engine.answer_voice(text, lambda _s: None).text, "Elizabeth's phone battery is at 62%.", text)
 
+    def test_lights_tell_home_place_moving_and_stopped_apart(self):
+        loc, now = self.engine.locations, time.time()
+        light = lambda: self.engine.family.family_lights()[0]["state"]  # noqa: E731
+        self.assertEqual(light(), "off")
+        self.post("elizabeth", self.liz.token, fix(*HOME, now - 3600))
+        self.assertEqual(light(), "home")
+        self.post("elizabeth", self.liz.token, fix(HOME[0] + 0.05, HOME[1], now - 1200))  # 20 min ago, somewhere unsaved
+        self.assertEqual(light(), "stopped")  # (a quiet phone stayed where it was)
+        self.post("elizabeth", self.liz.token, fix(HOME[0] + 0.09, HOME[1], now - 60))
+        self.assertEqual(light(), "moving")
+        self.post("elizabeth", self.liz.token, fix(HOME[0] + 0.0903, HOME[1], now - 5))  # shuffling about the same spot
+        self.assertEqual(light(), "moving")  # ...but only for a minute so far
+        loc.save_place("the library", HOME[0] + 0.2, HOME[1])
+        self.post("elizabeth", self.liz.token, fix(HOME[0] + 0.2, HOME[1], now))
+        self.assertEqual(light(), "place")
+
     def test_location_map_for_the_tv(self):
         """"Show me Elizabeth's location" puts her on a map on the TV (#map=<id>), like a camera."""
         lookup, liz = self.engine._camera_page, f"#map={self.liz.id}"
