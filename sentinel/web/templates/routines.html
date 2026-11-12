@@ -191,8 +191,9 @@
               <option value="">any temperature outside</option>
               <option value="temp_below">only when it's below</option>
               <option value="temp_above">only when it's above</option>
+              <option value="temp_between">only when it's between</option>
             </select>
-            <span id="temp-box" class="line"><input type="number" id="only-deg" min="-60" max="140" step="1" value="32" style="width:5em">° outside</span>
+            <span id="temp-box" class="line"><input type="number" id="only-deg" min="-60" max="140" step="1" value="32" style="width:5em"><span id="temp-and">° and <input type="number" id="only-deg2" min="-60" max="140" step="1" value="70" style="width:5em"></span>° outside</span>
           </div>
           <div class="line"><label class="check"><input type="checkbox" id="only-away"> only when nobody's home (everyone sharing their phone's location is away)</label></div>
         </div>
@@ -569,6 +570,7 @@
     function drawOnly() {
       document.getElementById("hours-box").hidden = !document.getElementById("only-hours").checked;
       document.getElementById("temp-box").hidden = !document.getElementById("only-temp").value;
+      document.getElementById("temp-and").hidden = document.getElementById("only-temp").value !== "temp_between";
     }
 
     function addStep(a) {
@@ -650,8 +652,10 @@
       var days = document.getElementById("only-days");
       days.replaceWith(Object.assign(chipGroup("days", DAYS, o.days || [], "none picked = every day"), { id: "only-days" }));
       document.getElementById("only-away").checked = !!o.nobody_home;
-      document.getElementById("only-temp").value = o.temp_below != null ? "temp_below" : o.temp_above != null ? "temp_above" : "";
-      if (o.temp_below != null || o.temp_above != null) document.getElementById("only-deg").value = o.temp_below != null ? o.temp_below : o.temp_above;
+      var both = o.temp_below != null && o.temp_above != null;
+      document.getElementById("only-temp").value = both ? "temp_between" : o.temp_below != null ? "temp_below" : o.temp_above != null ? "temp_above" : "";
+      if (o.temp_below != null || o.temp_above != null) document.getElementById("only-deg").value = both || o.temp_below == null ? o.temp_above : o.temp_below;
+      if (both) document.getElementById("only-deg2").value = o.temp_below;
       drawOnly();
       document.getElementById("steps").innerHTML = "";
       spec.then.forEach(addStep);
@@ -699,7 +703,10 @@
       if (chips.days && chips.days.size) only.days = Array.from(chips.days);
       if (document.getElementById("only-away").checked) only.nobody_home = true;
       var ot = document.getElementById("only-temp").value;
-      if (ot && document.getElementById("only-deg").value !== "") only[ot] = Number(document.getElementById("only-deg").value);
+      var deg = document.getElementById("only-deg").value, deg2 = document.getElementById("only-deg2").value;
+      if (ot === "temp_between") {
+        if (deg !== "" && deg2 !== "") { only.temp_above = Math.min(Number(deg), Number(deg2)); only.temp_below = Math.max(Number(deg), Number(deg2)); }
+      } else if (ot && deg !== "") only[ot] = Number(deg);
       var then = [];
       document.querySelectorAll(".step").forEach(function(step) {
         var kind = step.querySelector(".s-do").value;
