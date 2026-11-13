@@ -1,4 +1,4 @@
-// Fly-by: on the TVs' camera page, a plane about to pass over the house (/api/planes/overhead: within half a mile
+// Fly-by: on the TVs' camera page, a plane about to pass over the house (/api/planes/overhead: within 3 miles
 // sideways, any height) flies across the screen as a drawing of its kind in its airline's colours, with a card saying
 // who it is. Drawn side views, nose to the right (mirrored for planes heading west). Plain ES5: Chrome 56 TV.
 (function() {
@@ -246,7 +246,10 @@
     if (p.speed_kt) bits.push(Math.round(p.speed_kt * 1.15078) + " mph");
     if (p.track != null) bits.push("heading " + WAYS[Math.round(p.track / 45) % 8]);
     if (bits.length) lines.push(bits.join(" · "));
-    return '<div class="fb-tag">' + (p.demo ? "✈️ Test fly-by" : "✈️ Over the house now") + '</div><div class="fb-title">' + esc(title) + "</div>" +
+    var miles = Math.round(p.miss_mi || 0);
+    var tag = p.demo ? "✈️ Test fly-by" : p.side && miles >= 1
+      ? "✈️ Passing " + (miles === 1 ? "a mile " : miles + " miles ") + p.side : "✈️ Over the house now";
+    return '<div class="fb-tag">' + tag + '</div><div class="fb-title">' + esc(title) + "</div>" +
       lines.map(function(l) { return "<div>" + l + "</div>"; }).join("");
   }
 

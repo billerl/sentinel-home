@@ -274,12 +274,19 @@ class TestOverhead(unittest.TestCase):
         self.assertEqual([(p["id"], p["type"], p["airline"]) for p in got], [("b1", "A321", "Delta Air Lines")])
         self.assertAlmostEqual(got[0]["eta"], 22, delta=1.5)
         self.assertLess(got[0]["miss_mi"], 0.1)
+        self.assertEqual(got[0]["side"], "")  # right overhead
         self.assertEqual((got[0]["from"], got[0]["to"]), ("Tampa", "Chicago"))
+
+    def test_passing_to_one_side(self):
+        # 2 miles north of the house, flying east: seen, and said to pass 2 miles north
+        got = self.overhead([{"hex": "d1", "t": "B738", "alt_baro": 30000, "gs": 450, "track": 90.0,
+                              "lat": HOME[0] + 0.029, "lon": -88.2446}])
+        self.assertEqual([(p["id"], round(p["miss_mi"]), p["side"]) for p in got], [("d1", 2, "north")])
 
     def test_left_out(self):
         got = self.overhead([
-            # a mile north of the house, flying east: passes too far away
-            {"hex": "c1", "t": "B738", "alt_baro": 30000, "gs": 450, "track": 90.0, "lat": HOME[0] + 0.0145, "lon": -88.2446},
+            # 4 miles north of the house, flying east: passes too far away
+            {"hex": "c1", "t": "B738", "alt_baro": 30000, "gs": 450, "track": 90.0, "lat": HOME[0] + 0.058, "lon": -88.2446},
             # went over 24 s ago: 3 nm west, going away
             {"hex": "c2", "t": "B738", "alt_baro": 30000, "gs": 450, "track": 270.0, "lat": HOME[0], "lon": -88.2446},
             # coming, but more than 45 s away

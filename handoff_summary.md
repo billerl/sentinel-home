@@ -501,7 +501,7 @@ Use this file as continuity across chats. At the **start** of a new session, ask
 - **Fly-by on the TVs** (2026-11-13; `Planes.overhead`, `/api/planes/overhead`, `static/flyby.js` + `flyby.css`):
   the TVs' camera page (`TV_PAGE` only: Samsung + Fire TV kiosk) asks every 10 s; the server looks 10 nm round the
   house (the same 10 s position cache) and predicts from speed + heading (flat-ground, from the last-heard position
-  `seen_pos` s ago) which planes will pass within half a mile sideways, any height, in the next 45 s (`eta`, and up
+  `seen_pos` s ago) which planes will pass within 3 miles sideways (`FLYBY_NM`), any height, in the next 45 s (`eta`, and up
   to 15 s after). The page starts the fly-by so the plane is mid-screen at its closest point, once per plane per
   pass: a drawn side view of its kind (ICAO type code -> ~15 families: narrow, wide, quad, trijet, rj, ejet,
   turboprop, c130, airlifter, bizjet, twin, high/low-wing single, heli, fighter; else by ADS-B category) in its
