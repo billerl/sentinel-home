@@ -105,6 +105,7 @@ sentinel-home/                         # repository root
     │   ├── static/                    # Icons + web app manifest; leaflet/ = Leaflet 1.9.4 (BSD-2, map on the Timeline),
     │   │                              #   three/ = three.js r128 + OrbitControls (MIT, the House page),
     │   │                              #   grid.js + grid.css = the live page's script and styles (?v=boot id),
+    │   │                              #   sky.js + sky.css = the sky picture behind the weather cards (weather, time of day)
     │   │                              #   talk.js = the home page's 🎙️ Talk button (phone mic -> Jarvis)
     │   │                              #   hear.js = the home page's 🔔 Hear alerts switch (alerts read out in the browser)
     │   │                              #   roles.css = hides what the signed-in role can't use (data-min on elements)

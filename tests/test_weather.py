@@ -30,6 +30,13 @@ class TestWeather(unittest.TestCase):
         self.assertEqual(card["hours"][4]["rain"], 60)
         self.assertEqual(card["hours"][2]["icon"], "🌙")  # 7 pm, after dark
         self.assertEqual((card["sunrise"], card["sunset"], card["updated"]), ("7:55", "6:37", "4:45"))
+        self.assertEqual((card["sky"], card["sun_min"]), ("clear", [475, 1117]))  # the tile's background
+
+    def test_sky_kind(self):
+        kinds = {c: weather.sky_kind(c) for c in (0, 1, 2, 3, 45, 48, 51, 63, 66, 71, 77, 80, 82, 85, 95, 99, None)}
+        self.assertEqual(kinds, {0: "clear", 1: "clear", 2: "partly", 3: "cloudy", 45: "fog", 48: "fog", 51: "rain",
+                                 63: "rain", 66: "rain", 71: "snow", 77: "snow", 80: "rain", 82: "rain", 85: "snow",
+                                 95: "storm", 99: "storm", None: "clear"})
 
     def test_full_screen(self):
         raw = {**RAW, "current": {**RAW["current"], "wind_direction_10m": 200, "pressure_msl": 1016.3, "visibility": 24140,

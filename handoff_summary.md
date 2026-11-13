@@ -136,6 +136,12 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     weather's units; null when no reading in 10 min). On a TV (`TV_PAGE`, class `tv`: `renderWeatherTv`) the tile
     shows only big things: outside + inside temperature, clock, "words · High · Low · wind" (shrinks to fit:
     `fitWxLine`), the next 4 hours and the family row; sizes from `--cqh`/`--cqw` so Chrome 56 gets the same.
+    Sky picture behind it and the home page's weather card (`static/sky.js` + `sky.css`): `/api/weather` gives
+    `sky` (clear/partly/cloudy/fog/rain/snow/storm from the WMO code, `weather.sky_kind`) and `sun_min` (today's
+    sunrise/sunset in minutes); the page's own clock picks day/dawn/dusk/night (±30 min of sunrise/sunset), so it
+    changes on time between weather updates. Gradients, SVG hills, sliding cloud strips, falling rain/snow layers,
+    lightning; a shade on top + text shadow keep the numbers readable. `.wx-sky` is the tile's first child and
+    survives redraws (`setWeatherHtml`) so the clouds don't jump. Transform/opacity animations only (Chrome 56 TV).
   - QR sign-in for the Fire TV: `/login` shows a QR on wide screens (`POST /login/pair`), a signed-in phone
     approves at `/pair/<code>`, the TV's poll (`/login/pair/<code>`) gets the session cookie. Codes: one use,
     3 min, bound to the requesting IP, 3 per IP. Sessions persist as SHA-256 token hashes in

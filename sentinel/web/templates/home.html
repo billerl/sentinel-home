@@ -30,6 +30,9 @@
     .wx .temp { font-size: 2rem; font-weight: 700; color: #fff; }
     .wx .words { font-size: 0.9rem; color: #cfe; }
     .wx .words span { display: block; color: #6f97a5; font-size: 0.8rem; margin-top: 2px; }
+    .wx.has-sky { min-height: 76px; border-color: rgba(255,255,255,0.12); }
+    .wx.has-sky .words, .wx.has-sky .words span { color: #eaf6ff; }
+    .wx .sky-land { height: 58%; }  /* a short card: tall enough that the hills show as hills, not a strip */
     .people { display: flex; flex-wrap: wrap; gap: 8px 14px; }
     .people a, .people span.p { text-decoration: none; color: #fff; font-size: 0.9rem; display: inline-flex; align-items: center; gap: 6px; }
     .people small { color: #6f97a5; font-size: 0.75rem; }
@@ -65,6 +68,8 @@
     @media (prefers-reduced-motion: reduce) { .wx-alert.loud { animation: none; } }
   </style>
   <link rel="stylesheet" href="/static/roles.css?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='sky.css') }}?v={{ boot_id }}">
+  <script src="{{ url_for('static', filename='sky.js') }}?v={{ boot_id }}"></script>
 </head>
 <body data-role="{{ role }}">
   <div id="wx-alert" class="wx-alert" role="alert" hidden></div>
@@ -154,14 +159,18 @@
     async function loadWeather() {
       var box = document.getElementById("weather");
       try { var w = await getJson("/api/weather"); } catch (e) { return; }
+      WeatherSky.update(box, w);
       if (w.configured === false) {
         box.innerHTML = '<span class="muted">Add your town under <a href="/settings#weather">Settings → Weather</a> to see the weather here.</span>';
         return;
       }
       if (w.temp == null) { box.innerHTML = '<span class="muted">' + esc(w.error || "Loading the weather…") + '</span>'; return; }
+      var sky = box.querySelector(".wx-sky") || WeatherSky.make();
       box.innerHTML = '<span class="icon">' + esc(w.icon) + '</span><span class="temp">' + esc(w.temp) + '°</span>' +
         '<span class="words">' + esc(w.words) + '<span>High ' + esc(w.high) + '° · low ' + esc(w.low) + '° · wind ' + esc(w.wind) + ' mph' +
         (w.place ? ' · ' + esc(w.place) : '') + '</span></span>';
+      box.insertBefore(sky, box.firstChild);  // the sky picture behind it (sky.css)
+      WeatherSky.size(sky);
     }
 
     async function loadPeople() {

@@ -71,6 +71,14 @@ h1 { font-size: 0.9rem; margin: 0; flex: 1; }
 .tile.weather { cursor: pointer; container-type: size; background: linear-gradient(160deg, #0b2233, #05121c);
                 color: #cfefff; justify-content: center; gap: 3cqh; padding: 9cqh 5cqw 4cqh; }
 .tile.weather[hidden] { display: none; }
+/* Over the sky picture (sky.css): lighter small text, darker hour boxes, no shadow on the solid mesh badge */
+.tile.weather.has-sky .wx-meta, .tile.weather.has-sky .wx-now, .tile.weather.has-sky .wx-clock .ap,
+.tile.weather.has-sky .wx-clock .d, .tile.weather.has-sky .wx-line { color: #eaf6ff; }
+.tile.weather.has-sky .wx-foot { color: rgba(234,246,255,0.8); }
+.tile.weather.has-sky .wx-hours div { background: rgba(0,12,26,0.38); }
+.tile.weather.has-sky .wx-hours .r { color: #a8d8ff; }
+.tile.weather.has-sky .wx-family { border-top-color: rgba(255,255,255,0.18); }
+.tile.weather.has-sky .wx-family a.mesh { text-shadow: none; }
 .wx-top { display: flex; align-items: center; gap: 3cqw; }
 .wx-icon { font-size: 15cqh; line-height: 1; }
 .wx-temp { font-size: 22cqh; font-weight: 600; color: #fff; line-height: 1; }

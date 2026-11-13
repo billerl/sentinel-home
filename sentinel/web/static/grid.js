@@ -165,7 +165,14 @@ function updateTile(camId, imgElement) {
 var weatherTile = document.createElement("div");
 weatherTile.className = "tile weather";
 weatherTile.hidden = true;
+var weatherSky = WeatherSky.make();  // the sky picture behind it (sky.js / sky.css): kept across redraws so it doesn't jump
+weatherTile.appendChild(weatherSky);
 var weather = null;  // last /api/weather answer
+// Replaces what the tile shows, keeping the sky behind it
+function setWeatherHtml(html) {
+  while (weatherTile.lastChild && weatherTile.lastChild !== weatherSky) weatherTile.removeChild(weatherTile.lastChild);
+  weatherTile.insertAdjacentHTML("beforeend", html);
+}
 
 function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
 
@@ -190,20 +197,22 @@ function familyHtml() {
 
 function renderWeather() {
   var w = weather;
-  if (!w) { weatherTile.innerHTML = ""; return; }
+  WeatherSky.update(weatherTile, w);
+  if (!w) { setWeatherHtml(""); return; }
   renderWeatherOnly(w);
   weatherTile.classList.toggle("fam", family.length > 0 || mesh.unread > 0);
   weatherTile.insertAdjacentHTML("beforeend", familyHtml());
+  WeatherSky.size(weatherSky);  // phones: the tile's height follows what it shows
 }
 
 function renderWeatherOnly(w) {
   if (!w.configured) {
-    weatherTile.innerHTML = '<h2>Weather</h2><div class="wx-msg">Show the weather here: enter your town or ZIP code in ' +
-      '<a href="/settings#weather">Settings → Weather</a>.</div>';
+    setWeatherHtml('<h2>Weather</h2><div class="wx-msg">Show the weather here: enter your town or ZIP code in ' +
+      '<a href="/settings#weather">Settings → Weather</a>.</div>');
     return;
   }
   if (w.temp == null) {
-    weatherTile.innerHTML = '<h2>Weather</h2><div class="wx-msg">' + (w.error ? esc(w.error) : "Loading the weather…") + '</div>';
+    setWeatherHtml('<h2>Weather</h2><div class="wx-msg">' + (w.error ? esc(w.error) : "Loading the weather…") + '</div>');
     return;
   }
   var deg = "°";
@@ -213,7 +222,7 @@ function renderWeatherOnly(w) {
     return '<div><span>' + esc(h.label) + '</span><span>' + esc(h.icon) + '</span><span>' + esc(h.temp) + deg +
       '</span><span class="r">' + (h.rain >= 20 ? "☔ " + esc(h.rain) + "%" : "") + '</span></div>';
   }).join("");
-  weatherTile.innerHTML =
+  setWeatherHtml(
     '<h2>Weather — ' + esc(w.place) + '</h2>' +
     '<div class="wx-top"><div class="wx-icon">' + esc(w.icon) + '</div><div class="wx-temp">' + esc(w.temp) + deg + '</div>' +
     '<div class="wx-now"><b>' + esc(w.words) + '</b><span>Feels like ' + esc(w.feels) + deg + '</span>' +
@@ -224,7 +233,7 @@ function renderWeatherOnly(w) {
     '<span>🌅 ' + esc(w.sunrise) + '</span><span>🌇 ' + esc(w.sunset) + '</span></div>' +
     '<div class="wx-hours">' + hours + '</div>' +
     '<div class="wx-foot">' + (w.windy ? '<span class="wx-windy">Windy: expect motion clips from trees. </span>' : '') +
-    'Updated ' + esc(w.updated) + '</div>';
+    'Updated ' + esc(w.updated) + '</div>');
 }
 
 // On a TV, read from the couch: only the big things (outside, inside, the clock, today's range, the next 4 hours)
@@ -233,14 +242,14 @@ function renderWeatherTv(w) {
   var hours = (w.hours || []).slice(0, 4).map(function(h) {
     return '<div><span>' + esc(h.label) + '</span><span>' + esc(h.icon) + '</span><span>' + esc(h.temp) + deg + '</span></div>';
   }).join("");
-  weatherTile.innerHTML =
+  setWeatherHtml(
     '<div class="wx-top"><div class="wx-icon">' + esc(w.icon) + '</div>' +
     '<div class="wx-temp">' + esc(w.temp) + deg + '<small>Outside</small></div>' +
     (w.inside ? '<div class="wx-in">' + esc(w.inside.temp) + deg + '<small>Inside</small></div>' : '') +
     '<div class="wx-clock">' + clockHtml() + '</div></div>' +
     '<div class="wx-line"><b>' + esc(w.words) + '</b> · High ' + esc(w.high) + deg + ' · Low ' + esc(w.low) + deg +
     ' · 💨 ' + esc(w.wind) + (w.gusts > w.wind + 4 ? '–' + esc(w.gusts) : '') + ' mph</div>' +
-    '<div class="wx-hours">' + hours + '</div>';
+    '<div class="wx-hours">' + hours + '</div>');
   setTimeout(fitWxLine, 0);
 }
 // The TV's "Fog · High · Low · wind" line: a long day ("Partly cloudy", gusts) shrinks a little rather than being cut off
@@ -261,6 +270,7 @@ function clockHtml() {
 setInterval(function() {
   var html = clockHtml();
   document.querySelectorAll(".wx-clock, .wxf-clock").forEach(function(c) { if (c.innerHTML !== html) c.innerHTML = html; });
+  WeatherSky.update(weatherTile, weather);  // dawn, day, dusk, night follow the clock
 }, 5000);
 
 // ---------------- Full-screen weather ----------------
@@ -1261,6 +1271,7 @@ function layoutGrid() {
     grid.style.gridTemplateColumns = grid.style.gridAutoRows = "";
     // Phones: under the cameras, once a place is set.
     weatherTile.hidden = !(isPhone() && weather && weather.configured);
+    WeatherSky.size(weatherSky);
     return;
   }
   var gap = 2, pad = 4;
@@ -1277,6 +1288,7 @@ function layoutGrid() {
   grid.style.gridAutoRows = th + "px";
   weatherTile.style.setProperty("--cqh", th / 100 + "px");  // for browsers without container units (grid.css)
   weatherTile.style.setProperty("--cqw", tw / 100 + "px");
+  WeatherSky.size(weatherSky);
   fitWxLine();
   if (!GRID_CSS) {  // see grid.css: the same sizes, on each tile
     Array.prototype.forEach.call(grid.querySelectorAll(".tile"), function(t) {

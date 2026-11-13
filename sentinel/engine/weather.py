@@ -61,6 +61,18 @@ _CODES: Dict[int, Tuple[str, str, str]] = {
 }
 
 
+def sky_kind(code: Any) -> str:
+    """The weather tile's background picture for a WMO code: clear, partly, cloudy, fog, rain, snow or storm."""
+    c = int(code) if code is not None else 0
+    if c >= 95:
+        return "storm"
+    if 71 <= c <= 77 or c in (85, 86):
+        return "snow"
+    if c >= 51:
+        return "rain"
+    return {2: "partly", 3: "cloudy", 45: "fog", 48: "fog"}.get(c, "clear")
+
+
 def describe_code(code: Any, is_day: bool = True) -> Tuple[str, str]:
     words, day, night = _CODES.get(int(code) if code is not None else -1, ("", "🌡️", "🌡️"))
     return words, day if is_day else night
@@ -171,6 +183,7 @@ class WeatherService:
                           "temp": round(hourly["temperature_2m"][i]), "icon": h_icon,
                           "rain": (hourly.get("precipitation_probability") or [0] * 99)[i] or 0})
         hhmm = lambda s: (f"{int(s[11:13]) % 12 or 12}:{s[14:16]}" if s else "")  # noqa: E731
+        minutes = lambda s: (int(s[11:13]) * 60 + int(s[14:16]) if s else None)  # noqa: E731
         return {
             "place": place["name"],
             "unit": "°C" if units == "celsius" else "°F",
@@ -187,6 +200,10 @@ class WeatherService:
             "rain_today": (daily.get("precipitation_probability_max") or [0])[0] or 0,
             "sunrise": hhmm((daily.get("sunrise") or [""])[0]),
             "sunset": hhmm((daily.get("sunset") or [""])[0]),
+            # The tile's sky: the kind of weather, and sunrise/sunset in minutes after midnight (the page's own clock
+            # decides day, dawn, dusk or night, so it changes on time even between weather updates)
+            "sky": sky_kind(cur.get("weather_code")),
+            "sun_min": [minutes((daily.get("sunrise") or [""])[0]), minutes((daily.get("sunset") or [""])[0])],
             "hours": hours,
             "updated": hhmm(cur.get("time") or ""),
             "full": _full(raw, air or {}, units),
