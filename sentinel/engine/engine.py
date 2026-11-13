@@ -1858,7 +1858,8 @@ class Engine:
         ]
         return {
             "uptime_seconds": int(time.time() - self.started_at),
-            "cpu_percent": self._cpu.percent(),
+            "cpu_percent": self._cpu.percent(),  # of one core (can pass 100)
+            "cpu_cores": os.cpu_count() or 1,
             "disk": admin.disk_status(),
             "recordings": self.recording_store.stats(),
             "cameras": cams,

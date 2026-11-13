@@ -1051,7 +1051,8 @@
           stat("Cameras", online + " / " + enabled + " online", offline.length ? "Offline: " + offline.join(", ") : "All good") +
           stat("Clips today", s.recordings.today, s.recordings.clips + " total · " + s.recordings.size_gb + " GB") +
           stat("Disk free", s.disk.free_gb + " GB", s.disk.used_percent + "% used of " + s.disk.total_gb + " GB") +
-          stat("CPU", s.cpu_percent == null ? "…" : s.cpu_percent + "%", "Sentinel process (100% = 1 core)") +
+          stat("CPU", s.cpu_percent == null ? "…" : Math.round(s.cpu_percent / (s.cpu_cores || 1)) + "%",
+               "of the whole PC, used by Sentinel (" + (s.cpu_cores || 1) + " cores)") +
           stat("Uptime", fmtUptime(s.uptime_seconds), "since last restart") +
           stat("Telegram", s.telegram.enabled ? (s.telegram.configured ? "On" : "Not set up") : "Off", "") +
           stat("Oldest clip", s.recordings.oldest || "—", "") +
