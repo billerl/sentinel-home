@@ -335,3 +335,21 @@ class TestTrimInfrared(unittest.TestCase):
                                                          "code": base64.b64encode(self.code(17)).decode()}]}]
         self.assertTrue(r.press("Sound Bar", "Volume Up")[0])
         self.assertEqual(sent, [self.code(2)])
+
+    def test_quick_presses_are_spaced_out(self):
+        import base64
+        from sentinel.engine.remotes import IR_QUIET, ir_seconds
+        now, slept, sent = [100.0], [], []
+        def sleep(s):
+            slept.append(round(s, 3)); now[0] += s
+        r = Remotes(tempfile.mkdtemp(prefix="sentinel-remotes-"), clock=lambda: now[0], sleep=sleep)
+        r._connect = lambda force=False: types.SimpleNamespace(send_data=sent.append)
+        r.remotes = [{"name": "Sound Bar", "buttons": [{"name": "Volume Up", "kind": "ir",
+                                                         "code": base64.b64encode(self.code(2)).decode()}]}]
+        r.press("Sound Bar", "Volume Up")
+        r.press("Sound Bar", "Volume Up")  # tapped again straight away: waits for the first, plus quiet
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(slept, [round(ir_seconds(self.code(2)) + IR_QUIET, 3)])
+        now[0] += 5
+        r.press("Sound Bar", "Volume Up")  # a slow tap: no wait
+        self.assertEqual(len(slept), 1)

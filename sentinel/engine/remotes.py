@@ -31,6 +31,9 @@ LET_GO_SECONDS = 2.5  # radio: between finding the frequency (button held) and r
 RETRY_SECONDS = 60.0  # after the BroadLink didn't answer: don't search again on every press
 MAX_TIMES = 20  # "volume up 50 times" is a typo
 PRESS_GAP = 0.3
+# Quiet time between two infrared signals: the soundbar took five quick taps sent ~0.2 s apart as one held
+# press (one or two steps, 2026-11-13). Each signal is followed by this much silence before the next.
+IR_QUIET = 0.35
 # Spoken extras around "<remote> <button>": "press the soundbar power button please".
 FILLER = {"press", "push", "hit", "tap", "click", "the", "my", "a", "button", "please", "jarvis", "hey"}
 LOOSE_FILLER = {"turn", "set", "switch", "put", "to", "speed", "it", "at", "make"}
@@ -43,6 +46,25 @@ LOCKED = "The BroadLink is locked: in the BroadLink app, open its settings and t
 
 
 IR_KEEP_FRAMES = 2  # an infrared button sends its message this many times: what one quick tap of a remote sends
+
+
+def ir_seconds(code: bytes) -> float:
+    """How long an infrared signal takes to send (0 for radio or anything unreadable)."""
+    try:
+        if len(code) < 8 or code[0] != 0x26:
+            return 0.0
+        n = int.from_bytes(code[2:4], "little")
+        total, i = 0, 4
+        while i < min(len(code), 4 + n):
+            v = code[i]
+            i += 1
+            if v == 0:
+                v = int.from_bytes(code[i:i + 2], "big")
+                i += 2
+            total += v
+        return total * 8192 / 269 / 1e6 * (code[1] + 1)
+    except (IndexError, ValueError):
+        return 0.0
 
 
 def trim_ir(code: bytes, keep: int = IR_KEEP_FRAMES) -> bytes:
@@ -139,6 +161,7 @@ class Remotes:
         self._lib = lib  # python-broadlink (imported when first needed; tests pass a fake)
         self._clock = clock
         self._sleep = sleep
+        self._ir_free_at = 0.0  # when the last infrared signal (and its quiet time after) is over
         self._found_mhz: Optional[float] = None  # the radio frequency the button being taught came in on
         self._lock = threading.Lock()  # the store
         self._io = threading.Lock()  # one conversation with the BroadLink at a time
@@ -468,9 +491,12 @@ class Remotes:
                     return False, self.error or "The BroadLink isn't answering."
                 try:
                     for i in range(times):
-                        if i:
-                            self._sleep(gap)
+                        wait = max(self._ir_free_at - self._clock() if ir_seconds(code) else 0, gap if i else 0)
+                        if wait > 0:
+                            self._sleep(min(wait, 3.0))
                         dev.send_data(code)
+                        if ir_seconds(code):
+                            self._ir_free_at = self._clock() + ir_seconds(code) + IR_QUIET
                     break
                 except Exception as e:
                     self._device = None
