@@ -14,6 +14,10 @@ from sentinel.logging_utils import app_logger
 
 LIGHT_STOPPED_S = 15 * 60  # the live page's light: this long in one unsaved spot = stopped there (orange), not on the way
 LOCATION_STALE_S = 10 * 60  # a family phone's position older than this: ask the phone for a fresh one
+# A phone that was offline sends its saved positions in a burst when it's back (seen 2026-11-13: ~3 h of positions at
+# once, and "got to <a place>" went out while the person was home). Arrivals/departures older than this when they
+# reach Sentinel are kept in the history but not announced, and don't start the home routines.
+LATE_CHANGE_S = 10 * 60
 SPOT_CHECK_HOUR = 18  # new spots worth saving are looked for once a day, from this hour on
 SPOT_ASK_AGAIN_DAYS = 14  # a suggestion nobody answered may come back after this
 LOST_PIN_SECONDS = 300  # a lost pet: a fresh Telegram map pin at most this often ...
@@ -295,6 +299,11 @@ class Family:
                     continue
                 if person.tracker and change.kind != "started":
                     continue  # a pet: the yard says it better than "left home" 100+ m later
+                if change.kind != "started" and age is not None and age > LATE_CHANGE_S:
+                    app_logger.log("info", "location_late_change", person=person.name, change=change.kind,
+                                   place=change.place.name if change.place else None, age_s=age,
+                                   component="engine", action="location")
+                    continue  # (old news from a phone catching up: not said, no routines)
                 if change.kind in ("arrived", "left") and change.place is not None and change.place.is_home:
                     self._on_home("arrive" if change.kind == "arrived" else "leave", person.id)
                 if change.kind != "started" and not (self.settings.get("location_alerts_enabled", True)

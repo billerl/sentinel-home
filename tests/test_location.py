@@ -522,6 +522,22 @@ class TestEndpoints(unittest.TestCase):
         self.assertIn("👋 Elizabeth left home.", self.sent)
         self.assertIn("Elizabeth is about", self.engine.family.answer_location_question(self.engine.family.location_question("where is elizabeth"))[0])
 
+    def test_catching_up_after_being_offline_is_not_announced(self):
+        now = time.time()
+        self.post("elizabeth", self.liz.token, fix(*HOME, now - 7200))
+        self.wait_for(1)
+        n = len(self.sent)
+        # her phone was offline: positions from 1 h 50 and 1 h 40 ago arrive now, leaving home (old news)
+        self.post("elizabeth", self.liz.token, fix(HOME[0] + 0.05, HOME[1], now - 6600))
+        self.post("elizabeth", self.liz.token, fix(HOME[0] + 0.06, HOME[1], now - 6000))
+        time.sleep(0.2)
+        self.assertEqual(self.sent[n:], [])
+        self.assertIsNone(self.engine.locations.fix(self.liz.id)["place_id"])  # (still recorded: she's not home)
+        # back home, said as it happens
+        self.post("elizabeth", self.liz.token, fix(*HOME, now))
+        self.wait_for(n + 1)
+        self.assertTrue(any("Elizabeth" in t and "home" in t for t in self.sent[n:]), self.sent[n:])
+
     def test_battery_question_by_voice(self):
         self.post("elizabeth", self.liz.token, dict(fix(*HOME, time.time()), batt=62))
         for text in ("What's Elizabeth's battery percentage?", "What is Elizabeth's phone battery at?"):
