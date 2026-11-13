@@ -246,7 +246,7 @@
     if (p.speed_kt) bits.push(Math.round(p.speed_kt * 1.15078) + " mph");
     if (p.track != null) bits.push("heading " + WAYS[Math.round(p.track / 45) % 8]);
     if (bits.length) lines.push(bits.join(" · "));
-    return '<div class="fb-tag">✈️ Over the house now</div><div class="fb-title">' + esc(title) + "</div>" +
+    return '<div class="fb-tag">' + (p.demo ? "✈️ Test fly-by" : "✈️ Over the house now") + '</div><div class="fb-title">' + esc(title) + "</div>" +
       lines.map(function(l) { return "<div>" + l + "</div>"; }).join("");
   }
 

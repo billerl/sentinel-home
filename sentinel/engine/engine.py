@@ -239,7 +239,7 @@ class Engine:
             speak=lambda text: self.audio.speak(text) if self.audio is not None else None)
         from sentinel.engine.planes import Planes
 
-        self.planes = Planes(home=self.family.home_coords)  # "what plane is that?" and the TV's plane map
+        self.planes = Planes(home=self.family.home_coords, demo_file=os.path.join(VIDEO_DIR, "flyby_demo.json"))  # "what plane is that?" and the TV's plane map
         from sentinel.engine.phone_talk import PhoneTalk
 
         self.phone_talk = PhoneTalk(  # the web page's Talk button: Jarvis through a phone's microphone

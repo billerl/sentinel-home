@@ -293,6 +293,16 @@ class TestOverhead(unittest.TestCase):
         got = self.overhead([{"hex": "h1", "t": "", "category": "A7", "alt_baro": 900, "lat": HOME[0] + 0.003, "lon": HOME[1]}])
         self.assertEqual([(p["id"], p["eta"], p["category"]) for p in got], [("h1", 0.0, "A7")])
 
+    def test_trying_it_out(self):
+        import json, os, tempfile
+        path = os.path.join(tempfile.mkdtemp(), "flyby_demo.json")
+        with open(path, "w") as f:
+            json.dump([{"id": "demo1", "type": "B738", "callsign": "SWA1234"}, "junk"], f)
+        planes = Planes(home=lambda: HOME, get_json=FakeNet([]), demo_file=path)
+        self.assertEqual([(p["id"], p["eta"], p["demo"]) for p in planes.overhead()], [("demo1", 0.0, True)])
+        os.utime(path, (0, 0))  # older than 30 s: over
+        self.assertEqual(planes.overhead(), [])
+
     def test_no_home(self):
         self.assertEqual(Planes(home=lambda: None, get_json=FakeNet([])).overhead(), [])
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import contextvars
 import json
+import os
 import math
 import re
 import threading
@@ -160,8 +161,11 @@ def _feet(alt: Any) -> str:
 
 class Planes:
     def __init__(self, home: Callable[[], Optional[Tuple[float, float]]],
-                 get_json: Optional[Callable[[str], Any]] = None, clock: Callable[[], float] = time.time) -> None:
+                 get_json: Optional[Callable[[str], Any]] = None, clock: Callable[[], float] = time.time,
+                 demo_file: Optional[str] = None) -> None:
         self.home = home
+        # Trying the TVs' fly-by out: a JSON list of made-up passes written here is flown across once (for 30 s)
+        self.demo_file = demo_file
         self._get = get_json or self._http_json
         self._clock = clock
         self._lock = threading.Lock()
@@ -288,10 +292,10 @@ class Planes:
         """Planes about to pass (or just passing) within FLYBY_NM of the house, sideways at any height, for the TVs'
         fly-by picture: each with ``eta`` (seconds to its closest point; negative = just passed). Worked out from
         speed and heading on flat ground near the house, from where it was when last heard (``seen`` s ago)."""
+        out = self._demo_passes()
         home = self.home()
         if not home:
-            return []
-        out = []
+            return out
         for p in self.nearby((float(home[0]), float(home[1])), radius=FLYBY_WATCH_NM):
             if p["alt"] == "ground":
                 continue
@@ -314,6 +318,17 @@ class Planes:
                             "from": (route.get("from") or {}).get("city"), "to": (route.get("to") or {}).get("city"),
                             "eta": round(eta, 1), "miss_mi": round(miss * NM_TO_MILES, 2)})
         return sorted(out, key=lambda o: o["eta"])
+
+    def _demo_passes(self) -> List[Dict[str, Any]]:
+        """The made-up passes in ``demo_file`` while it's under 30 s old (each flown once: the TV remembers its id)."""
+        try:
+            if not self.demo_file or self._clock() - os.path.getmtime(self.demo_file) > 30:
+                return []
+            with open(self.demo_file) as f:
+                passes = json.load(f)
+        except (OSError, ValueError):
+            return []
+        return [{**p, "eta": 0.0, "demo": True} for p in passes if isinstance(p, dict) and p.get("id")]
 
     # ------------------------------------------------------------ words
     @staticmethod
