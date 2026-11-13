@@ -429,7 +429,9 @@ function renderWeatherChart() {
 }
 
 async function loadWeather() {
-  var next = 10 * 60 * 1000;
+  // every 2 minutes: the forecast itself is only fetched every 10 (server side), but the inside temperature
+  // moves fast once the heater is on (the TV said 63 while the room was 68.5, 2026-11-13)
+  var next = 2 * 60 * 1000;
   try {
     var r = await fetch("/api/weather");
     if (r.ok) {
