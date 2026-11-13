@@ -177,4 +177,5 @@ All tests should pass before running a changed version.
 
 ## License
 
-MIT.
+[MIT](LICENSE): free to use, change and share, including in your own projects. Keep the copyright
+notice with it. It comes with no warranty: it's a home project, so test it on your own setup.
