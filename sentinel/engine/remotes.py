@@ -45,7 +45,9 @@ ALIASES = [(re.compile(r"\bturn (.+) up\b|\bturn up\b|\blouder\b"), "volume up")
 LOCKED = "The BroadLink is locked: in the BroadLink app, open its settings and turn off “Lock device”."
 
 
-IR_KEEP_FRAMES = 2  # an infrared button sends its message this many times: what one quick tap of a remote sends
+IR_KEEP_FRAMES = 1  # an infrared tap sends its message once (a second copy ~0.1 s later already means "held":
+# the soundbar took quick taps sent as 2 copies as one press, 2026-11-13)
+HELD_FRAMES = 4  # a recording with this many matching copies was held while learning
 
 
 def ir_seconds(code: bytes) -> float:
@@ -91,10 +93,10 @@ def trim_ir(code: bytes, keep: int = IR_KEEP_FRAMES) -> bytes:
                 cur = []
             else:
                 cur.append(us)
-        if len(frames) <= keep + 1:  # (one more is still a tap: the TV's Power has 3 and works)
+        if len(frames) < HELD_FRAMES:  # a tap as recorded (the TV's Power has 3 and works): left as it is
             return code
         first = frames[0][0]
-        same = [f for f, _ in frames[:keep + 1]]
+        same = [f for f, _ in frames[:HELD_FRAMES]]
         if not first or any(len(f) != len(first) or any(abs(a - b) > 0.35 * max(a, b) for a, b in zip(f, first))
                             for f in same):
             return code

@@ -309,10 +309,10 @@ class TestTrimInfrared(unittest.TestCase):
             pulses += bytes(body) + bytes([0, 6, 0x50])  # then a ~49 ms gap (2 bytes, big-endian)
         return bytes([0x26, 0]) + len(pulses).to_bytes(2, "little") + pulses
 
-    def test_held_button_is_cut_to_two_copies(self):
+    def test_held_button_is_cut_to_one_copy(self):
         from sentinel.engine.remotes import trim_ir
-        held = self.code(17)
-        self.assertEqual(trim_ir(held), self.code(2))
+        self.assertEqual(trim_ir(self.code(17)), self.code(1))
+        self.assertEqual(trim_ir(self.code(4)), self.code(1))
 
     def test_a_tap_and_odd_signals_are_left_alone(self):
         from sentinel.engine.remotes import trim_ir
@@ -334,7 +334,7 @@ class TestTrimInfrared(unittest.TestCase):
         r.remotes = [{"name": "Sound Bar", "buttons": [{"name": "Volume Up", "kind": "ir",
                                                          "code": base64.b64encode(self.code(17)).decode()}]}]
         self.assertTrue(r.press("Sound Bar", "Volume Up")[0])
-        self.assertEqual(sent, [self.code(2)])
+        self.assertEqual(sent, [self.code(1)])
 
     def test_quick_presses_are_spaced_out(self):
         import base64
