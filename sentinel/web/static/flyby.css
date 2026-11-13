@@ -1,0 +1,23 @@
+/* Fly-by (flyby.js): a plane crossing the TV's camera page while it passes over the house, and its card. */
+.fb { position: fixed; left: 0; top: 36%; z-index: 9500; pointer-events: none; will-change: transform;
+      -webkit-filter: drop-shadow(0 6px 10px rgba(0,0,0,0.45)); filter: drop-shadow(0 6px 10px rgba(0,0,0,0.45)); }
+.fb-in { position: relative; width: 100%; height: 100%; }
+.fb-in.west { -webkit-transform: scaleX(-1); transform: scaleX(-1); }
+.fb-in svg { position: relative; display: block; }
+/* a contrail behind high jets: two fading lines from the engines back */
+.fb-trail { position: absolute; right: 90%; top: 64%; width: 70vw; height: 5%; min-height: 3px;
+  background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.7)); border-radius: 4px; opacity: 0.7; }
+.fb-trail:after { content: ""; position: absolute; left: 20%; right: 0; top: 180%; height: 70%;
+  background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.55)); border-radius: 4px; }
+
+.fb-card { position: fixed; left: 50%; top: 3%; z-index: 9501; pointer-events: none; min-width: 26vw; max-width: 60vw;
+  -webkit-transform: translate(-50%, -12px); transform: translate(-50%, -12px); opacity: 0;
+  -webkit-transition: opacity 0.6s, -webkit-transform 0.6s; transition: opacity 0.6s, transform 0.6s;
+  background: rgba(6,18,32,0.82); border: 1px solid rgba(160,210,255,0.35); border-radius: 1.2vw;
+  padding: 1vw 1.8vw; color: #e6f3ff; font-size: 1.7vw; line-height: 1.35; text-align: center;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.5); }
+.fb-card.show { opacity: 1; -webkit-transform: translate(-50%, 0); transform: translate(-50%, 0); }
+.fb-tag { font-size: 1.2vw; color: #8fd0ff; letter-spacing: 0.05em; text-transform: uppercase; }
+.fb-title { font-size: 2.6vw; font-weight: 700; color: #fff; margin: 0.2vw 0 0.3vw; }
+
+@media (prefers-reduced-motion: reduce) { .fb { -webkit-transition: none !important; transition: none !important; } }

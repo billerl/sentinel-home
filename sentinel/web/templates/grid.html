@@ -11,6 +11,7 @@
   <title>Sentinel — Live</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='grid.css') }}?v={{ boot_id }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='sky.css') }}?v={{ boot_id }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='flyby.css') }}?v={{ boot_id }}">
   <link rel="stylesheet" href="/static/roles.css?v=1">
 </head>
 <body data-role="{{ role }}">
@@ -232,6 +233,7 @@
   <script>var BOOT_ID = "{{ boot_id }}";</script>
   <script src="{{ url_for('static', filename='slowlog.js') }}?v={{ boot_id }}"></script>
   <script src="{{ url_for('static', filename='sky.js') }}?v={{ boot_id }}"></script>
+  <script src="{{ url_for('static', filename='flyby.js') }}?v={{ boot_id }}"></script>
   <script src="{{ url_for('static', filename='grid.js') }}?v={{ boot_id }}"></script>
   {% if role != "guest" %}<script src="{{ url_for('static', filename='talk.js') }}?v={{ boot_id }}"></script>
   <script src="{{ url_for('static', filename='hear.js') }}?v={{ boot_id }}"></script>{% endif %}

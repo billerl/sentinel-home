@@ -259,5 +259,42 @@ class TestWhoIsAsking(unittest.TestCase):
         fixes[1]["ts"] = time.time() - 7200  # a phone silent for two hours: not where they are now
         self.assertIsNone(Engine.asker_spot(fake, name="Alex"))
 
+
+class TestOverhead(unittest.TestCase):
+    """The TVs' fly-by: which planes are about to pass within half a mile of the house (any height)."""
+
+    def overhead(self, aircraft):
+        return Planes(home=lambda: HOME, get_json=FakeNet(aircraft)).overhead()
+
+    def test_heading_for_the_house(self):
+        # 3 nm south, flying north (toward Chicago) at 450 knots: over the house in ~24 s (a little sooner: it was
+        # heard 2 s ago)
+        got = self.overhead([{"hex": "b1", "flight": "DAL1776", "t": "A321", "alt_baro": 34000, "gs": 450, "track": 0.0,
+                              "seen_pos": 2, "lat": HOME[0] - 0.05, "lon": HOME[1]}])
+        self.assertEqual([(p["id"], p["type"], p["airline"]) for p in got], [("b1", "A321", "Delta Air Lines")])
+        self.assertAlmostEqual(got[0]["eta"], 22, delta=1.5)
+        self.assertLess(got[0]["miss_mi"], 0.1)
+        self.assertEqual((got[0]["from"], got[0]["to"]), ("Tampa", "Chicago"))
+
+    def test_left_out(self):
+        got = self.overhead([
+            # a mile north of the house, flying east: passes too far away
+            {"hex": "c1", "t": "B738", "alt_baro": 30000, "gs": 450, "track": 90.0, "lat": HOME[0] + 0.0145, "lon": -88.2446},
+            # went over 24 s ago: 3 nm west, going away
+            {"hex": "c2", "t": "B738", "alt_baro": 30000, "gs": 450, "track": 270.0, "lat": HOME[0], "lon": -88.2446},
+            # coming, but more than 45 s away
+            {"hex": "c3", "t": "B738", "alt_baro": 30000, "gs": 200, "track": 90.0, "lat": HOME[0], "lon": -88.2446},
+            # on the ground
+            {"hex": "c4", "t": "C172", "alt_baro": "ground", "gs": 0, "lat": HOME[0], "lon": HOME[1]},
+        ])
+        self.assertEqual(got, [])
+
+    def test_hovering_overhead(self):
+        got = self.overhead([{"hex": "h1", "t": "", "category": "A7", "alt_baro": 900, "lat": HOME[0] + 0.003, "lon": HOME[1]}])
+        self.assertEqual([(p["id"], p["eta"], p["category"]) for p in got], [("h1", 0.0, "A7")])
+
+    def test_no_home(self):
+        self.assertEqual(Planes(home=lambda: None, get_json=FakeNet([])).overhead(), [])
+
 if __name__ == "__main__":
     unittest.main()

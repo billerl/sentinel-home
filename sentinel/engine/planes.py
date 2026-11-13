@@ -37,6 +37,10 @@ ASK_RADIUS_NM = 25  # "any planes around?"
 OVERHEAD_NM = 12  # "what plane is that?": closer than this counts as the one being asked about
 POSITIONS_FRESH = 10.0  # seconds a fetch is reused
 LOOKBACK = 180.0  # "what was that?": a plane heard has usually just passed; look this many seconds back along its way
+# The TVs' fly-by picture: a plane whose path passes within half a mile (sideways, any height) of the house
+FLYBY_NM = 0.5 / 1.15078
+FLYBY_AHEAD = 45.0  # seconds ahead a pass is announced (the TVs ask every 10 s)
+FLYBY_WATCH_NM = 10  # looked at around the house: 45 s at airliner speed
 AWAY_NM = 5.0  # someone asking from farther than this from home hears about the planes over them instead
 # Where the person asking is, while their question is answered (their phone's position: Telegram, the Talk button, the
 # Planes page); None = the house. Set by whoever takes the question (Engine.answer_question, the Talk route).
@@ -229,6 +233,7 @@ class Planes:
             "lat": lat, "lon": lon, "alt": alt, "track": a.get("track"), "speed_kt": a.get("gs"),
             "dist_nm": dist, "dir": compass(bearing(home[0], home[1], lat, lon)),
             "slant_nm": math.hypot(dist, alt_nm), "route": None, "airline": None,
+            "type": code, "category": a.get("category") or "", "seen": float(a.get("seen_pos") or 0),
         }
 
     def _find_routes(self, planes: List[Dict[str, Any]]) -> None:
@@ -278,6 +283,37 @@ class Planes:
             airline = (fr.get("airline") if isinstance(fr.get("airline"), dict) else {}).get("name")
             stops.append([airport(fr.get("origin")), airport(fr.get("destination"))])
         return {"airline": airline, "stops": stops} if stops or airline else None
+
+    def overhead(self) -> List[Dict[str, Any]]:
+        """Planes about to pass (or just passing) within FLYBY_NM of the house, sideways at any height, for the TVs'
+        fly-by picture: each with ``eta`` (seconds to its closest point; negative = just passed). Worked out from
+        speed and heading on flat ground near the house, from where it was when last heard (``seen`` s ago)."""
+        home = self.home()
+        if not home:
+            return []
+        out = []
+        for p in self.nearby((float(home[0]), float(home[1])), radius=FLYBY_WATCH_NM):
+            if p["alt"] == "ground":
+                continue
+            x = (p["lon"] - home[1]) * 60 * math.cos(math.radians(home[0]))  # nm east
+            y = (p["lat"] - home[0]) * 60  # nm north
+            speed, track = p.get("speed_kt"), p.get("track")
+            if not speed or track is None:  # (a hovering helicopter: only when it's there now)
+                eta, miss = 0.0, math.hypot(x, y)
+            else:
+                vx = speed / 3600 * math.sin(math.radians(track))
+                vy = speed / 3600 * math.cos(math.radians(track))
+                x, y = x + vx * p["seen"], y + vy * p["seen"]
+                eta = -(x * vx + y * vy) / (vx * vx + vy * vy)
+                miss = math.hypot(x + vx * eta, y + vy * eta)
+            if miss <= FLYBY_NM and -15 <= eta <= FLYBY_AHEAD:
+                route = p["route"] or {}
+                out.append({"id": p["id"], "callsign": p["callsign"], "reg": p["reg"], "type": p["type"],
+                            "category": p["category"], "kind": p["kind"], "military": p["military"],
+                            "airline": p["airline"], "alt": p["alt"], "speed_kt": p["speed_kt"], "track": track,
+                            "from": (route.get("from") or {}).get("city"), "to": (route.get("to") or {}).get("city"),
+                            "eta": round(eta, 1), "miss_mi": round(miss * NM_TO_MILES, 2)})
+        return sorted(out, key=lambda o: o["eta"])
 
     # ------------------------------------------------------------ words
     @staticmethod

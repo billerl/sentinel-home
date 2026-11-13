@@ -106,6 +106,7 @@ sentinel-home/                         # repository root
     │   │                              #   three/ = three.js r128 + OrbitControls (MIT, the House page),
     │   │                              #   grid.js + grid.css = the live page's script and styles (?v=boot id),
     │   │                              #   sky.js + sky.css = the sky picture behind the weather cards (weather, time of day)
+    │   │                              #   flyby.js + flyby.css = TVs: a plane passing over the house flies across the screen
     │   │                              #   talk.js = the home page's 🎙️ Talk button (phone mic -> Jarvis)
     │   │                              #   hear.js = the home page's 🔔 Hear alerts switch (alerts read out in the browser)
     │   │                              #   roles.css = hides what the signed-in role can't use (data-min on elements)

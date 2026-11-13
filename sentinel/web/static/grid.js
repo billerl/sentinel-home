@@ -1511,6 +1511,7 @@ function closePlayer() {
   window.addEventListener("resize", function() { if (tl) applyZoom(false); });
   pollMusic();
   pollSwitches();
+  if (TV_PAGE && window.Flyby) Flyby.watch();  // TVs: a plane passing over the house flies across the screen
   // Keep today's timeline current.
   setInterval(function() {
     if (tl && tl.now_offset != null && !document.hidden) loadTimeline(tl.date);

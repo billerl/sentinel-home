@@ -498,6 +498,17 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   SAMEORIGIN (DENY blanked the TV). Map tiles come through Sentinel (`/map_tile/<street|aerial>/z/x/y.png`,
   `sentinel/web/map_tiles.py`: fetched with Sentinel's User-Agent, kept a week on disk under `.map_tiles`):
   OpenStreetMap sent the TV's browser "Access blocked" tiles.
+- **Fly-by on the TVs** (2026-11-13; `Planes.overhead`, `/api/planes/overhead`, `static/flyby.js` + `flyby.css`):
+  the TVs' camera page (`TV_PAGE` only: Samsung + Fire TV kiosk) asks every 10 s; the server looks 10 nm round the
+  house (the same 10 s position cache) and predicts from speed + heading (flat-ground, from the last-heard position
+  `seen_pos` s ago) which planes will pass within half a mile sideways, any height, in the next 45 s (`eta`, and up
+  to 15 s after). The page starts the fly-by so the plane is mid-screen at its closest point, once per plane per
+  pass: a drawn side view of its kind (ICAO type code -> ~15 families: narrow, wide, quad, trijet, rj, ejet,
+  turboprop, c130, airlifter, bizjet, twin, high/low-wing single, heli, fighter; else by ADS-B category) in its
+  airline's colours (call-sign prefix -> `LIVERIES`; colours only, no logos; private planes a stable colour from the
+  registration; military grey), crossing west->east or east->west as it really flies, contrail above 25,000 ft, and a
+  card (airline + number or registration, type, from -> to, height, mph, heading). One at a time (queued).
+  Costs: one adsb.lol call per 10 s while a TV shows the camera page (the Fire TV kiosk: all day).
 - **Planes overhead** (2026-11-10; `sentinel/engine/planes.py`, `templates/planes.html`, `/planes`, `/api/planes`):
   "what plane is that?" / "any planes around?" (command "planes", voice stage late) and "show me the planes" on the
   TV (`_camera_page` -> `#map=planes`; grid.js opens `/planes` instead of `/where`). Positions: adsb.lol

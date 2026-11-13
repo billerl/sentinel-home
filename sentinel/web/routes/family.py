@@ -255,6 +255,19 @@ def register(app: Flask, ctx: WebContext) -> None:
         # (a phone sends where it is, when its owner allowed it: the planes over them while they're away)
         return jsonify(engine.planes.map_view(_spot(request.args.get("lat"), request.args.get("lon"))))
 
+    @app.route("/api/planes/overhead")
+    def api_planes_overhead():
+        # The TVs ask every 10 s: a plane about to pass over the house flies across their screen (flyby.js)
+        redir = _require_session()
+        if redir:
+            return jsonify({"error": "unauthorized"}), 401
+        if engine is None:
+            return jsonify({"passes": []})
+        try:
+            return jsonify({"passes": engine.planes.overhead()})
+        except (OSError, ValueError):
+            return jsonify({"passes": []})
+
     tiles_box = []  # (made on first use: it needs the engine's data folder)
 
     @app.route("/map_tile/<source>/<int:z>/<int:x>/<int:y>.png")
