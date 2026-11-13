@@ -511,7 +511,7 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   "What was that" (also "plane" misheard as "playing" next to "flew over") ranks planes by their closest pass in
   the last LOOKBACK 180 s (walked back along track at ground speed). "Any military planes?" (kind "military"):
   /v2/point radius MIL_RADIUS_NM 150, dbFlags & 1 only, no route lookups; map: military red + always labeled.
-- **Lost dog** (`Family.set_lost/lost_view` in `sentinel/engine/family.py`, `lost_command` in location.py, page
+- **Pet tracker** (was "Lost dog"; renamed 2026-11-13, big blue Recall button at the top; `Family.set_lost/lost_view` in `sentinel/engine/family.py`, `lost_command` in location.py, page
   `/lost`, `/api/lost*`): "Grace is lost" (page button, voice, Telegram) = every unpaused chat gets the news, the
   `remote_web_url` + `/lost` link and the last fix as a pin; the base's check-ins then ask the collar every
   OUTING_POLL_SECONDS (as an outing, but with no end) and a new pin goes out when the pet has moved >= 30 m, at most

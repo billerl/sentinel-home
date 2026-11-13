@@ -8,7 +8,7 @@
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
   <link rel="manifest" href="/static/manifest.webmanifest">
   <meta name="theme-color" content="#001525">
-  <title>Sentinel — Lost dog</title>
+  <title>Sentinel — Pet tracker</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='leaflet/leaflet.css') }}">
   <script src="{{ url_for('static', filename='leaflet/leaflet.js') }}"></script>
   <style>
@@ -46,9 +46,10 @@
                  color: #ffd6d6; font-size: 0.9rem; line-height: 1.5; }
     .big { width: 100%; margin-top: 10px; padding: 14px; font-size: 1.05rem; font-weight: 600; }
     .big.alarm { background: #c62828; border-color: #ff8080; color: #fff; }
+    .big.recall { background: #1f5fa8; border-color: #8cc4ff; color: #fff; }
     .big.found { background: #1b6e3a; border-color: #7fe0a0; color: #fff; }
     #map { height: 62vh; min-height: 320px; border-radius: 14px; border: 1px solid #16303a; background: #050b0f; }
-    .tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+    .tools { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 10px; }
     .tools .btn, .tools button { padding: 12px 6px; font-size: 0.9rem; }
     .note { font-size: 0.8rem; color: #6f97a5; line-height: 1.5; margin: 10px 2px 0; }
     .msg { font-size: 0.85rem; color: #9cc; margin-top: 8px; min-height: 1em; }
@@ -68,7 +69,7 @@
   <header>
     <div class="bar">
       <a href="{{ url_for('index') }}">← Home</a>
-      <h1>Lost dog</h1>
+      <h1>Pet tracker</h1>
       <a href="{{ url_for('people_page') }}">Family</a>
     </div>
   </header>
@@ -82,6 +83,7 @@
         <div class="who"><b id="name"></b><span class="heard" id="heard"></span></div>
         <div class="lines" id="lines"></div>
         <div class="search-on" id="search-on" hidden></div>
+        <button type="button" class="big recall" id="recall" onclick="beep()"></button>
         <button type="button" class="big alarm" id="start" onclick="startSearch()"></button>
         <button type="button" class="big found" id="found" onclick="markFound()" hidden></button>
         <div class="msg" id="msg" role="status"></div>
@@ -89,7 +91,6 @@
       <div id="map"></div>
       <div class="tools">
         <a class="btn" id="directions" target="_blank" rel="noopener">🧭 Directions</a>
-        <button type="button" onclick="beep()">🔔 Beep collar</button>
         <button type="button" id="follow" onclick="followPet()">◎ Center</button>
       </div>
       <p class="note" id="range-note"></p>
@@ -180,6 +181,7 @@
         $("search-on").textContent = "Searching since " + clock(p.lost_since) + ". The collar reports about every " + data.poll_seconds + " seconds while " + p.name
           + " is moving, and every 3 minutes or so when still. Everyone on Telegram gets a new map pin when " + p.name + " moves.";
       }
+      $("recall").textContent = "🔔 Recall " + p.name + ": beep the collar";
       $("start").hidden = !!p.lost_since;
       $("start").textContent = "🚨 " + p.name + " is lost: start the search";
       $("found").hidden = !p.lost_since;

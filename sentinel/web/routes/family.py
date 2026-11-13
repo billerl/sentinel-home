@@ -1,5 +1,5 @@
 """
-Family locations: OwnTracks posts, setup links, personal logins, the People, Timeline and Lost dog pages
+Family locations: OwnTracks posts, setup links, personal logins, the People, Timeline and Pet tracker pages
 (sentinel/engine/location.py).
 """
 

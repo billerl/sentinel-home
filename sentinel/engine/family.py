@@ -122,7 +122,7 @@ class Family:
         app_logger.log("info", "pet_beep", pets=names, component="engine", action="location")
         return f"Okay, beeping {names}'s collar{'s' if len(pets) > 1 else ''}."
 
-    # ---- a lost pet: the collar is asked for a position every 30 s until it's found; the Lost dog page
+    # ---- a lost pet: the collar is asked for a position every 30 s until it's found; the Pet tracker page
     def lost(self) -> Dict[int, float]:
         """Pets being searched for: id -> since. Kept in the settings, so a restart doesn't end the search."""
         out = {}
@@ -164,7 +164,7 @@ class Family:
             self._send_location_alert(f"✅ {changed_names} found. Back to normal checking.")
             return f"Good news, {changed_names} {'are' if len(changed) > 1 else 'is'} found. Back to normal checking."
         url = str(self.settings.get("remote_web_url") or "").strip().rstrip("/")
-        link = f"Live map: {url}/lost" if url else "Live map: Sentinel's Home page → Lost dog."
+        link = f"Live map: {url}/lost" if url else "Live map: Sentinel's Home page → Pet tracker."
         many = len(changed) > 1
         text = (f"🚨 {changed_names} {'are' if many else 'is'} lost. {'Their collars are' if many else 'The collar is'} "
                 f"reporting about every {OUTING_POLL_SECONDS} seconds while moving (every 3 minutes or so when still) until you say "
@@ -177,7 +177,7 @@ class Family:
                     if fix:
                         self.telegram.send_location(chat, fix["lat"], fix["lon"])
             threading.Thread(target=send, name="pet-lost", daemon=True).start()
-        self._speak(f"{changed_names} {'are' if many else 'is'} lost. The live map is on Sentinel's lost dog page.")
+        self._speak(f"{changed_names} {'are' if many else 'is'} lost. The live map is on Sentinel's pet tracker page.")
         return (f"Okay, {changed_names} marked lost. Everyone on Telegram got the live map link, and "
                 f"{'their collars' if many else 'the collar'} will report as often as {'they' if many else 'it'} can.")
 
@@ -201,7 +201,7 @@ class Family:
             threading.Thread(target=send, name="pet-lost-pin", daemon=True).start()
 
     def lost_view(self) -> Dict[str, Any]:
-        """The Lost dog page: each collar's last position, its trail and whether it's being searched for."""
+        """The Pet tracker page: each collar's last position, its trail and whether it's being searched for."""
         from sentinel.engine.location import OUTING_POLL_SECONDS
 
         lost, now = self.lost(), time.time()
