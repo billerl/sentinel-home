@@ -295,3 +295,43 @@ class TestRemotes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTrimInfrared(unittest.TestCase):
+    """A button taught while held is many copies of one message: sent as one quick tap."""
+
+    @staticmethod
+    def code(copies, other_last=False):
+        frame = [146, 146, 16, 55, 16, 18] * 4  # (BroadLink ticks: header, then long/short bits)
+        pulses = b""
+        for i in range(copies):
+            body = [146, 146, 16, 18, 16, 55] * 4 if other_last and i == copies - 1 else frame
+            pulses += bytes(body) + bytes([0, 6, 0x50])  # then a ~49 ms gap (2 bytes, big-endian)
+        return bytes([0x26, 0]) + len(pulses).to_bytes(2, "little") + pulses
+
+    def test_held_button_is_cut_to_two_copies(self):
+        from sentinel.engine.remotes import trim_ir
+        held = self.code(17)
+        self.assertEqual(trim_ir(held), self.code(2))
+
+    def test_a_tap_and_odd_signals_are_left_alone(self):
+        from sentinel.engine.remotes import trim_ir
+        for code in (self.code(2), self.code(3), bytes([0xb2, 5, 4, 0, 1, 2, 3, 4]), bytes([0x26, 0])):
+            self.assertEqual(trim_ir(code), code)  # a tap, a 3-copy tap (the TV's Power), radio, nonsense
+
+    def test_copies_that_differ_are_left_alone(self):
+        from sentinel.engine.remotes import trim_ir
+        frame_a, frame_b = [146, 146, 16, 55, 16, 18] * 4, [146, 146, 16, 18, 16, 55] * 4
+        pulses = b"".join(bytes(f) + bytes([0, 6, 0x50]) for f in (frame_a, frame_b, frame_a, frame_b))
+        code = bytes([0x26, 0]) + len(pulses).to_bytes(2, "little") + pulses
+        self.assertEqual(trim_ir(code), code)  # not one message repeated: sent as recorded
+
+    def test_presses_send_the_trimmed_signal(self):
+        import base64
+        r = Remotes(tempfile.mkdtemp(prefix="sentinel-remotes-"))
+        sent = []
+        r._connect = lambda force=False: types.SimpleNamespace(send_data=sent.append)
+        r.remotes = [{"name": "Sound Bar", "buttons": [{"name": "Volume Up", "kind": "ir",
+                                                         "code": base64.b64encode(self.code(17)).decode()}]}]
+        self.assertTrue(r.press("Sound Bar", "Volume Up")[0])
+        self.assertEqual(sent, [self.code(2)])

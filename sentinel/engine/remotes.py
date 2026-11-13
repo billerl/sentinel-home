@@ -42,6 +42,47 @@ ALIASES = [(re.compile(r"\bturn (.+) up\b|\bturn up\b|\blouder\b"), "volume up")
 LOCKED = "The BroadLink is locked: in the BroadLink app, open its settings and turn off “Lock device”."
 
 
+IR_KEEP_FRAMES = 2  # an infrared button sends its message this many times: what one quick tap of a remote sends
+
+
+def trim_ir(code: bytes, keep: int = IR_KEEP_FRAMES) -> bytes:
+    """An infrared recording made with the button held is the same message over and over: the soundbar's
+    Volume up was 17 copies, 2 seconds of "held", so each tap took 2 s to send and they piled up behind
+    each other (2026-11-13). Cut to the first ``keep`` copies when the copies match; anything else as it was."""
+    try:
+        if len(code) < 8 or code[0] != 0x26:
+            return code
+        n = int.from_bytes(code[2:4], "little")
+        end = min(len(code), 4 + n)
+        entries, i = [], 4  # (byte offset just after it, microseconds)
+        while i < end:
+            v = code[i]
+            i += 1
+            if v == 0:
+                v = int.from_bytes(code[i:i + 2], "big")
+                i += 2
+            entries.append((i, v * 8192 / 269))
+        frames, cur = [], []  # each: its pulses, then the offset just after the gap that ends it
+        for off, us in entries:
+            if us > 20000:
+                frames.append((cur, off))
+                cur = []
+            else:
+                cur.append(us)
+        if len(frames) <= keep + 1:  # (one more is still a tap: the TV's Power has 3 and works)
+            return code
+        first = frames[0][0]
+        same = [f for f, _ in frames[:keep + 1]]
+        if not first or any(len(f) != len(first) or any(abs(a - b) > 0.35 * max(a, b) for a, b in zip(f, first))
+                            for f in same):
+            return code
+        cut = frames[keep - 1][1]
+        pulses = code[4:cut]
+        return bytes([code[0], code[1]]) + len(pulses).to_bytes(2, "little") + pulses
+    except (IndexError, ValueError):
+        return code
+
+
 def command_of(code: bytes) -> Optional[str]:
     """What a recorded radio signal says, without the timing wobble: the most common burst as long/short pulses.
     Two recordings of one button differ byte for byte but say the same; two buttons never do. None when it can't
@@ -418,7 +459,7 @@ class Remotes:
             b = self._button(r, button) if r else None
             if b is None:
                 return False, "I don't know that button."
-            name, code = f"{r['name']} {b['name']}", base64.b64decode(b["code"])
+            name, code = f"{r['name']} {b['name']}", trim_ir(base64.b64decode(b["code"]))
         times = max(1, min(MAX_TIMES, int(times)))  # (the heater's 14-press recount fits)
         with self._io:
             for attempt in (0, 1):  # once more after finding the BroadLink again (a new address)
