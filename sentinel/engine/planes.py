@@ -43,6 +43,34 @@ LOOKBACK = 180.0  # "what was that?": a plane heard has usually just passed; loo
 FLYBY_NM = 3 / 1.15078
 FLYBY_AHEAD = 45.0  # seconds ahead a pass is announced (the TVs ask every 10 s)
 FLYBY_WATCH_NM = 10  # looked at around the house: 45 s at airliner speed
+FLYBY_DEMO_S = 30  # a test fly-by is offered to the TVs this long (they ask every 10 s)
+# The Planes page's "Test fly-by" button picks one of these (one of each drawing, many airlines' colours)
+DEMO_PLANES = [
+    ("B738", "SWA1234", "Southwest Airlines", "Boeing 737", "Chicago", "Orlando", 34000, 452),
+    ("A321", "DAL1776", "Delta Air Lines", "Airbus A321", "Atlanta", "Detroit", 36000, 460),
+    ("B789", "UAL900", "United Airlines", "Boeing 787 Dreamliner", "Chicago", "Tokyo", 38000, 490),
+    ("B77W", "AAL100", "American Airlines", "Boeing 777", "Dallas", "London", 37000, 495),
+    ("A20N", "NKS610", "Spirit Airlines", "Airbus A320neo", "Detroit", "Fort Lauderdale", 33000, 445),
+    ("A321", "JBU9", "JetBlue", "Airbus A321", "Boston", "Las Vegas", 35000, 470),
+    ("A21N", "FFT2201", "Frontier Airlines", "Airbus A321neo", "Cleveland", "Denver", 34000, 455),
+    ("B39M", "ASA45", "Alaska Airlines", "Boeing 737 MAX", "Seattle", "Washington", 37000, 480),
+    ("A320", "AAY410", "Allegiant Air", "Airbus A320", "Toledo", "Punta Gorda", 32000, 440),
+    ("MD11", "FDX1400", "FedEx", "MD-11", "Memphis", "Indianapolis", 31000, 470),
+    ("B763", "UPS2100", "UPS", "Boeing 767", "Louisville", "Philadelphia", 33000, 465),
+    ("B744", "GTI8000", "Atlas Air", "Boeing 747", "Cincinnati", "Anchorage", 35000, 480),
+    ("CRJ9", "EDV5000", "Endeavor Air", "CRJ-900", "Detroit", "Columbus", 24000, 400),
+    ("E75L", "SKW3000", "SkyWest Airlines", "Embraer 175", "Chicago", "Pittsburgh", 29000, 420),
+    ("DH8D", "QXE2200", "Horizon Air", "Dash 8", "Portland", "Spokane", 21000, 300),
+    ("A359", "ACA880", "Air Canada", "Airbus A350", "Toronto", "Miami", 39000, 485),
+    ("C56X", "EJA331", None, "Cessna Citation Excel", "Columbus", "Teterboro", 41000, 430),
+    ("BE58", "N4567B", None, "Beechcraft Baron", None, None, 6500, 190),
+    ("C172", "N2628U", None, "Cessna 172", None, None, 2500, 105),
+    ("SR22", "N22SR", None, "Cirrus SR22", None, None, 8500, 170),
+    ("EC45", "N145LF", None, "Airbus EC145 helicopter", None, None, 1200, 130),
+    ("C130", "RCH77", None, "C-130 Hercules", None, None, 9000, 280),
+    ("C17", "RCH45", None, "C-17", None, None, 24000, 420),
+    ("F16", "VIPER1", None, "F-16 fighter", None, None, 15000, 480),
+]
 AWAY_NM = 5.0  # someone asking from farther than this from home hears about the planes over them instead
 # Where the person asking is, while their question is answered (their phone's position: Telegram, the Talk button, the
 # Planes page); None = the house. Set by whoever takes the question (Engine.answer_question, the Talk route).
@@ -167,6 +195,7 @@ class Planes:
         self.home = home
         # Trying the TVs' fly-by out: a JSON list of made-up passes written here is flown across once (for 30 s)
         self.demo_file = demo_file
+        self._demo: Optional[Tuple[float, Dict[str, Any]]] = None  # (when, pass): the Planes page's Test fly-by
         self._get = get_json or self._http_json
         self._clock = clock
         self._lock = threading.Lock()
@@ -322,16 +351,35 @@ class Planes:
                             "side": compass(math.degrees(math.atan2(cx, cy))) if miss * NM_TO_MILES >= 0.6 else ""})
         return sorted(out, key=lambda o: o["eta"])
 
+    def demo_flyby(self, pick: Optional[int] = None) -> Dict[str, Any]:
+        """A random plane from DEMO_PLANES, offered to the TVs for FLYBY_DEMO_S (each TV flies it once)."""
+        import random
+
+        t, cs, airline, kind, frm, to, alt, speed = DEMO_PLANES[random.randrange(len(DEMO_PLANES)) if pick is None else pick]
+        now = self._clock()
+        fake = {"id": f"demo-{cs}-{int(now * 1000)}", "type": t, "callsign": cs, "reg": cs if cs.startswith("N") else "",
+                "airline": airline, "kind": kind, "military": cs.startswith(("RCH", "VIPER")), "category": "",
+                "from": frm, "to": to, "alt": alt, "speed_kt": speed,
+                "track": float(random.choice((random.uniform(20, 160), random.uniform(200, 340)))),
+                "miss_mi": 0.0, "side": ""}
+        with self._lock:
+            self._demo = (now, fake)
+        return fake
+
     def _demo_passes(self) -> List[Dict[str, Any]]:
-        """The made-up passes in ``demo_file`` while it's under 30 s old (each flown once: the TV remembers its id)."""
+        """The Test fly-by (and the made-up passes in ``demo_file``) while under 30 s old (each flown once: the TV
+        remembers its id)."""
+        with self._lock:
+            demo = self._demo
+        out = [{**demo[1], "eta": 0.0, "demo": True}] if demo and self._clock() - demo[0] < FLYBY_DEMO_S else []
         try:
             if not self.demo_file or self._clock() - os.path.getmtime(self.demo_file) > 30:
-                return []
+                return out
             with open(self.demo_file) as f:
                 passes = json.load(f)
         except (OSError, ValueError):
-            return []
-        return [{**p, "eta": 0.0, "demo": True} for p in passes if isinstance(p, dict) and p.get("id")]
+            return out
+        return out + [{**p, "eta": 0.0, "demo": True} for p in passes if isinstance(p, dict) and p.get("id")]
 
     # ------------------------------------------------------------ words
     @staticmethod

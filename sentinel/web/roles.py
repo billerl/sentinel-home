@@ -77,7 +77,7 @@ ACCESS: Dict[str, Rule] = {
     # ---- user: use everything
     "pair_approve": USER,
     "api_family": USER, "people_page": USER, "api_people": USER, "where_page": USER, "api_where": USER,
-    "planes_page": USER, "api_planes": USER, "api_planes_overhead": USER,
+    "planes_page": USER, "api_planes": USER, "api_planes_overhead": USER, "api_planes_flyby_demo": USER,
     "timeline_page": USER, "api_timeline_people": USER, "api_timeline_day": USER,
     "api_timeline_delete": USER,  # (only their own: checked in the route)
     "api_people_photo": USER,  # (their own; an admin anyone's: checked in the route)

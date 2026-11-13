@@ -5,6 +5,7 @@ Family locations: OwnTracks posts, setup links, personal logins, the People, Tim
 
 from __future__ import annotations
 
+import re
 import time
 
 import segno
@@ -267,6 +268,17 @@ def register(app: Flask, ctx: WebContext) -> None:
             return jsonify({"passes": engine.planes.overhead()})
         except (OSError, ValueError):
             return jsonify({"passes": []})
+
+    @app.route("/api/planes/flyby_demo", methods=["POST"])
+    def api_planes_flyby_demo():
+        # The Planes page's "Test fly-by": a random plane across the TVs' camera page within ~10 s
+        err = _config_guard()
+        if err:
+            return err
+        p = engine.planes.demo_flyby()
+        who = " ".join(x for x in (p["airline"], re.sub(r"^[A-Z]{3}(?=\d)", "", p["callsign"]) if p["airline"] else "") if x)
+        return _result(True, f"Sending {who + ' · ' if who else ''}{p['kind']} across the TVs: it'll fly within 10 seconds "
+                             "(they need to be showing the cameras).")
 
     tiles_box = []  # (made on first use: it needs the engine's data folder)
 

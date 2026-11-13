@@ -310,6 +310,19 @@ class TestOverhead(unittest.TestCase):
         os.utime(path, (0, 0))  # older than 30 s: over
         self.assertEqual(planes.overhead(), [])
 
+    def test_test_flyby_button(self):
+        from sentinel.engine import planes as planes_mod
+        clock = [1000.0]
+        planes = Planes(home=lambda: None, get_json=FakeNet([]), clock=lambda: clock[0])
+        for i in range(len(planes_mod.DEMO_PLANES)):  # every sample makes a pass the TVs can draw
+            p = planes.demo_flyby(pick=i)
+            self.assertTrue(p["type"] and p["kind"] and p["id"].startswith("demo-"), p)
+            self.assertTrue(20 <= p["track"] <= 160 or 200 <= p["track"] <= 340, p["track"])  # clearly east or west
+        got = planes.overhead()
+        self.assertEqual([(g["id"], g["eta"], g["demo"]) for g in got], [(p["id"], 0.0, True)])
+        clock[0] += 31  # offered for 30 s only
+        self.assertEqual(planes.overhead(), [])
+
     def test_no_home(self):
         self.assertEqual(Planes(home=lambda: None, get_json=FakeNet([])).overhead(), [])
 

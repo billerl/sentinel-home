@@ -23,6 +23,10 @@
     .leaflet-tooltip.tag:before { display: none; }
     .leaflet-tooltip.tag.low { color: #ffd84d; }
     .leaflet-tooltip.tag.mil { color: #ff8f8f; }
+    #flyby { position: absolute; top: 12px; right: 12px; z-index: 1000; padding: 8px 14px; border-radius: 10px; font-size: 15px;
+             background: rgba(0, 10, 16, 0.86); border: 1px solid #0b6a7a; color: #8ff; cursor: pointer; font-family: inherit; }
+    #flyby-said { position: absolute; top: 56px; right: 12px; z-index: 1000; max-width: min(340px, 80vw); padding: 8px 12px;
+                  border-radius: 10px; background: rgba(0, 10, 16, 0.9); color: #cfe; font-size: 14px; line-height: 1.4; }
     #home-link { position: absolute; top: 12px; left: 12px; z-index: 1000; padding: 8px 14px; border-radius: 10px;
                  background: rgba(0, 10, 16, 0.86); border: 1px solid #16303a; color: #cfe; text-decoration: none; font-size: 15px; }
     @media (max-width: 700px) {  /* a phone */
@@ -39,11 +43,29 @@
   <div id="map"></div>
   <div id="panel"><div class="empty">Looking for planes…</div></div>
   <a id="home-link" href="/" hidden>← Home</a>
+  <button id="flyby" type="button" hidden title="A random plane flies across the TVs' camera screens">✈️ Test fly-by</button>
+  <div id="flyby-said" hidden></div>
   <script>
     var map = null, layers = null, me = null, centered = null;
     // A phone (not a TV) may share where it is: away from home, the map is of the planes over its owner
     var TV = /SMART-TV|Tizen|\bAFT[A-Z0-9]+\b|Web0S|webOS|BRAVIA/.test(navigator.userAgent);
     if (!TV && window.top === window) document.getElementById("home-link").hidden = false;  // (not inside the TV's page)
+    // Test fly-by (from a phone or PC): a random plane flies across the TVs' camera page
+    if (!TV && window.top === window) {
+      var fb = document.getElementById("flyby"), said = document.getElementById("flyby-said"), saidTimer = null;
+      fb.hidden = false;
+      fb.onclick = function () {
+        fb.disabled = true;
+        fetch("/api/planes/flyby_demo", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" }, body: "{}" })
+          .then(function (r) { return r.json(); })
+          .then(function (d) { said.textContent = d.message || d.error || "Sent."; })
+          .catch(function () { said.textContent = "Couldn't reach Sentinel."; })
+          .then(function () {
+            said.hidden = false; fb.disabled = false;
+            clearTimeout(saidTimer); saidTimer = setTimeout(function () { said.hidden = true; }, 8000);
+          });
+      };
+    }
     if (!TV && window.isSecureContext && navigator.geolocation) {
       navigator.geolocation.watchPosition(function (pos) {
         var first = !me;
