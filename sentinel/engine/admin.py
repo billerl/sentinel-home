@@ -144,6 +144,7 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "recording_retention_enabled": _bool,
     "recording_retention_days": _num(1, 365, int),
     "recording_min_free_percent": _num(0, 50, int),
+    "recording_motion_only_days": _num(0, 365, int),
     "auto_reconnect_enabled": _bool,
     "reconnect_interval_seconds": _num(5, 300, int),
     "feed_fps": _num(5, 30, int),

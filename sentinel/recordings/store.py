@@ -434,10 +434,11 @@ class RecordingStore:
         retention_days: float,
         min_free_percent: float = 0.0,
         free_percent_fn: Optional[Callable[[], float]] = None,
+        motion_only_days: float = 0.0,
     ) -> Dict[str, int]:
-        """Delete clips older than ``retention_days``; then, if free space is below
-        ``min_free_percent``, delete the oldest clips until it recovers (always
-        keeping the last 24 hours)."""
+        """Delete clips older than ``retention_days``, and motion-only clips (nothing recognised: grey on the
+        timeline) older than ``motion_only_days``; then, if free space is below ``min_free_percent``, delete
+        the oldest clips until it recovers (always keeping the last 24 hours)."""
         free_percent_fn = free_percent_fn or self._free_percent
         deleted, freed = 0, 0
 
@@ -464,6 +465,19 @@ class RecordingStore:
                             deleted += 1
                     except OSError:
                         pass
+
+        # Motion-only clips: wind, shadows, bugs at night. Measured 2026-11-13: three quarters of the space, and a
+        # sample of 30 old ones held nothing worth keeping. One within a minute of a recognised event is kept.
+        if motion_only_days and motion_only_days > 0:
+            cutoff = time.time() - float(motion_only_days) * 86400
+            with self._connect() as conn:
+                grey = conn.execute(
+                    "SELECT id, path, hd_path FROM recordings r WHERE start_ts < ? AND reason = 'motion'"
+                    " AND (labels IS NULL OR labels = '') AND NOT EXISTS (SELECT 1 FROM events e"
+                    " WHERE e.camera_key = r.camera_key AND e.ts BETWEEN r.start_ts - 60"
+                    " AND COALESCE(r.end_ts, r.start_ts) + 60)", (cutoff,)).fetchall()
+            d, f = self._delete_records(grey)
+            deleted, freed = deleted + d, freed + f
 
         if min_free_percent and min_free_percent > 0:
             keep_after = time.time() - LOW_DISK_KEEP_SECONDS
@@ -492,6 +506,7 @@ class RecordingStore:
                 result = self.apply_retention(
                     float(settings.get("recording_retention_days", 30)),
                     float(settings.get("recording_min_free_percent", 10)),
+                    motion_only_days=float(settings.get("recording_motion_only_days", 7)),
                 )
             if added or result["deleted"]:
                 app_logger.log(

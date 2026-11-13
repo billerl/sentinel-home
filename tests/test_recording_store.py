@@ -90,6 +90,28 @@ class TestRecordingStore(unittest.TestCase):
         self.assertFalse(os.path.isdir(os.path.join(self.root, "2026-01-01")))
         self.assertTrue(os.path.exists(keep_db))
 
+    def test_motion_only_clips_go_after_a_week(self) -> None:
+        now = time.time()
+        old_grey = self._add_clip("cam1", now - 9 * 86400)
+        old_person = self._add_clip("cam1", now - 9 * 86400 + 600)
+        self.store.set_labels(old_person, ["person"])
+        old_grey_by_a_car = self._add_clip("cam1", now - 9 * 86400 + 1200)
+        self.store.add_event(now - 9 * 86400 + 1200 + 30, "cam1", "CAM1", "vehicle", "A car pulled in", label="car")
+        old_grey_other_camera = self._add_clip("cam2", now - 9 * 86400 + 1200)  # (the car was on cam1)
+        new_grey = self._add_clip("cam1", now - 2 * 86400)
+        hd = _touch(os.path.join(self.root, "x_hd.mp4"))
+        with self.store._connect() as conn:
+            conn.execute("UPDATE recordings SET hd_path = ? WHERE id = ?", (self.store._rel(hd), old_grey))
+
+        result = self.store.apply_retention(30, 0, motion_only_days=7)
+
+        gone = {i: self.store.get(i) is None for i in (old_grey, old_person, old_grey_by_a_car, old_grey_other_camera, new_grey)}
+        self.assertEqual(gone, {old_grey: True, old_person: False, old_grey_by_a_car: False, old_grey_other_camera: True,
+                                new_grey: False})
+        self.assertFalse(os.path.exists(hd))  # (its HD copy too)
+        self.assertEqual(result["deleted"], 2)
+        self.assertEqual(self.store.apply_retention(30, 0, motion_only_days=0)["deleted"], 0)  # 0: kept with the rest
+
     def test_low_disk_deletes_oldest_but_keeps_last_day(self) -> None:
         now = time.time()
         ids = [self._add_clip("cam1", now - d * 86400) for d in (5, 4, 3)]

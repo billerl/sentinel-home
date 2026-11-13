@@ -247,8 +247,11 @@
         <div class="row">
           <div class="field" style="flex: 0 1 200px"><span>Keep clips for (days)</span><input type="number" min="1" max="365" data-key="recording_retention_days"></div>
           <div class="field" style="flex: 0 1 260px"><span>If free disk drops below (%), delete oldest</span><input type="number" min="0" max="50" data-key="recording_min_free_percent"></div>
+          <div class="field" style="flex: 0 1 260px"><span>Keep motion-only (grey) clips for (days)</span><input type="number" min="0" max="365" data-key="recording_motion_only_days"></div>
         </div>
-        <p class="hint">The last 24 hours are always kept, even when the disk is low.</p>
+        <p class="hint">The last 24 hours are always kept, even when the disk is low. <b>Motion-only</b> clips are the grey ones on the
+          timeline: something moved but no person, vehicle or animal was recognised (wind, shadows, bugs at night). They take most of
+          the space, so they're kept for a shorter time; one recorded within a minute of a recognised event stays. 0 = keep them as long as the rest.</p>
         <h3>Night bug filter schedule</h3>
         <div class="row">
           <div class="field" style="flex: 0 1 140px"><span>From hour (0–23)</span><input type="number" min="0" max="23" data-key="night_bug_start_hour"></div>
@@ -591,7 +594,7 @@
       telegram: ["telegram_enabled", "telegram_chat_ids", "telegram_motion_alerts", "telegram_include_video", "telegram_cooldown",
                  "recap_enabled", "recap_time", "recap_since",
                  "assistant_enabled", "assistant_daily_limit", "assistant_model", "assistant_web_search"],
-      recording: ["recording_retention_enabled", "recording_retention_days", "recording_min_free_percent",
+      recording: ["recording_retention_enabled", "recording_retention_days", "recording_min_free_percent", "recording_motion_only_days",
                   "night_bug_start_hour", "night_bug_end_hour", "auto_reconnect_enabled",
                   "reconnect_interval_seconds", "feed_fps", "web.max_fps", "web.show_zones"],
       backup: ["backup_enabled", "backup_time", "backup_video_days", "backup_remote"],

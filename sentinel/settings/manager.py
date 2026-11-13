@@ -98,6 +98,7 @@ class SettingsManager:
             "recording_retention_enabled": True,
             "recording_retention_days": 30,
             "recording_min_free_percent": 10,
+            "recording_motion_only_days": 7,  # grey (nothing recognised) clips; 0 = keep them as long as the rest
             # Object detection (YOLOX on OpenVINO). alert_mode "objects" alerts only
             # when a person/vehicle/animal is recognised; "motion" alerts on any motion.
             "object_detection_enabled": True,
