@@ -114,7 +114,16 @@ def parse_volume_command(text: str) -> Optional[Tuple[str, str]]:
          or re.fullmatch(rf"(?:turn |set |put )?{_PC} (?:to|at) (\d{{1,3}}|[a-z ]+?) percent", t))
     if m and level(m.group(1)):
         return ("pc", level(m.group(1)))
+    # Plain volume words are the Jabra's (Jarvis's own speaker); Spotify only when it's named (2026-11-13)
+    m = re.fullmatch(r"(?:turn |set |put )?(?:the )?volume (?:to |at )?(\d{1,3}|[a-z ]+?)(?: percent)?", t)
+    if m and level(m.group(1)):
+        return ("pc", level(m.group(1)))
     m = (re.fullmatch(rf"turn {_PC}(?: volume)? (up|down){_STEP}", t)
+         or re.fullmatch(rf"(?:turn )?(?:the )?volume (up|down){_STEP}", t)
+         or re.fullmatch(rf"turn (?:it|the volume) (up|down){_STEP}", t)
+         or re.fullmatch(rf"turn (up|down)(?: the volume| it)?{_STEP}", t)
+         or re.fullmatch(rf"{_PC} (up|down){_STEP}", t)
+         or re.fullmatch(rf"(louder|quieter|softer){_STEP}", t)
          or re.fullmatch(rf"turn (up|down) {_PC}(?: volume)?{_STEP}", t)
          or re.fullmatch(rf"{_PC} volume (up|down){_STEP}", t)
          or re.fullmatch(rf"make {_PC} (louder|quieter|softer){_STEP}", t))

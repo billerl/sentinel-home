@@ -96,14 +96,17 @@ def parse_music_command(text: str) -> Optional[Tuple[str, str]]:
     if re.search(r"\b(what'?s|what is|what song is|who is|who'?s) (this|playing|this song|singing)\b|"
                  r"\bwhat song\b|\bname of this song\b", t):
         return ("now", "")
-    m = re.fullmatch(r"(?:turn |set )?(?:the )?(?:music |spotify )?volume (?:to |at )?(\d{1,3}|[a-z ]+?)(?: percent)?", t)
+    # Only when Spotify or the music is named: a plain "volume up" is the Jabra speaker's (parse_volume_command,
+    # 2026-11-13: "volume up" went to Spotify and nothing happened)
+    m = (re.fullmatch(r"(?:turn |set )?(?:the )?(?:music|spotify)(?:'s)? volume (?:to |at )?(\d{1,3}|[a-z ]+?)(?: percent)?", t)
+         or re.fullmatch(r"(?:turn |set )?(?:the )?(?:music|spotify) (?:to |at )(\d{1,3}|[a-z ]+?)(?: percent)?", t))
     if m and (m.group(1).isdigit() or m.group(1) in _NUMBERS):
         return ("volume", str(min(100, int(m.group(1)) if m.group(1).isdigit() else _NUMBERS[m.group(1)])))
-    if re.fullmatch(r"(turn (it|the music|the volume) up|(music |volume )?up|louder|volume up|"
-                    r"turn up( the)?( music| volume)?)( a (bit|little))?", t):
+    if re.fullmatch(r"(turn (the )?(music|spotify)( volume)? up|(music|spotify)( volume)? up|"
+                    r"turn up( the)? (music|spotify)( volume)?|make (the )?(music|spotify) louder)( a (bit|little))?", t):
         return ("volume", "+")
-    if re.fullmatch(r"(turn (it|the music|the volume) down|(music |volume )?down|quieter|softer|volume down|"
-                    r"turn down( the)?( music| volume)?)( a (bit|little))?", t):
+    if re.fullmatch(r"(turn (the )?(music|spotify)( volume)? down|(music|spotify)( volume)? down|"
+                    r"turn down( the)? (music|spotify)( volume)?|make (the )?(music|spotify) (quieter|softer))( a (bit|little))?", t):
         return ("volume", "-")
     m = re.fullmatch(r"(?:play|put on)(?: the)? (?:music |spotify |it )?(?:on (?:the )?(.+)|(?:right |in )?(here))", t)
     if m:

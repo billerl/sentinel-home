@@ -24,8 +24,10 @@ class TestParse(unittest.TestCase):
             "resume": ("resume", ""), "play music": ("resume", ""), "keep playing": ("resume", ""),
             "skip": ("next", ""), "next song": ("next", ""), "skip this song": ("next", ""),
             "previous song": ("previous", ""), "go back": ("previous", ""),
-            "volume up": ("volume", "+"), "turn it down a bit": ("volume", "-"), "louder": ("volume", "+"),
-            "volume 40": ("volume", "40"), "set the volume to fifty percent": ("volume", "50"),
+            "spotify up": ("volume", "+"), "turn the music down a bit": ("volume", "-"),
+            "make the music louder": ("volume", "+"), "spotify volume 40": ("volume", "40"),
+            "set the music volume to fifty percent": ("volume", "50"), "turn spotify to 30 percent": ("volume", "30"),
+            "volume up": None, "louder": None, "turn it down": None,  # (the Jabra's: parse_volume_command)
             "What's playing?": ("now", ""), "what song is this": ("now", ""),
             "Place on Tom Petty.": ("play", "tom petty"), "Place some jazz": ("play", "some jazz"),
             "Play Spotify on Sentinel.": ("move", "sentinel"), "play spotify here": ("move", "here"),
@@ -398,7 +400,12 @@ class TestEngineMusic(unittest.TestCase):
                  "turn up the speaker phone": ("pc", "+"), "turn the tv down": None,
                  "Set the Jabra speaker to 50%.": ("pc", "50"), "set the speaker to 40 percent": ("pc", "40"),
                  "set the speaker to music": None,
-                 "turn it down": None, "volume 40": None, "turn the music down": None}
+                 "turn the music down": None, "spotify up": None, "spotify volume 40": None,
+                 # plain volume words are the Jabra's (2026-11-13)
+                 "volume up": ("pc", "+"), "Volume 80%": ("pc", "80"), "volume 40": ("pc", "40"),
+                 "turn it down": ("pc", "-"), "turn the volume up a bit": ("pc", "+"), "louder": ("pc", "+"),
+                 "speaker up": ("pc", "+"), "speaker volume up": ("pc", "+"), "turn up the volume": ("pc", "+"),
+                 "set the volume to fifty percent": ("pc", "50"), "quieter": ("pc", "-")}
         for text, want in cases.items():
             self.assertEqual(parse_volume_command(text), want, text)
 
