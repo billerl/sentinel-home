@@ -6,7 +6,8 @@ sentinel-home/                         # repository root
 ├── setup.py                           # setuptools package metadata
 ├── requirements.txt                   # Core Python dependencies
 ├── requirements-piper.txt             # Optional Piper TTS (`pip install -r ...`)
-├── readme.md                          # User documentation
+├── readme.md                          # Start here: what it is, install, optional extras
+├── AGENTS.md                          # For AI assistants (any tool) helping install or change Sentinel
 ├── installation-guide.md              # Installation + troubleshooting
 ├── project-structure.md               # This file
 ├── handoff_summary.md                 # Cross-session continuity for contributors

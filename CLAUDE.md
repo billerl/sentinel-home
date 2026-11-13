@@ -4,6 +4,8 @@ Self-hosted home security for RTSP cameras: motion + object detection, recording
 timeline, natural-language Telegram alerts and questions, all in a web UI. Everything must stay
 **free and local** (no paid APIs, no cloud AI). Start with `readme.md` (features, install) and
 `handoff_summary.md` (architecture and design decisions); `project-structure.md` maps the files.
+`AGENTS.md` is the same guidance for any AI assistant (and for people installing with one): keep the
+two in step when rules or pitfalls change.
 If `CLAUDE.local.md` exists (git-ignored), read it too: it holds the notes for one particular install
 (its machine, family, roadmap). Never copy its personal details into tracked files.
 

@@ -51,6 +51,11 @@
     .tile.alarm { border-color: #ff6b6b; box-shadow: 0 0 18px -8px #ff6b6b; }
     .tile.alarm .s { color: #ffb3b3; }
     .tile .s.alert { color: #ffc94d; }
+    #more-tiles .tile { opacity: 0.7; min-height: 0; }
+    #more-tiles .tile.big { grid-column: auto; background: #0a1116; border-color: #16303a; }
+    #more-tiles .tile.big .ic { font-size: 1.6rem; }
+    #more-tiles .tile:hover { opacity: 1; }
+    .more-note { color: #6f97a5; font-size: 0.85rem; margin: -2px 0 10px; }
     .tile.big { grid-column: span 2; background: linear-gradient(135deg, #062330, #091015); border-color: #0b4a5a; }
     .tile.big .ic { font-size: 2rem; }
 
@@ -90,22 +95,22 @@
     </div>
 
     <h2>Go to</h2>
-    <div class="tiles">
+    <div class="tiles" id="main-tiles">
       <a class="tile big" href="{{ url_for('live_page') }}">
         <span class="ic">📹</span><span class="t">Cameras</span><span class="s" id="s-cams">Live view, timeline and clips</span></a>
-      <a class="tile big" href="{{ url_for('sensors_page') }}" data-min="user">
+      <a class="tile big" href="{{ url_for('sensors_page') }}" data-min="user" data-needs="sensors">
         <span class="ic">📶</span><span class="t">Movement inside</span><span class="s" id="s-sensors">Wi-Fi motion sensors</span></a>
-      <a class="tile" href="{{ url_for('lost_page') }}" id="t-lost">
+      <a class="tile" href="{{ url_for('lost_page') }}" id="t-lost" data-needs="pets">
         <span class="ic">🐕</span><span class="t">Pet tracker</span><span class="s" id="s-lost">Collar map, recall beep</span></a>
       <a class="tile" href="{{ url_for('house_page') }}" data-min="user">
         <span class="ic">🏠</span><span class="t">House</span><span class="s">3D map: sensors, switches, cameras</span></a>
-      <a class="tile" href="{{ url_for('live_page') }}#switches">
+      <a class="tile" href="{{ url_for('live_page') }}#switches" data-needs="plugs">
         <span class="ic">💡</span><span class="t">Switches</span><span class="s" id="s-switches">Lights and plugs</span></a>
-      <a class="tile" href="{{ url_for('live_page') }}#remote" data-min="user">
+      <a class="tile" href="{{ url_for('live_page') }}#remote" data-min="user" data-needs="tvs">
         <span class="ic">🎮</span><span class="t">TV remote</span><span class="s" id="s-remotes">TV remotes</span></a>
-      <a class="tile" href="{{ url_for('remotes_page') }}" data-min="user">
-        <span class="ic">🎛️</span><span class="t">Remotes</span><span class="s">Heater, soundbar, fans</span></a>
-      <a class="tile" href="{{ url_for('sensors_history_page') }}" data-min="user">
+      <a class="tile" href="{{ url_for('remotes_page') }}" data-min="user" data-needs="blaster">
+        <span class="ic">🎛️</span><span class="t">Remotes</span><span class="s" id="s-blaster">Heater, soundbar, fans</span></a>
+      <a class="tile" href="{{ url_for('sensors_history_page') }}" data-min="user" data-needs="sensors">
         <span class="ic">🕒</span><span class="t">Movement history</span><span class="s">When each room saw movement</span></a>
       <a class="tile" href="{{ url_for('planes_page') }}" data-min="user">
         <span class="ic">✈️</span><span class="t">Planes</span><span class="s">What's flying over (or over you, when away)</span></a>
@@ -117,8 +122,8 @@
         <span class="ic">🍳</span><span class="t">Recipes</span><span class="s">Family recipe box and cooking mode</span></a>
       <a class="tile" href="{{ url_for('notes_page') }}" data-min="user">
         <span class="ic">📝</span><span class="t">Notes</span><span class="s">Shared lists, and notes only you can see</span></a>
-      <a class="tile" href="{{ url_for('mesh_page') }}" data-min="user">
-        <span class="ic">📡</span><span class="t">Mesh chat</span><span class="s">Text over the radio mesh</span></a>
+      <a class="tile" href="{{ url_for('mesh_page') }}" data-min="user" data-needs="mesh">
+        <span class="ic">📡</span><span class="t">Mesh chat</span><span class="s" id="s-mesh">Text over the radio mesh</span></a>
       <a class="tile" href="{{ url_for('vehicles_page') }}" data-min="admin">
         <span class="ic">🚗</span><span class="t">Vehicles</span><span class="s">Family cars the cameras know</span></a>
       <a class="tile" href="{{ url_for('routines_page') }}" data-min="user">
@@ -129,6 +134,12 @@
         <span class="ic">🛠️</span><span class="t">Settings</span><span class="s">Cameras, alerts, Telegram, voice</span></a>
       <a class="tile" href="{{ url_for('settings_page') }}#help">
         <span class="ic">❓</span><span class="t">Help</span><span class="s">How everything works{% if role == "user" %}, and your password{% endif %}</span></a>
+    </div>
+
+    <div id="more" hidden>
+      <h2>Add more</h2>
+      <p class="more-note">These light up by themselves once their hardware is on your network. Tap one to see what it needs.</p>
+      <div class="tiles" id="more-tiles"></div>
     </div>
   </main>
 
@@ -189,7 +200,8 @@
       var lost = d.pets.filter(function (p) { return p.lost_since; });
       document.getElementById("t-lost").classList.toggle("alarm", lost.length > 0);
       if (lost.length) setText("s-lost", "🚨 Searching for " + lost.map(function (p) { return p.name; }).join(" and "));
-      else setText("s-lost", d.pets.length ? "Collar map, recall beep" : "No collar trackers yet");
+      else setText("s-lost", d.pets.length ? "Collar map, recall beep" : "Needs a Meshtastic GPS collar tracker");
+      setReady("pets", d.pets.length > 0);
     }
 
     async function loadStatus() {
@@ -200,7 +212,8 @@
       try {
         var wm = await getJson("/api/wifi_motion");
         var moving = wm.sensors.filter(function (s) { return s.online && s.motion; }).map(function (s) { return s.name; });
-        if (!wm.sensors.length) setText("s-sensors", "No sensors set up");
+        setReady("sensors", wm.sensors.length > 0);
+        if (!wm.sensors.length) setText("s-sensors", "Needs ESP32 Wi-Fi sensor boards (see Help)");
         else if (moving.length) setText("s-sensors", "Movement now: " + moving.join(", "), true);
         else setText("s-sensors", "All still · " + wm.sensors.length + " line" + (wm.sensors.length === 1 ? "" : "s"));
       } catch (e) { }
@@ -210,10 +223,36 @@
       try { var d = await getJson("/api/switches"); } catch (e) { return; }
       var plugs = d.switches.filter(function (s) { return s.icon !== "tv"; });
       var on = plugs.filter(function (s) { return s.on && s.online; }).length;
-      setText("s-switches", !plugs.length ? "None found yet" : on ? on + " on · " + plugs.length + " in all" : "All off · " + plugs.length + " in all", on > 0);
+      setReady("plugs", plugs.length > 0);
+      setReady("tvs", d.switches.some(function (s) { return s.icon === "tv" && /^(samsung|firetv)-/.test(s.id); }));
+      setText("s-switches", !plugs.length ? "Kasa and Tasmota plugs on your Wi-Fi show up here" : on ? on + " on · " + plugs.length + " in all" : "All off · " + plugs.length + " in all", on > 0);
       var tvs = d.switches.filter(function (s) { return s.icon === "tv" && /^(samsung|firetv)-/.test(s.id); });
-      setText("s-remotes", tvs.length ? tvs.map(function (s) { return s.name; }).join(", ") : "No TVs found yet");
+      setText("s-remotes", tvs.length ? tvs.map(function (s) { return s.name; }).join(", ") : "Samsung and Fire TVs on your Wi-Fi show up here");
     }
+
+    // Tiles for hardware this house hasn't got yet wait under "Add more" (in their usual order) until it shows up
+    var ALL_TILES = Array.prototype.slice.call(document.querySelectorAll("#main-tiles > .tile"));
+    var ready = {};
+    function setReady(need, ok) {
+      if (ready[need] === ok) return;
+      ready[need] = ok;
+      var main = document.getElementById("main-tiles"), more = document.getElementById("more-tiles");
+      ALL_TILES.forEach(function (t) { (ready[t.dataset.needs] === false ? more : main).appendChild(t); });
+      document.getElementById("more").hidden = !more.children.length;
+    }
+    async function loadExtras() {  // (every minute: these change rarely; the mesh base checks in a few s after a restart)
+      try {
+        var r = await getJson("/api/remotes");
+        setReady("blaster", !!r.hub);
+        if (!r.hub) setText("s-blaster", "Needs a BroadLink RM4 (learns your IR/RF remotes)");
+      } catch (e) { }
+      try {
+        var m = await getJson("/api/mesh");
+        setReady("mesh", !!(m.base && m.base.id));
+        if (!(m.base && m.base.id)) setText("s-mesh", "Needs a Meshtastic radio base (see Help)");
+      } catch (e) { }
+    }
+    loadExtras(); setInterval(loadExtras, 60000);
 
     function refresh() { loadPeople(); loadStatus(); loadSwitches(); loadLost(); }
     clock(); setInterval(clock, 15000);

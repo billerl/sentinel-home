@@ -71,3 +71,7 @@ camera_admin.json
 
 # Notes for one install (machine, family, roadmap); never commit
 CLAUDE.local.md
+# The same kind of private notes for other AI assistants (see AGENTS.md); never commit
+AGENTS.local.md
+GEMINI.local.md
+*.local.md

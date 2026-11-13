@@ -671,3 +671,10 @@ button:disabled { opacity: 0.35; cursor: default; }
 .wx-alert.loud { animation: wx-pulse 1.6s ease-in-out infinite; }
 @keyframes wx-pulse { 50% { background: #e5372b; } }
 @media (prefers-reduced-motion: reduce) { .wx-alert.loud { animation: none; } }
+
+/* No cameras yet (a new install): where to add one */
+.no-cams { grid-column: 1 / -1; align-self: center; justify-self: center; max-width: 34em; margin: 12vh auto 0; padding: 0 16px;
+           text-align: center; color: #9fb7c4; line-height: 1.5; }
+.no-cams .big { font-size: 3rem; }
+.no-cams h3 { color: #fff; margin: 0.3em 0; font-size: 1.4rem; }
+.no-cams a { color: #00ffff; }

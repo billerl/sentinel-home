@@ -484,7 +484,7 @@ class Engine:
             app_logger.log("error", "events_backfill_failed", error_message=str(e), component="engine",
                            action="start")
         if not self.cameras:
-            print("No cameras configured (settings.json camera_profiles is empty).")
+            print("No cameras yet: open the web page -> Settings -> Cameras -> Add a camera.")
         for pipeline in self.cameras.values():
             if pipeline.profile.get("enabled", True):
                 pipeline.start()

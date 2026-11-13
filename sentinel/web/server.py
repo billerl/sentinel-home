@@ -124,8 +124,9 @@ class WebServer:
         auth_cfg = self._auth_cfg()
         if not (auth_cfg.get("password_hash") or "").strip():
             print(
-                "Web viewer: web.enabled is true but no password_hash. "
-                "Run: python -m sentinel.web.set_password"
+                "Web page: no login set yet, so it isn't started. Stop Sentinel, run\n"
+                "    venv/bin/python -m sentinel.web.set_password\n"
+                "then start Sentinel again and open http://127.0.0.1:%s/" % cfg.get("port", 8088)
             )
             return False
 

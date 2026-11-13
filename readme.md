@@ -1,152 +1,180 @@
 # Sentinel Home
 
-Sentinel Home is a self-hosted home security system for RTSP cameras. It runs headless on a
-small Linux PC: it detects motion, records clips, sends Telegram alerts, and serves a web
-viewer with a live camera grid, a DVR-style motion timeline, and a zone editor.
+Sentinel Home is a home security and smart-home system you run yourself, on a small Linux PC in your
+house. It watches your IP cameras, records clips, tells you what it saw in plain English ("🚗 A red car
+pulled into the Driveway"), and gives you one web page for everything: live cameras, a timeline of what
+happened, family locations, lights and plugs, routines and more. **Everything runs on your own PC, for
+free.** No cloud account, no subscription, nothing paid. The only optional exception is asking Claude
+the questions Sentinel can't answer itself.
 
-## Docs index
+> **Built with Claude Code, and your AI assistant is welcome too.** This whole project was written by
+> its owner together with [Claude Code](https://claude.com/claude-code), one feature at a time, for one
+> real house. You're welcome to have *your* AI assistant help you install it and change it to suit your
+> home: Claude Code, Antigravity, ChatGPT/Codex, Gemini, Cursor or anything else. Point it at
+> **[`AGENTS.md`](AGENTS.md)**, which explains the project to an AI assistant: how it fits together, how to
+> check changes, and the rules that keep it safe and private.
 
-| File | Purpose |
-|------|---------|
-| `readme.md` | This file: features, behavior, quick start |
-| `installation-guide.md` | Step-by-step install, Piper, Telegram, troubleshooting |
-| `project-structure.md` | Repository layout and how the pieces fit |
-| `handoff_summary.md` | Maintainer / agent handoff notes |
+---
 
-## Key features
+## What you need
 
-- **Motion detection:** OpenCV MOG2 background subtraction, with filtering for false
-  alarms. Shadows are ignored, whole-frame light changes (clouds, IR switching, headlights) are
-  ignored, and motion must persist over several frames. An optional night bug filter is included.
-- **Zones and entry lines:** draw them per camera in the web viewer (`/zones`). Motion counts
-  when the bottom of the moving object is inside a zone, or when it crosses a line in the chosen
-  direction.
-- **Object detection:** people, vehicles and animals are recognised with YOLOX on OpenVINO
-  (free, runs locally on the CPU, only while something moves). Alerts read naturally, for
-  example *"🚗 A red car pulled into the Driveway"*, and come with a snapshot. Parked cars
-  don't alert: a car in a known parking spot only counts as leaving once its spot is empty. Car alerts
-  have a **Wrong car?** button in Telegram to say whose car it really was (or "Not ours").
-- **Recording:** motion-triggered clips, organized by day and camera, indexed for fast
-  searching, and cleaned up automatically after 30 days (configurable), with a low-disk safety net.
-  A **1440p copy with 5 s pre-roll** is cut from each camera's main stream (ffmpeg stream copy
-  from a RAM ring buffer, about 2% CPU per camera).
-- **Web viewer:** live MJPEG grid, a motion timeline per camera with a built-in clip player,
-  and the zone/line editor. It uses a bcrypt login with lockout, never exposes camera
-  credentials, and is meant to be reached through a Cloudflare Tunnel or Tailscale.
-- **Telegram:** alerts with a snapshot and clip. Commands: **status / clip / pause / resume /
-  help**, **videos** *(time range, e.g. "videos 2pm-4pm people")*, **access** *(how to reach
-  Sentinel remotely)*, plus **enable/disable** phrases for recording, motion alerts, clips, the
-  night bug filter, and auto-reconnect.
-- **Resilience:** each camera runs in its own thread and reconnects on its own with backoff.
-  On shutdown (SIGTERM), clips in progress are finalized.
-- **Audio alerts (optional):** Piper neural TTS or pyttsx3. This is skipped entirely when the
-  volume is 0. Sounds can play on the PC's speakers or in the open Remote Desktop session.
-- **Voice assistant (optional, "Hey Jarvis"):** wake word (openWakeWord) and speech recognition
-  (faster-whisper `base.en`) run on the PC's CPU; answers are spoken with Kokoro ("Heart" voice,
-  streamed sentence by sentence) or Piper. Follow-up questions without the wake word; settings
-  change only after a spoken "yes". With the opt-in Claude fallback it also answers general questions.
-- **Spotify (optional, Premium):** "play some jazz", pause, skip, volume, "what's playing?" by voice,
-  on the household's own Spotify devices (TV app, phones, Echo); a now-playing bar on the live page.
-  "Play X on the TV" turns a Samsung TV on and opens its Spotify app first when it isn't a speaker yet.
-  PKCE sign-in with your own free developer app's Client ID (redirect `http://127.0.0.1:8888/callback`).
-  Optionally the PC itself is a Spotify speaker ("play Spotify on Sentinel", "play Spotify here"),
-  through spotifyd on its line-out jack; the music turns down while the voice assistant talks.
-- **Family locations (optional, OwnTracks):** family members who agree install the free OwnTracks app
-  (a setup link from the Family page walks them through it, no Sentinel login needed). Ask "Where is
-  Elizabeth?", "Who's home?", "Is Mom at work?" by Telegram or voice; arrive/leave messages for named places;
-  a light per person on the live page (tap = map). The phone says where the person is; their car is
-  reported separately. The **Family timeline** page (like Google Maps Timeline) shows each person's
-  stops, drives and route per day on an OpenStreetMap map; positions are kept until the person deletes
-  them. Each family member can have their own Sentinel login (Family page → "Make login link").
-- **Structured logging:** JSON lines in `sentinel_events.log`, with passwords redacted, rotated
-  at 10 MB.
+- **A Linux PC that stays on.** A small mini PC is plenty (this one is an Intel i5 office mini PC with
+  Ubuntu). An Intel graphics chip is used for detection when there is one; otherwise the CPU does it.
+  About 3 GB of disk for the software, plus room for recordings (30 days by default).
+- **IP cameras** that offer an RTSP stream (most wired and plug-in Wi-Fi cameras do: Amcrest, Dahua, Lorex, Hikvision, Annke, Reolink, Uniview, TP-Link Tapo,
+  Foscam, Anpviz and others; Ring, Blink, Arlo, Nest and most battery cameras don't).
+- Everything else is optional. See [Optional extras](#optional-extras) below.
 
-## Requirements
+## Install (about 15 minutes)
 
-- Python **3.10+**, Linux
-- RTSP cameras (sub-stream recommended for detection)
-- **Telegram (optional):** outbound HTTPS to `api.telegram.org`
+**1. System packages** (Ubuntu/Debian):
 
-## Quick install
+```bash
+sudo apt install git curl python3-venv alsa-utils xvfb
+```
+
+**2. Get Sentinel and its Python packages** (about 1.5 GB; takes a few minutes):
 
 ```bash
 git clone https://github.com/billerl/sentinel-home.git
 cd sentinel-home
 python3 -m venv venv
-venv/bin/pip install -r requirements.txt
-venv/bin/pip install -r requirements-piper.txt   # optional
-# object detection model (Apache-2.0)
+venv/bin/pip install -r requirements.txt -r requirements-piper.txt
+```
+
+**3. Download the object detector** (required: it's what tells people, cars and animals apart):
+
+```bash
 mkdir -p models/detector && curl -L -o models/detector/yolox_tiny.onnx \
   https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.onnx
-# optional: delivery-van / vehicle-type recognition (CLIP ViT-B/32, MIT)
-mkdir -p models/classifier && curl -L -o models/classifier/clip_vit_b32_vision.onnx \
-  https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model.onnx
-# optional: telling your own cars apart (DINOv2-small, Apache-2.0; without it CLIP is used, less accurately)
-curl -L -o models/classifier/dinov2_small.onnx https://huggingface.co/Xenova/dinov2-small/resolve/main/onnx/model.onnx
-# optional: natural voice (Kokoro, Apache-2.0)
-mkdir -p models/kokoro && for f in kokoro-v1.0.onnx voices-v1.0.bin; do curl -L -o models/kokoro/$f \
-  https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/$f; done
-# optional: voice assistant speech recognition (faster-whisper base.en, MIT)
-venv/bin/python -c "from huggingface_hub import snapshot_download as d; d('Systran/faster-whisper-base.en', local_dir='models/whisper/base.en')"
-# optional: this PC as a Spotify speaker (spotifyd, GPL-3.0; sign in under Settings -> Spotify)
-mkdir -p bin && curl -L https://github.com/Spotifyd/spotifyd/releases/download/v0.4.2/spotifyd-linux-x86_64-slim.tar.gz \
-  | tar xz -C bin   # check it against the release's .sha512 file
-venv/bin/python -m sentinel.web.set_password     # web viewer login
+```
+
+**4. Choose your web login** (the username and password for Sentinel's web page):
+
+```bash
+venv/bin/python -m sentinel.web.set_password
+```
+
+**5. Start Sentinel:**
+
+```bash
 venv/bin/python main.py
 ```
 
-Cameras are configured in `settings.json` → `camera_profiles` (one entry per RTSP source, with
-`source` and `display`), or added on the web Settings page. To run it always-on (systemd service) and set up
-Telegram, Claude, the voice assistant, Spotify and family locations, follow
-[installation-guide.md → Always-on setup](installation-guide.md#always-on-setup-how-sentinel-is-normally-run).
+It prints `Web viewer: http://127.0.0.1:8088/`. Open that address in a browser **on this PC** and sign in.
+(Ctrl+C stops it.)
 
-## Web viewer
+**6. Add your first camera:** on the web page, **Settings → Cameras → Add a camera**. Pick the brand,
+type the camera's address and its own username and password. It appears on the Cameras page a few
+seconds later. Then draw where it should watch under **Zones**.
 
-- `/`: the live grid. Click a camera for full screen. The timeline under the grid shows a red
-  mark for every motion clip; click one to play it. Use **◀ ▶** to change days and
-  **24h / 6h / 1h** to zoom.
-- `/zones`: pick a camera, then use **+ Zone** (click the corners and close on the yellow first
-  point) or **+ Line** (two clicks; the arrow shows the trigger direction). Drag the dots to
-  adjust a shape; double-click a dot to remove it. Sensitivity, recording, and the night bug
-  filter are set per camera. **Save** applies immediately; no restart is needed.
+**7. Keep it running all the time:** set it up as a service so it starts with the PC and restarts itself.
+See [installation-guide.md → Always-on setup](installation-guide.md#always-on-setup-how-sentinel-is-normally-run).
+That guide also covers using it from your phone when you're away (Cloudflare Tunnel or Tailscale).
 
-The server listens on `web.bind_host` (default `127.0.0.1`; several addresses can be listed, comma-separated,
-such as loopback plus the PC's home-network address). Use a Cloudflare Tunnel or Tailscale for remote access;
-see `installation-guide.md`.
+That's a working system: cameras, recordings, the timeline and alerts on the web page. Add the extras
+you want from the list below, whenever you like.
 
-## Detection and trigger behavior
+> **Tip:** stop Sentinel before editing `settings.json` by hand (or running step 4 again): it saves its
+> settings when it stops, so an edit made while it runs would be overwritten. Most settings are on the
+> web page's Settings anyway.
 
-| Configuration | Motion triggers when |
-|----------------|----------------------|
-| **No zones, no lines** | Any qualifying motion |
-| **Zones only** | The object's ground point (bottom-centre) is inside a zone, or ≥30% of its box overlaps one |
-| **Lines only** | A tracked object crosses an entry line in the allowed direction |
-| **Zones + lines** | Either of the above |
+## Optional extras
 
-A qualifying motion must be larger than the camera's minimum area and persist for 3 consecutive
-frames. Frames where most of the picture changes at once are treated as lighting changes.
+Each one is independent. Most are switched on from the web page's **Settings**; the guide has details.
 
-## Settings file
+| Extra | What you need | Where |
+|-------|---------------|-------|
+| **Telegram alerts and questions** ("did anyone come by?", "videos 2pm-4pm") | A free Telegram bot | Settings → Telegram ([guide](installation-guide.md#telegram-setup-optional)) |
+| **Spoken alerts** | A speaker on the PC | Settings → Audio |
+| **Voice assistant** ("Hey Jarvis, who's home?") | A USB speakerphone (e.g. Jabra Speak), plus the speech model below | Settings → Audio |
+| **Family locations, timeline and arrive/leave messages** | The free OwnTracks app on each phone, and remote access | Family page |
+| **Your own cars by name** ("Kate's car left") | Nothing extra (better with the car models below) | Vehicles page |
+| **Weather** on the cameras page and severe-weather warnings (US) | Your town or ZIP code | Settings → Weather |
+| **Lights and plugs, routines** ("at sunset turn the porch light on") | TP-Link Kasa or Tasmota plugs on your Wi-Fi | Found automatically; Routines page |
+| **TV control** (Samsung, Fire TV): show a camera on the TV | The TV on your Wi-Fi | Found automatically |
+| **IR/RF remotes** (heater, soundbar, ceiling fans) | A BroadLink RM4 Pro or mini | Remotes page |
+| **Wi-Fi motion sensing** (movement inside, no cameras) | ESP32-S3 boards with the firmware in `firmware/` | Movement inside page |
+| **Pet GPS tracker and mesh chat** | A Meshtastic collar tracker and radio base (`tools/meshtastic_bridge.py`) | Pet tracker page |
+| **Planes overhead** ("what plane is that?"), recipes, notes | Nothing extra | Home page |
+| **Spotify by voice** | Spotify Premium and a free developer app | Settings → Spotify |
+| **Ask Claude** (questions Sentinel can't answer) | The Claude Code app signed in on this PC | Settings → Telegram |
+| **Nightly backup** to a USB drive and/or another PC | The drive, or an SSH-reachable PC | Settings → Backup |
 
-`settings.json` (gitignored, owner-only permissions) holds camera profiles, Telegram settings, web
-settings and retention:
+Tiles for hardware you haven't got wait under **Add more** on the home page, and move up by themselves
+once the hardware shows up on your network.
 
-| Key | Default | Meaning |
-|-----|---------|---------|
-| `recording_retention_enabled` | `true` | Delete old clips automatically |
-| `recording_retention_days` | `30` | Keep clips this many days |
-| `recording_min_free_percent` | `10` | If free disk space drops below this, delete the oldest clips (the last 24 hours are always kept) |
+<details>
+<summary><b>Optional model downloads</b> (car types, telling your cars apart, natural voice, speech recognition, Spotify speaker)</summary>
 
-It contains secrets (camera passwords, bot token): don't share it.
+```bash
+# delivery vans and vehicle types (CLIP ViT-B/32, MIT)
+mkdir -p models/classifier && curl -L -o models/classifier/clip_vit_b32_vision.onnx \
+  https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model.onnx
+# telling your own cars apart (DINOv2-small, Apache-2.0; without it CLIP is used, less accurately)
+curl -L -o models/classifier/dinov2_small.onnx https://huggingface.co/Xenova/dinov2-small/resolve/main/onnx/model.onnx
+# natural voice (Kokoro, Apache-2.0)
+mkdir -p models/kokoro && for f in kokoro-v1.0.onnx voices-v1.0.bin; do curl -L -o models/kokoro/$f \
+  https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/$f; done
+# voice assistant speech recognition (faster-whisper base.en, MIT)
+venv/bin/python -c "from huggingface_hub import snapshot_download as d; d('Systran/faster-whisper-base.en', local_dir='models/whisper/base.en')"
+# this PC as a Spotify speaker (spotifyd, GPL-3.0; sign in under Settings -> Spotify)
+mkdir -p bin && curl -L https://github.com/Spotifyd/spotifyd/releases/download/v0.4.2/spotifyd-linux-x86_64-slim.tar.gz \
+  | tar xz -C bin   # check it against the release's .sha512 file
+```
+
+Restart Sentinel after adding a model.
+</details>
+
+## The web page
+
+- **Home:** weather, who's home, and a tile for each part of Sentinel.
+- **Cameras:** the live grid (tap one for full screen) and the timeline underneath: a mark for every
+  clip, coloured by what was seen (people, vehicles, deliveries, animals). Tap a mark to play it.
+- **Zones:** draw where each camera should watch (**+ Zone**) or a line something must cross (**+ Line**).
+- **Settings:** cameras, detection, Telegram, recording, backup, audio and voice, Spotify, weather, remote access, and **Help**, which
+  explains every feature in plain English.
+
+Each family member can have their own login with their own role (owner, admin, user, guest):
+Family page → **Make login link**.
+
+### How motion triggers an alert
+
+| Zones / lines drawn | Motion counts when |
+|---------------------|--------------------|
+| **None** | Anything moves enough |
+| **Zones only** | The bottom of the moving thing is inside a zone, or 30% of it overlaps one |
+| **Lines only** | Something crosses a line in the arrow's direction |
+| **Both** | Either of the above |
+
+Shadows, whole-picture light changes (clouds, headlights, night vision switching) and anything that
+doesn't last 3 frames are ignored. Then object detection decides what it was, and parked cars don't alert.
+
+## Docs map
+
+| File | What's in it |
+|------|--------------|
+| `readme.md` | This page |
+| [`installation-guide.md`](installation-guide.md) | Always-on service, remote access, Telegram, audio, backup, troubleshooting |
+| [`AGENTS.md`](AGENTS.md) | For AI assistants helping you install or change Sentinel |
+| [`handoff_summary.md`](handoff_summary.md) | How each feature is designed and why (long) |
+| [`project-structure.md`](project-structure.md) | What each file and folder is |
+
+## Your data and secrets
+
+Everything about *your* house is created on first run and never goes into git: `settings.json`
+(camera passwords, bot token; owner-only file permissions), `recorded_videos/` (clips, and databases
+of family, places, cars and history), `.web_sessions.json`, `camera_admin.json`. Don't share them.
+Logs (`sentinel_events.log`) have passwords removed.
 
 ## Tests
 
 ```bash
-venv/bin/python -m unittest discover -s tests
+PYTHONPATH=.:tests venv/bin/python -m unittest discover -s tests
 ```
 
-Full layout: **`project-structure.md`**.
+All tests should pass before running a changed version.
 
 ## License
 
-MIT (see `LICENSE` if present in the repository).
+MIT.

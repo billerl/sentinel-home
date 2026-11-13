@@ -124,13 +124,13 @@
         <div class="row">
           <div class="field" style="flex: 1 1 100%"><span>Camera brand</span>
             <select id="nc-brand" onchange="brandChanged()">
-              <option value="anpviz">Anpviz (like the current cameras)</option>
+              <option value="dahua">Amcrest, Dahua, Lorex</option>
+              <option value="anpviz">Anpviz</option>
+              <option value="foscam">Foscam</option>
               <option value="hikvision">Hikvision, Annke, HiWatch</option>
               <option value="reolink">Reolink (turn on RTSP in the Reolink app first)</option>
-              <option value="dahua">Amcrest, Dahua, Lorex</option>
-              <option value="uniview">Uniview</option>
               <option value="tapo">TP-Link Tapo (use the camera account from the Tapo app)</option>
-              <option value="foscam">Foscam</option>
+              <option value="uniview">Uniview</option>
               <option value="other">Other — I'll type the stream path</option>
             </select>
           </div>
@@ -147,7 +147,7 @@
         <details style="background:none;border:0;padding:0;margin:4px 0 0">
           <summary style="font-size:0.8rem">Stream paths (filled in from the brand)</summary>
           <div class="row">
-            <div class="field"><span>Stream path (low-res “substream”, for live view and detection)</span><input type="text" id="nc-path" value="/h264/ch1/sub/av_stream"></div>
+            <div class="field"><span>Stream path (low-res “substream”, for live view and detection)</span><input type="text" id="nc-path" value="/cam/realmonitor?channel=1&amp;subtype=1"></div>
             <div class="field"><span>High-res stream path for HD clips (optional — leave blank to guess)</span><input type="text" id="nc-main" placeholder="e.g. /h264Preview_01_main"></div>
           </div>
         </details>
@@ -946,7 +946,10 @@
         var cams = await api("/api/config/cameras");
         var root = $("cam-list");
         root.innerHTML = "";
-        if (!cams.length) root.innerHTML = '<p class="hint">No cameras yet — add one below.</p>';
+        if (!cams.length) {  // a new install: the form open, ready to fill in
+          root.innerHTML = '<p class="hint">No cameras yet — add your first one below.</p>';
+          var add = document.getElementById("add-cam"); if (add) add.open = true;
+        }
         cams.forEach(function(c) { root.appendChild(camCard(c)); });
       } catch (e) { $("cam-list").textContent = "Could not load cameras: " + e.message; }
     }

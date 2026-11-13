@@ -37,9 +37,12 @@ def main() -> int:
     auth["username"] = username
     auth["password_hash"] = h.decode("ascii")
     web["auth"] = auth
+    web["enabled"] = True  # (a login is only wanted for the web page)
     sm.settings["web"] = web
     if sm.save_settings(force=True):
-        print("Saved. Set web.enabled to true and restart Sentinel to start the web server.")
+        port = web.get("port", 8088)
+        print(f"Saved. Now start Sentinel (venv/bin/python main.py), or restart it if it's running,\n"
+              f"then open http://127.0.0.1:{port}/ on this PC and sign in.")
         return 0
     print("Could not save settings.", file=sys.stderr)
     return 1

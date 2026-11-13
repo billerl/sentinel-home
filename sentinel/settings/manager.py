@@ -32,7 +32,7 @@ from sentinel.constants import (
 
 # Web viewer (MJPEG); merged into settings on load — see installation-guide.md
 WEB_VIEWER_DEFAULTS: Dict[str, Any] = {
-    "enabled": False,
+    "enabled": True,  # the web page is the only way to use Sentinel (on this PC only until you open it up)
     "bind_host": "127.0.0.1",
     "port": 8088,
     "camera_subnet_block": "192.168.0.0/24",
@@ -78,7 +78,7 @@ class SettingsManager:
             "voice_id": "",  # Will be set after TTS initialization
             "cam_orientation": "horizontal",
             "camera_index": 0,
-            "camera_source": "0",
+            "camera_source": "",  # (none: cameras are added on the web page; "0" made a new install hunt for a webcam)
             "camera_display": "",
             "rtsp_username": "",
             "rtsp_password": "",

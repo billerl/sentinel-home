@@ -1,64 +1,24 @@
 # Installation Guide for Sentinel Home
 
-This guide covers practical setup for:
+The **[readme](readme.md#install-about-15-minutes)** has the short install: about 15 minutes from nothing to
+cameras on the web page. This guide has the rest: running it all the time, using it away from home,
+Telegram, audio and voice, the backup drive, and troubleshooting.
 
-- Local USB and RTSP network cameras  
-- Motion detection, zones/lines, and recording  
-- Optional Piper TTS (recommended on Linux) and pyttsx3 fallback  
-- Optional Telegram alerts (requires **outbound internet** HTTPS to `api.telegram.org`)  
-- Structured runtime logging (`sentinel_events.log`, gitignored)
+Sentinel runs on **Linux** (built and used on Ubuntu; other Debian-style systems should work the same).
+It has no window of its own: you use it through its web page. Python 3.10 or newer.
 
-For feature overview and behavior details, see `readme.md`.
+> Using an AI assistant to help? Point it at [`AGENTS.md`](AGENTS.md) first.
 
-## Prerequisites
+## Install
 
-- **Python 3.10+** recommended  
-- **Git** (to clone the repository) — install with your OS package manager if missing  
-- A **camera** (local V4L2 webcam and/or RTSP URL)  
-- **Linux audio** (for Piper): ALSA `aplay` — package `alsa-utils` on Debian/Ubuntu  
-- **Telegram** (optional): a bot token and chat ID(s); the **PC running Sentinel** must reach the public internet for `https://api.telegram.org` (independent of whether cameras are on an isolated LAN)
+Follow steps 1-6 of the [readme](readme.md#install-about-15-minutes). In short: system packages
+(`git curl python3-venv alsa-utils xvfb`), clone, a virtual environment with `requirements.txt` and
+`requirements-piper.txt`, the object detector model, `venv/bin/python -m sentinel.web.set_password`, then
+`venv/bin/python main.py` and open `http://127.0.0.1:8088/`. What you see when it starts:
 
-## Recommended install (virtual environment)
-
-1. **Clone** (or your own fork):
-
-   ```bash
-   git clone https://github.com/billerl/sentinel-home.git
-   cd sentinel-home
-   ```
-
-2. **Create and activate a venv**:
-
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
-
-   Windows (PowerShell):
-
-   ```powershell
-   python -m venv venv
-   .\venv\Scripts\Activate.ps1
-   ```
-
-3. **Install core dependencies**:
-
-   ```bash
-   pip install --upgrade pip
-   pip install -r requirements.txt
-   ```
-
-4. **Optional — Piper TTS** (neural voices, used automatically when models are present):
-
-   ```bash
-   pip install -r requirements-piper.txt
-   ```
-
-5. **Run**:
-
-   ```bash
-   python main.py
-   ```
+- `Web viewer: http://127.0.0.1:8088/`: the web page is up.
+- `Web page: no login set yet`: stop Sentinel, run `set_password`, start it again.
+- `No cameras yet`: add one on the web page (Settings → Cameras → Add a camera).
 
 ## Piper TTS (optional, recommended on Linux)
 
@@ -166,41 +126,24 @@ files that are created on first run and are git-ignored (`settings.json`, `camer
 From repo root with venv activated:
 
 ```bash
-python3 -m unittest discover -s tests -p 'test_*.py'
+PYTHONPATH=.:tests venv/bin/python -m unittest discover -s tests
 ```
 
-Requires `numpy` (listed in `requirements.txt`).
+They don't need cameras, models or a network, and don't touch your settings or recordings.
 
-## First run checklist
+## The web page
 
-1. Click **Search Cameras**.  
-2. Pick a source from the dropdown (or add RTSP host / resolve pending camera).  
-3. Toggle the feed with **Camera Offline** / **Disconnect Selected**.  
-4. For IP cameras, prefer **sub-stream** where possible (checkbox).  
-5. Tune **Detection Size** / **Sensitivity** and optional **Feed FPS** (lower = less CPU).  
-6. Draw **active zones** and/or **entry lines** as needed (see `readme.md` for gating rules).
+It's on by default at `http://127.0.0.1:8088/`, reachable **only from this PC** until you choose otherwise
+(below). First steps after signing in:
 
-## Web viewer (optional, live MJPEG grid)
+1. **Settings → Cameras → Add a camera:** brand, address, the camera's own login. **Test connection** shows
+   a picture or says what's wrong. Prefer the camera's low-resolution "substream" for detection (the brand
+   choice fills it in); the full-quality stream is recorded too.
+2. **Zones:** draw where each camera should watch, or a line something has to cross.
+3. **Settings → Detection / Recording:** sensitivity, what to alert on, how long to keep clips.
+4. **Help** (in Settings) explains every feature in plain English.
 
-The desktop app can expose a small **Flask** server with a login page and a multi-camera live grid. Frames are the same ones already decoded for the UI (no extra RTSP load). Defaults listen on **`127.0.0.1:8088`** only, which pairs well with **Cloudflare Tunnel** so you do not open inbound router ports.
-
-### 1) Install dependencies
-
-Core `requirements.txt` already includes **Flask** and **bcrypt**. After `pip install -r requirements.txt`, continue below.
-
-### 2) Set username and password
-
-From the repository root (venv activated):
-
-```bash
-python -m sentinel.web.set_password
-```
-
-This writes `web.auth.username` and `web.auth.password_hash` into **`settings.json`** (gitignored). Passwords are **bcrypt**-hashed; the plaintext is never stored.
-
-### 3) Enable the web server
-
-Edit **`settings.json`** (or rely on merged defaults after one app run) and set at least:
+Web settings live under `"web"` in `settings.json` (stop Sentinel before editing it by hand):
 
 ```json
 "web": {
@@ -211,19 +154,17 @@ Edit **`settings.json`** (or rely on merged defaults after one app run) and set 
 }
 ```
 
-- **`bind_host`**: `127.0.0.1` is recommended when using **Cloudflare Tunnel** (`cloudflared` on the same PC talks to Flask over loopback). To allow phones on **home Wi‑Fi** without going through Cloudflare, add this machine’s **LAN IP** after a comma, e.g. `"127.0.0.1,192.168.1.45"` (give the PC a fixed address; none may be inside `camera_subnet_block`, or startup will refuse — cameras stay isolated). With a LAN address listed, a TV in the house (Fire TV kiosk, smart-TV browser) that opens the tunnel's public address is sent to the LAN address automatically, still signed in, so its video stays inside the house and keeps working when the internet is down. It's recognised by its IPv6 address being in this PC's own /64; phones are never moved (they leave the house).
-- **`camera_subnet_block`**: CIDR used only to **block accidental bind** on your camera-only NIC (adjust if your cameras use a different subnet).
-- **`web.published_frame`**: `"overlay"` matches the on-screen overlays (zones/lines) when overlay mode is on; `"raw"` publishes the detector’s raw frame even if the UI shows overlays.
+- **`bind_host`**: `127.0.0.1` (this PC only) is right when using a **Cloudflare Tunnel**, which runs on the same PC. To also allow phones and TVs on your **home Wi-Fi** directly, add this PC's home-network address after a comma, e.g. `"127.0.0.1,192.168.1.20"` (give the PC a fixed address in your router; none may be inside `camera_subnet_block`, or startup refuses, so cameras stay isolated). With a home address listed, a TV in the house (Fire TV kiosk, smart-TV browser) that opens the tunnel's public address is sent to the home address automatically, still signed in, so its video stays inside the house and keeps working when the internet is down. It's recognised by its IPv6 address being in this PC's own /64; phones are never moved (they leave the house).
+- **`camera_subnet_block`**: the camera network (if your cameras are on their own network card), so the web page is never opened up on it by mistake.
+- **`web.published_frame`**: `"overlay"` shows zones and lines on the live picture; `"raw"` doesn't.
 
-Restart **`python main.py`**. You should see `Web viewer: http://127.0.0.1:8088/` in the console when startup succeeds.
-
-### 4) Auth and lockout
+### Login and lockout
 
 Login uses **session cookies** (not HTTP Basic). After **`web.auth.max_attempts`** failed logins from the same client IP within **`attempt_window_minutes`**, the client is locked out; lockout length grows with **`lockout_backoff_factor`** up to **`lockout_max_minutes`**. Successful login clears the lockout for that IP. Set **`web.auth.bind_session_to_ip`** to `false` only if a trusted reverse proxy changes client IPs between requests.
 
 Events are logged to **`sentinel_events.log`** as `web_login_success`, `web_login_failed`, `web_login_locked`, `web_session_revoked`, `web_server_start`, etc.
 
-### 5) Remote HTTPS with Cloudflare Tunnel (typical)
+### Away from home: Cloudflare Tunnel (your own domain)
 
 Same pattern as exposing Home Assistant at `ha.example.com`:
 
@@ -244,7 +185,7 @@ Optional: add **Cloudflare Access** (Zero Trust) in front of that hostname so on
 
 **Note:** Cloudflare’s free terms restrict some “video” proxying; keep **`web.max_fps`** and **`web.jpeg_quality`** modest for personal use, or use **Tailscale** instead of a public hostname if you prefer.
 
-### 6) Tailscale (alternative)
+### Away from home: Tailscale (simpler, no domain needed)
 
 Install Tailscale on the PC and your phone, then browse `http://<tailscale-ip>:8088` (or set `web.bind_host` to the `tailscale0` address). No Cloudflare account required.
 
@@ -294,21 +235,22 @@ On run, the app may append JSON lines to **`sentinel_events.log`** in the projec
 
 - The file is covered by `.gitignore` (`*.log`) so it is not committed.  
 - Useful when diagnosing RTSP drops or UI/control issues.  
-- **Privacy:** some fields may echo the **full RTSP URL** (including embedded passwords). Restrict permissions on this file and do not paste raw lines into public chats.
+- **Privacy:** passwords are removed before anything is written, but the log still holds camera addresses, names and times. Don't paste it into public chats.
 
 ## Common troubleshooting
 
 ### No camera / unstable RTSP
 
-- Use **sub-stream**, lower bitrate/resolution/FPS on the camera.  
-- Prefer **wired** Ethernet to the camera path.  
-- Disable **SVC** / exotic smart codecs if decode errors appear in the console.  
-- Increase **Retry (sec)** or enable **Auto reconnect**.
+- **Settings → Cameras → Test connection** says what's wrong (wrong password, wrong stream path, no answer).
+- Use the camera's **substream** for detection; lower its bitrate or frame rate in the camera's own settings.
+- Prefer **wired** Ethernet for cameras. Turn off "smart codec"/SVC/H.265+ in the camera if the picture breaks up.
+- Cameras accept only a few streams at once: close the camera's own app or other recorders while testing.
+- Sentinel reconnects on its own; **Reconnect** under Settings → Cameras forces it.
 
 ### Motion outside the drawn zone still alerts
 
-- Confirm you are not using **entry lines** without zones (line-only mode triggers on crossing).  
-- **Vertical** camera view: zones must be drawn in vertical view; detection uses the same orientation as the UI.
+- With **lines only** (no zones), crossing a line anywhere along it counts.
+- A zone counts the moving thing's **bottom edge** (its feet or tyres): draw zones on the ground, not around walls.
 
 ### Piper silent or not used
 
@@ -319,9 +261,9 @@ On run, the app may append JSON lines to **`sentinel_events.log`** in the projec
 
 ### High CPU with two RTSP streams
 
-- Lower **Feed FPS** in the UI.  
-- Reduce camera resolution/bitrate.  
-- Ensure only **one** `python main.py` is running (`pgrep -af main.py`).
+- Use the cameras' substreams for detection, and lower their frame rate (10 fps is plenty).
+- With an Intel graphics chip, detection runs there (Settings → Status shows the device; the user needs the `render` group).
+- Make sure only **one** Sentinel is running (`pgrep -af main.py`).
 
 ### Many `python` rows in `htop`
 

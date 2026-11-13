@@ -498,6 +498,11 @@ function applyCameras(cams) {
   root.innerHTML = "";
   Object.values(gridTimers).forEach(clearInterval);
   gridTimers = {};
+  if (!cams.length) {  // a new install: say how to start, not a black page
+    root.insertAdjacentHTML("beforeend", '<div class="no-cams"><div class="big">📹</div><h3>No cameras yet</h3>' +
+      '<p>Add your first one under <a href="/settings#cameras">Settings → Cameras → Add a camera</a>: pick the brand, ' +
+      'type its address and its own username and password. It shows up here a few seconds later.</p></div>');
+  }
 
   cams.forEach(function(c) {
     var tile = document.createElement('div');
