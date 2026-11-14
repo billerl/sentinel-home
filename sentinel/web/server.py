@@ -19,6 +19,8 @@ from sentinel.web.bind_util import bind_host_allowed
 from sentinel.web import roles
 from sentinel.web.context import TV_BROWSER, WebContext  # noqa: F401  (TV_BROWSER: tests import it from here)
 from sentinel.web.frame_broker import FrameBroker
+
+BIND_RETRY_SECONDS = 10.0  # a listener whose address can't be bound yet (network not up) tries again this often
 from sentinel.web.routes import (cameras, family, house, live, mesh, notes, recipes, recordings, routines, sensors,
                                  settings, signin, spotify, switches, talk, vehicles)
 from sentinel.web.routes.signin import _from_this_home, _home_nets  # noqa: F401  (tests use them here)
@@ -40,6 +42,29 @@ def _home_lan_address(host: str) -> bool:
         return False
     return (addr.version == 4 and addr.is_private and not addr.is_loopback
             and addr not in ipaddress.ip_network("100.64.0.0/10"))
+
+
+def _serve(app: Flask, host: str, port: int) -> None:
+    """One listener. Werkzeug answers a failed bind with sys.exit(1) (SystemExit, not OSError), so a listener used to
+    die silently; after a power cut the home-network address may not be up yet when Sentinel starts. Retry every
+    BIND_RETRY_SECONDS until it can be bound, saying so once (bug hunt 2026-11-13)."""
+    failures = 0
+    while True:
+        try:
+            server = make_server(host, port, app, threaded=True)
+        except (OSError, SystemExit) as e:
+            failures += 1
+            if failures == 1 or failures % 60 == 0:  # (then every 10 minutes)
+                print(f"Web viewer: failed to bind {host}:{port} ({e}); retrying every {BIND_RETRY_SECONDS:.0f} s")
+                app_logger.log("error", "web_server_bind_failed", bind_host=host, port=port,
+                               error_message=str(e), attempts=failures, component="web_server", action="start")
+            time.sleep(BIND_RETRY_SECONDS)
+            continue
+        if failures:
+            app_logger.log("info", "web_server_bound", bind_host=host, port=port, attempts=failures + 1,
+                           component="web_server", action="start")
+        server.serve_forever()
+        return
 
 
 class _StreamLimiter:
@@ -209,24 +234,7 @@ class WebServer:
             action="start",
         )
 
-        def _run(host: str) -> None:
-            try:
-                server = make_server(host, port, app, threaded=True)
-            except OSError as e:
-                print(f"Web viewer: failed to bind {host}:{port}: {e}")
-                app_logger.log(
-                    "error",
-                    "web_server_bind_failed",
-                    bind_host=host,
-                    port=port,
-                    error_message=str(e),
-                    component="web_server",
-                    action="start",
-                )
-                return
-            server.serve_forever()
-
-        threads = [threading.Thread(target=_run, args=(h,), name=f"sentinel-web-{i}", daemon=True)
+        threads = [threading.Thread(target=_serve, args=(app, h, port), name=f"sentinel-web-{i}", daemon=True)
                    for i, h in enumerate(bind_hosts)]
         for t in threads:
             t.start()

@@ -108,3 +108,29 @@ class TestHandoff(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestListenerRetry(unittest.TestCase):
+    def test_a_listener_whose_address_isnt_up_yet_keeps_trying(self):
+        # (bug hunt 2026-11-13: werkzeug's bind failure is SystemExit, so the listener died silently, for good)
+        import threading
+        from unittest import mock
+
+        from sentinel.web import server as server_mod
+
+        calls = []
+
+        def fake_make_server(host, port, app, threaded=True):
+            calls.append(host)
+            if len(calls) < 3:
+                raise SystemExit(1)  # what werkzeug does when the address can't be bound
+            return mock.Mock(serve_forever=lambda: None)
+
+        app = server_mod.Flask(__name__)
+        with mock.patch.object(server_mod, "make_server", fake_make_server), \
+                mock.patch.object(server_mod, "BIND_RETRY_SECONDS", 0.01):
+            t = threading.Thread(target=server_mod._serve, args=(app, "192.0.2.7", 8088), daemon=True)
+            t.start()
+            t.join(2)
+        self.assertFalse(t.is_alive())
+        self.assertEqual(calls, ["192.0.2.7"] * 3)  # tried until it could bind, then served
