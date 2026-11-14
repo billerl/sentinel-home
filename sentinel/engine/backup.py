@@ -247,16 +247,23 @@ class Backup:
         return True, f"{drive['label'] or 'The drive'} is now the backup drive. The first backup is starting."
 
     # --------------------------------------------------------------- schedule
+    def _since_slot(self, now: float) -> int:
+        """Minutes since the most recent set backup time (0-1439)."""
+        hh, mm = (int(x) for x in str(self.settings.get("backup_time", "03:30")).split(":"))
+        t = time.localtime(now)
+        return (t.tm_hour * 60 + t.tm_min - (hh * 60 + mm)) % 1440
+
+    def _slot_day(self, now: float) -> str:
+        """The day of the night's backup slot a run at ``now`` belongs to (a 23:00 slot's run at 00:30 is yesterday's)."""
+        return time.strftime("%Y-%m-%d", time.localtime(now - self._since_slot(now) * 60))
+
     def due(self, now: float) -> bool:
         """Once a night at the set time (within 3 hours of it, so a restart doesn't skip a night)."""
         if not self.settings.get("backup_enabled", True) or self.running:
             return False
-        hh, mm = (int(x) for x in str(self.settings.get("backup_time", "03:30")).split(":"))
-        t = time.localtime(now)
-        minutes = (t.tm_hour * 60 + t.tm_min - (hh * 60 + mm)) % 1440
-        if minutes >= 180:
+        if self._since_slot(now) >= 180:
             return False
-        return self.state().get("last_try_day") != time.strftime("%Y-%m-%d", time.localtime(now - minutes * 60))
+        return self.state().get("last_try_day") != self._slot_day(now)
 
     def start(self) -> bool:
         if not self._lock.acquire(blocking=False):
@@ -270,6 +277,10 @@ class Backup:
             self.run()
         except Exception as e:  # never take the command loop's thread down with it
             app_logger.log("error", "backup_failed", error_message=str(e)[:200], component="backup", action="run")
+            try:
+                self.warn(f"⚠️ The backup stopped with an error ({str(e)[:120]}). It will try again tomorrow night.")
+            except Exception:
+                pass
         finally:
             self._lock.release()
 
@@ -284,7 +295,9 @@ class Backup:
         now = self.clock()
         started = time.monotonic()
         state = self.state()
-        result: Dict[str, Any] = {"last_try": now, "last_try_day": time.strftime("%Y-%m-%d", time.localtime(now))}
+        result: Dict[str, Any] = {"last_try": now, "last_try_day": self._slot_day(now)}
+        # Tonight counts as tried from the start: an error part-way must not restart it every 5 s until morning
+        self._save_state(last_try=now, last_try_day=result["last_try_day"])
         problems = []
         self.running = "Looking for the backup drive"
         drive = next((d for d in self.drives() if d["ours"]), None)
@@ -299,6 +312,8 @@ class Backup:
                     problems.append(f"{result['failed_files']} files couldn't be copied")
             except OSError as e:
                 problems.append(f"the drive gave an error ({e.strerror or e})")
+            except (sqlite3.Error, ValueError) as e:  # (a database that couldn't be copied, e.g. the drive full mid-copy)
+                problems.append(f"a database couldn't be copied to the drive ({str(e)[:100]})")
         remote = str(self.settings.get("backup_remote") or "").strip()
         if remote:
             self.running = f"Copying to {remote}"

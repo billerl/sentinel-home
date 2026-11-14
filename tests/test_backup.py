@@ -261,6 +261,35 @@ class TestBackup(unittest.TestCase):
         self.settings["backup_enabled"] = False
         self.assertFalse(self.backup.due(at(3, 31, 10)))
 
+    def test_a_database_that_cant_be_copied_is_reported_once(self):
+        self._use_stick()
+        _write(os.path.join(self.data, "broken.db"), b"this is not a database")
+        result = self.backup.run()
+        self.assertTrue(any("database couldn't be copied" in p for p in result["problems"]), result["problems"])
+        self.assertEqual(len(self.warnings), 1)  # the family is told
+        self.assertFalse(self.backup.due(self.now + 5))  # and it isn't restarted every 5 s until morning
+
+    def test_a_late_slot_isnt_repeated_after_midnight(self):
+        self.settings["backup_time"] = "23:00"
+        self.now = time.mktime((2026, 11, 9, 0, 30, 0, 0, 0, -1))  # the 8th's 23:00 run, started late
+        self.assertTrue(self.backup.due(self.now))
+        self.backup.run()
+        self.assertFalse(self.backup.due(self.now + 60))
+        self.assertTrue(self.backup.due(time.mktime((2026, 11, 9, 23, 0, 0, 0, 0, -1))))
+
+    def test_an_unexpected_error_still_warns_and_doesnt_loop(self):
+        def boom(*_a, **_k):
+            raise RuntimeError("something odd")
+        self.backup.drives = boom
+        self.backup.start()
+        for _ in range(100):
+            if not self.backup._lock.locked():
+                break
+            time.sleep(0.01)
+        self.assertEqual(len(self.warnings), 1)
+        self.assertIn("something odd", self.warnings[0])
+        self.assertFalse(self.backup.due(self.now + 5))
+
 
 if __name__ == "__main__":
     unittest.main()
