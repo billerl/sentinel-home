@@ -242,9 +242,11 @@ class WebAuthManager:
             self._save_sessions()
         return rec
 
-    def revoke_user(self, username: str) -> int:
-        """Sign this login out everywhere (a removed personal login); how many sessions that ended."""
-        keys = [k for k, r in list(self._sessions.items()) if r.username == username]
+    def revoke_user(self, username: str, keep_token: Optional[str] = None) -> int:
+        """Sign this login out everywhere (a removed login, a changed password), except the session ``keep_token``
+        (the one changing the password stays in); how many sessions that ended."""
+        keep = self._key(keep_token) if keep_token else None
+        keys = [k for k, r in list(self._sessions.items()) if r.username == username and k != keep]
         for k in keys:
             self._sessions.pop(k, None)
         if keys:

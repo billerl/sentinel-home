@@ -289,6 +289,26 @@ class TestRoles(unittest.TestCase):
         finally:
             self.post(owner, f"/api/people/{pid}/delete")
 
+    def test_changing_a_password_signs_out_the_other_devices(self):
+        # a personal login: the phone that changes it stays in, the lost one is out
+        liz_phone, liz_lost = self.signed_in("liz", PASSWORD), self.signed_in("liz", PASSWORD)
+        r = self.post(liz_phone, "/api/settings/password", {"current": PASSWORD, "new": "a-brand-new-pw"})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertIn("1 other device signed out", r.get_json()["message"])
+        self.assertEqual(liz_phone.get("/api/me").status_code, 200)
+        self.assertEqual(liz_lost.get("/api/me").status_code, 401)
+        self.post(liz_phone, "/api/settings/password", {"current": "a-brand-new-pw", "new": PASSWORD})
+        # the household login likewise (the owner client making the change stays in)
+        owner, other = self.clients[OWNER], self.signed_in("alex", "household-pw")
+        r = self.post(owner, "/api/settings/password", {"current": "household-pw", "new": "another-household-pw"})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        self.assertIn("signed out", r.get_json()["message"])
+        self.assertEqual(owner.get("/api/me").status_code, 200)
+        self.assertEqual(other.get("/api/me").status_code, 401)
+        self.assertEqual(self.post(owner, "/api/settings/password", {"current": "another-household-pw",
+                                                                     "new": "household-pw"}).status_code, 200)
+        self.assertEqual(self.clients[ADMIN].get("/api/me").status_code, 200)  # (other logins untouched)
+
     def test_a_pet_has_no_login_or_role(self):
         owner, loc = self.clients[OWNER], self.engine.locations
         r = self.post(owner, "/api/people", {"name": "Biscuit"})

@@ -9,7 +9,7 @@ from flask import Flask, jsonify, redirect, render_template, request, url_for
 
 from sentinel.logging_utils import app_logger
 from sentinel.web.auth import _client_ip
-from sentinel.web.context import WebContext
+from sentinel.web.context import PERSON_PREFIX, WebContext
 from sentinel.web.roles import OWNER, OWNER_SETTINGS
 
 
@@ -98,6 +98,9 @@ def register(app: Flask, ctx: WebContext) -> None:
             return err
         return _result(*engine.send_telegram_test())
 
+    def _signed_out_words(n: int) -> str:
+        return f"; {n} other device{'s' if n != 1 else ''} signed out" if n else ""
+
     @app.route("/api/settings/password", methods=["POST"])
     def api_change_password():
         err = _config_guard()
@@ -121,9 +124,11 @@ def register(app: Flask, ctx: WebContext) -> None:
             if len(new) < MIN_WEB_PASSWORD:
                 return jsonify({"error": f"new password must be at least {MIN_WEB_PASSWORD} characters"}), 400
             engine.locations.set_web_password(me, new)
-            app_logger.log("info", "web_password_changed", ip=ip, person=person.name,
+            # Every other device on this login is signed out: a lost phone or a shared password stops working now
+            ended = auth.revoke_user(PERSON_PREFIX + person.username, keep_token=request.cookies.get("sentinel_session"))
+            app_logger.log("info", "web_password_changed", ip=ip, person=person.name, signed_out=ended,
                            component="web_server", action="change_password")
-            return jsonify({"ok": True, "message": "password changed"})
+            return jsonify({"ok": True, "message": "password changed" + _signed_out_words(ended)})
         username = str(server._auth_cfg().get("username", ""))
         if not auth.verify_password(username, current):
             auth.record_failure(ip)
@@ -140,9 +145,11 @@ def register(app: Flask, ctx: WebContext) -> None:
         settings.settings["web"] = web
         settings.save_settings(force=True)
         auth.reload_config(web["auth"])
-        app_logger.log("info", "web_password_changed", ip=ip,
+        ended = auth.revoke_user(username, keep_token=request.cookies.get("sentinel_session"))
+        app_logger.log("info", "web_password_changed", ip=ip, signed_out=ended,
                        component="web_server", action="change_password")
-        return jsonify({"ok": True, "message": "password changed"})
+        return jsonify({"ok": True, "message": "password changed" + _signed_out_words(ended)
+                        + (" (the TVs too: sign them in again with the QR code)" if ended else "")})
 
     @app.route("/api/status")
     def api_status():

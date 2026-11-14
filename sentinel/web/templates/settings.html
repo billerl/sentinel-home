@@ -410,6 +410,7 @@
           <div class="field"><span>Repeat new password</span><input type="password" id="pw-new2" autocomplete="new-password"></div>
         </div>
         <div class="save-row"><button class="primary" onclick="changePassword()">Change password</button><span class="msg" id="msg-pw"></span></div>
+        <p class="hint">Changing it signs this login out on every other phone, PC and TV (a lost phone stops working at once); this browser stays signed in.</p>
       </div>
     </section>
 
@@ -867,7 +868,8 @@
       try {
         var r = await api("/api/settings/password", { current: $("pw-current").value, new: $("pw-new").value });
         ["pw-current", "pw-new", "pw-new2"].forEach(function(id) { $(id).value = ""; });
-        say("msg-pw", "Password changed", true);
+        var m = (r && r.message) || "password changed";
+        say("msg-pw", m.charAt(0).toUpperCase() + m.slice(1), true);
       } catch (e) { say("msg-pw", e.message, false); }
     }
 
