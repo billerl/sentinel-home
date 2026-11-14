@@ -190,7 +190,7 @@ h1 { font-size: 0.9rem; margin: 0; flex: 1; }
 }
 
 /* ---- Full-screen weather (tap the weather tile) ---- */
-#wxf { position: fixed; inset: 0; z-index: 1100; display: none; overflow-y: auto; color: #d9f6ff;
+#wxf { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 1100; display: none; overflow-y: auto; color: #d9f6ff;
        background: radial-gradient(120% 70% at 20% 0%, #12354a, #06121b 60%, #040a10); scrollbar-color: #1f3a44 transparent; }
 #wxf.open { display: block; }
 .wxf-wrap { max-width: 1500px; margin: 0 auto; padding: 18px 24px 28px; display: grid; gap: 18px;
@@ -238,6 +238,21 @@ h1 { font-size: 0.9rem; margin: 0; flex: 1; }
 .wxf-range b { position: absolute; top: -3px; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%;
                background: #fff; box-shadow: 0 0 0 2px #06121b; }
 .wxf-hours { grid-area: hours; position: relative; }
+/* No CSS grid (the 2018 Samsung's Chrome 56): the full-screen weather stacked, its tiles and 7-day rows in flex rows,
+   with margins for the flex gaps it doesn't know either (bug hunt 2026-11-13) */
+@supports not (display: grid) {
+  .wxf-wrap > * { margin-bottom: 18px; }
+  .wxf-head > * + *, .wxf-now > * + * { margin-left: 18px; }
+  .wxf-now > .wxf-clock { margin-left: auto; }
+  .wxf-tiles { display: flex; flex-wrap: wrap; margin: 0 -5px; }
+  .wxf-tile { width: 31%; margin: 0 1% 10px; box-sizing: border-box; }
+  .wxf-day { display: flex; flex-wrap: wrap; align-items: center; }
+  .wxf-day > * { margin-right: 12px; }
+  .wxf-day .n { width: 4.4em; } .wxf-day .ic { width: 2em; } .wxf-day .r { width: 3.6em; }
+  .wxf-day .lo { width: 2.4em; } .wxf-day .hi { width: 2.4em; margin-right: 0; }
+  .wxf-day .wxf-range { -webkit-box-flex: 1; flex: 1; min-width: 60px; }
+  .wxf-day .x { width: 100%; margin-right: 0; }
+}
 .wxf-chart { position: relative; }
 .wxf-chart svg { display: block; width: 100%; overflow: visible; }
 .wxf-chart text { fill: #7f9aa6; font-size: 12px; }
@@ -503,7 +518,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 .sw-remote:active { transform: scale(0.97); }
 
 /* ---- TV remote: a sheet over the page (full screen on phones) ---- */
-#tvr { position: fixed; inset: 0; z-index: 1100; display: none; align-items: center; justify-content: center;
+#tvr { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 1100; display: none; align-items: center; justify-content: center;
        background: rgba(0,0,0,0.6); -webkit-tap-highlight-color: transparent; }
 #tvr.open { display: flex; }
 .tvr-panel { width: min(400px, 100vw); max-height: 100%; overflow-y: auto; padding: 14px 18px 18px;
@@ -557,7 +572,7 @@ button:disabled { opacity: 0.35; cursor: default; }
            color: #bcd6df; font: inherit; font-size: 0.68rem; cursor: pointer; }
 .tvr-app .ic { position: relative; width: 100%; aspect-ratio: 1; border-radius: 16px; overflow: hidden; display: flex; align-items: center;
                justify-content: center; background: #1a2731; border: 1px solid #23343f; font-size: 1.4rem; font-weight: 700; color: #fff; }
-.tvr-app img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.2s; }
+.tvr-app img { position: absolute; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.2s; }
 .tvr-app img.ready { opacity: 1; }
 .tvr-app:active .ic { transform: scale(0.93); }
 .tvr-app:focus-visible .ic { outline: 3px solid #fff; outline-offset: 2px; }
@@ -565,7 +580,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 .tvr-screen { position: relative; aspect-ratio: 16 / 9; background: #000; border: 1px solid #23343f; border-radius: 10px;
               overflow: hidden; margin: 0 0 4px; cursor: pointer; touch-action: manipulation; }
 .tvr-screen img { display: block; width: 100%; height: 100%; object-fit: contain; }
-.tvr-screen .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 12px;
+.tvr-screen .msg { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; padding: 12px;
                    text-align: center; color: #7fb3c4; font-size: 0.82rem; pointer-events: none; }
 .tvr-screen .dot { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%;
                    border: 2px solid #7fe8ff; pointer-events: none; animation: tvr-dot 0.6s ease-out forwards; }
@@ -646,7 +661,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 /* ---- Clip player ---- */
 #player-overlay {
   display: none;
-  position: fixed; inset: 0;
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   background: #000; z-index: 2000;
   flex-direction: column;
 }
