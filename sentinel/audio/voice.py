@@ -258,7 +258,15 @@ def is_confused(text: str) -> bool:
     return bool(re.fullmatch(_CONFUSED, re.sub(r"[^a-z ]", "", (text or "").lower()).strip()))
 
 
+# Any of these anywhere in the answer makes it a no ("Please don't", "Okay, never mind", "Sure... wait, no"): a
+# confirmation guards deleting routines and turning recording off, so when in doubt, don't (bug hunt 2026-11-13)
+_NOT_YES = re.compile(r"\b(no|nope|nah|not|don'?t|do not|never|cancel|stop|wait|hold on|forget it|leave it)\b",
+                      re.IGNORECASE)
+
+
 def is_yes(text: str) -> bool:
+    if _NOT_YES.search(text or ""):
+        return False
     return bool(re.match(r"^\W*(yes|yeah|yep|yup|sure|ok|okay|do it|go ahead|please|correct|absolutely)\b",
                          text or "", re.IGNORECASE))
 

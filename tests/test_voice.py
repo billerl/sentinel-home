@@ -68,8 +68,13 @@ class TestTranscript(unittest.TestCase):
     def test_yes(self):
         for text in ("Yes.", "yeah do it", "Sure!", "Okay", "go ahead"):
             self.assertTrue(is_yes(text), text)
-        for text in ("No.", "nope", "", "yesterday?"):
+        for text in ("No.", "nope", "", "yesterday?",
+                     # (heard as yes before the bug hunt of 2026-11-13: the first word decided)
+                     "Please don't.", "Okay, never mind.", "Ok, no.", "Okay cancel", "Sure, wait no", "Yes... no, stop",
+                     "Please do not", "Sure, hold on", "Ok forget it"):
             self.assertFalse(is_yes(text), text)
+        for text in ("Yes please", "Please", "Sure thing", "Okay, go ahead"):
+            self.assertTrue(is_yes(text), text)
 
 
 class TestToSpeech(unittest.TestCase):
