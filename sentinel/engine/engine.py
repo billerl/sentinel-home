@@ -220,7 +220,7 @@ class Engine:
         from sentinel.engine.camera_light import CameraLights
 
         self.camera_lights = CameraLights()  # white light for cars at night (cameras in camera_admin.json)
-        self.telegram = TelegramNotifier(self.settings)
+        self.telegram = TelegramNotifier(self.settings, listen=False)  # (listens once start() has wired it)
         self.weather = WeatherService(self.settings)
         from sentinel.engine.cars import Cars
 
@@ -508,6 +508,7 @@ class Engine:
             target=self._command_loop, name="telegram-commands", daemon=True
         )
         self._command_thread.start()
+        self.telegram.start_listening()  # (only now: every filter and handler above is in place)
         self._start_voice()
         if self.settings.get("pc_volume") is not None:  # ALSA forgets it at reboot without `alsactl store` (sudo)
             from sentinel.audio.alert_system import set_pc_volume
@@ -523,6 +524,7 @@ class Engine:
         if self._stop.is_set():
             return
         self._stop.set()
+        self.telegram.stop_listening()  # first: what arrives now stays with Telegram for the next start
         for pipeline in self.cameras.values():
             pipeline.stop()
         if self.detection_worker is not None:

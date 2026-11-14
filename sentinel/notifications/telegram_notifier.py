@@ -21,7 +21,10 @@ TELEGRAM_MAX_UPLOAD_BYTES = 49 * 1024 * 1024  # Bot API upload limit is 50 MB
 class TelegramNotifier:
     """Sends Telegram Bot API alerts with cooldown and recipient pause controls."""
 
-    def __init__(self, settings: Dict[str, Any]):
+    def __init__(self, settings: Dict[str, Any], listen: bool = True):
+        # listen=False: don't take messages until start_listening() (the engine wires its command handlers first;
+        # a message read before that got the help text instead of being handled; bug hunt 2026-11-13)
+        self._listen_allowed = listen
         self.enabled = False
         self.bot_token = ""
         self.chat_ids: List[str] = []
@@ -477,8 +480,18 @@ class TelegramNotifier:
         """Minutes remaining for Pause for this chat, or 0 if active."""
         return self._remaining_pause_minutes(chat_id)
 
+    def start_listening(self) -> None:
+        """Begin taking messages and button taps (once whatever handles them is ready)."""
+        self._listen_allowed = True
+        self._refresh_listener_state()
+
+    def stop_listening(self) -> None:
+        """Stop taking new messages (shutting down: unread ones stay with Telegram for the next start)."""
+        self._listen_allowed = False
+        self._listener_running = False
+
     def _refresh_listener_state(self) -> None:
-        if self.enabled and self.is_configured():
+        if self.enabled and self.is_configured() and self._listen_allowed:
             self._start_listener()
         else:
             self._listener_running = False

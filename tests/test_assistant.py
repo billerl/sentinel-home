@@ -232,3 +232,29 @@ class TestTelegramListenerRestart(unittest.TestCase):
             _time.sleep(1.0)
             self.assertTrue(n._listener_thread.is_alive(), "the bot stopped listening")
             n.update_settings({"telegram_enabled": False})
+
+    def test_nothing_is_read_until_the_handlers_are_ready(self):
+        # (bug hunt 2026-11-13: the engine's notifier listened from its constructor, before the command filters were
+        # wired, so messages sent around a restart got the help text)
+        import threading
+        import time as _time
+
+        from sentinel.notifications.telegram_notifier import TelegramNotifier
+
+        polls = threading.Event()
+
+        def fake_loop(self):
+            while self._listener_running and self.enabled and self.is_configured():
+                polls.set()
+                _time.sleep(0.05)
+
+        cfg = {"telegram_enabled": True, "telegram_bot_token": "123456789:" + "A" * 35, "telegram_chat_ids": "42"}
+        with mock.patch.object(TelegramNotifier, "_listener_loop", fake_loop):
+            n = TelegramNotifier(cfg, listen=False)
+            n.update_settings(cfg)  # (a settings save meanwhile mustn't start it either)
+            self.assertFalse(polls.wait(0.3))
+            n.start_listening()
+            self.assertTrue(polls.wait(2))
+            n.stop_listening()
+            n._listener_thread.join(2)
+            self.assertFalse(n._listener_thread.is_alive())
