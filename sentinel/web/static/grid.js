@@ -1317,6 +1317,10 @@ function shiftDay(dir) {
   if (d) loadTimeline(d);
 }
 
+// Showing today: the 30 s refresh then asks for "today" rather than this date, so a page left open (the TVs) rolls
+// over at midnight instead of staying on yesterday for good (bug hunt 2026-11-13)
+var tlToday = false;
+
 async function loadTimeline(date) {
   var url = "/api/recordings" + (date ? "?date=" + encodeURIComponent(date) : "");
   try {
@@ -1326,6 +1330,7 @@ async function loadTimeline(date) {
     var data = await r.json();
     var first = !tl || tl.date !== data.date;
     tl = data;
+    tlToday = data.now_offset != null;
     renderTimeline(first);
   } catch (e) {
     document.getElementById("tl-summary").textContent = "Timeline unavailable";
@@ -1520,6 +1525,6 @@ function closePlayer() {
   if (TV_PAGE && window.Flyby) Flyby.watch();  // TVs: a plane passing over the house flies across the screen
   // Keep today's timeline current.
   setInterval(function() {
-    if (tl && tl.now_offset != null && !document.hidden) loadTimeline(tl.date);
+    if (tl && tlToday && !document.hidden) loadTimeline(null);
   }, 30000);
 })();
