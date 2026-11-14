@@ -109,7 +109,7 @@
     <div class="tiles" id="main-tiles">
       <a data-key="cameras" class="tile big" href="{{ url_for('live_page') }}">
         <span class="ic">📹</span><span class="t">Cameras</span><span class="s" id="s-cams">Live view, timeline and clips</span></a>
-      <a data-key="sensors" class="tile big" href="{{ url_for('sensors_page') }}" data-min="user" data-needs="sensors">
+      <a data-key="sensors" class="tile" href="{{ url_for('sensors_page') }}" data-min="user" data-needs="sensors">
         <span class="ic">📶</span><span class="t">Movement inside</span><span class="s" id="s-sensors">Wi-Fi motion sensors</span></a>
       <a data-key="pets" class="tile" href="{{ url_for('lost_page') }}" id="t-lost" data-needs="pets">
         <span class="ic">🐕</span><span class="t">Pet tracker</span><span class="s" id="s-lost">Collar map, recall beep</span></a>
