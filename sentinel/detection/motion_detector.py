@@ -31,6 +31,12 @@ from sentinel.constants import (
 
 CAMERA_OPEN_TIMEOUT_MS = 15000
 CAMERA_READ_TIMEOUT_MS = 10000
+# A camera sending frames faster than they're processed (its frame rate above Settings > Processing rate) used to
+# fall further and further behind: OpenCV keeps every frame. When the stream's own clock says the picture is more
+# than CATCH_UP_LAG behind real time, queued frames are skipped until it's within CAUGHT_UP_LAG (bug hunt 2026-11-13)
+CATCH_UP_LAG = 1.0
+CAUGHT_UP_LAG = 0.25
+CATCH_UP_MAX = 300  # frames skipped at most in one go
 
 
 class MotionDetector:
@@ -408,6 +414,9 @@ class MotionDetector:
                             cv2.CAP_PROP_READ_TIMEOUT_MSEC, CAMERA_READ_TIMEOUT_MS,
                         ],
                     )
+                self._stream_ref = None  # (wall time, stream ms) of the first frame: how far behind the picture is
+                self._stream_pos = -1.0
+                self._stream_moves = False  # the stream's clock has advanced at least once (some don't report one)
                 if not self.cap.isOpened():
                     raise RuntimeError(f"Failed to open camera {camera_index}")
 
@@ -755,6 +764,50 @@ class MotionDetector:
                 crossed = True
         return crossed
 
+    def _note_stream_position(self, cap) -> None:
+        """Remember where in the stream the last frame was, against real time (see CATCH_UP_LAG)."""
+        try:
+            pos = float(cap.get(cv2.CAP_PROP_POS_MSEC))
+        except (cv2.error, TypeError, ValueError):
+            return
+        if not pos == pos or pos < 0:  # (NaN or nothing reported)
+            return
+        now = time.monotonic()
+        ref = getattr(self, "_stream_ref", None)
+        last = getattr(self, "_stream_pos", -1.0)
+        if ref is None or pos < last - 1000 or (now - ref[0]) - (pos - ref[1]) / 1000.0 < -2.0:
+            self._stream_ref = (now, pos)  # first frame, or the stream's clock jumped: start measuring again
+        elif pos > last:
+            self._stream_moves = True
+        self._stream_pos = pos
+
+    def _catch_up(self, cap) -> None:
+        """Skip queued frames when the picture has fallen behind real time (see CATCH_UP_LAG)."""
+        ref = getattr(self, "_stream_ref", None)
+        if ref is None or not getattr(self, "_stream_moves", False):
+            return
+        lag = (time.monotonic() - ref[0]) - (self._stream_pos - ref[1]) / 1000.0
+        if lag <= CATCH_UP_LAG:
+            return
+        skipped = 0
+        while skipped < CATCH_UP_MAX and lag > CAUGHT_UP_LAG:
+            if not cap.grab():
+                break
+            skipped += 1
+            try:
+                pos = float(cap.get(cv2.CAP_PROP_POS_MSEC))
+            except (cv2.error, TypeError, ValueError):
+                break
+            if not pos == pos or pos < self._stream_pos:
+                break
+            self._stream_pos = pos
+            lag = (time.monotonic() - ref[0]) - (pos - ref[1]) / 1000.0
+        now = time.monotonic()
+        if skipped and now - getattr(self, "_caught_up_logged", -1e9) >= 600:  # (said at most every 10 minutes)
+            self._caught_up_logged = now
+            app_logger.log("info", "camera_caught_up", camera_display=getattr(self, "camera_name", None),
+                           skipped_frames=skipped, lag_s=round(lag, 2), component="motion_detector", action="read")
+
     def detect_motion(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], List[Tuple[int, int, int, int]], bool, Optional[str]]:
         """
         Capture a frame and detect motion.
@@ -777,7 +830,10 @@ class MotionDetector:
             with self._read_lock:
                 if not self.feed_active:
                     return None, None, [], False, None
+                self._catch_up(cap)
                 ret, frame = cap.read()
+                if ret:
+                    self._note_stream_position(cap)
             
             # Re-acquire lock for the heavy lifting and shared state access
             with self._lock:
