@@ -445,6 +445,21 @@ class TestTV(unittest.TestCase):
                      "skip ahead", "go back to the beginning"):
             self.assertIsNone(self.sw.command(text, "voice"), text)
 
+    def test_mute_for_a_while_with_a_real_timer(self):
+        # (bug hunt 2026-11-13: the real timer helper returned None, so the unmute thought it was cancelled; the
+        # tests' fake timers returned a Mock and hid it)
+        import threading
+
+        from sentinel.engine import switches as switches_mod
+
+        self.tv.on = True
+        self.sw.poll()
+        self.assertIsInstance(switches_mod._after(60, lambda: None), threading.Timer)
+        self.sw._after = lambda seconds, fn: switches_mod._after(0.05, fn)  # the real timer, just shorter
+        self.sw.command("mute the TV for 2 minutes", "voice")
+        threading.Event().wait(0.4)  # (time.sleep is patched out in these tests)
+        self.assertEqual(self.tv.calls[-2:], [("press", "KEY_MUTE"), ("press", "KEY_MUTE")])  # sound back on
+
     def test_mute_for_a_while(self):
         self.tv.on = True
         self.sw.poll()

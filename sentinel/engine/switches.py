@@ -275,10 +275,13 @@ def _app_words(name: str) -> List[str]:
     return _words(name)
 
 
-def _after(delay: float, fn: Callable[[], None]) -> None:
+def _after(delay: float, fn: Callable[[], None]) -> threading.Timer:
+    """Call fn after delay seconds; the Timer is returned so it can be cancelled (and is what "mute for N minutes"
+    keeps: returning None here made the unmute think it had been cancelled, so the TV stayed muted)."""
     t = threading.Timer(delay, fn)
     t.daemon = True
     t.start()
+    return t
 
 
 class SmartSwitches:
@@ -304,7 +307,7 @@ class SmartSwitches:
         # TV's own volume keys changed the TV, not the bar (2026-11-07). (key, times) -> True when it took them.
         self.sound_keys: Optional[Callable[[str, int], bool]] = None
         self._camera_shows: Dict[str, List[Any]] = {}  # TV switch id -> [until, page path] (a routine's camera)
-        self._after: Callable[[float, Callable[[], None]], None] = _after
+        self._after: Callable[[float, Callable[[], None]], threading.Timer] = _after  # (tests swap in a fake)
         # words -> (camera name, its page path "#cam=<id>") when they name a camera (set by the engine)
         self.camera_lookup: Optional[Callable[[str], Optional[Tuple[str, str]]]] = None
         self._known: Dict[str, Dict[str, Any]] = {}  # device key ("kasa-<mac>") -> {kind, host, model}
@@ -802,12 +805,6 @@ class SmartSwitches:
                 and all(k == keys[0] for k in keys) and keys[0] in sound and self.sound_keys(keys[0], len(keys))):
             return
         driver.press(host, *keys)
-
-    def _after(self, seconds: float, fn: Callable[[], None]):
-        timer = threading.Timer(seconds, fn)
-        timer.daemon = True
-        timer.start()
-        return timer
 
     def _press_later(self, sw: Switch, driver, host: str, keys: List[str], what: str, source: str,
                      only: Any = True) -> None:
