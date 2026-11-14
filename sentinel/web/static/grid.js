@@ -541,15 +541,33 @@ function applyCameras(cams) {
     var raw = document.getElementById("initial-cameras").textContent;
     applyCameras(JSON.parse(raw || "[]"));
   } catch (e) {}
+  try {  // a camera that was full screen before a restart (refreshList): open it again
+    var again = sessionStorage.getItem("sentinel.refocus");
+    if (again) {
+      sessionStorage.removeItem("sentinel.refocus");
+      var c = liveCams.filter(function(x) { return (x.display || x.id) === again; })[0];
+      if (c) openFocus(c.id, c.display || c.id);
+    }
+  } catch (e) {}
 })();
 
 async function refreshList() {
-  if (focusedCamId) return;
+  // (also while a camera is full screen: after a restart its id no longer exists and the picture froze for good;
+  // bug hunt 2026-11-13. Only the grid isn't rebuilt under it.)
   try {
     var r = await fetch("/api/cameras");
     if (r.status === 401) { location.href = "/login"; return; }  // signed out (e.g. a TV left on)
     var boot = r.headers.get("X-Sentinel-Boot");
-    if (boot && boot !== BOOT_ID) { if (!playerOpen) location.reload(); return; }  // Sentinel was updated: load the new page
+    if (boot && boot !== BOOT_ID) {  // Sentinel was updated or restarted: load the new page
+      if (!playerOpen) {
+        if (focusedCamId) {  // ... and come back to the same camera (by name: its id changes at every restart)
+          try { sessionStorage.setItem("sentinel.refocus", document.getElementById("focus-title").textContent); } catch (e) {}
+        }
+        location.reload();
+      }
+      return;
+    }
+    if (focusedCamId) return;
     var cams = await r.json();
     var cur = liveCams.map(c => c.id).sort().join(",");
     var nxt = cams.map(c => c.id).sort().join(",");
