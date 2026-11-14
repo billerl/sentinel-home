@@ -1593,7 +1593,8 @@ class Engine:
                 applied.append(f"Auto reconnect: {'on' if val else 'off'}")
                 if val:
                     for pipeline in self.cameras.values():
-                        pipeline.start()  # no-op if its thread is still running
+                        if pipeline.profile.get("enabled", True):  # (a camera switched off stays off)
+                            pipeline.start()  # no-op if its thread is still running
         self.settings_manager.save_settings(force=True)
         app_logger.log("info", "remote_feature_toggle", changes=changes, component="engine", action=source)
         return applied

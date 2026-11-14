@@ -32,6 +32,21 @@ class TestAccessCommand(unittest.TestCase):
         self.assertIn("connected", msg)
 
 
+class TestReconnectToggle(unittest.TestCase):
+    def test_enable_reconnect_leaves_switched_off_cameras_off(self):
+        from types import SimpleNamespace
+        from unittest import mock
+
+        from sentinel.engine import Engine
+
+        started = []
+        cam = lambda name, on: SimpleNamespace(profile={"enabled": on}, start=lambda: started.append(name))  # noqa: E731
+        fake = SimpleNamespace(cameras={"a": cam("Front Door", True), "b": cam("Bedroom", False)},
+                               settings_manager=mock.Mock(), settings={}, telegram=mock.Mock(), audio=mock.Mock())
+        Engine.apply_feature_changes(fake, {"reconnect": True}, "test")
+        self.assertEqual(started, ["Front Door"])  # (bug hunt 2026-11-13: it started the Bedroom camera too)
+
+
 class TestSettingsApi(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="sentinel-settings-")
