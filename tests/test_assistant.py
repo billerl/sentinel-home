@@ -206,3 +206,29 @@ class TestWebSearch(unittest.TestCase):
             system = cmd[cmd.index("--system-prompt") + 1]
             self.assertEqual("You can search the web" in system, want)
             self.assertEqual("You can't look anything up" in system, voice and not want)
+
+
+class TestTelegramListenerRestart(unittest.TestCase):
+    def test_quick_off_and_on_keeps_listening(self):
+        # Turned off and on again within one long poll: the bot must keep listening (bug hunt 2026-11-13)
+        import threading
+        import time as _time
+
+        from sentinel.notifications.telegram_notifier import TelegramNotifier
+
+        polls = threading.Event()
+
+        def fake_loop(self):
+            while self._listener_running and self.enabled and self.is_configured():
+                polls.set()
+                _time.sleep(0.3)  # (the long poll)
+
+        with mock.patch.object(TelegramNotifier, "_listener_loop", fake_loop):
+            n = TelegramNotifier({"telegram_enabled": True, "telegram_bot_token": "123456789:" + "A" * 35,
+                                  "telegram_chat_ids": "42"})
+            self.assertTrue(polls.wait(2))
+            n.update_settings({"telegram_enabled": False})
+            n.update_settings({"telegram_enabled": True})  # (while the old poll is still running)
+            _time.sleep(1.0)
+            self.assertTrue(n._listener_thread.is_alive(), "the bot stopped listening")
+            n.update_settings({"telegram_enabled": False})

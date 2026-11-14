@@ -484,9 +484,12 @@ class TelegramNotifier:
             self._listener_running = False
 
     def _start_listener(self) -> None:
+        # Set first: turned off and on again within one long poll, the old thread is still alive and just carries
+        # on (it checks this flag when its poll returns); set after the early return, it read False and quit, and
+        # Telegram stopped listening until a restart (bug hunt 2026-11-13)
+        self._listener_running = True
         if self._listener_thread and self._listener_thread.is_alive():
             return
-        self._listener_running = True
         self._listener_thread = threading.Thread(
             target=self._listener_loop,
             daemon=True,
