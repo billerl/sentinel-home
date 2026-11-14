@@ -472,12 +472,18 @@ async function loadWeatherAlerts() {
 }
 loadWeatherAlerts(); setInterval(loadWeatherAlerts, 60 * 1000);
 
+// Every 10 s, like the home page: a light lagged up to a minute behind the Telegram "got home" (2026-11-14).
+// Redrawn only when something changed, so the weather card's sky picture doesn't restart every 10 s on the TVs.
+var familySeen = "";
 async function loadFamily() {
   try {
     var r = await fetch("/api/family");
-    if (r.ok) { family = (await r.json()).people || []; renderWeather(); }
+    if (r.ok) {
+      var people = (await r.json()).people || [], seen = JSON.stringify(people);
+      if (seen !== familySeen) { familySeen = seen; family = people; renderWeather(); }
+    }
   } catch (e) {}
-  setTimeout(loadFamily, 60 * 1000);
+  setTimeout(loadFamily, 10 * 1000);
 }
 loadFamily();
 
