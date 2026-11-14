@@ -69,6 +69,9 @@ class SettingsManager:
             settings_file: Path to the settings JSON file
         """
         self.settings_file = settings_file
+        # True when settings.json exists but couldn't be read: then nothing is saved over it (saving the defaults we
+        # fell back to would wipe the cameras, Telegram and the web login; bug hunt 2026-11-13)
+        self.load_failed = False
         self.last_save_time = 0
         self._save_lock = threading.RLock()
         self._deferred_save: threading.Timer = None
@@ -203,15 +206,37 @@ class SettingsManager:
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, "r") as f:
                     loaded_settings = json.load(f)
-                    self.settings.update(loaded_settings)
-                    self._migrate_camera_profiles()
-                    print("Settings loaded successfully")
-        except (json.JSONDecodeError, PermissionError, OSError) as e:
+                if not isinstance(loaded_settings, dict):
+                    raise ValueError("settings.json doesn't hold a settings object")
+                self.settings.update(loaded_settings)
+                self._migrate_camera_profiles()
+                print("Settings loaded successfully")
+        except (ValueError, OSError) as e:  # (json.JSONDecodeError is a ValueError; PermissionError an OSError)
+            self.load_failed = True
+            kept = self._keep_broken_copy()
             print(f"Error loading settings: {e}")
-            print("Using default settings")
+            print("Running on default settings for now, and NOT saving over settings.json: fix the file (a copy is in "
+                  f"{kept or 'settings.json itself'}) and restart Sentinel.")
+            try:
+                from sentinel.logging_utils import app_logger
+                app_logger.log("error", "settings_load_failed", error_message=str(e)[:200], copy=kept,
+                               component="settings", action="load")
+            except Exception:
+                pass
 
         self.ensure_web_defaults()
         return self.settings
+
+    def _keep_broken_copy(self) -> str:
+        """A copy of the unreadable settings.json (settings.json.broken-<time>), or "" if it can't be copied."""
+        import shutil
+        target = f"{self.settings_file}.broken-{time.strftime('%Y%m%d-%H%M%S')}"
+        try:
+            shutil.copy2(self.settings_file, target)
+            os.chmod(target, 0o600)  # (it holds camera passwords and the bot token)
+            return target
+        except OSError:
+            return ""
 
     def ensure_web_defaults(self) -> None:
         """Merge web viewer defaults; safe to call after manual edits."""
@@ -274,6 +299,9 @@ class SettingsManager:
             current_time = time.time()
             if settings:
                 self.settings.update(settings)
+            if self.load_failed:
+                print("Not saving settings: settings.json couldn't be read at start-up (fix it and restart).")
+                return False
             if not force and (current_time - self.last_save_time) < SAVE_DEBOUNCE_INTERVAL:
                 # Too soon: save once the debounce window ends instead of dropping it.
                 if self._deferred_save is None:
