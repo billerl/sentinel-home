@@ -139,6 +139,7 @@ class PackageWatch:
         self._doors: Dict[str, _Door] = {}
         self._visits: Dict[str, float] = {}  # camera name -> when the camera last saw a person
         self._lock = threading.Lock()
+        self._save_soon = False  # the waiting packages changed: saved at the end of this check
         self._stop = threading.Event()
 
     # ------------------------------------------------------------- lifecycle
@@ -150,18 +151,23 @@ class PackageWatch:
         self.save()
 
     def save(self) -> None:
-        """Keep each door's quiet picture for the next start (see REFERENCE_KEEP)."""
+        """Keep each door's quiet picture for the next start (see REFERENCE_KEEP), and the packages waiting there:
+        the quiet picture already shows them, so they'd never be found again (bug hunt 2026-11-13: forgotten at a
+        restart, so no sunset reminder, no "gone while nobody's home", and "any packages?" said none)."""
         if not self.state_dir:
             return
         with self._lock:
             refs = {k: d.reference for k, d in self._doors.items() if d.reference is not None}
+            waiting = {k: [{"box": list(p.box), "since": p.since, "reminded": p.reminded,
+                            "look": p.look.round(4).tolist() if p.look is not None else None} for p in d.packages]
+                       for k, d in self._doors.items()}
         index = {}
         try:
             os.makedirs(self.state_dir, exist_ok=True)
             for name, ref in refs.items():
                 file = re.sub(r"[^\w-]+", "_", name) + ".png"
                 if cv2.imwrite(os.path.join(self.state_dir, file), ref):
-                    index[name] = {"file": file, "saved": self.clock()}
+                    index[name] = {"file": file, "saved": self.clock(), "packages": waiting.get(name, [])}
             with open(os.path.join(self.state_dir, REFERENCE_INDEX), "w") as f:
                 json.dump(index, f)
         except Exception as e:
@@ -181,6 +187,13 @@ class PackageWatch:
             return
         if ref is not None:
             door.reference = ref
+            for p in entry.get("packages") or []:
+                try:
+                    look = np.asarray(p["look"], dtype=np.float32).reshape(32, 32) if p.get("look") else None
+                    door.packages.append(Package(tuple(int(v) for v in p["box"]), look, float(p["since"]),
+                                                 reminded=bool(p.get("reminded"))))
+                except (KeyError, TypeError, ValueError):
+                    pass
 
     def _run(self) -> None:
         self._stop.wait(30)  # let cameras connect
@@ -236,6 +249,9 @@ class PackageWatch:
             self._hosts[cam.display_name] = getattr(cam, "host", cam.display_name)
             if frame is not None:
                 self.look(cam.display_name, frame, now)
+        if self._save_soon:
+            self._save_soon = False
+            self.save()
 
     def look(self, name: str, frame: np.ndarray, now: float) -> None:
         with self._lock:
@@ -264,6 +280,7 @@ class PackageWatch:
                 continue
             door.packages.append(Package(box, _look(frame, box), now))
             self._report(name, frame, box, p)
+            self._save_soon = True  # (kept on disk too, so a power cut doesn't lose it)
         recent = now - self._visits.get(name, -1e9) <= VISIT_WINDOW
         for box in changes(door.reference, frame)[:MAX_CANDIDATES] if recent else []:
             if any(_iou(box, k.box) >= SAME_PLACE_IOU for k in door.packages):
@@ -285,6 +302,7 @@ class PackageWatch:
                 pkg.missing += 1
                 if pkg.missing >= GONE_SNAPSHOTS:
                     door.packages.remove(pkg)
+                    self._save_soon = True
                     if not door.packages:
                         self._gone(name)
                     away = self.nobody_home()
@@ -296,6 +314,7 @@ class PackageWatch:
             pkg.missing = 0
             if not pkg.reminded and sunset is not None and now >= sunset and pkg.since < sunset:
                 pkg.reminded = True
+                self._save_soon = True
                 self.notify(f"📦 Reminder: the package is still at the {name}.", _jpeg(frame, pkg.box), True)
 
     def _report(self, name: str, frame: np.ndarray, box, probability: float) -> None:

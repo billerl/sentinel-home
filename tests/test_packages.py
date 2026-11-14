@@ -99,6 +99,29 @@ class TestPackages(unittest.TestCase):
             self.look(porch(parcel=True))
             self.assertEqual(self.sent, ["📦 A package was left at the Front Door."])
 
+    def test_a_package_waiting_at_a_restart_is_remembered(self):
+        """(bug hunt 2026-11-13: the quiet picture saved at the stop already showed the parcel, and the waiting list
+        wasn't saved, so after a restart: no sunset reminder, no "gone while nobody's home", "any packages?" none)"""
+        with tempfile.TemporaryDirectory() as d:
+            self.watch.state_dir = d
+            self.watch.clock = lambda: self.t
+            self.deliver()
+            self.look(porch(parcel=True))  # (the quiet picture now includes the parcel)
+            self.watch.stop()
+            self.watch = P.PackageWatch({}, lambda: [], self.watch.detector, FakeChecker(),
+                                        lambda text, jpeg, ask_done=False: self.sent.append(text),
+                                        lambda now: self.sunset, lambda: self.away, clock=lambda: self.t, state_dir=d)
+            self.look(porch(parcel=True), 40)
+            self.assertEqual(self.watch.packages(), {"Front Door": 1})
+            self.sunset = self.t + 5
+            self.look(porch(parcel=True))
+            self.look(porch(parcel=True))
+            self.assertEqual(self.sent[-1], "📦 Reminder: the package is still at the Front Door.")
+            self.away = True
+            for _ in range(P.GONE_SNAPSHOTS):
+                self.look(porch())
+            self.assertEqual(self.sent[-1], "📦 The package at the Front Door is gone, and nobody is home.")
+
     def test_a_restart_alone_is_not_a_visit(self):
         """Sun shadows move while Sentinel restarts: with nobody seen, a change isn't a parcel (2026-11-09)."""
         with tempfile.TemporaryDirectory() as d:
