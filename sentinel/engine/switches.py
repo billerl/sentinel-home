@@ -224,6 +224,9 @@ _BACK_WORDS = ("rewind", "go back", "skip back", "jump back", "back up")
 _SPOTIFY_WORDS = ("go back", "skip back", "skip ahead", "skip forward", "jump back", "jump ahead", "go forward", "back up")
 SEEK_STEP = 10  # seconds one arrow press skips in Netflix, YouTube, Hulu, Disney+, Prime Video
 SEEK_MAX = 30 * 60
+# A routine's camera on a TV stays while that camera sees movement (a visitor standing at the door), but never longer
+# than this from when it came up (a tree in the wind mustn't hold the show off for the evening)
+CAMERA_SHOW_MAX = 10 * 60
 SEEK_SETTLE = 1.0  # seconds after the last arrow before pressing Play
 _COUNT = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
           "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "fifteen": 15, "twenty": 20, "thirty": 30,
@@ -306,7 +309,8 @@ class SmartSwitches:
         # The TV's sound through a soundbar that only follows infrared (a BroadLink's taught "Soundbar" buttons): the
         # TV's own volume keys changed the TV, not the bar (2026-11-07). (key, times) -> True when it took them.
         self.sound_keys: Optional[Callable[[str, int], bool]] = None
-        self._camera_shows: Dict[str, List[Any]] = {}  # TV switch id -> [until, page path] (a routine's camera)
+        # TV switch id -> {until, path, seconds, started, dismissed} (a routine's camera on that TV)
+        self._camera_shows: Dict[str, Dict[str, Any]] = {}
         self._after: Callable[[float, Callable[[], None]], threading.Timer] = _after  # (tests swap in a fake)
         # words -> (camera name, its page path "#cam=<id>") when they name a camera (set by the engine)
         self.camera_lookup: Optional[Callable[[str], Optional[Tuple[str, str]]]] = None
@@ -1010,31 +1014,54 @@ class SmartSwitches:
         sw, driver, host = tv
         if not (sw.on and sw.online):
             return False, f"The {sw.name} is off."
+        now = self._clock()
         with self._lock:
             showing = self._camera_shows.get(switch_id)
-            self._camera_shows[switch_id] = [self._clock() + seconds, path]
-        if showing is None or showing[1] != path:
-            try:
-                driver.show_live(host, path=path)
-            except (OSError, ValueError) as e:
-                with self._lock:
-                    self._camera_shows.pop(switch_id, None)
-                return False, f"The {sw.name} didn't do it ({e})."
+            if showing is not None and showing["path"] == path:
+                # the same visit seen again: keeps it up (or, after "go back", keeps it away), never brought back
+                showing["until"] = min(showing["started"] + CAMERA_SHOW_MAX, max(showing["until"], now + seconds))
+                return True, "showing"
+            self._camera_shows[switch_id] = {"until": now + seconds, "path": path, "seconds": seconds,
+                                             "started": now, "dismissed": False}
+        try:
+            driver.show_live(host, path=path)
+        except (OSError, ValueError) as e:
+            with self._lock:
+                self._camera_shows.pop(switch_id, None)
+            return False, f"The {sw.name} didn't do it ({e})."
         if showing is None:
             self._after(seconds, lambda: self._camera_done(switch_id))
         return True, "showing"
 
+    def camera_showing(self) -> bool:
+        return bool(self._camera_shows)  # (asked on every frame with motion: no lock for the quick look)
+
+    def keep_camera_up(self, path: str) -> None:
+        """Movement on a camera a routine put on a TV: it stays (its time starts again), up to CAMERA_SHOW_MAX."""
+        now = self._clock()
+        with self._lock:
+            for showing in self._camera_shows.values():
+                if showing["path"] == path and not showing["dismissed"]:
+                    showing["until"] = min(showing["started"] + CAMERA_SHOW_MAX, max(showing["until"], now + showing["seconds"]))
+
+    def _camera_dismissed(self, switch_id: str) -> None:
+        """Someone went back to the show: this visit doesn't bring the camera up again or hold it."""
+        with self._lock:
+            showing = self._camera_shows.get(switch_id)
+            if showing is not None:
+                showing["dismissed"] = True
+
     def _camera_done(self, switch_id: str) -> None:
         with self._lock:
             showing = self._camera_shows.get(switch_id)
-            left = showing[0] - self._clock() if showing else 0
+            left = showing["until"] - self._clock() if showing else 0
             if showing and left <= 0:
                 self._camera_shows.pop(switch_id, None)
         if showing and left > 0:
             self._after(left, lambda: self._camera_done(switch_id))
             return
         tv = self._tv_for(switch_id)
-        if showing and tv is not None:
+        if showing and not showing["dismissed"] and tv is not None:
             try:
                 tv[1].live_end(tv[2])  # back to the show (or, if the TV closed it meanwhile, open it again)
             except (OSError, ValueError):
@@ -1049,7 +1076,9 @@ class SmartSwitches:
             return False, f"Use the {tv[0].name}'s Back button."
         try:
             if back:
-                return True, tv[1].live_back(tv[2])
+                name = tv[1].live_back(tv[2])
+                self._camera_dismissed(switch_id)
+                return True, name
             tv[1].show_live(tv[2], reload=reload)
         except (OSError, ValueError) as e:
             # (logged: the remote's failed Back presses on 2026-11-10 left no trace of why)

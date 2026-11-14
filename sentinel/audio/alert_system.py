@@ -20,6 +20,7 @@ import numpy as np
 import pyttsx3
 
 from sentinel.audio import devices
+from sentinel.logging_utils import app_logger
 from sentinel.constants import (
     DEFAULT_SPEECH_SPEED,
     DEFAULT_VOLUME,
@@ -324,13 +325,17 @@ class AudioAlertSystem:
     def trigger_alert(self, message: str = "Motion detected!") -> bool:
         """Speak an alert if the cooldown has elapsed."""
         current_time = time.time()
-        if (current_time - self.last_alert_time) <= MOTION_TIMEOUT:
-            return False
-        # Don't stack TTS calls
-        if self.busy or self._tts_thread and self._tts_thread.is_alive() or self._play_lock.locked():
+        # (each skip is logged: a visitor at the front door went unheard on 2026-11-14 and nothing said why)
+        why = ("another alert just played" if current_time - self.last_alert_time <= MOTION_TIMEOUT
+               else "Jarvis was talking with someone" if self.busy
+               else "something else was playing" if self._tts_thread and self._tts_thread.is_alive() or self._play_lock.locked()
+               else None)
+        if why:
+            app_logger.log("info", "alert_not_spoken", text=message[:120], why=why, component="audio", action="alert")
             return False
 
         self.last_alert_time = current_time
+        app_logger.log("info", "alert_spoken", text=message[:120], component="audio", action="alert")
 
         if self.piper_voice or self.kokoro is not None:
             self._tts_thread = threading.Thread(
@@ -457,6 +462,9 @@ class AudioAlertSystem:
                 env=alsa_env(),
             )
             proc.communicate(wav_payload, timeout=120)
+            if proc.returncode:
+                app_logger.log("warning", "audio_play_failed", device=speaker_device(), code=proc.returncode,
+                               component="audio", action="play")
 
     def _speak_piper(self, text: str) -> bool:
         """Synthesise speech with Piper and play it via aplay."""

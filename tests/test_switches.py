@@ -730,6 +730,39 @@ class TestCameraOnTV(unittest.TestCase):
         self.run_timers()
         self.assertEqual(self.tv.backs, 0)  # leave them be
 
+    def test_stays_while_the_visitor_moves_then_never_past_ten_minutes(self):
+        # 2026-11-14 (the user): "as long as the person is there or until someone tells Jarvis to change it back"
+        self.sw.tv_show_camera("samsung-1", "#cam=abc", 60)
+        for _ in range(4):  # standing at the door, shifting about: movement on that camera
+            self.now += 50
+            self.sw.keep_camera_up("#cam=abc")
+            self.sw.keep_camera_up("#cam=other")  # (another camera's movement doesn't count)
+            self.run_timers()
+        self.assertEqual(self.tv.backs, 0)  # 200 s and still up
+        self.now += 61
+        self.run_timers()
+        self.assertEqual(self.tv.backs, 1)  # a minute after the movement stopped: back to the show
+        self.sw.tv_show_camera("samsung-1", "#cam=abc", 60)  # a tree in the wind: movement all evening
+        for _ in range(30):
+            self.now += 30
+            self.sw.keep_camera_up("#cam=abc")
+            self.run_timers()
+        self.assertEqual(self.tv.backs, 2)  # gone back after 10 minutes anyway
+
+    def test_go_back_ends_this_visit(self):
+        self.tv.live_back = lambda host: "YouTube TV"
+        self.sw.tv_show_camera("samsung-1", "#cam=abc", 60)
+        self.assertEqual(self.sw.tv_live("samsung-1", False, back=True), (True, "YouTube TV"))
+        self.now += 20
+        self.sw.keep_camera_up("#cam=abc")
+        self.sw.tv_show_camera("samsung-1", "#cam=abc", 60)  # the same visitor seen again
+        self.assertEqual(self.tv.shown, ["#cam=abc"])  # not brought back up
+        self.now += 61
+        self.run_timers()
+        self.assertEqual(self.tv.backs, 0)  # (already back: nothing pressed)
+        self.sw.tv_show_camera("samsung-1", "#cam=abc", 60)  # the next visitor: shown again
+        self.assertEqual(self.tv.shown, ["#cam=abc", "#cam=abc"])
+
 
 class TestOneCameraByVoice(unittest.TestCase):
     def test_show_me_the_front_door(self):

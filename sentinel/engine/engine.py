@@ -616,6 +616,8 @@ class Engine:
     def _on_motion(self, pipeline: CameraPipeline) -> None:
         self._last_motion[pipeline.host] = time.time()
         self.routines.motion(pipeline.host)
+        if self.switches.camera_showing() and self.frame_broker is not None:  # a visitor still at the door
+            self.switches.keep_camera_up("#cam=" + self.frame_broker.web_id(pipeline.camera_id))
         if self.objects_active():
             return  # alerts come from recognised objects instead (see _on_object)
         if self.quiet.is_quiet(pipeline.display_name):
