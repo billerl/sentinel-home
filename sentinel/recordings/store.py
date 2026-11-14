@@ -280,6 +280,12 @@ class RecordingStore:
                 (",".join(sorted(set(labels))) or None, recording_id),
             )
 
+    def mark_checked(self, recording_id: int) -> None:
+        """Object detection looked at this clip and found nothing: labels '' (NULL = never looked at, e.g. detection
+        off), so the motion-only cleanup only takes clips known to be empty (bug hunt 2026-11-13: cameras#3)."""
+        with self._lock, self._connect() as conn:
+            conn.execute("UPDATE recordings SET labels = '' WHERE id = ? AND labels IS NULL", (recording_id,))
+
     def hd_absolute_path(self, record: Dict[str, Any]) -> Optional[str]:
         rel = record.get("hd_path")
         if not rel:
@@ -473,7 +479,7 @@ class RecordingStore:
             with self._connect() as conn:
                 grey = conn.execute(
                     "SELECT id, path, hd_path FROM recordings r WHERE start_ts < ? AND reason = 'motion'"
-                    " AND (labels IS NULL OR labels = '') AND NOT EXISTS (SELECT 1 FROM events e"
+                    " AND labels = '' AND NOT EXISTS (SELECT 1 FROM events e"
                     " WHERE e.camera_key = r.camera_key AND e.ts BETWEEN r.start_ts - 60"
                     " AND COALESCE(r.end_ts, r.start_ts) + 60)", (cutoff,)).fetchall()
             d, f = self._delete_records(grey)

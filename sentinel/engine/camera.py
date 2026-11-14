@@ -109,6 +109,7 @@ class CameraPipeline:
         self._on_object = on_object
         self._on_maybe_person = on_maybe_person  # routines: a moving person too unsure for an alert
         self._clip_labels: set = set()
+        self._clip_checked = False  # object detection looked at this clip (so "no labels" means nothing was there)
         self.tracker = None
         if detection_worker is not None:
             from sentinel.engine.objects import CameraObjectTracker
@@ -281,9 +282,12 @@ class CameraPipeline:
         if reason == CLIP_REQUEST_REASON:
             chats, self._clip_chats = self._clip_chats, []
         span = self.detector.last_completed_span
-        if span and span[2] is not None and self._clip_labels and self._store is not None:
-            self._store.set_labels(span[2], sorted(self._clip_labels))
-        labels, self._clip_labels = sorted(self._clip_labels), set()
+        if span and span[2] is not None and self._store is not None:
+            if self._clip_labels:
+                self._store.set_labels(span[2], sorted(self._clip_labels))
+            elif self._clip_checked:
+                self._store.mark_checked(span[2])  # grey, and known to be: the motion-only cleanup may take it
+        labels, self._clip_labels, self._clip_checked = sorted(self._clip_labels), set(), False
         self.last_clip_labels = labels
         hd = self.hd
         if hd is not None and hd.running and span and span[2] is not None:
@@ -313,6 +317,8 @@ class CameraPipeline:
     def _handle_detections(self, detections, frame: np.ndarray, ts: float) -> None:
         """Runs on the detection worker thread."""
         from sentinel.engine.objects import wants_type_check
+
+        self._clip_checked = True
 
         h, w = frame.shape[:2]
 
