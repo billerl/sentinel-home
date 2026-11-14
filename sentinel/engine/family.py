@@ -18,6 +18,7 @@ LOCATION_STALE_S = 10 * 60  # a family phone's position older than this: ask the
 # once, and "got to <a place>" went out while the person was home). Arrivals/departures older than this when they
 # reach Sentinel are kept in the history but not announced, and don't start the home routines.
 LATE_CHANGE_S = 10 * 60
+CONTRADICTION_HOLD = 60.0  # a change that contradicts the last alert is sent once it has held this long
 SPOT_CHECK_HOUR = 18  # new spots worth saving are looked for once a day, from this hour on
 SPOT_ASK_AGAIN_DAYS = 14  # a suggestion nobody answered may come back after this
 LOST_PIN_SECONDS = 300  # a lost pet: a fresh Telegram map pin at most this often ...
@@ -45,6 +46,9 @@ class Family:
         self._speak = speak
         self._place_pins: Dict[str, Tuple[float, float, float]] = {}  # chat -> pin waiting for a name (lat, lon, until)
         self._location_alerted: Dict[Tuple[int, int], float] = {}  # (person, place) -> last alert
+        # What was last said per (person, place) / (pet, "yard"), and checks waiting for a cool-down to end
+        self._last_said: Dict[Tuple[int, Any], Tuple[str, float]] = {}
+        self._settling: Dict[Tuple[int, Any], threading.Timer] = {}
         self._location_asked: Dict[int, float] = {}  # person -> last time we asked their phone for a fresh fix
         self._spots_checked = ""  # the day frequent spots were last looked for
         self._places_asked: Dict[int, float] = {}  # person -> last time we asked their phone which places it has
@@ -309,26 +313,60 @@ class Family:
                 if change.kind != "started" and not (self.settings.get("location_alerts_enabled", True)
                                                      and change.place.alerts):
                     continue
-                if change.kind != "started":
-                    key = (person.id, change.place.id)
-                    if time.time() - self._location_alerted.get(key, 0) < 15 * 60:
-                        continue  # GPS wobbling at the edge of a place: one message is enough
-                    self._location_alerted[key] = time.time()
                 text = change_message(change, self._cars_of(person, statuses))
-                if text:
+                if not text:
+                    continue
+                if change.kind == "started":
                     self._send_location_alert(text)
+                    continue
+                place_id = change.place.id
+                self._announce((person.id, place_id), change.kind, 15 * 60,
+                               lambda text=text: self._send_location_alert(text),
+                               lambda pid=person.id, place_id=place_id: "arrived" if (
+                                   self.locations.fix(pid) or {}).get("place_id") == place_id else "left")
         return reply
 
     def _yard_alert(self, change, fix: Optional[Dict[str, Any]]) -> None:
         """A pet left the yard (or came back): Telegram with a map pin, and said out loud in the house."""
-        from sentinel.engine.location import change_message
-
         if not self.settings.get("location_alerts_enabled", True):
             return
-        key = (change.person.id, change.kind)
-        if time.time() - self._location_alerted.get(key, 0) < 5 * 60:
-            return  # nosing along the fence: one message is enough
-        self._location_alerted[key] = time.time()
+        pid = change.person.id
+        self._announce((pid, "yard"), change.kind, 5 * 60, lambda: self._send_yard_alert(change, fix),
+                       lambda: "back_in_yard" if (self.locations.fix(pid) or {}).get("in_yard") else "left_yard")
+
+    def _announce(self, key, kind: str, window: float, send, now_kind) -> None:
+        """Say ``kind`` (arrived/left, left_yard/back_in_yard) unless the same was said within ``window`` (GPS
+        wobbling at the edge of a place, a dog nosing along the fence). A change that contradicts what was last said
+        is never just dropped: after CONTRADICTION_HOLD (or the window's end, if sooner) it's said if it still holds (it used to be dropped, leaving
+        "back in the yard" as the last word while the dog was out; bug hunt 2026-11-13)."""
+        now = time.time()
+        last = self._last_said.get(key)
+        if last is None or now - last[1] >= window:
+            self._last_said[key] = (kind, now)
+            send()
+            return
+        if last[0] == kind or key in self._settling:
+            return
+
+        def settle():
+            self._settling.pop(key, None)
+            try:
+                if now_kind() == kind and self._last_said.get(key, ("",))[0] != kind:
+                    self._last_said[key] = (kind, time.time())
+                    send()
+            except Exception as e:
+                app_logger.log("error", "location_alert_failed", error_message=str(e)[:200],
+                               component="engine", action="location")
+
+        # (once it has held a minute, or the window is over: "she's back" shouldn't wait the whole 5 or 15 minutes)
+        timer = threading.Timer(max(0.0, min(last[1] + window - now, CONTRADICTION_HOLD)), settle)
+        timer.daemon = True
+        self._settling[key] = timer
+        timer.start()
+
+    def _send_yard_alert(self, change, fix: Optional[Dict[str, Any]]) -> None:
+        from sentinel.engine.location import change_message
+
         text = change_message(change, [])
         url = str(self.settings.get("remote_web_url") or "").strip().rstrip("/")
         if change.kind == "left_yard" and url:

@@ -810,3 +810,46 @@ class TestEndpoints(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAlertCoolDown(unittest.TestCase):
+    """Repeats within the quiet window are dropped; a change that contradicts the last message is said once the window
+    ends if it still holds (bug hunt 2026-11-13: "back in the yard" stayed the last word while the dog was out)."""
+
+    def setUp(self):
+        from types import SimpleNamespace
+
+        from sentinel.engine.family import Family
+
+        self.me = SimpleNamespace(_last_said={}, _settling={})
+        self.announce = lambda kind, state: Family._announce(self.me, ("xena", "yard"), kind, 0.3,
+                                                             lambda: self.said.append(kind), lambda: state[0])
+        self.said = []
+
+    def wait(self):
+        for t in list(self.me._settling.values()):
+            t.join(2)
+
+    def test_out_back_out_ends_with_out(self):
+        state = ["left_yard"]
+        self.announce("left_yard", state)
+        state[0] = "back_in_yard"
+        self.announce("back_in_yard", state)  # (a contradiction: held until the window ends)
+        state[0] = "left_yard"
+        self.announce("left_yard", state)
+        self.wait()
+        self.assertEqual(self.said, ["left_yard"])  # back and out again inside the window: still out, nothing new
+        state[0] = "back_in_yard"
+        self.announce("back_in_yard", state)
+        self.wait()
+        self.assertEqual(self.said, ["left_yard", "back_in_yard"])  # said once the window ended
+
+    def test_a_repeat_is_dropped_and_a_flicker_that_settles_says_nothing(self):
+        state = ["left_yard"]
+        self.announce("left_yard", state)
+        self.announce("left_yard", state)
+        state[0] = "back_in_yard"
+        self.announce("back_in_yard", state)
+        state[0] = "left_yard"  # (nosing along the fence: back out before the window ends)
+        self.wait()
+        self.assertEqual(self.said, ["left_yard"])
