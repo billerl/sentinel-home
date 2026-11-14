@@ -349,7 +349,7 @@ class WifiMotion:
             if self._csv_file:
                 try:
                     self._csv_file.flush()
-                except OSError:
+                except (OSError, ValueError):  # (ValueError: a closed file)
                     pass
             moving, self._moving = self._moving, set()
         if self.on_motion:  # outside the lock: routines may ask us when things went quiet
@@ -565,6 +565,7 @@ class WifiMotion:
             if day != self._csv_day:
                 if self._csv_file:
                     self._csv_file.close()
+                    self._csv_file = self._csv = None  # (if opening the new day's file fails, nothing writes to the closed one)
                 os.makedirs(self.log_dir, exist_ok=True)
                 path = os.path.join(self.log_dir, f"{day}.csv")
                 fresh = not os.path.exists(path)
@@ -624,12 +625,27 @@ class WifiMotion:
                 self.hello(data, addr)
 
     def _poll_loop(self) -> None:
+        # One error used to end this thread for good: no board polled again, so no sensor routines, "movement now"
+        # or history until a restart (bug hunt 2026-11-13). Now it's logged (once a minute at most) and polling goes on
+        failed_at = -1e9
         while not self._stop.wait(POLL_SECONDS):
-            with self._lock:
-                boards = list(self._boards.values())
-            for board in boards:
-                self.poll(board)
-            self.close_quiet_episodes()
+            try:
+                with self._lock:
+                    boards = list(self._boards.values())
+                for board in boards:
+                    try:
+                        self.poll(board)
+                    except Exception as e:
+                        if time.monotonic() - failed_at >= 60:
+                            failed_at = time.monotonic()
+                            app_logger.log("error", "wifi_motion_poll_failed", board=getattr(board, "ip", ""),
+                                           error_message=str(e)[:200], component="wifi_motion", action="poll")
+                self.close_quiet_episodes()
+            except Exception as e:
+                if time.monotonic() - failed_at >= 60:
+                    failed_at = time.monotonic()
+                    app_logger.log("error", "wifi_motion_poll_failed", error_message=str(e)[:200],
+                                   component="wifi_motion", action="poll")
 
     # ---- the web page and questions ----
     def _path_name(self, pid: str, lines: List[Line]) -> str:

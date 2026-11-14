@@ -94,6 +94,40 @@ def status(*links, battery=None):
             "links": [{"id": lid, "source": src, "rssi": -55, "samples": rows} for lid, src, rows in links]}
 
 
+class PollLoopTest(unittest.TestCase):
+    def test_an_error_while_polling_doesnt_stop_the_polling(self):
+        # (bug hunt 2026-11-13: one error ended the polling thread, and Wi-Fi sensing stopped until a restart)
+        import shutil
+        import tempfile
+        import threading
+        from unittest import mock
+
+        from sentinel.engine import wifi_motion as wm_mod
+
+        d = tempfile.mkdtemp(prefix="sentinel-wm-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        wm = WifiMotion(d, fetch=lambda url: {})
+        wm._boards["a1"] = wm_mod.Board("a1", "192.0.2.1")
+        polls = []
+
+        def poll(board):
+            polls.append(board.board_id if hasattr(board, "board_id") else board)
+            if len(polls) == 1:
+                raise ValueError("I/O operation on closed file")
+
+        wm.poll = poll
+        with mock.patch.object(wm_mod, "POLL_SECONDS", 0.01):
+            t = threading.Thread(target=wm._poll_loop, daemon=True)
+            t.start()
+            for _ in range(200):
+                if len(polls) >= 3:
+                    break
+                threading.Event().wait(0.01)
+            wm._stop.set()
+            t.join(2)
+        self.assertGreaterEqual(len(polls), 3)  # kept polling after the error
+
+
 class SensorsTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()
