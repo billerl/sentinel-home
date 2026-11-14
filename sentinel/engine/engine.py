@@ -1178,13 +1178,19 @@ class Engine:
             return VoiceReply("Spotify isn't connected yet. Connect it on the Settings page, under Spotify.")
         if re.search(r"\bwhat time is it\b|\bwhat'?s the time\b|\bwhat is the time\b", low):
             return VoiceReply(f"It's {_fmt_clock(time.time())}.")
-        if re.search(r"\b(any|a) (packages?|parcels?|deliver(y|ies))\b|\bpackages? (here|outside|at the door)\b", low):
+        # Making a routine or a reminder that mentions a package or the weather ("when a package is left, ...", "remind
+        # me to check the weather") isn't a question about them: on to the routine/reminder handling (bug hunt
+        # 2026-11-13). "Any deliveries today?" is about the history, not what's at the door now: on to that too.
+        asking_status = not NEW_ROUTINE.search(low) and not re.match(r"^(please )?(remind|set a reminder)", low)
+        _period = r"\b(today|tonight|yesterday|this (morning|afternoon|evening|week)|last (night|week)|on \w+day)\b"
+        if asking_status and not re.search(_period, low) and re.search(
+                r"\b(any|a) (packages?|parcels?|deliver(y|ies))\b|\bpackages? (here|outside|at the door)\b", low):
             waiting = self.packages.packages() if self.packages is not None else {}
             return VoiceReply("Yes: " + ", ".join(f"{n} at the {cam}" for cam, n in waiting.items()) + "." if waiting
                               else "I don't see any packages waiting at the door.")
-        if re.search(r"\b(weather|storm) (alerts?|warnings?|watch(es)?)\b|\bany (weather )?(alerts|warnings)\b", low):
+        if asking_status and re.search(r"\b(weather|storm) (alerts?|warnings?|watch(es)?)\b|\bany (weather )?(alerts|warnings)\b", low):
             return VoiceReply(self.weather_alerts.summary())
-        if re.search(r"\b(weather|temperature|how (hot|cold|warm)|rain\w*|snow\w*)\b", low) \
+        if asking_status and re.search(r"\b(weather|temperature|how (hot|cold|warm)|rain\w*|snow\w*)\b", low) \
                 and self.settings.get("weather_location"):
             w = self.weather.current()
             if w.get("temp") is not None:

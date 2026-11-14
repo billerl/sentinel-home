@@ -587,6 +587,24 @@ class TestEngine(unittest.TestCase):
         self.assertEqual([r.name for r in self.engine.routines.store.all()], ["Patio at night"])
         self.assertIn("1 routine", self.engine.answer_voice("what are my routines", lambda _s: None).text)
 
+    def test_a_routine_about_packages_or_weather_isnt_answered_as_a_question(self):
+        # (bug hunt 2026-11-13: these were answered "I don't see any packages waiting" / with the weather)
+        self.engine.settings["weather_location"] = "Springfield"
+        self.engine.weather.current = lambda: {"temp": 40, "words": "Cloudy", "place": "Springfield", "high": 45,
+                                               "low": 30, "rain_today": 10}
+        for text in ("new routine when a package is left at the front door send me a message",
+                     "make a routine when the temperature drops below 32 turn on the pond pump",
+                     "every time a delivery comes turn on the porch light"):
+            with mock.patch.object(self.engine.assistant, "ask", return_value="Sure.\nCOMMAND: " + ROUTINE_JSON) as ask, \
+                    mock.patch.object(self.engine.assistant, "remaining_today", return_value=5):
+                reply = self.engine.answer_voice(text, lambda _s: None)
+            self.assertTrue(ask.called, text)  # went to the routine maker
+            self.assertNotIn("packages waiting", reply.text, text)
+            self.assertNotIn("degrees", reply.text, text)
+        # plain questions still get the quick answers
+        self.assertIn("packages waiting", self.engine.answer_voice("any packages?", lambda _s: None).text)
+        self.assertIn("40 degrees", self.engine.answer_voice("what's the weather", lambda _s: None).text)
+
     def test_claude_mistake_is_explained(self):
         bad = "Routine " + json.dumps({**PATIO, "then": [{"do": "switch", "switch": "hot tub", "on": True}]})
         with mock.patch.object(self.engine.assistant, "ask", return_value="OK.\nCOMMAND: " + bad), \
