@@ -346,7 +346,24 @@ def register(app: Flask, ctx: WebContext) -> None:
         body = request.get_json(silent=True)
         if not isinstance(body, dict):
             return jsonify({"error": "expected a JSON object"}), 400
-        return _result(*engine.family.people_save(body))
+        # Marking someone a pet (or giving them a collar tracker) removes their login and role, so for a person who
+        # has a login, or an admin, it's the owner's to do, like removing a login (bug hunt 2026-11-13: web#4)
+        try:
+            before = engine.locations.person(int(body["id"])) if body.get("id") not in (None, "") else None
+        except (TypeError, ValueError):
+            before = None
+        becomes_pet = body.get("pet") is True or bool(str(body.get("tracker") or "").strip())
+        had_login = before is not None and engine.locations.has_web_login(before.id)
+        if (before is not None and not before.is_pet and becomes_pet and not ctx.viewer().at_least(OWNER)
+                and (had_login or before.role == ADMIN)):
+            return ctx.denied(f"{before.name} has a login: only the household (owner) login can make them a pet "
+                              "or give them a tracker (it removes their login).")
+        ok, message = engine.family.people_save(body)
+        if ok and had_login and auth is not None:
+            after = engine.locations.person(before.id)
+            if after is not None and after.is_pet:
+                auth.revoke_user(PERSON_PREFIX + before.username)  # their login is gone: signed out everywhere too
+        return _result(ok, message)
 
     @app.route("/api/yard", methods=["POST"])
     def api_yard_save():

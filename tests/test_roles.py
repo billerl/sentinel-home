@@ -254,6 +254,28 @@ class TestRoles(unittest.TestCase):
         self.assertTrue(seen[liz]["invite"]["url"].startswith("https://"))
         self.assertEqual(admin.get("/api/people").get_json()["me"], {"role": ADMIN, "person": kate})
 
+    def test_only_the_owner_turns_someone_with_a_login_into_a_pet(self):
+        owner, admin, loc = self.clients[OWNER], self.clients[ADMIN], self.engine.locations
+        gid = int(self.post(owner, "/api/people", {"name": "Morgan"}).get_json()["message"])
+        try:
+            loc.set_web_password(gid, PASSWORD)
+            grace = self.signed_in("morgan", PASSWORD)
+            self.assertEqual(grace.get("/api/me").status_code, 200)
+            # an admin can't remove her login this way (it's the owner's, like remove-login)
+            for change in ({"pet": True}, {"tracker": "!a1b2c3d4"}):
+                r = self.post(admin, "/api/people", dict({"id": gid, "name": "Morgan"}, **change))
+                self.assertEqual(r.status_code, 403, change)
+            self.assertTrue(loc.has_web_login(gid))
+            self.assertEqual(grace.get("/api/me").status_code, 200)
+            # ordinary edits still work for the admin
+            self.assertEqual(self.post(admin, "/api/people", {"id": gid, "name": "Morgan", "aliases": "Mo"}).status_code, 200)
+            # the owner can, and she is signed out at once
+            self.assertEqual(self.post(owner, "/api/people", {"id": gid, "name": "Morgan", "pet": True}).status_code, 200)
+            self.assertFalse(loc.has_web_login(gid))
+            self.assertEqual(grace.get("/api/me").status_code, 401)
+        finally:
+            self.post(owner, f"/api/people/{gid}/delete")
+
     def test_a_pet_has_no_login_or_role(self):
         owner, loc = self.clients[OWNER], self.engine.locations
         r = self.post(owner, "/api/people", {"name": "Biscuit"})
