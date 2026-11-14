@@ -434,12 +434,15 @@ class HouseholdStore:
         return out
 
     def prune(self, max_age_days: float = 30) -> None:
-        """Forget old unlabelled sightings (labelled ones are the references; kept)."""
+        """Forget old unlabelled sightings. Kept: labelled ones (the references) and the family's own "Not ours"
+        marks (ignored by hand: they keep those cars hidden; deleted after 30 days, they came back to be labelled
+        again; bug hunt 2026-11-13)."""
         cutoff = time.time() - max_age_days * 86400
+        prunable = "vehicle_id IS NULL AND NOT (ignored = 1 AND auto = 0)"
         with self._lock, self._connect() as conn:
             old = [r[0] for r in conn.execute(
-                "SELECT id FROM sightings WHERE vehicle_id IS NULL AND (ts < ? OR id NOT IN "
-                "(SELECT id FROM sightings WHERE vehicle_id IS NULL ORDER BY ts DESC LIMIT ?))",
+                f"SELECT id FROM sightings WHERE {prunable} AND (ts < ? OR id NOT IN "
+                f"(SELECT id FROM sightings WHERE {prunable} ORDER BY ts DESC LIMIT ?))",
                 (cutoff, MAX_UNLABELLED))]
             conn.executemany("DELETE FROM sightings WHERE id = ?", [(i,) for i in old])
         for sid in old:
@@ -731,14 +734,23 @@ class PresenceTracker:
         self._baseline.add(key)
         boxes, people = boxes if isinstance(boxes, tuple) else (boxes, [])
         unmatched = list(boxes)
+        # First every parked car takes its own box (a clear match); only then may a car that seems partly hidden
+        # take a leftover box. In one pass, a car that had driven off took its neighbour's overlapping box as
+        # "partly hidden" and was never marked as left (bug hunt 2026-11-13)
+        matched = set()
         for p in parked:
             best = max(unmatched, key=lambda b: _iou(b, p.box), default=None)
             if best is not None and _iou(best, p.box) > 0.5:
                 unmatched.remove(best)
+                matched.add(id(p))
                 p.box, p.last_seen, p.missed = best, now, 0
                 p.seen += 1
                 self._remember_look(p, frame, night)
-            elif best is not None and _iou(best, p.box) > 0.2:
+        for p in parked:
+            if id(p) in matched:
+                continue
+            best = max(unmatched, key=lambda b: _iou(b, p.box), default=None)
+            if best is not None and _iou(best, p.box) > 0.2:
                 # Still there, just partly hidden (doors open, someone loading it): don't let it
                 # "leave" and "arrive" again.
                 unmatched.remove(best)
@@ -974,10 +986,18 @@ class PresenceTracker:
         except (OSError, ValueError):
             return
         cutoff = time.time() - 15 * 60
+        try:
+            saved_recently = os.path.getmtime(self.state_path) >= cutoff
+        except OSError:
+            saved_recently = False
         for key, cars in data.items():
             self.parked[key] = [Parked(tuple(c["box"]), c["first_seen"], c["last_seen"], seen=CONFIRM_SCANS,
                                        vehicle_id=c.get("vehicle_id"), confirmed=c.get("confirmed", False),
                                        announced=True, asked=True, unchecked=c.get("unchecked", True),
                                        day_sure=c.get("day_sure", False), looks=_saved_looks(c.get("looks")))
                                 for c in cars if c.get("last_seen", 0) >= cutoff]
-            self._baseline.add(key)  # restored: changes from here on are real
+            # Changes from here on are real only if the scene was actually restored: after a long outage every
+            # saved car is dropped as too old, and the first scan must set the scene quietly again, or every car
+            # that was there all along "got home" at the restart (bug hunt 2026-11-13)
+            if self.parked[key] or (not cars and saved_recently):
+                self._baseline.add(key)

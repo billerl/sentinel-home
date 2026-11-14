@@ -361,6 +361,45 @@ class TestPresence(unittest.TestCase):
                                 on_change=lambda *a: self.changes.append(a), state_path=path)
         self.assertIsNotNone(again.where_is(self.sierra))
 
+    def test_after_a_long_outage_cars_already_parked_dont_get_home_again(self):
+        # (bug hunt 2026-11-13: every saved car was dropped as too old but the camera still counted as set up, so each
+        # car in the driveway "got home" at the restart)
+        path = os.path.join(self.dir, "presence.json")
+        self.tracker.state_path = path
+        self.t = time.time() - 3600
+        self.scan([]); self.scan([self.BOX]); self.scan([self.BOX])
+        self.tracker._save()
+        os.utime(path, (time.time() - 3600, time.time() - 3600))  # Sentinel was off for an hour
+        self.changes.clear()
+        self.tracker = PresenceTracker(self.store, self.det, self.clf, cameras=lambda: [self.cam],
+                                       on_change=lambda kind, cam, v, ts, jpeg: self.changes.append((kind, v.name, ts)),
+                                       state_path=path)
+        self.t = time.time()
+        for _ in range(4):
+            self.scan([self.BOX])  # it's still there
+        self.assertEqual(self.changes, [])
+
+    def test_a_car_that_left_isnt_kept_by_its_neighbours_box(self):
+        # Two cars side by side, boxes overlapping a little (IoU ~0.23). The first one drives off: its spot used to
+        # take the neighbour's box as "partly hidden" and never leave (bug hunt 2026-11-13)
+        left, right = (100, 100, 200, 150), (225, 100, 200, 150)
+        self.scan([]); self.scan([left, right]); self.scan([left, right])
+        self.assertEqual(len(self.tracker.spots(self.cam.host)), 2)
+        for _ in range(6):
+            self.scan([right], frame=self.textured(5))
+        self.assertEqual([p.box for p in self.tracker.spots(self.cam.host)], [right])
+
+    def test_a_not_ours_mark_is_kept_past_30_days(self):
+        old = time.time() - 40 * 86400
+        mine = self.store.add_sighting(old, "cam", "Garage", COLOUR, self.BOX, unit(70, SIERRA, 0.008), None)
+        self.store.assign([mine], None, ignore=True)  # the family said "Not ours"
+        stale = self.store.add_sighting(old, "cam", "Garage", COLOUR, self.BOX, unit(71, SIERRA, 0.008), None)
+        self.store.prune()
+        with self.store._connect() as conn:
+            ids = {r[0] for r in conn.execute("SELECT id FROM sightings")}
+        self.assertIn(mine, ids)
+        self.assertNotIn(stale, ids)
+
     def test_restart_at_night_keeps_a_car_the_detector_misses(self):
         """2026-11-07 01:42: restarted at night, the Jeep at the edge of the view (which the detector misses in
         infrared) 'left' 3 minutes later and 'got home' again: the restored spot had no look to compare with."""
