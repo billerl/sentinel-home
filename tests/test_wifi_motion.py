@@ -108,6 +108,7 @@ class PollLoopTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, d, ignore_errors=True)
         wm = WifiMotion(d, fetch=lambda url: {})
         wm._boards["a1"] = wm_mod.Board("a1", "192.0.2.1")
+        wm._boards["a1"].last_seen = __import__("time").time()  # (a board that's answering)
         polls = []
 
         def poll(board):
@@ -126,6 +127,43 @@ class PollLoopTest(unittest.TestCase):
             wm._stop.set()
             t.join(2)
         self.assertGreaterEqual(len(polls), 3)  # kept polling after the error
+
+
+class QuietBoardTest(unittest.TestCase):
+    def test_a_quiet_board_is_asked_less_often_until_it_says_hello(self):
+        # (bug hunt 2026-11-13: an unplugged board was asked every round, 2 s each, holding up the others)
+        import shutil
+        import tempfile
+        import threading
+        from unittest import mock
+
+        from sentinel.engine import wifi_motion as wm_mod
+
+        d = tempfile.mkdtemp(prefix="sentinel-wm-")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        wm = WifiMotion(d, fetch=lambda ip: {})
+        gone = wm_mod.Board("aa11", "192.0.2.1")  # not heard for ages
+        here = wm_mod.Board("bb22", "192.0.2.2")
+        wm._boards = {"aa11": gone, "bb22": here}
+        asked = []
+
+        def poll(board):
+            asked.append(board.id)
+            if board is here:
+                board.last_seen = __import__("time").time()
+
+        wm.poll = poll
+        with mock.patch.object(wm_mod, "POLL_SECONDS", 0.01):
+            t = threading.Thread(target=wm._poll_loop, daemon=True)
+            t.start()
+            threading.Event().wait(0.3)
+            self.assertEqual(asked.count("aa11"), 1)  # tried once, then left for QUIET_BOARD_RETRY
+            self.assertGreater(asked.count("bb22"), 5)
+            wm.hello(b'{"sentinel_sensor": "wifi_motion", "id": "aa11"}', "192.168.1.50")  # it's back
+            threading.Event().wait(0.1)
+            wm._stop.set()
+            t.join(2)
+        self.assertGreaterEqual(asked.count("aa11"), 2)
 
 
 class SensorsTest(unittest.TestCase):

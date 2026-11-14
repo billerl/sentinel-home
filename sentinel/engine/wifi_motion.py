@@ -41,6 +41,7 @@ LOG_DIR = "wifi_motion"
 HELLO_PORT = 47301
 POLL_SECONDS = 1.0
 OFFLINE_AFTER = 15.0
+QUIET_BOARD_RETRY = 30.0  # a board not heard for OFFLINE_AFTER is asked only this often (each try can wait 2 s)
 HOUSE_WIDE_WINDOW = 2.0  # seconds either side: paths that began moving "together"
 HOUSE_WIDE_PATHS = 12  # this many together = the Wi-Fi itself blipped (interference), not a person
 KEEP_DAYS = 14
@@ -158,6 +159,7 @@ class Board:
         self.id, self.ip, self.host, self.fw = board_id, ip, host, fw
         self.name = name  # what the user calls the board ("Feather", "Kitchen board"); else its id
         self.last_seen = 0.0
+        self.last_try = 0.0  # when it was last asked (a quiet board is asked less often)
         self.rssi: Optional[int] = None
         self.battery: Optional[Dict[str, float]] = None
 
@@ -302,6 +304,7 @@ class WifiMotion:
             fw = _clean_name(msg.get("fw"))[:16]
             changed = new or board.ip != source_ip or board.fw != fw
             board.ip, board.host, board.fw = source_ip, _clean_name(msg.get("host"))[:40], fw
+            board.last_try = 0.0  # (it's there: ask it at the next round, even if it had gone quiet)
             if changed:
                 self._save()
         if new:
@@ -632,7 +635,14 @@ class WifiMotion:
             try:
                 with self._lock:
                     boards = list(self._boards.values())
+                now = time.time()
                 for board in boards:
+                    # A board that's gone quiet (unplugged, retired) is tried every QUIET_BOARD_RETRY s, not every
+                    # round: each try waits up to 2 s, which held up every other board's readings and the sensor
+                    # routines behind them (bug hunt 2026-11-13). Its hello brings it straight back.
+                    if now - board.last_seen > OFFLINE_AFTER and now - board.last_try < QUIET_BOARD_RETRY:
+                        continue
+                    board.last_try = now
                     try:
                         self.poll(board)
                     except Exception as e:
