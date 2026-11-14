@@ -651,6 +651,7 @@ class PresenceTracker:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
+        self._calls: List[Tuple[Any, tuple]] = []  # callbacks a scan hands on once it lets go of the lock
         self.lights = None  # CameraLights: colours are real while its white light is on
         self._load()
 
@@ -702,7 +703,23 @@ class PresenceTracker:
     def scan(self, cam, frame: np.ndarray, now: float) -> None:
         boxes = self._vehicles_in(frame)
         with self._lock:
+            self._calls = []
             self._scan_locked(cam, frame, boxes, now)
+            calls, self._calls = self._calls, []
+        # Arrivals, departures, "whose car?" photos and renames are handed on only now, with the lock let go: their
+        # handlers (routines with "only when nobody's home", Telegram sends) ask this tracker where the cars are,
+        # and doing that under the (non-reentrant) lock hung the tracker and object detection (bug hunt 2026-11-13)
+        for fn, args in calls:
+            try:
+                fn(*args)
+            except Exception as e:  # (one bad handler mustn't stop the others or the tracker)
+                from sentinel.logging_utils import app_logger
+                app_logger.log("error", "household_callback_failed", error_message=str(e)[:200],
+                               component="household", action="scan")
+
+    def _later(self, fn, *args) -> None:
+        """Call fn(*args) once the scan has let go of the lock."""
+        self._calls.append((fn, args))
 
     def _scan_locked(self, cam, frame: np.ndarray, boxes, now: float) -> None:
         key = cam.host
@@ -745,7 +762,7 @@ class PresenceTracker:
                 if p.confirmed and p.vehicle_id is not None and p.announced and not self._parked_elsewhere(p):
                     vehicle = self.store.vehicle(p.vehicle_id)
                     if vehicle is not None:
-                        self.on_change("left", cam, vehicle, p.last_seen, None)
+                        self._later(self.on_change, "left", cam, vehicle, p.last_seen, None)
                 continue
             if p.missed:
                 continue  # hidden this time (someone walking past); keep its identity
@@ -792,7 +809,7 @@ class PresenceTracker:
                 p.asked = True
                 sid = self.store.add_sighting(now, key, cam.display_name, frame, p.box, embedding,
                                               clip=self._clip(frame, p.box))
-                self.on_unknown(cam, p, frame, sid, self.store.scores(embedding, night))
+                self._later(self.on_unknown, cam, p, frame, sid, self.store.scores(embedding, night))
             if p.confirmed and p.vehicle_id is not None and not p.announced:
                 p.announced = True
                 if self._parked_elsewhere(p):
@@ -800,7 +817,7 @@ class PresenceTracker:
                 vehicle = self.store.vehicle(p.vehicle_id)
                 if vehicle is not None:
                     ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                    self.on_change("arrived", cam, vehicle, p.first_seen, jpeg.tobytes() if ok else None)
+                    self._later(self.on_change, "arrived", cam, vehicle, p.first_seen, jpeg.tobytes() if ok else None)
 
     def _look(self, frame: np.ndarray, box) -> np.ndarray:
         """A parked car's fingerprint (CLIP's embedding when no fingerprint model is in use)."""
@@ -845,7 +862,7 @@ class PresenceTracker:
             p.asked = False  # whose is it, then?
             p.announced = False  # its arrival is recorded once it has a name
         if announced and self.on_renamed is not None:
-            self.on_renamed(cam, p, self.store.vehicle(old),
+            self._later(self.on_renamed, cam, p, self.store.vehicle(old),
                             self.store.vehicle(vehicle_id) if vehicle_id is not None else None)
 
     @staticmethod

@@ -226,6 +226,36 @@ class TestPresence(unittest.TestCase):
         self.assertEqual(self.changes[-1], ("left", "Alex's Sierra", 1240.0))  # last time it was seen
         self.assertIsNone(self.tracker.where_is(self.sierra))
 
+    def test_a_handler_may_ask_the_tracker_where_cars_are(self):
+        # A car routine with "only when nobody's home" asks where the cars are while its arrival is being handed on;
+        # under the tracker's own lock that hung the tracker and object detection (bug hunt 2026-11-13)
+        import threading
+
+        asked = []
+
+        def on_change(kind, cam, v, ts, jpeg):
+            asked.append((kind, self.tracker.where_is(v.id) is not None, len(self.tracker.spots(cam.host))))
+
+        self.tracker.on_change = on_change
+        done = threading.Event()
+
+        def drive():
+            self.scan([]); self.scan([self.BOX]); self.scan([self.BOX])
+            self.scan([]); self.scan([]); self.scan([])
+            done.set()
+
+        threading.Thread(target=drive, daemon=True).start()
+        self.assertTrue(done.wait(5), "the tracker hung handing on a car change")
+        self.assertEqual(asked, [("arrived", True, 1), ("left", False, 0)])
+
+    def test_a_failing_handler_doesnt_stop_the_tracker(self):
+        def boom(*_a):
+            raise RuntimeError("handler broke")
+
+        self.tracker.on_change = boom
+        self.scan([]); self.scan([self.BOX]); self.scan([self.BOX])  # (logged, not raised)
+        self.assertEqual(self.tracker.where_is(self.sierra)[0], "192.168.0.9")
+
     def test_a_missed_scan_keeps_the_spot(self):
         self.scan([])
         for _ in range(3):
