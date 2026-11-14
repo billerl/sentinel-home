@@ -52,6 +52,36 @@ class TestWeatherAlerts(unittest.TestCase):
         self.assertEqual((len(self.sent), len(self.said)), (1, 1))  # still in effect: not again
         self.assertIn("tornado warning until 4:45 PM", wx.summary())
 
+    def test_a_warning_telegram_didnt_take_is_sent_again(self):
+        # (bug hunt 2026-11-13: marked announced before sending, so a failed send was never retried)
+        tries = []
+        up = [False]
+        wx = WeatherAlerts(self.settings, lambda: (41.1145, -88.1780), lambda text: tries.append(text) or up[0],
+                           self.said.append, self.dir, fetch=lambda lat, lon: list(self.raw), clock=lambda: self.now)
+        self.raw = [nws("w1", "Tornado Warning", "Extreme")]
+        wx.check()  # Telegram isn't answering
+        self.assertEqual(len(tries), 1)
+        self.assertEqual(len(self.said), 1)  # said out loud at once
+        self.now += 120
+        up[0] = True
+        wx.check()  # next check: sent again, and this time it goes
+        self.assertEqual(len(tries), 2)
+        self.now += 120
+        wx.check()
+        self.assertEqual(len(tries), 2)  # delivered: not again
+        self.assertEqual(len(self.said), 1)  # (and never said twice)
+
+    def test_an_unsent_warning_that_has_ended_is_dropped(self):
+        tries = []
+        wx = WeatherAlerts(self.settings, lambda: (41.1145, -88.1780), lambda text: tries.append(text) and False,
+                           self.said.append, self.dir, fetch=lambda lat, lon: list(self.raw), clock=lambda: self.now)
+        self.raw = [nws("w1", "Tornado Warning", "Extreme")]
+        wx.check()
+        self.raw = []  # it's over
+        self.now += 120
+        wx.check()
+        self.assertEqual(len(tries), 1)
+
     def test_a_watch_only_goes_to_telegram(self):
         wx = self.alerts()
         self.raw = [nws("t1", "Tornado Watch")]

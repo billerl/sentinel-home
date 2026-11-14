@@ -105,6 +105,9 @@ class WeatherAlerts:
         self._busy = False
         self._failing = False
         self._announced: Dict[str, Tuple[float, str]] = {}  # alert id -> (when, its level); kept 2 days
+        # Messages Telegram didn't take (a storm is when the internet is flaky): sent again at each check while the
+        # warning is still on (bug hunt 2026-11-13: it was marked announced first, so a failed send was never retried)
+        self._unsent: Dict[str, str] = {}
         try:
             with open(self.path) as f:
                 self._announced = {str(k): (float(v[0]), str(v[1])) for k, v in json.load(f).items()}
@@ -164,6 +167,10 @@ class WeatherAlerts:
         with self._lock:
             self._active = [{k: a[k] for k in ("event", "level", "until", "headline")} for a in alerts]
         now = self.clock()
+        live = {a["id"] for a in alerts}
+        for aid, text in list(self._unsent.items()):
+            if aid not in live or self.notify(text) is not False:
+                self._unsent.pop(aid, None)
         for a in alerts:
             if not a["id"] or a["id"] in self._announced:
                 continue
@@ -175,7 +182,9 @@ class WeatherAlerts:
                 continue
             app_logger.log("info", "weather_alert", alert_event=a["event"], alert_level=a["level"], until=a["until"],
                            component="weather", action="alerts")
-            self.notify(message(a))
+            text = message(a)
+            if self.notify(text) is False:
+                self._unsent[a["id"]] = text
             if a["level"] == "loud" and self.settings.get("weather_alerts_speak", True):
                 self.speak(spoken(a))
         self._announced = {k: v for k, v in self._announced.items() if now - v[0] < 2 * 86400}

@@ -58,11 +58,13 @@ class HouseNews:
         for c in self._recap_chats(chat):
             self.telegram.send_video(c, path, caption)
 
-    def tell_everyone(self, text: str) -> None:
-        """A message to every Sentinel chat (weather warnings)."""
+    def tell_everyone(self, text: str) -> bool:
+        """A message to every Sentinel chat (weather warnings); False when there are chats and none took it (worth
+        sending again)."""
         self._hear(text)
-        for chat in list(self.telegram.chat_ids):
-            self.telegram.reply_to_chat(chat, text)
+        chats = list(self.telegram.chat_ids)
+        sent = [self.telegram.reply_to_chat(chat, text) for chat in chats]
+        return not chats or any(sent)
 
     def on_package(self, camera_key: str, camera_name: str, text: str, jpeg: Optional[bytes]) -> None:
         """A parcel left at a door: into the history (questions, timeline, the morning recap) and to routines."""
