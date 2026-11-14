@@ -173,12 +173,12 @@
   function esc(t) { return String(t == null ? "" : t).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
     function clock(t) { return new Date(t || Date.now()).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
     async function getJson(url) {
-      var r = await fetch(url, { cache: "no-store" });
+      var r = await fetch(url, { cache: "no-store", credentials: "same-origin" });  // (Chrome 56, the Samsung TV, leaves the sign-in cookie off without it)
       if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
       return r.json();
     }
     async function postJson(url, body) {
-      var r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+      var r = await fetch(url, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
                                  body: JSON.stringify(body) });
       if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
       var j = await r.json().catch(function () { return {}; });
@@ -783,7 +783,9 @@
       controls.target.copy(home.target);
       if (TV) { document.getElementById("v-3d").setAttribute("aria-pressed", false); document.getElementById("v-top").setAttribute("aria-pressed", true); }
       setFloor("main");
-      new ResizeObserver(resize).observe(stage); resize();
+      if (window.ResizeObserver) new ResizeObserver(resize).observe(stage);  // (not in the Samsung TV's Chrome 56)
+      else window.addEventListener("resize", resize);
+      resize();
       await poll();
       setInterval(poll, 1500);
       requestAnimationFrame(frame);
