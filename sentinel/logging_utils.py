@@ -4,6 +4,7 @@ Structured application logging helpers.
 
 import json
 import os
+import sys
 import re
 import time
 from threading import Lock
@@ -36,15 +37,26 @@ class StructuredLogger:
         self.max_bytes = max_bytes
         self.backup_count = backup_count
         self._lock = Lock()
+        self.dropped = 0  # records that couldn't be written
 
     def log(self, level: str, event: str, **fields: Any) -> None:
-        record: Dict[str, Any] = {
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "level": level,
-            "event": event,
-        }
-        record.update(redact(fields))
-        self._append_record(record)
+        """Never raises: callers log from the alert path, the Telegram listener, the voice thread and their own
+        error handlers, so a full disk or an unwritable log must not take those down (bug hunt 2026-11-13)."""
+        try:
+            record: Dict[str, Any] = {
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "level": level,
+                "event": event,
+            }
+            record.update(redact(fields))
+            self._append_record(record)
+        except Exception as e:  # (OSError: disk full, unwritable; TypeError/ValueError: an odd field)
+            self.dropped += 1
+            if self.dropped == 1 or self.dropped % 1000 == 0:  # (say so, without flooding the console)
+                try:
+                    print(f"Event log not written ({self.dropped} so far): {e}", file=sys.stderr)
+                except Exception:
+                    pass
 
     def _rotate_if_needed(self) -> None:
         try:
@@ -62,7 +74,7 @@ class StructuredLogger:
         parent = os.path.dirname(self.log_path)
         if parent:
             os.makedirs(parent, exist_ok=True)
-        payload = json.dumps(record, sort_keys=True)
+        payload = json.dumps(record, sort_keys=True, default=str)  # (a stray non-JSON value is written as text)
         with self._lock:
             self._rotate_if_needed()
             with open(self.log_path, "a", encoding="utf-8") as handle:
