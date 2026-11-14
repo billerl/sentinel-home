@@ -597,6 +597,10 @@ class SamsungTVDriver:
         live_back: it keeps running behind the browser."""
         if not self.live_url:
             raise ValueError("Sentinel's web page isn't on the home network")
+        # One quick look first: switched off, asking about each installed app in turn took ~2 s apiece before
+        # failing (bug hunt 2026-11-13)
+        if self.answering(host, timeout=3) is None:
+            raise OSError("the TV isn't answering")
         before = self._visible_app(host)  # (the browser itself isn't one of the TV's listed apps)
         if before:
             self._before_live[host] = before
@@ -646,6 +650,8 @@ class SamsungTVDriver:
         """A routine's camera time is up: back to the app it covered, unless someone changed the TV meanwhile.
         An app the TV closed behind the camera (short of memory) is opened again, from its first screen."""
         app_id = self._before_live.get(host)
+        if app_id and self.answering(host, timeout=3) is None:
+            return None  # (switched off meanwhile: nothing to go back to, and no need to ask about every app)
         if not app_id or self._visible_app(host):
             self._before_live.pop(host, None)
             return None

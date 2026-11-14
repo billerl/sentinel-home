@@ -547,6 +547,24 @@ class TestSamsungLiveView(unittest.TestCase):
         patch = mock.patch("sentinel.engine.samsung_tv.OPEN_WAIT", 0)  # (no page ever checks in here)
         patch.start()
         self.addCleanup(patch.stop)
+        on = mock.patch("sentinel.engine.samsung_tv.SamsungTVDriver.answering", lambda self, host, timeout=None: {})
+        on.start()  # (the TV answers its info request; see the switched-off test below)
+        self.addCleanup(on.stop)
+
+    def test_a_switched_off_tv_fails_at_once(self):
+        # (bug hunt 2026-11-13: it asked about every installed app, ~2 s each, before failing)
+        from sentinel.engine.samsung_tv import SamsungTVDriver
+        drv = SamsungTVDriver(tempfile.mkdtemp(prefix="sentinel-tv-"))
+        drv.live_url = "http://192.168.1.9:8088/"
+        asked = []
+        drv._visible_app = lambda host: asked.append(host)
+        drv.answering = lambda host, timeout=None: None  # switched off
+        with self.assertRaises(OSError):
+            drv.show_live("tv")
+        self.assertEqual(asked, [])
+        drv._before_live["tv"] = "youtube"
+        self.assertIsNone(drv.live_end("tv"))
+        self.assertEqual(asked, [])
 
     def test_says_when_no_page_came_up(self):
         from sentinel.engine.samsung_tv import SamsungTVDriver
