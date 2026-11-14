@@ -58,6 +58,16 @@
     .more-note { color: #6f97a5; font-size: 0.85rem; margin: -2px 0 10px; }
     .tile.big { grid-column: span 2; background: linear-gradient(135deg, #062330, #091015); border-color: #0b4a5a; }
     .tile.big .ic { font-size: 2rem; }
+    /* Press and hold a tile to move it (the script at the bottom); dense = a small tile fills the gap a wide one leaves */
+    #main-tiles { grid-auto-flow: row dense; }
+    #main-tiles .tile { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; -webkit-user-drag: none; }
+    #main-tiles .tile.lifted { position: relative; z-index: 20; pointer-events: none; border-color: #00ffff;
+      box-shadow: 0 12px 30px -6px rgba(0, 255, 255, 0.45); opacity: 0.95; }
+    #main-tiles .tile.settling { transition: transform 0.18s ease; }
+    #main-tiles.moving .tile:not(.lifted) { transition: transform 0.18s ease; }
+    .go-head { display: flex; align-items: baseline; gap: 10px; }
+    .go-head .hint { color: #4f7380; font-size: 0.75rem; flex: 1; }
+    .linkish { background: none; border: none; color: #6f97a5; text-decoration: underline; font-size: 0.75rem; padding: 0; }
 
     @media (max-width: 760px) {
       .top { grid-template-columns: 1fr; }
@@ -94,45 +104,46 @@
       <div class="card" data-min="user"><div class="people" id="people"><span class="muted">Loading who's home…</span></div></div>
     </div>
 
-    <h2>Go to</h2>
+    <div class="go-head"><h2>Go to</h2><span class="hint">Press and hold a tile to move it</span>
+      <button type="button" class="linkish" id="layout-reset" hidden>Reset layout</button></div>
     <div class="tiles" id="main-tiles">
-      <a class="tile big" href="{{ url_for('live_page') }}">
+      <a data-key="cameras" class="tile big" href="{{ url_for('live_page') }}">
         <span class="ic">📹</span><span class="t">Cameras</span><span class="s" id="s-cams">Live view, timeline and clips</span></a>
-      <a class="tile big" href="{{ url_for('sensors_page') }}" data-min="user" data-needs="sensors">
+      <a data-key="sensors" class="tile big" href="{{ url_for('sensors_page') }}" data-min="user" data-needs="sensors">
         <span class="ic">📶</span><span class="t">Movement inside</span><span class="s" id="s-sensors">Wi-Fi motion sensors</span></a>
-      <a class="tile" href="{{ url_for('lost_page') }}" id="t-lost" data-needs="pets">
+      <a data-key="pets" class="tile" href="{{ url_for('lost_page') }}" id="t-lost" data-needs="pets">
         <span class="ic">🐕</span><span class="t">Pet tracker</span><span class="s" id="s-lost">Collar map, recall beep</span></a>
-      <a class="tile" href="{{ url_for('house_page') }}" data-min="user">
+      <a data-key="house" class="tile" href="{{ url_for('house_page') }}" data-min="user">
         <span class="ic">🏠</span><span class="t">House</span><span class="s">3D map: sensors, switches, cameras</span></a>
-      <a class="tile" href="{{ url_for('live_page') }}#switches" data-needs="plugs">
+      <a data-key="switches" class="tile" href="{{ url_for('live_page') }}#switches" data-needs="plugs">
         <span class="ic">💡</span><span class="t">Switches</span><span class="s" id="s-switches">Lights and plugs</span></a>
-      <a class="tile" href="{{ url_for('live_page') }}#remote" data-min="user" data-needs="tvs">
+      <a data-key="tv-remote" class="tile" href="{{ url_for('live_page') }}#remote" data-min="user" data-needs="tvs">
         <span class="ic">🎮</span><span class="t">TV remote</span><span class="s" id="s-remotes">TV remotes</span></a>
-      <a class="tile" href="{{ url_for('remotes_page') }}" data-min="user" data-needs="blaster">
+      <a data-key="remotes" class="tile" href="{{ url_for('remotes_page') }}" data-min="user" data-needs="blaster">
         <span class="ic">🎛️</span><span class="t">Remotes</span><span class="s" id="s-blaster">Heater, soundbar, fans</span></a>
-      <a class="tile" href="{{ url_for('sensors_history_page') }}" data-min="user" data-needs="sensors">
+      <a data-key="movement" class="tile" href="{{ url_for('sensors_history_page') }}" data-min="user" data-needs="sensors">
         <span class="ic">🕒</span><span class="t">Movement history</span><span class="s">When each room saw movement</span></a>
-      <a class="tile" href="{{ url_for('planes_page') }}" data-min="user">
+      <a data-key="planes" class="tile" href="{{ url_for('planes_page') }}" data-min="user">
         <span class="ic">✈️</span><span class="t">Planes</span><span class="s">What's flying over (or over you, when away)</span></a>
-      <a class="tile" href="{{ url_for('timeline_page') }}" data-min="user">
+      <a data-key="timeline" class="tile" href="{{ url_for('timeline_page') }}" data-min="user">
         <span class="ic">🗺️</span><span class="t">Family timeline</span><span class="s">Where everyone has been</span></a>
-      <a class="tile" href="{{ url_for('people_page') }}" data-min="user">
+      <a data-key="family" class="tile" href="{{ url_for('people_page') }}" data-min="user">
         <span class="ic">👪</span><span class="t">Family</span><span class="s">Phones, places, home</span></a>
-      <a class="tile" href="{{ url_for('recipes_page') }}" data-min="user">
+      <a data-key="recipes" class="tile" href="{{ url_for('recipes_page') }}" data-min="user">
         <span class="ic">🍳</span><span class="t">Recipes</span><span class="s">Family recipe box and cooking mode</span></a>
-      <a class="tile" href="{{ url_for('notes_page') }}" data-min="user">
+      <a data-key="notes" class="tile" href="{{ url_for('notes_page') }}" data-min="user">
         <span class="ic">📝</span><span class="t">Notes</span><span class="s">Shared lists, and notes only you can see</span></a>
-      <a class="tile" href="{{ url_for('mesh_page') }}" data-min="user" data-needs="mesh">
+      <a data-key="mesh" class="tile" href="{{ url_for('mesh_page') }}" data-min="user" data-needs="mesh">
         <span class="ic">📡</span><span class="t">Mesh chat</span><span class="s" id="s-mesh">Text over the radio mesh</span></a>
-      <a class="tile" href="{{ url_for('vehicles_page') }}" data-min="admin">
+      <a data-key="vehicles" class="tile" href="{{ url_for('vehicles_page') }}" data-min="admin">
         <span class="ic">🚗</span><span class="t">Vehicles</span><span class="s">Family cars the cameras know</span></a>
-      <a class="tile" href="{{ url_for('routines_page') }}" data-min="user">
+      <a data-key="routines" class="tile" href="{{ url_for('routines_page') }}" data-min="user">
         <span class="ic">⚙️</span><span class="t">Routines</span><span class="s" id="s-routines">When this happens, do that</span></a>
-      <a class="tile" href="{{ url_for('zones_page') }}" data-min="admin">
+      <a data-key="zones" class="tile" href="{{ url_for('zones_page') }}" data-min="admin">
         <span class="ic">🔲</span><span class="t">Zones</span><span class="s">Where the cameras watch</span></a>
-      <a class="tile" href="{{ url_for('settings_page') }}" data-min="admin">
+      <a data-key="settings" class="tile" href="{{ url_for('settings_page') }}" data-min="admin">
         <span class="ic">🛠️</span><span class="t">Settings</span><span class="s">Cameras, alerts, Telegram, voice</span></a>
-      <a class="tile" href="{{ url_for('settings_page') }}#help">
+      <a data-key="help" class="tile" href="{{ url_for('settings_page') }}#help">
         <span class="ic">❓</span><span class="t">Help</span><span class="s">How everything works{% if role == "user" %}, and your password{% endif %}</span></a>
     </div>
 
@@ -230,16 +241,149 @@
       setText("s-remotes", tvs.length ? tvs.map(function (s) { return s.name; }).join(", ") : "Samsung and Fire TVs on your Wi-Fi show up here");
     }
 
-    // Tiles for hardware this house hasn't got yet wait under "Add more" (in their usual order) until it shows up
+    // Tiles for hardware this house hasn't got yet wait under "Add more" (in this login's order) until it shows up
+    var SAVED_ORDER = {{ tile_order | tojson }};  // this login's tile order (sentinel/engine/home_layout.py); [] = usual
     var ALL_TILES = Array.prototype.slice.call(document.querySelectorAll("#main-tiles > .tile"));
-    var ready = {};
-    function setReady(need, ok) {
-      if (ready[need] === ok) return;
-      ready[need] = ok;
+    var USUAL = ALL_TILES.slice();  // the order the page lists them in (Reset layout)
+    (function () {  // saved tiles first, in their order; a tile the saved list doesn't name keeps to the end
+      var byKey = {};
+      ALL_TILES.forEach(function (t) { byKey[t.dataset.key] = t; });
+      var ordered = [];
+      SAVED_ORDER.forEach(function (k) { if (byKey[k]) { ordered.push(byKey[k]); delete byKey[k]; } });
+      ALL_TILES.forEach(function (t) { if (byKey[t.dataset.key]) ordered.push(t); });
+      ALL_TILES = ordered;
+      document.getElementById("layout-reset").hidden = !SAVED_ORDER.length;
+    })();
+    var ready = {}, dragging = false;
+    function placeTiles() {
       var main = document.getElementById("main-tiles"), more = document.getElementById("more-tiles");
       ALL_TILES.forEach(function (t) { (ready[t.dataset.needs] === false ? more : main).appendChild(t); });
       document.getElementById("more").hidden = !more.children.length;
     }
+    function setReady(need, ok) {
+      if (ready[need] === ok) return;
+      ready[need] = ok;
+      if (!dragging) placeTiles();  // (mid-move it waits for the drop)
+    }
+    placeTiles();
+
+    async function saveLayout(order) {
+      try {
+        var r = await fetch("/api/home_layout", { method: "POST", credentials: "same-origin",
+          headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" }, body: JSON.stringify({ order: order }) });
+        if (!r.ok) throw new Error();
+        document.getElementById("layout-reset").hidden = !order.length;
+      } catch (e) { alert("Couldn't save the new layout. Check the connection and try again."); }
+    }
+    document.getElementById("layout-reset").addEventListener("click", function () {
+      if (!confirm("Put the tiles back in their usual order?")) return;
+      ALL_TILES = USUAL.slice();
+      placeTiles();
+      saveLayout([]);
+    });
+
+    // Press and hold a tile (half a second, finger or mouse) to lift it, drag it, let go to drop it there.
+    // A quick tap still opens the tile and a swipe still scrolls: only a still press lifts one.
+    (function () {
+      var main = document.getElementById("main-tiles");
+      var HOLD_MS = 450, SLOP = 10, EDGE = 70;
+      var timer = null, tile = null, startX = 0, startY = 0, lastX = 0, lastY = 0, grabX = 0, grabY = 0, tx = 0, ty = 0,
+          moved = false, scrollRaf = null, blockClick = false, lastSwap = 0;
+      ALL_TILES.forEach(function (t) { t.setAttribute("draggable", "false"); });
+
+      function point(e) { var p = e.touches && e.touches[0] || e.changedTouches && e.changedTouches[0] || e; return { x: p.clientX, y: p.clientY }; }
+      function visible() { return Array.prototype.filter.call(main.children, function (t) { return t.offsetParent !== null; }); }
+
+      function down(e) {
+        if (e.type === "mousedown" && e.button !== 0) return;
+        var t = e.target.closest && e.target.closest(".tile");
+        if (!t || t.parentNode !== main || tile) return;
+        var p = point(e);
+        startX = lastX = p.x; startY = lastY = p.y;
+        clearTimeout(timer);
+        timer = setTimeout(function () { lift(t); }, HOLD_MS);
+      }
+      function lift(t) {
+        timer = null; tile = t; dragging = true; moved = false; tx = ty = 0;
+        var r = t.getBoundingClientRect();
+        grabX = lastX - r.left; grabY = lastY - r.top;
+        t.classList.add("lifted");
+        main.classList.add("moving");
+        if (navigator.vibrate) { try { navigator.vibrate(25); } catch (e) { } }
+        scrollRaf = requestAnimationFrame(edgeScroll);
+      }
+      function follow() {  // the lifted tile sits under the finger wherever the grid put it
+        var r = tile.getBoundingClientRect();
+        tx += lastX - grabX - r.left; ty += lastY - grabY - r.top;
+        tile.style.transform = "translate(" + tx + "px," + ty + "px)";
+      }
+      function reorder() {
+        if (Date.now() - lastSwap < 220) return;  // (the tile that just slid away may still be under the finger)
+        var under = document.elementFromPoint(lastX, lastY), over = under && under.closest && under.closest(".tile");
+        if (!over || over === tile || over.parentNode !== main) return;
+        var kids = Array.prototype.slice.call(main.children), from = kids.indexOf(tile), to = kids.indexOf(over);
+        var before = {};
+        visible().forEach(function (k, i) { if (k !== tile) { k.dataset.flip = i; before[i] = k.getBoundingClientRect(); } });
+        main.insertBefore(tile, from < to ? over.nextSibling : over);
+        moved = true; lastSwap = Date.now();
+        visible().forEach(function (k) {  // the others slide to their new places instead of jumping
+          if (k === tile || k.dataset.flip == null) return;
+          var b = before[k.dataset.flip], a = k.getBoundingClientRect();
+          delete k.dataset.flip;
+          if (!b || (b.left === a.left && b.top === a.top)) return;
+          k.style.transition = "none";
+          k.style.transform = "translate(" + (b.left - a.left) + "px," + (b.top - a.top) + "px)";
+          k.getBoundingClientRect();
+          k.style.transition = "";
+          k.style.transform = "";
+        });
+      }
+      function move(e) {
+        var p = point(e);
+        if (timer && (Math.abs(p.x - startX) > SLOP || Math.abs(p.y - startY) > SLOP)) { clearTimeout(timer); timer = null; return; }
+        if (!tile) return;
+        if (e.cancelable) e.preventDefault();  // (a lifted tile: no page scroll while dragging)
+        lastX = p.x; lastY = p.y;
+        reorder();
+        follow();
+      }
+      function edgeScroll() {  // near the top or bottom edge the page scrolls, so a tile can go a long way
+        if (!tile) return;
+        var dy = lastY < EDGE ? -10 : lastY > window.innerHeight - EDGE ? 10 : 0;
+        if (dy) { window.scrollBy(0, dy); reorder(); follow(); }
+        scrollRaf = requestAnimationFrame(edgeScroll);
+      }
+      function up(e) {
+        clearTimeout(timer); timer = null;
+        if (!tile) return;
+        if (e.cancelable) e.preventDefault();  // (no tap on the tile it was dropped on)
+        var t = tile;
+        tile = null; dragging = false; blockClick = true;
+        setTimeout(function () { blockClick = false; }, 400);
+        cancelAnimationFrame(scrollRaf);
+        main.classList.remove("moving");
+        t.classList.add("settling");
+        t.style.transform = "";
+        setTimeout(function () { t.classList.remove("lifted", "settling"); }, 200);
+        if (moved) {  // main's new order, with the "Add more" tiles keeping their places in between
+          var inMain = Array.prototype.slice.call(main.children), n = 0;
+          ALL_TILES = ALL_TILES.map(function (k) { return k.parentNode === main ? inMain[n++] : k; });
+          saveLayout(ALL_TILES.map(function (k) { return k.dataset.key; }));
+        }
+        placeTiles();  // (anything that changed mid-move)
+      }
+
+      main.addEventListener("touchstart", down, { passive: true });
+      main.addEventListener("mousedown", down);
+      document.addEventListener("touchmove", move, { passive: false });
+      document.addEventListener("mousemove", move);
+      document.addEventListener("touchend", up, { passive: false });
+      document.addEventListener("touchcancel", up);
+      document.addEventListener("mouseup", up);
+      main.addEventListener("click", function (e) { if (blockClick) { e.preventDefault(); e.stopPropagation(); } }, true);
+      main.addEventListener("contextmenu", function (e) { if (e.target.closest && e.target.closest(".tile")) e.preventDefault(); });
+      main.addEventListener("dragstart", function (e) { e.preventDefault(); });
+    })();
     async function loadExtras() {  // (every minute: these change rarely; the mesh base checks in a few s after a restart)
       try {
         var r = await getJson("/api/remotes");

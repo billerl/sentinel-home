@@ -30,7 +30,17 @@ def register(app: Flask, ctx: WebContext) -> None:
             return redir
         if TV_BROWSER.search(request.headers.get("User-Agent", "")):
             return live_page()
-        return render_template("home.html", boot_id=BOOT_ID)
+        order = engine.home_layouts.get(ctx.viewer_person_id()) if engine is not None else []
+        return render_template("home.html", boot_id=BOOT_ID, tile_order=order)
+
+    @app.route("/api/home_layout", methods=["POST"])
+    def api_home_layout():
+        """This login's tile order on the home page ({"order": [tile keys]}; [] = back to the usual order)."""
+        err = ctx.config_guard()
+        if err:
+            return err
+        body = request.get_json(silent=True)
+        return ctx.result(*engine.home_layouts.save(ctx.viewer_person_id(), body.get("order") if isinstance(body, dict) else None))
 
     @app.route("/live")
     def live_page():

@@ -66,7 +66,7 @@ ACCESS: Dict[str, Rule] = {
     "help_page": PUBLIC,  # (only sends on to the Settings page)
 
     # ---- guest: live cameras, switches, the lost-dog page, recordings from the day their pass began
-    "index": GUEST, "live_page": GUEST, "api_cameras": GUEST, "api_slow": GUEST, "api_me": GUEST,
+    "index": GUEST, "api_home_layout": GUEST, "live_page": GUEST, "api_cameras": GUEST, "api_slow": GUEST, "api_me": GUEST,
     "api_weather": GUEST, "api_weather_alerts": GUEST, "snapshot": GUEST, "stream": GUEST,
     "api_recordings": GUEST, "recording_video": GUEST,
     "api_switches": GUEST, "api_switches_set": GUEST,

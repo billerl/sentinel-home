@@ -180,6 +180,9 @@ class Engine:
         from sentinel.engine.notes import Notes
 
         self.notes = Notes(VIDEO_DIR)  # each person's notes and lists, private or shared (the Notes page)
+        from sentinel.engine.home_layout import HomeLayouts
+
+        self.home_layouts = HomeLayouts(VIDEO_DIR)  # each login's home page tile order (press-and-hold to move)
         from sentinel.engine.reminders import ReminderStore
 
         self.reminders = ReminderStore(VIDEO_DIR)  # "remind me ..." -> a Telegram message at that time

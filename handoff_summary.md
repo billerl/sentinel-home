@@ -654,6 +654,11 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   Since 2026-11-07 the grid's script and styles are `static/grid.js` + `static/grid.css` (`grid.html` is only the
   markup). They load with `?v=<boot id>`, so a page that reloads itself after an update gets the new files; `BOOT_ID`
   and the first camera list stay inline in `grid.html` (they come from the server). `/static` needs no login.
+  Tile order (2026-11-14): press and hold a tile ~0.45 s to lift it, drag, drop (touch + mouse events in `home.html`;
+  a move before the hold ends is a scroll, a hold suppresses the tap and the phone's link menu). Saved per login in
+  `recorded_videos/home_layouts.json` (`sentinel/engine/home_layout.py`, POST `/api/home_layout`, "household" or
+  "person:<id>"; only tile keys = each tile's `data-key`); the page applies it before "Add more" sorting, unknown/new
+  tiles go to the end, `[]` = Reset layout. `#main-tiles` uses `grid-auto-flow: dense` so wide tiles leave no holes.
 - **Roles** (2026-11-11, `sentinel/web/roles.py`): guest < user < admin < owner. The shared household login
   (settings `web.auth`) is always the owner, so it can't be locked out; a person's own login carries `people.role`
   (`location.db`, "user" unless changed; `role_since` = when it was given). `roles.install()` adds one

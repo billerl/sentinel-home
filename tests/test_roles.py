@@ -115,6 +115,18 @@ class TestRoles(unittest.TestCase):
             args = {a: stand_ins.get(a, "x") for a in rule.arguments}
             yield rule.endpoint, rule.build(args)[1], rule.methods
 
+    def test_home_layout_is_each_logins_own(self):
+        guest, user = self.clients[GUEST], self.clients[USER]
+        self.assertEqual(self.post(user, "/api/home_layout", {"order": ["planes", "cameras"]}).status_code, 200)
+        self.assertEqual(self.post(guest, "/api/home_layout", {"order": ["help"]}).status_code, 200)
+        self.assertIn('var SAVED_ORDER = ["planes", "cameras"]', user.get("/").get_data(as_text=True))
+        self.assertIn('var SAVED_ORDER = ["help"]', guest.get("/").get_data(as_text=True))
+        self.assertIn("var SAVED_ORDER = []", self.clients[OWNER].get("/").get_data(as_text=True))
+        self.assertEqual(self.post(user, "/api/home_layout", {"order": "planes"}).status_code, 400)
+        self.assertEqual(user.post("/api/home_layout", json={"order": []}).status_code, 400)  # (no X-Sentinel-Request)
+        self.assertEqual(self.post(user, "/api/home_layout", {"order": []}).status_code, 200)
+        self.assertIn("var SAVED_ORDER = []", user.get("/").get_data(as_text=True))
+
     # ---------------------------------------------------------------- the table covers everything
     def test_every_route_has_a_rule_and_no_rule_is_stale(self):
         endpoints = {endpoint for endpoint, _, _ in self.rules()}

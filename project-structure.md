@@ -38,6 +38,7 @@ sentinel-home/                         # repository root
     │   │                              #   cooking videos (yt-dlp + Whisper + Claude), family version beside the
     │   │                              #   original, swaps/twists, what-can-I-make, cooking mode + Jarvis (recipes.db)
     │   ├── notes.py                   # Notes and lists, private to their writer or shared with the family (notes.db)
+    │   ├── home_layout.py             # Each login's home page tile order (press-and-hold to move; home_layouts.json)
     │   ├── backup.py                  # Backup: nightly copy to a USB drive (databases, settings, photos, recent
     │   │                              #   video) and optionally the snapshot to another computer over SSH
     │   ├── news.py                    # HouseNews: unprompted messages (packages, recap, routines, weather)
