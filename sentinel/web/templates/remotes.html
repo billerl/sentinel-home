@@ -218,9 +218,14 @@
         return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
       });
     }
-    async function post(path, body) {
-      var r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
-                                  body: JSON.stringify(body || {}) });
+    // waitMs: give up on an answer that never comes (a stalled phone connection, 2026-11-14)
+    async function post(path, body, waitMs) {
+      var ctl = waitMs && window.AbortController ? new AbortController() : null;
+      var timer = ctl ? setTimeout(function () { ctl.abort(); }, waitMs) : null;
+      try {
+        var r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+                                    body: JSON.stringify(body || {}), signal: ctl ? ctl.signal : undefined });
+      } finally { if (timer) clearTimeout(timer); }
       if (r.status === 401) { location.href = "/login"; return { ok: false, data: {} }; }
       var d = {}; try { d = await r.json(); } catch (e) {}
       return { ok: r.ok, data: d };
@@ -432,7 +437,9 @@
       var r = state.remotes[ri], b = r.buttons[bi], el = document.getElementById("k-" + ri + "-" + bi);
       var msg = document.getElementById("rmsg-" + ri);
       el.disabled = true;
-      var res = await post("/api/remotes/press", { remote: r.name, button: b.name });
+      var res;
+      try { res = await post("/api/remotes/press", { remote: r.name, button: b.name }, 30000); }
+      catch (e) { res = { ok: false, data: { error: "Couldn't reach Sentinel." } }; }  // (the button used to stay greyed out)
       el.disabled = false;
       el.classList.add(res.ok ? "sent" : "failed");
       setTimeout(function () { el.classList.remove("sent", "failed"); }, 700);
@@ -469,7 +476,7 @@
       var btn = document.getElementById("hub-find"), txt = document.getElementById("hub-txt");
       btn.disabled = true;
       txt.textContent = "Looking on the home network…";
-      await post("/api/remotes/find", {});
+      try { await post("/api/remotes/find", {}); } catch (e) {}
       btn.disabled = false;
       load();
     }

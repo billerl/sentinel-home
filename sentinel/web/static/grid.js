@@ -814,16 +814,24 @@ async function pollSwitches() {
 function switchMsg(text) {
   document.getElementById("sw-msg").textContent = text || "";
 }
-async function switchPost(path, body) {
-  var r = await fetch(path, {
-    method: "POST", headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
-    body: JSON.stringify(body)
-  });
+// waitMs: give up on a request that hasn't been answered (the TV remote's presses go one at a time, so one lost on
+// a stalled phone connection held back every press after it, then they all arrived together, 2026-11-14)
+async function switchPost(path, body, waitMs) {
+  var ctl = waitMs && window.AbortController ? new AbortController() : null;
+  var timer = ctl ? setTimeout(function() { ctl.abort(); }, waitMs) : null;
+  try {
+    var r = await fetch(path, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+      body: JSON.stringify(body), signal: ctl ? ctl.signal : undefined
+    });
+  } finally { if (timer) clearTimeout(timer); }
   var data = {};
   try { data = await r.json(); } catch (e) {}
   if (r.status === 401) location.href = "/login";
   return { ok: r.ok, data: data };
 }
+// A lost request no longer leaves the tile "busy" until a reload; a Samsung waking up can take over a minute.
+var SWITCH_WAIT_MS = 90000;
 async function flipSwitch(s, tile) {
   if (!s.online || switchBusy[s.id]) return;
   var want = !s.on;
@@ -832,7 +840,7 @@ async function flipSwitch(s, tile) {
   tile.classList.toggle("on", want);  // show it straight away; put it back if the plug says no
   switchMsg("");
   try {
-    var res = await switchPost("/api/switches/set", { id: s.id, on: want });
+    var res = await switchPost("/api/switches/set", { id: s.id, on: want }, SWITCH_WAIT_MS);
     delete switchBusy[s.id];
     if (res.data.switches) renderSwitches(res.data);
     if (!res.ok) {
@@ -860,6 +868,9 @@ async function scanSwitches() {
 }
 // ---------------- TV remote ----------------
 var tvId = null, tvState = null, tvQueue = Promise.resolve(), tvRepeat = null, tvKeys = null;
+// A remote press waits this long for Sentinel; one still waiting its turn after KEY_STALE_MS is dropped (a late
+// Back or arrow does the wrong thing on whatever screen the TV has moved on to).
+var KEY_WAIT_MS = 6000, KEY_STALE_MS = 4000;
 function remoteOpen() { return document.getElementById("tvr").classList.contains("open"); }
 function remoteMsg(text, ok) {
   var m = document.getElementById("tvr-msg");
@@ -984,7 +995,7 @@ document.getElementById("tvr-screen").addEventListener("click", function(ev) {
   var id = tvId;
   tvQueue = tvQueue.then(async function() {
     try {
-      var res = await switchPost("/api/tv/" + encodeURIComponent(id) + "/tap", { x: x, y: y });
+      var res = await switchPost("/api/tv/" + encodeURIComponent(id) + "/tap", { x: x, y: y }, KEY_WAIT_MS);
       if (!res.ok) remoteMsg(res.data.error || "That didn't work.");
     } catch (e) { remoteMsg("Couldn't reach Sentinel."); }
   });
@@ -999,10 +1010,11 @@ function closeRemote() {
 function remoteKey(key) {
   if (!tvId) return;
   if (navigator.vibrate) { try { navigator.vibrate(8); } catch (e) {} }
-  var id = tvId;
+  var id = tvId, at = Date.now();
   tvQueue = tvQueue.then(async function() {  // one at a time, in order
+    if (Date.now() - at > KEY_STALE_MS) { remoteMsg("Sentinel was slow to answer, so that press was skipped."); return; }
     try {
-      var res = await switchPost("/api/tv/" + encodeURIComponent(id) + "/key", { key: key });
+      var res = await switchPost("/api/tv/" + encodeURIComponent(id) + "/key", { key: key }, KEY_WAIT_MS);
       if (!res.ok) { remoteMsg(res.data.error || "That didn't work."); stopRepeat(); }
       else if (document.getElementById("tvr-msg").className !== "ok") remoteMsg("");
       if (res.ok && recording) loadShortcuts();
