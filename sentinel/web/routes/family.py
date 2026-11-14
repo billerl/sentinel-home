@@ -354,10 +354,12 @@ def register(app: Flask, ctx: WebContext) -> None:
             before = None
         becomes_pet = body.get("pet") is True or bool(str(body.get("tracker") or "").strip())
         had_login = before is not None and engine.locations.has_web_login(before.id)
+        # (a phone too: as a "pet" their whole timeline would be open to everyone)
+        has_phone = before is not None and bool(before.token) and engine.locations.fix(before.id) is not None
         if (before is not None and not before.is_pet and becomes_pet and not ctx.viewer().at_least(OWNER)
-                and (had_login or before.role == ADMIN)):
-            return ctx.denied(f"{before.name} has a login: only the household (owner) login can make them a pet "
-                              "or give them a tracker (it removes their login).")
+                and (had_login or before.role == ADMIN or has_phone)):
+            return ctx.denied(f"{before.name} has a login or a phone set up: only the household (owner) login can make "
+                              "them a pet or give them a tracker.")
         ok, message = engine.family.people_save(body)
         if ok and had_login and auth is not None:
             after = engine.locations.person(before.id)

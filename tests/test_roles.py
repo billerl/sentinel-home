@@ -276,6 +276,19 @@ class TestRoles(unittest.TestCase):
         finally:
             self.post(owner, f"/api/people/{gid}/delete")
 
+    def test_someone_sharing_their_phone_isnt_made_a_pet_by_an_admin(self):
+        owner, admin, loc = self.clients[OWNER], self.clients[ADMIN], self.engine.locations
+        pid = int(self.post(owner, "/api/people", {"name": "Robin"}).get_json()["message"])
+        try:
+            robin = loc.person(pid)
+            self.assertTrue(robin.token)  # (a phone setup key is made with the person)
+            loc.record(robin, {"_type": "location", "lat": 41.1145, "lon": -88.1780, "tst": int(time.time()), "acc": 10})
+            r = self.post(admin, "/api/people", {"id": pid, "name": "Robin", "tracker": "!a1b2c3d4"})
+            self.assertEqual(r.status_code, 403)
+            self.assertFalse(loc.person(pid).is_pet)  # their timeline stays theirs
+        finally:
+            self.post(owner, f"/api/people/{pid}/delete")
+
     def test_a_pet_has_no_login_or_role(self):
         owner, loc = self.clients[OWNER], self.engine.locations
         r = self.post(owner, "/api/people", {"name": "Biscuit"})
