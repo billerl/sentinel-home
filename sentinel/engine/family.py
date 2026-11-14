@@ -626,19 +626,26 @@ class Family:
         self.locations.set_photo(person_id, jpeg.tobytes())
         return True, f"Saved {person.name}'s picture."
 
-    def map_lookup(self, words: str) -> Optional[Tuple[str, str]]:
+    def map_lookup(self, words: str, bare: bool = False) -> Optional[Tuple[str, str]]:
         """"xena's location" / "where lincoln is" / "everyone on the map" -> ("Xena's location", "#map=3"), for
-        showing it on a TV the way a camera is shown; None when the words don't ask for a map."""
+        showing it on a TV the way a camera is shown; None when the words don't ask for a map. ``bare``: names
+        alone ("Xena", "Xena and Tito") count too (asked only once no camera has that name)."""
         from sentinel.engine.location import _words_in
 
-        w = re.sub(r"\s+", " ", (words or "").lower()).strip()
+        w = re.sub(r"\s+", " ", (words or "").lower()).strip().rstrip(".!?")
         m = (re.match(r"^(?:the )?(.+?)(?:'s|s')? (?:location|locations|position|whereabouts)$", w)
              or re.match(r"^where (.+?) (?:is|are)(?: at| right now| now)?$", w)
              or re.match(r"^(.+?) on (?:the |a )?map$", w))
         who = m.group(1) if m else ("" if re.match(r"^(?:the )?(?:family )?map$", w) else None)
+        if who is None and bare:
+            # only names: "show Xena on the TV" (2026-11-14 went to Claude); "show the porch light" stays None
+            known = [n for p in self.locations.people() for n in p.words()]
+            parts = [x for x in re.split(r"\s*(?:,|&|\band\b)\s*", w) if x]
+            who = w if parts and all(x in known for x in parts) else None
         if who is None:
             return None
-        if who in ("", "everyone", "everybody", "the family", "family", "all of us", "us", "the kids"):
+        # (not a bare "us": the phone heard "Xena's location" as "us location" and showed everyone, 2026-11-14)
+        if who in ("", "everyone", "everybody", "the family", "family", "all of us", "the kids"):
             return "everyone's location", "#map=all"
         people = [p for p in self.locations.people() if _words_in(" " + who + " ", p.words())]
         if not people:

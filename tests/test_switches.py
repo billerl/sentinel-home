@@ -1115,6 +1115,31 @@ class TestFireTV(unittest.TestCase):
         self.assertEqual(self.sw.tv_live(self.fire_id, False), (True, "showing"))  # Show cameras: closes a map too
         self.assertEqual(self.sw.tv_page("192.168.1.70")["path"], "")
 
+    def test_a_map_shown_while_adb_is_busy(self):
+        # 2026-11-14: the phone remote's screen mirror held the one ADB connection: the kiosk page took Xena's map by
+        # itself, but Jarvis said "The Sentinel TV isn't answering"
+        self.sw.set_live_url("http://192.168.1.9:8088/")
+        self.sw.camera_lookup = lambda words: ("Grace's location", "#map=4") if "grace" in words.lower() else None
+        real = self.shell
+
+        def busy(host, command, timeout=None):
+            if "monkey" in command:
+                self.sw.tv_page("192.168.1.70")  # (the page checked in meanwhile)
+                raise ConnectionRefusedError("adb busy")
+            return real(host, command, timeout)
+
+        self.fire._shell = busy
+        self.assertEqual(self.sw.command("show grace on the sentinel tv", "voice"), "Okay, Grace's location is on the Sentinel TV.")
+
+        def down(host, command, timeout=None):  # no page checking in either: really not answering
+            if "monkey" in command:
+                raise ConnectionRefusedError("adb busy")
+            return real(host, command, timeout)
+
+        self.fire._shell = down
+        with mock.patch("sentinel.engine.fire_tv.PAGE_TAKE_WAIT", 0.05):
+            self.assertIn("isn't answering", self.sw.command("show grace on the sentinel tv", "voice"))
+
     def test_apps_are_what_people_open(self):
         self.assertEqual(self.fire.apps("192.168.1.70"), {"de.ozerov.fully": "Sentinel live view",
                                                           "com.netflix.ninja": "Netflix", "com.amazon.avod": "Prime Video"})

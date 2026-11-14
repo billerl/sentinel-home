@@ -1299,12 +1299,12 @@ class Engine:
             return "the plane map", "#map=planes"
         name = re.sub(r"\s+", " ", re.sub(r"\bcam(?:era)?s?\b", "", words.lower())).strip()
         if not name or self.frame_broker is None:
-            return None
+            return self.family.map_lookup(words, bare=True) if name else None
         cams = list({id(p): p for p in self.cameras.values()}.values())  # (some are listed under two keys)
         hit = ([p for p in cams if p.display_name.lower() == name] or
                [p for p in cams if name in p.display_name.lower() or p.display_name.lower() in name])
         if len(hit) != 1:
-            return None
+            return self.family.map_lookup(words, bare=True)  # "show Xena on the TV": her map
         return hit[0].display_name, "#cam=" + self.frame_broker.web_id(hit[0].camera_id)
 
     def _routine_tv_camera(self, tv_id: str, camera: str, seconds: float) -> bool:

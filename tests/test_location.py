@@ -567,7 +567,12 @@ class TestEndpoints(unittest.TestCase):
         self.assertEqual(lookup("elizabeth on the map"), ("Elizabeth's location", liz))
         self.assertEqual(lookup("everyone's location"), ("everyone's location", "#map=all"))
         self.assertEqual(lookup("map"), ("everyone's location", "#map=all"))
-        for not_it in ("weather", "front door", "grace's location", "elizabeth"):
+        # a name alone, once no camera has it ("show Xena on the Sentinel TV" went to Claude, 2026-11-14)
+        self.assertEqual(lookup("elizabeth"), ("Elizabeth's location", liz))
+        self.assertEqual(lookup("Elizabeth."), ("Elizabeth's location", liz))
+
+        # the phone heard "Xena's location" as "us location" and the TV showed everyone
+        for not_it in ("weather", "front door", "grace's location", "us location", "us", "elizabeth's dinner"):
             self.assertIsNone(lookup(not_it), not_it)
         self.post("elizabeth", self.liz.token, fix(*HOME, time.time()))
         view = self.engine.family.map_view(str(self.liz.id))

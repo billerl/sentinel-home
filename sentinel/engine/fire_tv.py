@@ -31,6 +31,7 @@ SCAN_EVERY = 6 * 3600.0  # look for newly enabled Fire TVs across the home netwo
 APPS_EVERY = 3600.0
 APPS_RETRY = 600.0  # after a Fire TV didn't answer
 LIVE_VIEW_APPS = ("de.ozerov.fully", "com.fullykiosk.emm")  # Fully Kiosk Browser: Sentinel's live view
+PAGE_TAKE_WAIT = 4.5  # s: the kiosk page asks what to show every 2 s
 # The remote's keys (named as Samsung's, see switches.TV_KEYS) -> Android key codes.
 KEYS = {"KEY_UP": "KEYCODE_DPAD_UP", "KEY_DOWN": "KEYCODE_DPAD_DOWN", "KEY_LEFT": "KEYCODE_DPAD_LEFT",
         "KEY_RIGHT": "KEYCODE_DPAD_RIGHT", "KEY_ENTER": "KEYCODE_DPAD_CENTER", "KEY_RETURN": "KEYCODE_BACK",
@@ -114,6 +115,7 @@ class FireTVDriver:
         self.live_url: Optional[str] = None  # (set by SmartSwitches.set_live_url: marks it as able to show one)
         self._page: Dict[str, Dict[str, Any]] = {}
         self._page_lock = threading.Lock()
+        self._page_seen: Dict[str, float] = {}  # host -> when the open page last asked (page_poll)
         try:
             with open(self.path) as f:
                 self._tvs = {k: v for k, v in json.load(f).items() if isinstance(v, dict)}
@@ -395,15 +397,35 @@ class FireTVDriver:
         if package is None:
             raise ValueError("this Fire TV has no Sentinel live view (Fully Kiosk Browser) installed")
         with self._page_lock:
-            self._page[host] = {"seq": time.time(), "path": path, "reload": False}
+            asked = time.time()
+            self._page[host] = {"seq": asked, "path": path, "reload": False}
         if reload:
             self._shell(host, f"am force-stop {package}")
             time.sleep(1)
-        self.launch(host, package)
+        try:
+            self.launch(host, package)
+        except OSError:
+            # ADB busy or refused (one connection only: the phone remote's screen mirror holds it, 2026-11-14), but
+            # the kiosk page in front fetches the request itself: it was shown if the page asks within a poll or two.
+            if not path or not self._page_taken(host, asked, PAGE_TAKE_WAIT):
+                raise
+            app_logger.log("info", "firetv_page_without_adb", host=host, path=path.split("=")[0],
+                           component="fire_tv", action="show_live")
+
+    def _page_taken(self, host: str, since: float, wait: float) -> bool:
+        deadline = time.time() + wait
+        while True:
+            with self._page_lock:
+                if self._page_seen.get(host, 0.0) > since:
+                    return True
+            if time.time() >= deadline:
+                return False
+            time.sleep(0.25)
 
     def page_poll(self, host: str) -> Dict[str, Any]:
         """The open camera page asking what to show (every 2 s): {"seq", "path", "reload"}."""
         with self._page_lock:
+            self._page_seen[host] = time.time()
             return dict(self._page.get(host) or {"seq": 0, "path": "", "reload": False})
 
     def live_end(self, host: str) -> Optional[str]:
