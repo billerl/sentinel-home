@@ -309,6 +309,27 @@ class TestRoles(unittest.TestCase):
                                                                      "new": "household-pw"}).status_code, 200)
         self.assertEqual(self.clients[ADMIN].get("/api/me").status_code, 200)  # (other logins untouched)
 
+    def test_head_requests_give_their_live_stream_slot_back(self):
+        # HEAD never starts the stream, and used to keep its slot for good: 8 of them and nobody could watch live video
+        import numpy as np
+
+        broker, limiter = self.server._broker, self.server._limiter
+        broker.publish("rtsp://cam-head-test", "Head test", np.zeros((8, 8, 3), dtype=np.uint8))
+        cam = broker.web_id("rtsp://cam-head-test")
+        try:
+            guest = self.clients[GUEST]
+            for _ in range(12):
+                r = guest.head(f"/stream?id={cam}")
+                self.assertEqual(r.status_code, 200)
+                r.close()  # (what the real web server does with every response)
+            self.assertEqual(limiter._global, 0)  # every slot given back
+            r = self.clients[OWNER].get(f"/stream?id={cam}", buffered=False)
+            self.assertEqual(r.status_code, 200)  # live video still works
+            r.close()
+            self.assertEqual(limiter._global, 0)
+        finally:
+            broker.unpublish("rtsp://cam-head-test")
+
     def test_a_pet_has_no_login_or_role(self):
         owner, loc = self.clients[OWNER], self.engine.locations
         r = self.post(owner, "/api/people", {"name": "Biscuit"})

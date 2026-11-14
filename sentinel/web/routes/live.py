@@ -140,6 +140,15 @@ def register(app: Flask, ctx: WebContext) -> None:
         token = _session_token()
         if limiter is None or not limiter.try_acquire(ip):
             return "Too many concurrent streams", 503
+        released = []
+
+        def release_once():
+            # The slot goes back when the response is closed, whichever way: a HEAD request (or one dropped before its
+            # first frame) never starts generate(), so its finally never ran and the slot was kept for good; after
+            # 8 of those nobody could watch live video (bug hunt 2026-11-13)
+            if not released:
+                released.append(True)
+                limiter.release(ip)
 
         wcfg = settings.settings.get("web", {})
         max_fps = max(1, int(wcfg.get("max_fps", 10)))
@@ -177,12 +186,13 @@ def register(app: Flask, ctx: WebContext) -> None:
                         
                     time.sleep(poll_interval)
             finally:
-                limiter.release(ip)
+                release_once()
 
         resp = Response(
             generate(),
             mimetype="multipart/x-mixed-replace; boundary=frame",
         )
+        resp.call_on_close(release_once)
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
         resp.headers["Pragma"] = "no-cache"
         resp.headers["X-Accel-Buffering"] = "no"
