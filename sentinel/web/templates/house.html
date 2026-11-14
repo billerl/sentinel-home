@@ -545,6 +545,8 @@
       box.innerHTML = html;
       var bt = document.getElementById("a-toggle");
       if (bt) bt.onclick = async function () {
+        // (2026-11-14: the TV went off mid-show while someone was moving things on the map; "Turn off" sits by "Turn ↻")
+        if (l.on && isTv(dv) && !confirm("Turn the " + nameOf(dv) + " off?")) return;
         bt.disabled = true;
         try { var j = await postJson("/api/switches/set", { id: dv.ref, on: !l.on }); live.switches = j.switches || live.switches; refresh(); }
         catch (e) { alert(e.message); bt.disabled = false; }
