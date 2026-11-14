@@ -32,6 +32,7 @@ APPS_EVERY = 3600.0
 APPS_RETRY = 600.0  # after a Fire TV didn't answer
 LIVE_VIEW_APPS = ("de.ozerov.fully", "com.fullykiosk.emm")  # Fully Kiosk Browser: Sentinel's live view
 PAGE_TAKE_WAIT = 4.5  # s: the kiosk page asks what to show every 2 s
+PAGE_ALIVE = 20.0  # s: a kiosk page that asked this recently is open on screen (ADB or not)
 # The remote's keys (named as Samsung's, see switches.TV_KEYS) -> Android key codes.
 KEYS = {"KEY_UP": "KEYCODE_DPAD_UP", "KEY_DOWN": "KEYCODE_DPAD_DOWN", "KEY_LEFT": "KEYCODE_DPAD_LEFT",
         "KEY_RIGHT": "KEYCODE_DPAD_RIGHT", "KEY_ENTER": "KEYCODE_DPAD_CENTER", "KEY_RETURN": "KEYCODE_BACK",
@@ -256,7 +257,26 @@ class FireTVDriver:
         mac, _ = self._tv(host)
         if mac is None:
             raise OSError("unknown Fire TV")
-        return self._info(mac, self._screen_on(host))
+        try:
+            return self._info(mac, self._screen_on(host))
+        except OSError:
+            # ADB refusing (2026-11-14: for hours after this PC lost power, probably the old connection still held
+            # on the Fire TV's side) while the kiosk page keeps asking: it's on and can still show maps and cameras
+            if self.page_alive(host):
+                return self._info(mac, True)
+            raise
+
+    def knows(self, host: str) -> bool:
+        return self._tv(host)[0] is not None
+
+    def saved_tvs(self) -> List[Tuple[str, str]]:
+        """(address, name) of every Fire TV Sentinel has met, answering or not."""
+        with self._lock:
+            return [(tv["host"], tv.get("name") or "Fire TV") for tv in self._tvs.values() if tv.get("host")]
+
+    def page_alive(self, host: str) -> bool:
+        with self._page_lock:
+            return time.time() - self._page_seen.get(host, 0.0) < PAGE_ALIVE
 
     def set(self, host: str, child_id: Optional[str], on: bool) -> None:
         self._shell(host, f"input keyevent {'KEYCODE_WAKEUP' if on else 'KEYCODE_SLEEP'}")
@@ -388,7 +408,8 @@ class FireTVDriver:
 
     def live_app(self, host: str) -> Optional[str]:
         """The kiosk browser showing Sentinel's live view, if this Fire TV has one."""
-        return next((pkg for pkg in LIVE_VIEW_APPS if pkg in self.apps(host)), None)
+        found = next((pkg for pkg in LIVE_VIEW_APPS if pkg in self.apps(host)), None)
+        return found or (LIVE_VIEW_APPS[0] if self.page_alive(host) else None)  # (its page asking proves it)
 
     def show_live(self, host: str, reload: bool = False, path: str = "") -> None:
         """The kiosk's camera page in front; ``path`` ("#map=planes", "#cam=<id>", "" = the grid) is picked up by the

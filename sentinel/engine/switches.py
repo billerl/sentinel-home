@@ -617,7 +617,22 @@ class SmartSwitches:
     def tv_parse(self, text: str, bare: bool = False) -> Optional[Tuple[str, Any]]:
         """('app', (tv, app id, app name)) / ('volume', (tv, 'up')) / ('mute', (tv, 'mute')) / ('what', tv) /
         ('play', (tv, 'pause')) / ('seek', (tv, back?, seconds)) / ('mute_for', (tv, seconds)), or None.
-        bare (voice): pause/play/seek/mute without "TV" mean the TV while it's on."""
+        bare (voice): pause/play/seek/mute without "TV" mean the TV while it's on. ('absent', name): a TV command
+        for a TV Sentinel knows but can't reach right now (never quietly done on another TV instead)."""
+        parsed = self._tv_parse(text, bare)
+        if parsed is None:
+            return None
+        said = set(_words(text or ""))
+        listed = {host for _sw, _driver, host in self._tvs()}
+        for driver in self._drivers.values():
+            for host, name in (driver.saved_tvs() if hasattr(driver, "saved_tvs") else []):
+                words = set(_words(name))
+                # (2026-11-14: "Xena's location on the Sentinel TV" went to the Samsung while the Fire TV was unlisted)
+                if host not in listed and words - {"tv"} and words <= said:
+                    return "absent", name
+        return parsed
+
+    def _tv_parse(self, text: str, bare: bool = False) -> Optional[Tuple[str, Any]]:
         t = re.sub(r"\s+", " ", re.sub(r"[^\w\s'+-]", " ", text or "")).strip()
         tvs = self._tvs()
         if not tvs:
@@ -703,6 +718,9 @@ class SmartSwitches:
         if parsed is None:
             return None
         what, detail = parsed
+        if what == "absent":
+            return (f"The {detail} isn't answering Sentinel right now, so I didn't put it on another TV. If its "
+                    f"screen is on, unplug the {detail} for 10 seconds, plug it back in, and ask again in a minute.")
         tv = detail[0] if what != "what" else detail
         sw, driver, host = tv
         if what == "camera":
@@ -974,6 +992,9 @@ class SmartSwitches:
         for _sw, driver, host in self._tvs():
             if host == ip and hasattr(driver, "page_poll"):
                 return driver.page_poll(host)
+        for driver in self._drivers.values():  # a Fire TV whose ADB isn't answering: its page still counts
+            if hasattr(driver, "knows") and hasattr(driver, "page_poll") and driver.knows(ip):
+                return driver.page_poll(ip)
         return None
 
     def camera_tvs(self) -> Dict[str, str]:

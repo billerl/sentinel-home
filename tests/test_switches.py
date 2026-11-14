@@ -7,6 +7,7 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 import types
 import unittest
 from unittest import mock
@@ -1139,6 +1140,29 @@ class TestFireTV(unittest.TestCase):
         self.fire._shell = down
         with mock.patch("sentinel.engine.fire_tv.PAGE_TAKE_WAIT", 0.05):
             self.assertIn("isn't answering", self.sw.command("show grace on the sentinel tv", "voice"))
+
+    def test_after_a_restart_with_adb_refusing(self):
+        # 2026-11-14: this PC lost power; afterwards the Fire TV reset every ADB connection for hours, dropped off
+        # the TV list, and "show Xena's location on the Sentinel TV" went to the Samsung. Its kiosk page kept asking.
+        self.tv.live_url = "http://192.168.1.9:8088/"  # (the Samsung can show maps too: it was the one used)
+        self.tv.show_live = lambda host, reload=False, path="": self.fail("the Samsung was asked")
+        self.fire._shell = lambda host, command, timeout=None: (_ for _ in ()).throw(ConnectionResetError("reset"))
+        sw = SmartSwitches(self.dir, drivers=[FakeKasa(), self.tv, self.fire], clock=lambda: NOW)
+        sw.set_live_url("http://192.168.1.9:8088/")
+        sw.camera_lookup = lambda words: ("Grace's location", "#map=4") if "grace" in words.lower() else None
+        with mock.patch("sentinel.engine.fire_tv.PAGE_TAKE_WAIT", 0.05):
+            sw.poll()
+            self.assertNotIn(self.fire_id, [s.id for s in sw.switches()])  # (nothing heard from it at all)
+            reply = sw.command("show grace on the sentinel tv", "voice")
+            self.assertIn("Sentinel TV isn't answering", reply)
+            self.assertIn("didn't put it on another TV", reply)
+            # its camera page asks what to show (no ADB needed): it's listed again and takes the map
+            self.assertEqual(sw.tv_page("192.168.1.70")["path"], "")
+            sw.poll()
+            self.assertTrue(next(s for s in sw.switches() if s.id == self.fire_id).on)
+            self.fire._page_seen["192.168.1.70"] = time.time() + 1  # (the page keeps asking every 2 s)
+            self.assertEqual(sw.command("show grace on the sentinel tv", "voice"), "Okay, Grace's location is on the Sentinel TV.")
+            self.assertEqual(sw.tv_page("192.168.1.70")["path"], "#map=4")
 
     def test_apps_are_what_people_open(self):
         self.assertEqual(self.fire.apps("192.168.1.70"), {"de.ozerov.fully": "Sentinel live view",

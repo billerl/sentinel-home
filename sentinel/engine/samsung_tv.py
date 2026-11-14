@@ -584,6 +584,9 @@ class SamsungTVDriver:
                         pass
             app_logger.log("info", "tv_resumed", app=app_id, how="DEEP_LINK", component="samsung_tv", action="launch")
             return
+        # (not running: the TV had closed it, e.g. to make room for the browser's map; it starts from its first screen)
+        app_logger.log("info", "tv_app_started", app=app_id, running=bool(info.get("running")), asked=bool(info),
+                       component="samsung_tv", action="launch")
         self._rest(host, f"applications/{app_id}", method="POST", timeout=5.0)
 
     def live_app(self, host: str) -> Optional[str]:
@@ -664,10 +667,12 @@ class SamsungTVDriver:
             raise ValueError("nothing was on before the cameras")
         try:
             self.launch(host, app_id)
-        except (OSError, ValueError):
+        except (OSError, ValueError) as e:
             # One more way in, the TV's REST "start": from the app's first screen if it had closed. The app is
             # only forgotten once it's back, so pressing Back again can still work (2026-11-10: the first failed
             # press forgot YouTube TV and every press after it said "nothing was on").
+            app_logger.log("info", "tv_back_restart", app=app_id, error_message=str(e)[:200],
+                           component="samsung_tv", action="live_back")
             self._rest(host, f"applications/{app_id}", method="POST", timeout=5.0)
         self._before_live.pop(host, None)
         return self.apps(host).get(app_id, app_id)
