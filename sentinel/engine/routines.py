@@ -51,6 +51,7 @@ REPLAY_HOURS = 24  # the editor shows when a sensor rule would have gone off ove
 TEMP_CHECK_SECONDS = 60.0  # the outdoor temperature (the weather card's) is looked at this often
 TEMP_REARM = 2.0  # "when it drops below 32": goes again only after it's been back above 34 (no flapping at the line)
 TEMP_RANGE = (-60.0, 140.0)
+HOLD_GIVE_UP = 6 * 3600.0  # a timed light whose plug never answers again is let go this long after its end
 SETTLE_SECONDS = 20.0  # after a routine switches a light, the picture changes: that isn't motion
 COMMAND = re.compile(r"^routine\s+(\{.*\})\s*$", re.IGNORECASE | re.DOTALL)
 LIST = re.compile(r"^(?:what are |list |show )?(?:my |the )?routines\??$", re.IGNORECASE)
@@ -908,12 +909,26 @@ class RoutineRunner:
             if now < end:
                 continue
             with self._lock:
-                self._holds.pop(key, None)
-                others = any(h.switch == hold.switch for h in self._holds.values())
-            if not others and self.hooks["switch_on"](hold.switch):
-                self.hooks["set_switch"](hold.switch, False, "routine")
-                self._settle_until = now + SETTLE_SECONDS
-            self._save_holds()
+                others = any(h.switch == hold.switch for k, h in self._holds.items() if k != key)
+            # The hold is let go only once the switch is off (or another routine still holds it on): a plug that
+            # wasn't answering when the time ran out used to keep the light on for good (bug hunt 2026-11-13)
+            done = True
+            if not others:
+                state = self.hooks["switch_on"](hold.switch)
+                if state:
+                    result = self.hooks["set_switch"](hold.switch, False, "routine")
+                    done = bool(result[0]) if isinstance(result, tuple) else bool(result)
+                    self._settle_until = now + SETTLE_SECONDS
+                elif state is None:  # not answering: try again next time
+                    done = False
+                if not done and now - end > HOLD_GIVE_UP:
+                    done = True
+                    app_logger.log("error", "routine_switch_off_gave_up", switch=hold.switch, routine=hold.routine_id,
+                                   component="routines", action="release")
+            if done:
+                with self._lock:
+                    self._holds.pop(key, None)
+                self._save_holds()
 
     def _save_holds(self) -> None:
         with self._lock:

@@ -246,6 +246,40 @@ class TestRunner(unittest.TestCase):
         self.assertIsNotNone(self.store.get(1).last_run)
         self.assertFalse(os.path.exists(os.path.join(self.dir, "holds.json")))
 
+    def test_a_light_whose_plug_isnt_answering_is_switched_off_later(self):
+        # (bug hunt 2026-11-13: the hold was dropped when the plug didn't answer, and the light stayed on for good)
+        self.add(PATIO)
+        plug = "kasa-9c53220000aa-1"
+        self.runner.seen("192.168.0.9", "person")
+        self.assertEqual(self.fake.calls, [(plug, True)])
+        self.fake.motion["192.168.0.9"] = self.now
+        real = self.fake.switch[plug]
+        self.fake.switch[plug] = None  # the plug drops off Wi-Fi
+        self.now += 300
+        self.runner.tick()
+        self.assertEqual(len(self.fake.calls), 1)  # can't switch it off yet: still held
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "holds.json")))
+        self.fake.switch[plug] = real  # it's back, still on
+        self.now += 60
+        self.runner.tick()
+        self.assertEqual(self.fake.calls[-1], (plug, False))
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "holds.json")))
+
+    def test_an_off_command_that_fails_is_tried_again(self):
+        self.add(PATIO)
+        plug = "kasa-9c53220000aa-1"
+        self.runner.seen("192.168.0.9", "person")
+        self.fake.motion["192.168.0.9"] = self.now
+        hooks = self.runner.hooks
+        real_set = hooks["set_switch"]
+        hooks["set_switch"] = lambda sid, on, src: (False, "isn't answering")
+        self.now += 300
+        self.runner.tick()
+        hooks["set_switch"] = real_set
+        self.now += 60
+        self.runner.tick()
+        self.assertEqual(self.fake.calls[-1], (plug, False))
+
     def test_not_in_daylight_and_hand_switched_light_is_left_alone(self):
         self.add(PATIO)
         self.now = NOON
