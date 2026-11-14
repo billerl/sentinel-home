@@ -110,6 +110,8 @@ class CameraPipeline:
         self._on_maybe_person = on_maybe_person  # routines: a moving person too unsure for an alert
         self._clip_labels: set = set()
         self._clip_checked = False  # object detection looked at this clip (so "no labels" means nothing was there)
+        self._backoff = 0.0  # reconnect wait, kept across _run_once rounds
+        self._frame_error_at = -1e9
         self.tracker = None
         if detection_worker is not None:
             from sentinel.engine.objects import CameraObjectTracker
@@ -205,17 +207,37 @@ class CameraPipeline:
             return 15
 
     def _run(self) -> None:
-        backoff = 0.0
+        # One error used to end this thread for good while the camera still showed as online with a frozen picture
+        # (bug hunt 2026-11-13): now it's logged, the camera is shown as down, and it reconnects
+        while not self._stop.is_set():
+            try:
+                if self._run_once():
+                    return
+            except Exception as e:
+                app_logger.log("error", "camera_thread_error", camera_ip=self.host, camera_display=self.display_name,
+                               error_message=redact(str(e))[:200], component="camera_pipeline", action="run")
+                try:
+                    self._set_connected(False, f"error: {e}")
+                    if self._broker is not None:
+                        self._broker.unpublish(self.camera_id)
+                    self.detector.stop_camera()
+                except Exception:
+                    pass
+                self._stop.wait(5)
+
+    def _run_once(self) -> bool:
+        """One connect-and-watch round; True when the thread should end (stopped, or reconnecting is off)."""
+        backoff = self._backoff
         while not self._stop.is_set():
             if not self._connect():
                 settings = self._settings()
                 if not settings.get("auto_reconnect_enabled", True):
-                    return
+                    return True
                 base = float(settings.get("reconnect_interval_seconds", 15))
-                backoff = min(RECONNECT_BACKOFF_MAX, max(base, backoff * 2 or base))
+                backoff = self._backoff = min(RECONNECT_BACKOFF_MAX, max(base, backoff * 2 or base))
                 self._stop.wait(backoff)
                 continue
-            backoff = 0.0
+            backoff = self._backoff = 0.0
             self._process_frames()
             if self._stop.is_set():
                 break
@@ -223,8 +245,9 @@ class CameraPipeline:
             if self._broker is not None:
                 self._broker.unpublish(self.camera_id)
             if not self._settings().get("auto_reconnect_enabled", True):
-                return
+                return True
             self._stop.wait(float(self._settings().get("reconnect_interval_seconds", 15)))
+        return True
 
     def _connect(self) -> bool:
         ok = self.detector.start_camera(self.source, target_fps=self._feed_fps())
@@ -233,6 +256,14 @@ class CameraPipeline:
         else:
             self._set_connected(False, self.detector.last_error_message or "connect failed")
         return ok
+
+    def _frame_error(self, e: Exception) -> None:
+        """Logged at most once a minute per camera (a failure that repeats every frame would flood the log)."""
+        now = time.monotonic()
+        if now - self._frame_error_at >= 60:
+            self._frame_error_at = now
+            app_logger.log("error", "camera_frame_error", camera_ip=self.host, camera_display=self.display_name,
+                           error_message=redact(str(e))[:200], component="camera_pipeline", action="frame")
 
     def _set_connected(self, connected: bool, error: Optional[str]) -> None:
         if self._status_known and connected == self.connected:
@@ -248,7 +279,10 @@ class CameraPipeline:
             component="camera_pipeline",
             action="connect",
         )
-        self._on_status(self, connected, error)
+        try:
+            self._on_status(self, connected, error)
+        except Exception as e:  # (an alert handler failing mustn't take the camera down)
+            self._frame_error(e)
 
     def _process_frames(self) -> None:
         interval = 1.0 / self._feed_fps()
@@ -261,13 +295,16 @@ class CameraPipeline:
                 continue  # transient read error; detector counts failures
             self.last_frame_time = loop_start
 
-            self._start_requested_clip(raw)
-            self._publish(annotated, raw)
-            if self._detections is not None and raw is not None and self.detector.activity_streak > 0:
-                self._detections.submit(self.host, raw, self._handle_detections)
-            if motion:
-                self._on_motion(self)
-            self._deliver_completed_clip()
+            try:
+                self._start_requested_clip(raw)
+                self._publish(annotated, raw)
+                if self._detections is not None and raw is not None and self.detector.activity_streak > 0:
+                    self._detections.submit(self.host, raw, self._handle_detections)
+                if motion:
+                    self._on_motion(self)
+                self._deliver_completed_clip()
+            except Exception as e:  # (one frame's alert, routine or clip labels failing mustn't stop the camera)
+                self._frame_error(e)
 
             wait = interval - (time.time() - loop_start)
             if wait > 0:
