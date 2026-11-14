@@ -768,7 +768,7 @@ class MotionDetector:
         """Remember where in the stream the last frame was, against real time (see CATCH_UP_LAG)."""
         try:
             pos = float(cap.get(cv2.CAP_PROP_POS_MSEC))
-        except (cv2.error, TypeError, ValueError):
+        except Exception:  # (best effort: never in the way of reading frames)
             return
         if not pos == pos or pos < 0:  # (NaN or nothing reported)
             return
@@ -796,7 +796,7 @@ class MotionDetector:
             skipped += 1
             try:
                 pos = float(cap.get(cv2.CAP_PROP_POS_MSEC))
-            except (cv2.error, TypeError, ValueError):
+            except Exception:  # (best effort: never in the way of reading frames)
                 break
             if not pos == pos or pos < self._stream_pos:
                 break
