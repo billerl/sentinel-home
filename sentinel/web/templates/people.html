@@ -644,7 +644,7 @@
       yardPts.forEach(function(p) { L.circleMarker(p, { radius: 5, color: "#fff", fillColor: "#7fe8c8", fillOpacity: 1 }).addTo(yardLayer); });
       (data.people || []).forEach(function(p) {
         if (p.tracker && p.lat != null) L.circleMarker([p.lat, p.lon], { radius: 7, color: "#ffb347", fillOpacity: 0.9 })
-          .bindTooltip(p.name).addTo(yardLayer);
+          .bindTooltip(document.createTextNode(p.name)).addTo(yardLayer);  // (text, not HTML: names are user-typed)
       });
     }
     function yardUndo() { yardPts.pop(); drawYard(); }

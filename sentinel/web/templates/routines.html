@@ -238,7 +238,8 @@
     var DAYS = [["mon", "Mon"], ["tue", "Tue"], ["wed", "Wed"], ["thu", "Thu"], ["fri", "Fri"], ["sat", "Sat"], ["sun", "Sun"]];
     var SEEN = [["person", "🧍 Person"], ["vehicle", "🚗 Vehicle"], ["animal", "🐾 Animal"], ["delivery", "🚚 Delivery van"], ["package", "📦 Package left"]];
 
-    function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
+    // (quotes too: these go inside attribute values; a text node's innerHTML only escapes & < >)
+  function esc(t) { return String(t == null ? "" : t).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
     function clock(ts) { return new Date(ts * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
     function when(ts) {
       var d = new Date(ts * 1000), today = new Date();

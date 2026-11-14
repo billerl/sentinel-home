@@ -250,7 +250,7 @@
         var here = [p.lat, p.lon];
         if (p.acc && p.acc > 10) L.circle(here, { radius: p.acc, color: "#ff8c1a", weight: 1, fillOpacity: 0.08, interactive: false }).addTo(layers);
         L.marker(here, { icon: L.divIcon({ className: "pet-pin", iconSize: [20, 20] }) })
-          .bindTooltip(p.name, { permanent: true, direction: "top", offset: [0, -12], className: "pet-label" }).addTo(layers);
+          .bindTooltip(esc(p.name), { permanent: true, direction: "top", offset: [0, -12], className: "pet-label" }).addTo(layers);
         if (me) L.polyline([me, here], { color: "#8fd3ff", weight: 2, dashArray: "6 8", interactive: false }).addTo(layers);
         $("directions").href = "https://www.google.com/maps/dir/?api=1&travelmode=walking&destination=" + p.lat + "," + p.lon;
         $("directions").hidden = false;

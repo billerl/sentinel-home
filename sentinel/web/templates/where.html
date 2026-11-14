@@ -39,7 +39,7 @@
     var which = (/[?&]p=([\w,]+)/.exec(location.search) || [])[1] || "all";
     var map = null, layers = null, fitted = false;
 
-    function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+    function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
     function ago(s) {
       if (s < 90) return "just now";
       if (s < 3600) return Math.round(s / 60) + " min ago";

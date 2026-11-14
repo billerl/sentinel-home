@@ -230,7 +230,8 @@
   }
 
   // ---------------------------------------------------------------- the card
-  function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
+  // (quotes too: these go inside attribute values; a text node's innerHTML only escapes & < >)
+  function esc(t) { return String(t == null ? "" : t).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   var WAYS = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"];
   function cardHtml(p) {
     var number = (p.callsign || "").replace(/^[A-Z]{3}(?=\d)/, "");

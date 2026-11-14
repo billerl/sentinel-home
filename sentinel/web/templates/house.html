@@ -169,7 +169,8 @@
     var C = { remote: 0xb48cff, cyan: 0x00ffff, live: 0xffc94d, garage: 0xfff3a0, outside: 0x4ade80, off: 0x5a6b73, wood: 0xc8955a, glass: 0xbfefff };
     var H = 3.0, OPEN_TOP = 2.1;  // ceiling height and the top of a doorway, in drawing heights (1 ≈ 2.7 ft)
 
-    function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
+    // (quotes too: these go inside attribute values; a text node's innerHTML only escapes & < >)
+  function esc(t) { return String(t == null ? "" : t).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
     function clock(t) { return new Date(t || Date.now()).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
     async function getJson(url) {
       var r = await fetch(url, { cache: "no-store" });

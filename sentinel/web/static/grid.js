@@ -174,7 +174,8 @@ function setWeatherHtml(html) {
   weatherTile.insertAdjacentHTML("beforeend", html);
 }
 
-function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
+// (quotes too: these go inside attribute values; a text node's innerHTML only escapes & < >)
+  function esc(t) { return String(t == null ? "" : t).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
 
 var family = [];  // last /api/family answer: [{name, state: home|out|off, label, lat, lon}]
 var mesh = { unread: 0, from: [] };  // last /api/mesh/unread answer: messages over the radio mesh not read yet

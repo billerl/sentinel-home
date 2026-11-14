@@ -44,7 +44,7 @@
   var nextTimer = null, starting = false;
   var rec = null, stream = null, chunks = [], audioCtx = null, timer = null, pending = "", dictating = false;
 
-  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function show(html) { box.innerHTML = '<button class="close" type="button" aria-label="Close">✕</button>' + html; box.hidden = false;
     box.querySelector(".close").onclick = function () { stopAll(); box.hidden = true; }; }
   function setState(s) { state = s; btn.className = s === "rec" ? "rec" : s === "busy" ? "busy" : ""; }

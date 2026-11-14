@@ -606,7 +606,8 @@
     };
 
     function $(id) { return document.getElementById(id); }
-    function esc(t) { var d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
+    // (quotes too: these go inside attribute values; a text node's innerHTML only escapes & < >)
+  function esc(t) { return String(t == null ? "" : t).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
     function say(id, text, ok) { var el = $(id); el.textContent = text || ""; el.className = "msg " + (ok === true ? "ok" : ok === false ? "err" : ""); }
 
     async function api(url, body) {
