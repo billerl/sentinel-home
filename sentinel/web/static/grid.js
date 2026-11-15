@@ -988,8 +988,44 @@ function screenShow(id) {
 document.addEventListener("visibilitychange", function() {  // phone locked or tab hidden: let the TV rest
   if (tvId && remoteOpen() && screenFor !== null) screenShow(tvId);
 });
+// After the phone has slept, its browser can keep trying a dead connection to Sentinel for 20 s to 4 minutes before
+// it makes a new one (seen in web_slow reports, 2026-11-15). The remote then looked broken: it now says it's
+// reconnecting and holds presses until Sentinel answers again (a late Back or arrow lands on the wrong screen).
+var hiddenAt = 0, tvWaking = false, WAKE_AFTER_MS = 20000, WAKE_TRY_MS = 5000, WAKE_SAY_MS = 1200;
+document.addEventListener("visibilitychange", function() {
+  if (document.hidden) { if (!hiddenAt) hiddenAt = Date.now(); return; }
+  var slept = hiddenAt && Date.now() - hiddenAt > WAKE_AFTER_MS;
+  hiddenAt = 0;
+  if (slept && tvId && remoteOpen()) remoteWake();
+});
+async function remoteWake() {
+  if (tvWaking) return;
+  tvWaking = true;
+  var started = Date.now(), said = false;
+  var say = setTimeout(function() { said = true; remoteMsg("Reconnecting to Sentinel…"); }, WAKE_SAY_MS);  // only if slow
+  while (tvId && remoteOpen() && !document.hidden) {
+    var ctl = window.AbortController ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function() { ctl.abort(); }, WAKE_TRY_MS) : null;
+    try {
+      var r = await fetch("/api/switches", { cache: "no-store", signal: ctl ? ctl.signal : undefined });
+      if (r.status === 401) { location.href = "/login"; break; }
+      if (r.ok) { try { renderSwitches(await r.json()); } catch (e) {} break; }
+    } catch (e) {
+    } finally { if (timer) clearTimeout(timer); }
+    if (Date.now() - started > 15000) remoteMsg("Still reconnecting… after the phone sleeps this can take up to a minute.");
+    await new Promise(function(done) { setTimeout(done, 1000); });
+  }
+  clearTimeout(say);
+  tvWaking = false;
+  if (said) remoteMsg(document.hidden ? "" : "Connected ✓", true);
+}
+function remoteWaiting() {  // a press while reconnecting: say so instead of sending it late
+  if (!tvWaking) return false;
+  remoteMsg("Still reconnecting to Sentinel… try again in a moment.");
+  return true;
+}
 document.getElementById("tvr-screen").addEventListener("click", function(ev) {
-  if (!tvId) return;
+  if (!tvId || remoteWaiting()) return;
   var r = this.getBoundingClientRect(), x = (ev.clientX - r.left) / r.width, y = (ev.clientY - r.top) / r.height;
   var dot = document.createElement("span");
   dot.className = "dot";
@@ -1014,7 +1050,7 @@ function closeRemote() {
   pollSwitches();
 }
 function remoteKey(key) {
-  if (!tvId) return;
+  if (!tvId || remoteWaiting()) return;
   if (navigator.vibrate) { try { navigator.vibrate(8); } catch (e) {} }
   var id = tvId, at = Date.now();
   tvQueue = tvQueue.then(async function() {  // one at a time, in order
@@ -1028,7 +1064,7 @@ function remoteKey(key) {
   });
 }
 async function remotePower() {
-  if (!tvId || !tvState) return;
+  if (!tvId || !tvState || remoteWaiting()) return;
   var want = !tvState.on;
   remoteMsg(want ? "Turning the TV on (about 15 seconds)…" : "Turning the TV off…", true);
   var res = await switchPost("/api/switches/set", { id: tvId, on: want });
@@ -1038,6 +1074,7 @@ async function remotePower() {
   if (res.data.switches) renderSwitches(res.data);
 }
 async function remoteApp(a) {
+  if (remoteWaiting()) return;
   remoteMsg("Opening " + a.name + (tvState && !tvState.on ? " (turning the TV on first)…" : "…"), true);
   var res = await switchPost("/api/tv/" + encodeURIComponent(tvId) + "/open", { app: a.id });
   if (!res.ok) { remoteMsg(res.data.error || "That didn't work."); return; }
@@ -1046,6 +1083,7 @@ async function remoteApp(a) {
   if (tvState && !tvState.on) remoteShow(Object.assign({}, tvState, { on: true }));
 }
 async function remoteLive(reload, back) {
+  if (remoteWaiting()) return;
   remoteMsg(back ? "Going back…" : reload ? "Reloading the cameras…" : "Showing the cameras…", true);
   var res = await switchPost("/api/tv/" + encodeURIComponent(tvId) + "/live", { reload: reload, back: back === true });
   remoteMsg(res.ok ? (back ? "Back to " + res.data.message + " ✓" : reload ? "Reloaded ✓" : "Cameras on ✓")
@@ -1157,7 +1195,7 @@ document.querySelectorAll("#tvr [data-key]").forEach(function(btn) {
       if (hold || repeat) mine.t = setTimeout(function() {
         if (tvRepeat !== mine) return;  // lifted, or it turned into a scroll
         mine.held = true;
-        if (hold) { remoteKey(hold); remoteMsg("Held ✓ (the quick menu takes a few seconds to appear)", true); return; }
+        if (hold) { if (!remoteWaiting()) { remoteKey(hold); remoteMsg("Held ✓ (the quick menu takes a few seconds to appear)", true); } return; }
         remoteKey(key);
         mine.i = setInterval(function() { remoteKey(key); }, 220);
       }, hold ? 700 : 450);
