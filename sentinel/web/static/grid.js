@@ -185,11 +185,17 @@ function meshHtml() {
   return '<a class="mesh" href="/mesh" title="' + esc(mesh.unread + " unread mesh message" + (mesh.unread === 1 ? "" : "s") +
     (who ? " from " + who : "")) + '">📡 ' + mesh.unread + (who ? ' <span class="who">' + esc(mesh.from[0]) + "</span>" : "") + "</a>";
 }
+// A pet's tracker battery beside its name: quiet when fine, yellow at 20% or less, red at 10% or less
+function battHtml(p) {
+  if (p.batt == null) return "";
+  var b = Math.round(Number(p.batt));
+  return ' <span class="batt' + (b <= 10 ? " crit" : b <= 20 ? " low" : "") + '">' + (b <= 20 ? "🔋" : "") + b + "%</span>";
+}
 function familyHtml() {
   if (!family.length && !mesh.unread) return "";
   return '<div class="wx-family">' + family.map(function(p) {
-    var inner = '<span class="dot ' + esc(p.state) + '"></span>' + esc(p.name);
-    var title = esc(p.name + " — " + p.label);
+    var inner = '<span class="dot ' + esc(p.state) + '"></span>' + esc(p.name) + battHtml(p);
+    var title = esc(p.name + " — " + p.label + (p.batt == null ? "" : " · tracker battery " + p.batt + "%"));
     if (p.lat == null || p.id == null) return '<span class="p" title="' + title + '">' + inner + '</span>';
     // Sentinel's own map (the Family timeline), in this window: a new tab is a pop-up to a TV's kiosk browser
     return '<a href="/timeline?person=' + encodeURIComponent(p.id) + '" title="' + title + '">' + inner + '</a>';

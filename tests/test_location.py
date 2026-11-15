@@ -538,6 +538,36 @@ class TestEndpoints(unittest.TestCase):
         self.wait_for(n + 1)
         self.assertTrue(any("Elizabeth" in t and "home" in t for t in self.sent[n:]), self.sent[n:])
 
+    def test_tracker_battery_warns_at_20_and_10_once_each(self):
+        loc = self.engine.locations
+        dog = loc.person(loc.save_person("Grace"))
+        loc.set_tracker(dog.id, "!a1cacb2a")
+        now = time.time()
+
+        def at(batt, n_more=0):
+            n = len(self.sent)
+            self.post(dog.username, dog.token, dict(fix(*HOME, now), batt=batt))
+            if n_more:
+                self.wait_for(n + n_more)
+            else:
+                time.sleep(0.1)
+            return [t for t in self.sent[n:] if "battery" in t]
+
+        self.assertEqual(at(60), [])
+        self.assertEqual(next(p for p in self.engine.family.family_lights() if p["id"] == dog.id)["batt"], 60)
+        self.assertNotIn("batt", next(p for p in self.engine.family.family_lights() if p["id"] == self.liz.id))  # (phones: no)
+        self.assertEqual(at(20, 1), ["🔋 Grace's tracker battery is at 20%. Charge it soon, or it stops reporting where Grace is."])
+        self.assertEqual(at(19), [])
+        self.assertEqual(at(22), [])  # (a wobble back up isn't a charge)
+        self.assertEqual(at(18), [])
+        self.engine.family._battery_warned = None  # a restart: what was said is read back from the file
+        self.assertEqual(at(15), [])
+        self.assertEqual(at(9, 1), ["🪫 Grace's tracker battery is down to 9%: charge it now. "
+                                     "Once it runs out, Sentinel can't see where Grace is."])
+        self.assertEqual(at(4), [])
+        self.assertEqual(at(100), [])  # charged: warned again on the next run down
+        self.assertEqual(len(at(8, 1)), 1)  # (straight to the 10% one when it drops fast)
+
     def test_battery_question_by_voice(self):
         self.post("elizabeth", self.liz.token, dict(fix(*HOME, time.time()), batt=62))
         for text in ("What's Elizabeth's battery percentage?", "What is Elizabeth's phone battery at?"):

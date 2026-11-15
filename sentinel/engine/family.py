@@ -5,6 +5,8 @@ Answers "where is ...?", sends arrive/leave and yard messages, takes check-ins f
 base, and backs the Family and Timeline pages. Moved out of engine.py; the engine hands it what it needs.
 """
 
+import json
+import os
 import re
 import threading
 import time
@@ -23,6 +25,9 @@ SPOT_CHECK_HOUR = 18  # new spots worth saving are looked for once a day, from t
 SPOT_ASK_AGAIN_DAYS = 14  # a suggestion nobody answered may come back after this
 LOST_PIN_SECONDS = 300  # a lost pet: a fresh Telegram map pin at most this often ...
 LOST_PIN_METRES = 30  # ... and only once it has moved this far
+BATTERY_WARN = (20, 10)  # a pet's tracker: one Telegram at each of these battery levels on the way down ...
+BATTERY_REARM = 50  # ... and again on the next run down, once it has been charged past this
+BATTERY_FILE = "tracker_battery.json"  # which warnings were sent (so a restart doesn't send them again)
 
 
 class Family:
@@ -55,6 +60,8 @@ class Family:
         self._outings: Dict[int, float] = {}  # pet -> until when its tracker is asked often ("the dogs are going out")
         self._beeps: Dict[int, float] = {}  # pet -> when "recall Xena" was asked (the LoRa base picks it up)
         self._lost_pinned: Dict[int, Tuple[float, float, float]] = {}  # lost pet -> last pin sent (ts, lat, lon)
+        self._battery_lock = threading.Lock()
+        self._battery_warned: Optional[Dict[str, int]] = None  # pet id -> lowest level warned about (from BATTERY_FILE)
 
     def location_question(self, text: str):
         from sentinel.engine.location import location_question
@@ -292,6 +299,8 @@ class Family:
                        component="engine", action="location")
         if person.tracker and msg.get("_type") == "location" and person.id in self.lost():
             self._lost_pin(person, fix)
+        if person.tracker and msg.get("_type") == "location":
+            self._battery_watch(person, fix)
         if changes:
             statuses = self._vehicle_statuses()[0] if self._presence() is not None else {}
             for change in changes:
@@ -325,6 +334,56 @@ class Family:
                                lambda pid=person.id, place_id=place_id: "arrived" if (
                                    self.locations.fix(pid) or {}).get("place_id") == place_id else "left")
         return reply
+
+    def _battery_file(self) -> Optional[str]:
+        root = os.path.dirname(getattr(self.locations, "db_path", "") or "")
+        return os.path.join(root, BATTERY_FILE) if root else None
+
+    def _battery_watch(self, person, fix: Optional[Dict[str, Any]]) -> None:
+        """A pet's tracker running low: a Telegram at 20% and another at 10%. A flat collar can't say where the pet
+        is, and nothing said so when one ran out (2026-11-15). Charged past BATTERY_REARM = warned again next time."""
+        batt = (fix or {}).get("batt")
+        if batt is None:
+            return
+        key, path = str(person.id), self._battery_file()
+        with self._battery_lock:
+            if self._battery_warned is None:
+                try:
+                    with open(path or "", encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    self._battery_warned = {k: int(v) for k, v in data.items()} if isinstance(data, dict) else {}
+                except (OSError, ValueError, TypeError):
+                    self._battery_warned = {}
+            warned = self._battery_warned.get(key)
+            if batt >= BATTERY_REARM:
+                level = None
+                if warned is None:
+                    return
+                self._battery_warned.pop(key, None)
+            else:
+                level = min((lvl for lvl in BATTERY_WARN if batt <= lvl), default=None)  # (8% -> 10, 18% -> 20)
+                if level is None or (warned is not None and warned <= level):
+                    return
+                self._battery_warned[key] = level
+            if path:
+                try:
+                    tmp = path + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as fh:
+                        json.dump(self._battery_warned, fh)
+                    os.replace(tmp, path)
+                except OSError:
+                    pass  # (then a restart may say it once more: better than not at all)
+        if level is None:
+            return
+        name = person.name
+        if level <= min(BATTERY_WARN):
+            text = (f"🪫 {name}'s tracker battery is down to {batt}%: charge it now. "
+                    f"Once it runs out, Sentinel can't see where {name} is.")
+        else:
+            text = f"🔋 {name}'s tracker battery is at {batt}%. Charge it soon, or it stops reporting where {name} is."
+        app_logger.log("info", "tracker_battery_low", person=name, batt=batt, warned_at=level, component="engine",
+                       action="location")
+        self._send_location_alert(text)
 
     def _yard_alert(self, change, fix: Optional[Dict[str, Any]]) -> None:
         """A pet left the yard (or came back): Telegram with a map pin, and said out loud in the house."""
@@ -589,6 +648,8 @@ class Family:
             out.append({"id": v.person.id, "name": v.person.name, "state": state,
                         "label": whereabouts(v, places, now), "lat": round(v.fix["lat"], 6),
                         "lon": round(v.fix["lon"], 6), "ts": v.fix["ts"], "photo": photo})
+            if v.person.tracker and v.fix.get("batt") is not None:  # (a pet's collar: shown beside the name)
+                out[-1]["batt"] = int(v.fix["batt"])
         return out
 
     def set_photo(self, person_id: int, data_url: Any) -> Tuple[bool, str]:

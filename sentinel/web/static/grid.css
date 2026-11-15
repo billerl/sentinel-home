@@ -111,6 +111,9 @@ h1 { font-size: 0.9rem; margin: 0; flex: 1; }
 .wx-family .dot.stopped { background: #ff5a1f; box-shadow: 0 0 0.4em #ff5a1f; }
 @keyframes fam-move { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .wx-family .dot.off { background: #555; }
+.wx-family .batt { font-size: 0.72em; opacity: 0.7; }  /* a pet's tracker battery (grid.js battHtml) */
+.wx-family .batt.low { color: #ffe53b; opacity: 1; font-weight: 700; }
+.wx-family .batt.crit { color: #ff5a5a; opacity: 1; font-weight: 700; }
 /* Unread mesh messages: a pill at the end of the family row, gently pulsing until they're read. */
 .wx-family a.mesh { color: #001; background: #00e5ff; border-radius: 1em; padding: 0 0.55em; font-weight: 700;
                     animation: mesh-pulse 2s ease-in-out infinite; }

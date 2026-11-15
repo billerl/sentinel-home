@@ -39,6 +39,9 @@
     .dot { width: 10px; height: 10px; border-radius: 50%; background: #445; flex: none; }
     .dot.home { background: #4ade80; box-shadow: 0 0 8px #4ade80; }
     .dot.out { background: #f59e0b; }
+    .people .batt { color: #9fb8c2; font-size: 0.75rem; }
+    .people .batt.low { color: #facc15; font-weight: 700; }
+    .people .batt.crit { color: #f87171; font-weight: 700; }
     .muted { color: #6f97a5; font-size: 0.85rem; }
 
     .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
@@ -200,7 +203,9 @@
       var box = document.getElementById("people");
       if (!d.people.length) { box.innerHTML = '<span class="muted">Nobody shares their location yet: see <a href="/people">Family</a>.</span>'; return; }
       box.innerHTML = d.people.map(function (p) {
-        var inner = '<span class="dot ' + esc(p.state) + '"></span>' + esc(p.name) + ' <small>' + esc(p.label) + '</small>';
+        var b = p.batt == null ? null : Math.round(Number(p.batt));  // a pet's tracker: yellow at 20%, red at 10%
+        var batt = b == null ? "" : ' <span class="batt' + (b <= 10 ? " crit" : b <= 20 ? " low" : "") + '">' + (b <= 20 ? "🔋" : "") + b + "%</span>";
+        var inner = '<span class="dot ' + esc(p.state) + '"></span>' + esc(p.name) + batt + ' <small>' + esc(p.label) + '</small>';
         return p.lat == null || p.id == null ? '<span class="p">' + inner + '</span>'
           : '<a href="/timeline?person=' + encodeURIComponent(p.id) + '">' + inner + '</a>';
       }).join("");
