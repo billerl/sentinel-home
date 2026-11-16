@@ -75,7 +75,7 @@ class TasmotaDriver:
     def set(self, host: str, child_id: Optional[str], on: bool) -> None:
         reply = self._command(host, f"Power{child_id or ''} {'On' if on else 'Off'}")
         if not any(k.startswith("POWER") for k in reply):
-            raise ValueError("the plug refused")
+            raise ValueError(f"the plug refused ({str(reply)[:120]})")
 
     def rename(self, host: str, child_id: Optional[str], name: str) -> None:
         n = child_id or "1"

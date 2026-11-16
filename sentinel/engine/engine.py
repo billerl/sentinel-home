@@ -274,6 +274,7 @@ class Engine:
         self.routines = RoutineRunner(RoutineStore(VIDEO_DIR), {
             "set_switch": self.switches.set,
             "switch_on": lambda sid: next((s.on for s in self.switches.switches() if s.id == sid and s.online), None),
+            "switch_name": lambda sid: next((s.name for s in self.switches.switches() if s.id == sid), "the switch"),
             "telegram": self.news.routine_message,
             "say": lambda text: self.audio.speak(text) if self.audio is not None else None,
             "tv_camera": self._routine_tv_camera,

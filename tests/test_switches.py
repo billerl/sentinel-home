@@ -105,6 +105,23 @@ class TestSwitches(unittest.TestCase):
         self.assertFalse(self.sw.set("kasa-9c53220000aa", True)[0])  # a two-outlet plug needs the outlet
         self.assertFalse(self.sw.set("../etc", True)[0])
 
+    def test_a_refusal_is_asked_once_more(self):
+        naps, real = [], self.kasa.set
+        self.sw._sleep = naps.append
+        no = {"left": 1}
+
+        def refuse_once(host, child_id, on):
+            if no["left"]:
+                no["left"] -= 1
+                raise ValueError("the plug refused (error -1: busy)")
+            real(host, child_id, on)
+        self.kasa.set = refuse_once
+        self.assertTrue(self.sw.set("kasa-9c53220000aa-1", True)[0])
+        self.assertEqual(len(naps), 1)
+        no["left"] = 2  # twice in a row: given up (no more waiting than one short pause)
+        self.assertFalse(self.sw.set("kasa-9c53220000aa-1", False)[0])
+        self.assertEqual(len(naps), 2)
+
     def test_known_devices_survive_restart_and_moves(self):
         self.assertEqual(os.stat(os.path.join(self.dir, "switches.json")).st_mode & 0o777, 0o600)
         again = SmartSwitches(self.dir, drivers=[self.kasa], clock=lambda: NOW)

@@ -31,6 +31,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from sentinel.logging_utils import app_logger
 
 KNOWN_FILE = "switches.json"
+SET_RETRY_SECONDS = 1.5  # a plug that answered "no" is asked once more after this
 POLL_SECONDS = 10.0  # changes made with the plug's own button or the Kasa app show up within this
 DISCOVER_SECONDS = 15 * 60
 TV_APPS_EVERY = 300.0  # the voice hint's app names (each TV remembers its own list for an hour)
@@ -98,8 +99,9 @@ class KasaDriver:
 
     def set(self, host: str, child_id: Optional[str], on: bool) -> None:
         reply = self._send(host, {**self._context(child_id), "system": {"set_relay_state": {"state": int(on)}}})
-        if reply.get("system", {}).get("set_relay_state", {}).get("err_code", 0):
-            raise ValueError("the plug refused")
+        answer = reply.get("system", {}).get("set_relay_state", {})
+        if answer.get("err_code", 0):  # (its own reason is logged: the patio plug refused for 47 min, 2026-11-15)
+            raise ValueError(f"the plug refused (error {answer.get('err_code')}: {answer.get('err_msg') or 'no reason given'})")
 
     def rename(self, host: str, child_id: Optional[str], name: str) -> None:
         reply = self._send(host, {**self._context(child_id), "system": {"set_dev_alias": {"alias": name}}})
@@ -289,7 +291,8 @@ def _after(delay: float, fn: Callable[[], None]) -> threading.Timer:
 
 class SmartSwitches:
     def __init__(self, root: str, drivers: Optional[List[Any]] = None,
-                 clock: Callable[[], float] = time.time) -> None:
+                 clock: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep) -> None:
+        self._sleep = sleep
         self.path = os.path.join(os.path.abspath(root), KNOWN_FILE)
         if drivers is None:
             from sentinel.engine.samsung_tv import SamsungTVDriver
@@ -484,7 +487,13 @@ class SmartSwitches:
             return False, "I don't know that switch."
         name = next((s.name for s in self.switches() if s.id == switch_id), "it")
         try:
-            self._drivers[dev["kind"]].set(dev["host"], child, on)
+            try:
+                self._drivers[dev["kind"]].set(dev["host"], child, on)
+            except ValueError as e:  # it answered but said no: once more in a moment (a passing hiccup, not a dead plug)
+                app_logger.log("info", "switch_refused_once", switch=name, on=on, error_message=str(e), source=source,
+                               component="switches", action="set")
+                self._sleep(SET_RETRY_SECONDS)
+                self._drivers[dev["kind"]].set(dev["host"], child, on)
             info = self._drivers[dev["kind"]].status(dev["host"])
         except (OSError, ValueError) as e:
             app_logger.log("warning", "switch_failed", switch=name, on=on, error_message=str(e), source=source,

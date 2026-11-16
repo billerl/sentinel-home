@@ -280,6 +280,67 @@ class TestRunner(unittest.TestCase):
         self.runner.tick()
         self.assertEqual(self.fake.calls[-1], (plug, False))
 
+    def _refusing(self):
+        hooks, real = self.runner.hooks, self.runner.hooks["set_switch"]
+        hooks["set_switch"] = lambda sid, on, src: (False, "the plug said no")
+        return lambda: hooks.__setitem__("set_switch", real)
+
+    def test_an_at_time_switch_that_fails_is_retried_for_five_minutes_only(self):
+        plug = "kasa-50c7bf000001"
+        self.add({"name": "Pond pump on at 8", "when": {"type": "time", "at": "20:00"},
+                  "then": [{"do": "switch", "switch": plug, "on": True}]})
+        fix = self._refusing()
+        self.now = time.mktime(time.strptime(time.strftime("%Y-%m-%d 19:59:58", time.localtime(EVENING)), "%Y-%m-%d %H:%M:%S"))
+        self.runner._time_checked = self.now
+        self.now += 5
+        self.runner.tick()  # 20:00: refused
+        for _ in range(9):  # tried every 30 s ...
+            self.now += 30
+            self.runner.tick()
+        self.assertEqual(self.fake.messages, [])
+        self.now += 31  # ... and past 5 minutes it stops and says so
+        self.runner.tick()
+        self.assertEqual(len(self.fake.messages), 1)
+        self.assertIn("I kept trying for 5 minutes, then stopped, so it won't turn on by itself now", self.fake.messages[0][0])
+        fix()  # the plug works again later: nothing happens by itself
+        for _ in range(10):
+            self.now += 30
+            self.runner.tick()
+        self.assertFalse(self.fake.switch[plug])
+
+    def test_a_retry_that_works_says_nothing(self):
+        plug = "kasa-50c7bf000001"
+        self.add({"when": {"type": "time", "at": "20:00"}, "then": [{"do": "switch", "switch": plug, "on": True}]})
+        fix = self._refusing()
+        self.now = time.mktime(time.strptime(time.strftime("%Y-%m-%d 19:59:58", time.localtime(EVENING)), "%Y-%m-%d %H:%M:%S"))
+        self.runner._time_checked = self.now
+        self.now += 5
+        self.runner.tick()
+        fix()
+        self.now += 30
+        self.runner.tick()
+        self.assertTrue(self.fake.switch[plug])
+        self.assertEqual(self.fake.messages, [])
+
+    def test_a_between_hours_switch_keeps_trying_while_the_hours_last(self):
+        plug = "kasa-50c7bf000001"
+        night = time.localtime(EVENING)
+        start = "%02d:%02d" % (night.tm_hour, night.tm_min)
+        end_h = (night.tm_hour + 1) % 24
+        self.add({"when": {"type": "seen", "what": ["person"], "cameras": ["Back Yard"]},
+                  "only": {"from": start, "to": "%02d:%02d" % (end_h, night.tm_min)},
+                  "then": [{"do": "switch", "switch": plug, "on": True}]})
+        fix = self._refusing()
+        self.runner.seen("192.168.0.9", "person")
+        for _ in range(40):  # 20 minutes in: still trying, nothing said
+            self.now += 30
+            self.runner.tick()
+        self.assertEqual(self.fake.messages, [])
+        fix()
+        self.now += 30
+        self.runner.tick()
+        self.assertTrue(self.fake.switch[plug])
+
     def test_not_in_daylight_and_hand_switched_light_is_left_alone(self):
         self.add(PATIO)
         self.now = NOON

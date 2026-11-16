@@ -51,6 +51,14 @@ REPLAY_HOURS = 24  # the editor shows when a sensor rule would have gone off ove
 TEMP_CHECK_SECONDS = 60.0  # the outdoor temperature (the weather card's) is looked at this often
 TEMP_REARM = 2.0  # "when it drops below 32": goes again only after it's been back above 34 (no flapping at the line)
 TEMP_RANGE = (-60.0, 140.0)
+# A switch step that failed (the plug said no, or didn't answer) is tried again every RETRY_EVERY: for RETRY_FOR after
+# the routine went off, or, for a routine with "between" hours, while those hours last (at most RETRY_WINDOW_MAX).
+# Never longer: someone told it didn't work may be working on that device, and must not have it switch on later
+# by surprise (the user's rule, 2026-11-15). Giving up is said on Telegram.
+RETRY_EVERY = 30.0
+RETRY_FOR = 5 * 60.0
+RETRY_WINDOW_MAX = 12 * 3600.0
+GAVE_UP_SAY_EVERY = 3600.0  # the "stopped trying" message, per routine and switch, at most this often
 HOLD_GIVE_UP = 6 * 3600.0  # a timed light whose plug never answers again is let go this long after its end
 SETTLE_SECONDS = 20.0  # after a routine switches a light, the picture changes: that isn't motion
 COMMAND = re.compile(r"^routine\s+(\{.*\})\s*$", re.IGNORECASE | re.DOTALL)
@@ -572,6 +580,8 @@ class RoutineRunner:
         self._package_fired: Dict[Tuple[int, str], float] = {}  # (routine, camera) -> last time, while a parcel waits
         self._sensor_moved: Dict[str, float] = {}  # Wi-Fi sensor path -> its latest moving reading
         self._deciding: Dict[int, float] = {}  # sensor rule -> when the movement that started it was
+        self._retries: Dict[Tuple[int, int], Dict[str, Any]] = {}  # (routine, step) -> a failed switch step to retry
+        self._gave_up_said: Dict[Tuple[int, str], float] = {}  # (routine, switch) -> last "stopped trying" message
         # When set: did most of the house's sensor paths start moving around this moment (a Wi-Fi blip)? Then
         # sensor routines stay quiet. Asked HOUSE_WIDE_WAIT after the movement, once the other paths have reported.
         self.house_wide: Optional[Callable[[float], int]] = None
@@ -824,6 +834,7 @@ class RoutineRunner:
                 if at is not None and last < at <= now:
                     self._fire(lambda _w: False, None, None, only={r.id})
         self._temperature(now)
+        self._retry(now)
         self._release(now)
 
     def _time_of(self, w: Dict[str, Any], day: float) -> Optional[float]:
@@ -851,9 +862,12 @@ class RoutineRunner:
         due = {kind for kind, wait in (("telegram", MESSAGE_COOLDOWN), ("say", SAY_COOLDOWN))
                if now - self._said.get((r.id, kind), 0) >= wait}
         did = []
-        for a in r.spec["then"]:
+        for i, a in enumerate(r.spec["then"]):
             if a["do"] == "switch":
-                did.append(self._switch(r, a, camera, now))
+                result = self._switch(r, a, camera, now)
+                if result is None:
+                    self._retry_later(r, i, camera, now)
+                did.append(result or "")
             elif a["do"] == "telegram" and "telegram" in due:
                 self.hooks["telegram"](a["text"], jpeg if a.get("photo") else None)
                 did.append("telegram")
@@ -871,7 +885,8 @@ class RoutineRunner:
             app_logger.log("info", "routine_ran", routine=r.name, routine_id=r.id, steps=[d for d in did if d],
                            component="routines", action="run")
 
-    def _switch(self, r: Routine, a: Dict[str, Any], camera: Optional[str], now: float) -> str:
+    def _switch(self, r: Routine, a: Dict[str, Any], camera: Optional[str], now: float) -> Optional[str]:
+        """"switch" when it switched, "" when there was nothing to do, None when the switch wouldn't do it."""
         key = (r.id, a["switch"])
         timed = a.get("for") or a.get("until_quiet")
         with self._lock:
@@ -884,7 +899,7 @@ class RoutineRunner:
             return ""  # already that way (a light someone turned on by hand stays theirs)
         ok, _msg = self.hooks["set_switch"](a["switch"], a["on"], "routine")
         if not ok:
-            return ""
+            return None
         self._settle_until = now + SETTLE_SECONDS
         if a["on"] and timed:
             w = r.spec["when"]
@@ -895,6 +910,60 @@ class RoutineRunner:
                                          a["until_quiet"] * 60 if a.get("until_quiet") else None, cams, wifi)
             self._save_holds()
         return "switch"
+
+    def _retry_later(self, r: Routine, step: int, camera: Optional[str], now: float) -> None:
+        window = bool(r.spec.get("only", {}).get("from"))
+        until = now + (RETRY_WINDOW_MAX if window else RETRY_FOR)
+        with self._lock:
+            item = self._retries.get((r.id, step))
+            if item is not None:  # went off again meanwhile (more motion): its own few minutes count from now
+                item["until"] = max(item["until"], until)
+                return
+            self._retries[(r.id, step)] = {"next": now + RETRY_EVERY, "until": until, "camera": camera, "window": window}
+        app_logger.log("info", "routine_switch_retrying", routine=r.name, routine_id=r.id, switch=r.spec["then"][step]["switch"],
+                       until=time.strftime("%H:%M", time.localtime(until)) if not window else "end of its hours",
+                       component="routines", action="run")
+
+    def _retry(self, now: float) -> None:
+        with self._lock:
+            due = [(k, v) for k, v in self._retries.items() if now >= v["next"]]
+        for key, item in due:
+            r = next((x for x in self._routines if x.id == key[0]), None)
+            a = r.spec["then"][key[1]] if r is not None and key[1] < len(r.spec["then"]) else None
+            if r is None or not r.enabled or a is None or a.get("do") != "switch":
+                with self._lock:
+                    self._retries.pop(key, None)  # (deleted, switched off or edited meanwhile)
+                continue
+            allowed = self._allowed(r, now)  # (its "between" hours, dark, temperature... still hold)
+            result = self._switch(r, a, item["camera"], now) if allowed else None
+            if result is not None:  # it took, or it's already that way (someone did it by hand)
+                with self._lock:
+                    self._retries.pop(key, None)
+                if result:
+                    self.store.ran(r.id, now)
+                    r.last_run = now
+                    app_logger.log("info", "routine_ran", routine=r.name, routine_id=r.id, steps=["switch"], retried=True,
+                                   component="routines", action="run")
+                continue
+            if allowed and now + RETRY_EVERY <= item["until"]:
+                item["next"] = now + RETRY_EVERY
+                continue
+            with self._lock:
+                self._retries.pop(key, None)
+            self._gave_up(r, a, item, now)
+
+    def _gave_up(self, r: Routine, a: Dict[str, Any], item: Dict[str, Any], now: float) -> None:
+        app_logger.log("warning", "routine_switch_gave_up", routine=r.name, routine_id=r.id, switch=a["switch"],
+                       component="routines", action="run")
+        said = (r.id, a["switch"])
+        if now - self._gave_up_said.get(said, 0.0) < GAVE_UP_SAY_EVERY:
+            return
+        self._gave_up_said[said] = now
+        name = self.hooks.get("switch_name", lambda _sid: "the switch")(a["switch"])
+        way = "on" if a["on"] else "off"
+        tried = "while its hours lasted" if item["window"] else f"for {int(RETRY_FOR // 60)} minutes"
+        self.hooks["telegram"](f"⚠️ Routine “{r.name}”: {name} didn't turn {way}. I kept trying {tried}, then "
+                               f"stopped, so it won't turn {way} by itself now.", None)
 
     def _release(self, now: float) -> None:
         with self._lock:
