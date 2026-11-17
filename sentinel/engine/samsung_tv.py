@@ -40,6 +40,7 @@ IR_BOOT_SECONDS = 45  # how long to wait for its network after the infrared butt
 WAKE_SECONDS = 25  # how long a wake (packet, then waiting for its network) may take
 SCREEN_AFTER = 240.0  # answering this long without a break = the picture is on (dark wake-ups last ~2 min)
 APPS_EVERY = 3600.0
+APPS_RETRY = 300.0  # sooner when the TV's remote connection was stuck
 IDLE_SECONDS = 60.0  # the remote-control connection is kept open this long between button presses
 # Just after being switched off the TV is still shutting down for a few minutes: a power press then is lost and
 # its app service goes away for ~30-40 s (2026-11-03 18:39, 2.5 min after switch-off; a press at 18:40 worked).
@@ -532,6 +533,7 @@ class SamsungTVDriver:
         if not tv.get("on_since"):
             return {}
         found: Dict[str, str] = {}
+        stuck = False
         try:
             s = self._remote(host)
             try:
@@ -545,8 +547,15 @@ class SamsungTVDriver:
                         break
             finally:
                 s.close()
-        except (OSError, ValueError):
+        except OSError:
+            stuck = True
+        except ValueError:
             pass
+        if not found and stuck and tv.get("icons"):
+            # It gave its full list before; only its remote connection is stuck now (2026-11-16: a hung TV left
+            # just the 3 common apps it could find, for an hour). Keep that list and ask again soon.
+            self._remember(mac, apps_at=time.time() - APPS_EVERY + APPS_RETRY)
+            return dict(tv.get("apps") or {})
         if not found:  # not allowed yet, or an older TV: ask about the common ones (no icons that way)
             self._remember(mac, icons={})
             for app_id, name in COMMON_APPS.items():
@@ -554,8 +563,8 @@ class SamsungTVDriver:
                     found[app_id] = str(self._rest(host, f"applications/{app_id}").get("name") or name)
                 except (OSError, ValueError):
                     continue
-        if found:
-            self._remember(mac, apps=found, apps_at=time.time())
+        if found:  # (a stuck connection's short list is asked again soon, not kept for an hour)
+            self._remember(mac, apps=found, apps_at=time.time() - (APPS_EVERY - APPS_RETRY if stuck else 0))
         return found or dict(tv.get("apps") or {})
 
     def launch(self, host: str, app_id: str) -> None:

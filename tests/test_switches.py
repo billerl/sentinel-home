@@ -585,6 +585,23 @@ class TestSamsungLiveView(unittest.TestCase):
         on.start()  # (the TV answers its info request; see the switched-off test below)
         self.addCleanup(on.stop)
 
+    def test_a_stuck_remote_connection_keeps_the_full_app_list(self):
+        # (2026-11-16: a hung TV's remote channel left only the 3 common apps it could find, for an hour)
+        from sentinel.engine.samsung_tv import APPS_EVERY, APPS_RETRY, SamsungTVDriver
+        drv = SamsungTVDriver(tempfile.mkdtemp(prefix="sentinel-tv-"))
+        full = {"111": "Netflix", "222": "YouTube", "333": "Hulu", "444": "Plex"}
+        drv._tvs = {"aa": {"host": "tv", "on_since": 1.0, "apps": dict(full), "icons": {"111": "/i.png"}, "apps_at": 0.0}}
+
+        def stuck(host, timeout=10.0):
+            raise OSError("_ssl.c:983: The handshake operation timed out")
+        drv._remote = stuck
+        drv._rest = lambda host, path: {"name": "Tubi"}
+        self.assertEqual(drv.apps("tv"), full)
+        tv = drv._tvs["aa"]
+        self.assertEqual(tv["icons"], {"111": "/i.png"})
+        self.assertAlmostEqual(tv["apps_at"], time.time() - APPS_EVERY + APPS_RETRY, delta=5)  # asked again soon
+        self.assertEqual(drv.apps("tv"), full)  # (and not every time in between)
+
     def test_a_switched_off_tv_fails_at_once(self):
         # (bug hunt 2026-11-13: it asked about every installed app, ~2 s each, before failing)
         from sentinel.engine.samsung_tv import SamsungTVDriver
