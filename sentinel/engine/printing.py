@@ -33,6 +33,8 @@ KINDS = (
     (b"\xff\xd8\xff", "jpg", "photo"),
     (b"\x89PNG\r\n\x1a\n", "png", "picture"),
 )
+# IPP print-quality: draft prints at 300 dpi and lays down least ink (a form, a shopping list); best is for photos
+QUALITY = {"draft": 3, "normal": 4, "best": 5}
 PAGES = re.compile(r"^\d{1,4}(-\d{1,4})?(,\d{1,4}(-\d{1,4})?)*$")
 JOB_ID = re.compile(r"^[A-Za-z0-9_.@-]{1,120}-\d{1,9}$")
 
@@ -173,7 +175,7 @@ class Printer:
 
     # ------------------------------------------------------------------ printing
     def send(self, data: bytes, filename: str, copies: Any = 1, color: bool = True, pages: str = "",
-             who: str = "") -> Tuple[bool, str]:
+             who: str = "", quality: str = "normal") -> Tuple[bool, str]:
         """Print an uploaded PDF or photo. (ok, what to tell the person)."""
         if not data:
             return False, "That file is empty."
@@ -194,7 +196,8 @@ class Printer:
             return False, "No printer is set up on the Sentinel computer yet."
         title = clean_title(filename)
         args = ["lp", "-d", queue, "-n", str(copies), "-t", title,
-                "-o", "print-color-mode=" + ("color" if color else "monochrome")]
+                "-o", "print-color-mode=" + ("color" if color else "monochrome"),  # (black cartridge only)
+                "-o", f"print-quality={QUALITY.get(quality, QUALITY['normal'])}"]
         if pages:
             args += ["-o", "page-ranges=" + pages]
         if kind[0] != "pdf":
@@ -218,7 +221,7 @@ class Printer:
         with self._lock:
             self._sent.insert(0, {"id": job, "title": title, "who": who, "at": self._clock(), "copies": copies})
             del self._sent[RECENT * 2:]
-        app_logger.log("info", "print_sent", job=job, kind=kind[0], copies=copies, color=bool(color),
+        app_logger.log("info", "print_sent", job=job, kind=kind[0], copies=copies, color=bool(color), quality=quality,
                        pages=pages or "all", who=who, component="printing", action="send")
         return True, f"Sent to the printer: your {kind[1]}" + (f", {copies} copies" if copies > 1 else "") + "."
 

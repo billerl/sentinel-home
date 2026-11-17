@@ -55,7 +55,8 @@ def register(app: Flask, ctx: WebContext) -> None:
         args = request.args
         return _result(*engine.printer.send(
             data, unquote(request.headers.get("X-File-Name", ""))[:200], copies=args.get("copies", "1"),
-            color=args.get("color", "1") != "0", pages=args.get("pages", "")[:60], who=_who()))
+            color=args.get("color", "1") != "0", pages=args.get("pages", "")[:60], who=_who(),
+            quality=args.get("quality", "normal")[:10]))
 
     @app.route("/api/print/cancel", methods=["POST"])
     def api_print_cancel():

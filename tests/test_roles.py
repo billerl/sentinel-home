@@ -437,7 +437,7 @@ class TestRoles(unittest.TestCase):
             pdf = b"%PDF-1.7\n" + b"0" * (2 * 1024 * 1024)  # bigger than the 256 KB the rest of Sentinel takes
 
             def send(c, headers=None):
-                return c.post("/api/print?copies=2&color=0", data=pdf, content_type="application/pdf",
+                return c.post("/api/print?copies=2&color=0&quality=draft", data=pdf, content_type="application/pdf",
                               headers=headers if headers is not None else {"X-Sentinel-Request": "1",
                                                                            "X-File-Name": "Field%20trip%20form.pdf"})
             r = send(user)
@@ -445,6 +445,7 @@ class TestRoles(unittest.TestCase):
             self.assertEqual(cups.files, [pdf])
             lp = next(c for c in cups.calls if c[0] == "lp")
             self.assertIn("Field trip form.pdf", lp)
+            self.assertIn("print-quality=3", lp)
             self.assertEqual(user.get("/api/print").get_json()["jobs"][0]["who"], "Ben")
             self.assertEqual(send(user, headers={}).status_code, 400)  # (not from Sentinel's own page)
             self.assertEqual(send(guest).status_code, 403)

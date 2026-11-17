@@ -63,6 +63,7 @@
     .jobs .s.done { color: #7ef0b0; }
     .jobs .s.wait { color: #ffcf7a; }
     .hint { color: #6f97a5; font-size: 0.8rem; line-height: 1.45; }
+    #q-hint { margin-top: 6px; min-height: 0; }
   </style>
   <link rel="stylesheet" href="/static/roles.css?v=1">
 </head>
@@ -101,6 +102,13 @@
         <button type="button" class="chip" id="c-color" aria-pressed="true" onclick="setColor(true)">🎨 Colour</button>
         <button type="button" class="chip" id="c-bw" aria-pressed="false" onclick="setColor(false)">⚫ Black &amp; white</button>
       </div>
+      <div class="row" role="group" aria-label="Quality">
+        <span>Quality</span>
+        <button type="button" class="chip" data-q="draft" aria-pressed="false" onclick="setQuality('draft')">💧 Draft</button>
+        <button type="button" class="chip" data-q="normal" aria-pressed="true" onclick="setQuality('normal')">Normal</button>
+        <button type="button" class="chip" data-q="best" aria-pressed="false" onclick="setQuality('best')">✨ Best</button>
+      </div>
+      <div class="hint" id="q-hint"></div>
       <div class="row" id="pages-row" hidden>
         <span>Pages</span>
         <input type="text" id="pages" inputmode="numeric" placeholder="All" aria-label="Pages to print, like 1-3 or 2,5">
@@ -122,7 +130,11 @@
   </main>
 
   <script>
-    var copies = 1, color = true, file = null, polling = null;
+    var copies = 1, color = true, quality = "normal", file = null, polling = null;
+    var Q_HINT = { draft: "Draft uses the least ink: lighter, but fine for forms and lists.", normal: "",
+                   best: "Best is slower and uses more ink: for photos." };
+    function remember(k, v) { try { localStorage.setItem("sentinel.print." + k, v); } catch (e) {} }
+    function recall(k) { try { return localStorage.getItem("sentinel.print." + k); } catch (e) { return null; } }
     function esc(s) {
       return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
         return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
@@ -130,8 +142,15 @@
     }
     function msg(text, ok) { var m = document.getElementById("msg"); m.textContent = text || ""; m.className = "msg" + (ok ? " ok" : ""); }
     function setCopies(n) { copies = Math.max(1, Math.min(20, n)); document.getElementById("copies").textContent = copies; }
+    function setQuality(q) {
+      quality = Q_HINT.hasOwnProperty(q) ? q : "normal";
+      document.querySelectorAll("[data-q]").forEach(function (b) { b.setAttribute("aria-pressed", b.dataset.q === quality ? "true" : "false"); });
+      document.getElementById("q-hint").textContent = Q_HINT[quality];
+      remember("quality", quality);
+    }
     function setColor(on) {
       color = on;
+      remember("color", on ? "1" : "0");
       document.getElementById("c-color").setAttribute("aria-pressed", on ? "true" : "false");
       document.getElementById("c-bw").setAttribute("aria-pressed", on ? "false" : "true");
     }
@@ -160,7 +179,7 @@
     function sendIt() {
       if (!file) return;
       var go = document.getElementById("go"), prog = document.getElementById("prog");
-      var q = "?copies=" + copies + "&color=" + (color ? "1" : "0");
+      var q = "?copies=" + copies + "&color=" + (color ? "1" : "0") + "&quality=" + quality;
       var pages = document.getElementById("pages").value.trim();
       if (pages && isPdf(file)) q += "&pages=" + encodeURIComponent(pages);
       go.disabled = true;
@@ -242,6 +261,8 @@
       // quicker while something is printing (to show it finish), slow otherwise
       polling = setTimeout(load, jobs.some(function (j) { return !j.done; }) ? 4000 : 30000);
     }
+    setColor(recall("color") !== "0");  // (the last choices on this phone: a form is usually printed the same way)
+    setQuality(recall("quality") || "normal");
     document.addEventListener("visibilitychange", function () { if (!document.hidden) load(); });
     load();
   </script>

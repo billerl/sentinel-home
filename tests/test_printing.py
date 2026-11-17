@@ -80,6 +80,7 @@ class TestPrinting(unittest.TestCase):
         self.assertEqual(args[:6], ["lp", "-d", "DeskJet", "-n", "2", "-t"])
         self.assertIn("print-color-mode=monochrome", args)
         self.assertIn("page-ranges=1-3,5", args)
+        self.assertIn("print-quality=4", args)  # (normal unless asked)
         self.assertNotIn("print-scaling=fit", args)
         self.assertEqual(self.cups.files, [PDF])
         self.assertEqual(os.listdir(self.spool), [])  # (CUPS has its own copy)
@@ -90,6 +91,15 @@ class TestPrinting(unittest.TestCase):
         self.assertIn("photo", said)
         self.assertIn("print-scaling=fit", self.lp_args())
         self.assertIn("print-color-mode=color", self.lp_args())
+
+    def test_draft_saves_ink(self):
+        self.p.send(PDF, "form.pdf", color=False, quality="draft")
+        self.assertIn("print-quality=3", self.lp_args())
+        self.assertIn("print-color-mode=monochrome", self.lp_args())
+        self.p.send(JPG, "photo.jpg", quality="best")
+        self.assertIn("print-quality=5", self.lp_args())
+        self.p.send(PDF, "x.pdf", quality="ultra; lp")
+        self.assertIn("print-quality=4", self.lp_args())
 
     def test_what_it_refuses(self):
         self.assertFalse(self.p.send(b"", "x.pdf")[0])
