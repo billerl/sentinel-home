@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -33,12 +34,47 @@ KINDS = (
     (b"\xff\xd8\xff", "jpg", "photo"),
     (b"\x89PNG\r\n\x1a\n", "png", "picture"),
 )
-# Black & white is done here, before CUPS: this computer's CUPS (cups-filters 2.0.0, its "universal" filter)
-# printed in colour whatever it was told (print-color-mode=monochrome, ColorModel=Gray, cupsColorSpace=18: the
-# raster it made was always sRGB; 2026-11-17, a draft "black and white" form came out in colour). A grey file
-# can't come out in colour.
+# Black & white goes around CUPS: this computer's CUPS (cups-filters 2.0.0, its "universal" filter) printed in
+# colour whatever it was told (print-color-mode=monochrome, ColorModel=Gray, cupsColorSpace=18: the raster it made
+# was always sRGB; 2026-11-17, a draft "black and white" form came out in colour). So each page is made a grey
+# JPEG here and sent to the printer itself (IPP Print-Job) with print-color-mode=monochrome: the printer also
+# offers process-monochrome (grey mixed from the colour inks), so its "monochrome" is the black cartridge alone.
+# The printer takes one document per job (multiple-document-jobs-supported = false): one job per page.
+GRAY_PAGES = ["gs", "-q", "-dSAFER", "-dBATCH", "-dNOPAUSE", "-sDEVICE=jpeggray", "-r300", "-dJPEGQ=85"]
 GRAY_PDF = ["gs", "-q", "-dSAFER", "-dBATCH", "-dNOPAUSE", "-sDEVICE=pdfwrite", "-sColorConversionStrategy=Gray",
-            "-dProcessColorModel=/DeviceGray", "-dCompatibilityLevel=1.4"]
+            "-dProcessColorModel=/DeviceGray", "-dCompatibilityLevel=1.4"]  # (a printer CUPS reaches some other way)
+MAX_PAGES = 60
+_IPP_HEAD = """{
+	OPERATION %s
+	GROUP operation-attributes-tag
+	ATTR charset attributes-charset utf-8
+	ATTR naturalLanguage attributes-natural-language en
+	ATTR uri printer-uri $uri
+	ATTR name requesting-user-name sentinel
+"""
+IPP_PRINT = _IPP_HEAD % "Print-Job" + """	ATTR name job-name "$title"
+	ATTR mimeMediaType document-format image/jpeg
+	GROUP job-attributes-tag
+	ATTR integer copies $copies
+	ATTR keyword print-color-mode monochrome
+	ATTR enum print-quality $quality
+	ATTR keyword print-scaling fit
+	FILE $filename
+	STATUS successful-ok
+	DISPLAY job-id
+}
+"""
+IPP_STATE = _IPP_HEAD % "Get-Job-Attributes" + """	ATTR integer job-id $job
+	ATTR keyword requested-attributes job-state
+	STATUS successful-ok
+	DISPLAY job-state
+}
+"""
+IPP_CANCEL = _IPP_HEAD % "Cancel-Job" + """	ATTR integer job-id $job
+	STATUS successful-ok
+}
+"""
+FINISHED = {"completed", "canceled", "aborted"}
 
 # IPP print-quality: draft prints at 300 dpi and lays down least ink (a form, a shopping list); best is for photos
 QUALITY = {"draft": 3, "normal": 4, "best": 5}
@@ -176,9 +212,79 @@ class Printer:
         problems = [p for p in problems if p]
         waiting = set(self._waiting(queue))
         with self._lock:
-            jobs = [dict(j, done=j["id"] not in waiting) for j in self._sent[:RECENT]]
+            recent = [dict(j) for j in self._sent[:RECENT]]
+        jobs = []
+        for j in recent:
+            if "ids" in j:  # black & white: sent to the printer itself, asked there
+                j["done"] = j.get("finished") or self._direct_done(j)
+            else:
+                j["done"] = j["id"] not in waiting
+            j.pop("ids", None), j.pop("uri", None), j.pop("finished", None)
+            jobs.append(j)
         return {"printer": name, "queue": queue, "ready": attrs is not None and not problems and state != "stopped",
                 "state": state, "problems": problems, "ink": ink, "jobs": jobs}
+
+    # ------------------------------------------------------------------ black & white, to the printer itself
+    def _ipp(self, uri: str, test: str, timeout: float = 60, **values: Any) -> Tuple[bool, str]:
+        fd, path = tempfile.mkstemp(prefix="sentinel-ipp-", suffix=".test", dir=self._spool_dir)
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(test)
+            args = ["ipptool", "-tv", "-T", str(int(timeout))]
+            for key, value in values.items():
+                args += ["-d", f"{key}={value}"]
+            code, text = self._cmd(args + [uri, path], timeout=timeout + 10)
+        finally:
+            os.unlink(path)
+        return code == 0 and "[PASS]" in text, text
+
+    def _gray_pages(self, path: str, ext: str, pages: str, folder: str) -> List[str]:
+        """Each page (the chosen ones) as a grey JPEG in folder, in order; [] when they couldn't be made."""
+        if ext == "pdf":
+            args = GRAY_PAGES + ([f"-sPageList={pages}"] if pages else [])
+            code, _ = self._cmd(args + ["-sOutputFile=" + os.path.join(folder, "page-%03d.jpg"), path], timeout=180)
+            made = sorted(f for f in os.listdir(folder) if f.startswith("page-"))
+            return [os.path.join(folder, f) for f in made][:MAX_PAGES] if code == 0 else []
+        try:
+            from PIL import Image, ImageOps
+
+            out = os.path.join(folder, "page-001.jpg")
+            with Image.open(path) as im:
+                ImageOps.exif_transpose(im).convert("L").save(out, quality=90)  # (a phone photo the right way up)
+            return [out]
+        except Exception:
+            return []
+
+    def _send_gray(self, uri: str, path: str, ext: str, folder: str, title: str, copies: int, quality: str,
+                   pages: str) -> Tuple[List[int], str]:
+        """(the printer's job ids, what went wrong if any)."""
+        files = self._gray_pages(path, ext, pages, folder)
+        if not files:
+            return [], "It couldn't be made black and white, so it wasn't printed (to save the colour ink)."
+        ids: List[int] = []
+        for page in files:
+            ok, text = self._ipp(uri, IPP_PRINT, filename=page, title=title.replace('"', "'"), copies=copies,
+                                 quality=QUALITY.get(quality, QUALITY["normal"]))
+            m = re.search(r"job-id \(integer\) = (\d+)", text)
+            if not ok or not m:
+                app_logger.log("warning", "print_failed", error_message=text.strip()[-200:], component="printing",
+                               action="send")
+                return ids, "The printer didn't take it" + (f" (after {len(ids)} pages)" if ids else "") + "."
+            ids.append(int(m.group(1)))
+        return ids, ""
+
+    def _direct_done(self, job: Dict[str, Any]) -> bool:
+        """Every page's job finished at the printer (or the printer no longer knows it)."""
+        for job_id in job["ids"]:
+            ok, text = self._ipp(job["uri"], IPP_STATE, timeout=8, job=job_id)
+            m = re.search(r"job-state \(enum\) = ([\w-]+)", text)
+            if ok and m and m.group(1) not in FINISHED:
+                return False
+        with self._lock:
+            for j in self._sent:
+                if j["id"] == job["id"]:
+                    j["finished"] = True  # (not asked again)
+        return True
 
     # ------------------------------------------------------------------ printing
     def _gray(self, path: str, ext: str) -> Optional[str]:
@@ -224,6 +330,30 @@ class Printer:
             args += ["-o", "page-ranges=" + pages]
         if kind[0] != "pdf":
             args += ["-o", "print-scaling=fit"]  # a photo fills the page, whole (not cut off, not tiny)
+        uri = None if color else self._device(queue)
+        if uri:  # black & white: the printer itself, black ink only
+            folder = tempfile.mkdtemp(prefix="sentinel-print-", dir=self._spool_dir)
+            try:
+                path = os.path.join(folder, "upload." + kind[0])
+                with open(path, "wb") as f:
+                    f.write(data)
+                ids, problem = self._send_gray(uri, path, kind[0], folder, title, copies, quality, pages)
+            finally:
+                shutil.rmtree(folder, ignore_errors=True)
+            if not ids:
+                return False, problem
+            job = f"printer-{ids[0]}"
+            with self._lock:
+                self._sent.insert(0, {"id": job, "title": title, "who": who, "at": self._clock(), "copies": copies,
+                                      "ids": ids, "uri": uri})
+                del self._sent[RECENT * 2:]
+            app_logger.log("info", "print_sent", job=job, kind=kind[0], copies=copies, color=False, quality=quality,
+                           pages=pages or "all", sheets=len(ids), who=who, direct=True, component="printing",
+                           action="send")
+            n = len(ids)
+            return (problem == "", ("Sent to the printer in black and white: your " + kind[1] +
+                                    (f" ({n} pages)" if n > 1 else "") + (f", {copies} copies" if copies > 1 else "") +
+                                    "." + (" " + problem if problem else "")))
         fd, path = tempfile.mkstemp(prefix="sentinel-print-", suffix="." + kind[0], dir=self._spool_dir)
         gray = None
         try:
@@ -261,9 +391,16 @@ class Printer:
             ours = any(j["id"] == job for j in self._sent)
         if not JOB_ID.match(job) or not ours:
             return False, "I don't know that print job."
-        code, text = self._cmd(["cancel", job], timeout=10)
-        if code != 0:
-            return False, "It couldn't be stopped (it may have already printed)."
+        with self._lock:
+            direct = next((dict(j) for j in self._sent if j["id"] == job and "ids" in j), None)
+        if direct is not None:  # black & white: each page's job at the printer
+            stopped = [self._ipp(direct["uri"], IPP_CANCEL, timeout=8, job=i)[0] for i in direct["ids"]]
+            if not any(stopped):
+                return False, "It couldn't be stopped (it may have already printed)."
+        else:
+            code, text = self._cmd(["cancel", job], timeout=10)
+            if code != 0:
+                return False, "It couldn't be stopped (it may have already printed)."
         with self._lock:
             for j in self._sent:
                 if j["id"] == job:

@@ -28,6 +28,8 @@ class FakeCups:
         self.ipp = IPP_OK
         self.waiting = []
         self.next_job = 7
+        self.printer_jobs = {}  # black & white jobs sent to the printer itself: id -> {state, values, page}
+        self.pdf_pages = 2  # how many pages Ghostscript finds in a PDF
 
     def __call__(self, args, **kw):
         self.calls.append(list(args))
@@ -39,14 +41,32 @@ class FakeCups:
         elif args[:2] == ["lpstat", "-o"]:
             out = "".join(f"{j} someone 1024 Tue 17 Nov 2026\n" for j in self.waiting)
         elif args[0] == "ipptool":
+            test = open(args[-1]).read() if args[-1].endswith(".test") and os.path.exists(args[-1]) else ""
+            values = dict(args[i + 1].split("=", 1) for i, a in enumerate(args) if a == "-d")
             if self.ipp is None:
                 code, out = 1, "ipptool: Unable to connect to 192.0.2.81: No route to host"
+            elif "OPERATION Print-Job" in test:
+                job = 100 + len(self.printer_jobs)
+                with open(values["filename"], "rb") as f:
+                    page = f.read()
+                self.printer_jobs[job] = {"state": "processing", "values": values, "page": page, "test": test}
+                out = f"    Sentinel print  [PASS]\n        job-id (integer) = {job}\n"
+            elif "OPERATION Get-Job-Attributes" in test:
+                out = f"  [PASS]\n        job-state (enum) = {self.printer_jobs[int(values['job'])]['state']}\n"
+            elif "OPERATION Cancel-Job" in test:
+                self.printer_jobs[int(values["job"])]["state"] = "canceled"
+                out = "  [PASS]\n"
             else:
                 out = self.ipp
-        elif args[0] == "gs":  # black & white: a grey copy of the PDF
-            out = next(a for a in args if a.startswith("-sOutputFile="))[len("-sOutputFile="):]
-            with open(out, "wb") as f:
-                f.write(GRAY_PDF_OUT)
+        elif args[0] == "gs":
+            target = next(a for a in args if a.startswith("-sOutputFile="))[len("-sOutputFile="):]
+            if "%03d" in target:  # each page a grey JPEG
+                for n in range(1, self.pdf_pages + 1):
+                    with open(target % n, "wb") as f:
+                        f.write(b"\xff\xd8\xff grey page %d" % n)
+            else:  # a grey copy of the PDF
+                with open(target, "wb") as f:
+                    f.write(GRAY_PDF_OUT)
         elif args[0] == "lp":
             path = args[-1]
             with open(path, "rb") as f:
@@ -77,20 +97,45 @@ class TestPrinting(unittest.TestCase):
         self.assertEqual(clean_title("../../etc/My Report (final).pdf"), "My Report (final).pdf")
         self.assertEqual(clean_title(""), "Sentinel print")
 
-    def test_a_pdf_is_printed_and_its_file_removed(self):
-        ok, said = self.p.send(PDF, "Report.pdf", copies="2", color=False, pages="1-3, 5", who="Alex")
+    def test_a_colour_pdf_goes_through_cups(self):
+        ok, said = self.p.send(PDF, "Report.pdf", copies="2", pages="1-3, 5", who="Alex")
         self.assertTrue(ok, said)
         self.assertIn("2 copies", said)
         args = self.lp_args()
         self.assertEqual(args[:6], ["lp", "-d", "DeskJet", "-n", "2", "-t"])
-        self.assertIn("print-color-mode=monochrome", args)
+        self.assertIn("print-color-mode=color", args)
         self.assertIn("page-ranges=1-3,5", args)
         self.assertIn("print-quality=4", args)  # (normal unless asked)
         self.assertNotIn("print-scaling=fit", args)
-        self.assertEqual(self.cups.files, [GRAY_PDF_OUT])  # (made grey here: CUPS printed colour anyway)
-        self.assertEqual(os.listdir(self.spool), [])  # (CUPS has its own copy; the grey one goes too)
-        self.p.send(PDF, "Report.pdf")
-        self.assertEqual(self.cups.files[-1], PDF)  # colour: as it came
+        self.assertEqual(self.cups.files, [PDF])
+        self.assertEqual(os.listdir(self.spool), [])  # (CUPS has its own copy)
+
+    def test_black_and_white_goes_to_the_printer_itself_black_ink_only(self):
+        # (CUPS printed colour whatever it was told: each page goes to the printer as a grey JPEG, "monochrome")
+        ok, said = self.p.send(PDF, "Form.pdf", copies="2", color=False, pages="1-2", quality="draft", who="Alex")
+        self.assertTrue(ok, said)
+        self.assertIn("black and white", said)
+        self.assertIn("2 pages", said)
+        self.assertFalse(any(c[0] == "lp" for c in self.cups.calls))
+        gs = next(c for c in self.cups.calls if c[0] == "gs")
+        self.assertIn("-sDEVICE=jpeggray", gs)
+        self.assertIn("-sPageList=1-2", gs)
+        jobs = self.cups.printer_jobs
+        self.assertEqual(len(jobs), 2)  # (one job per page: it takes one document a job)
+        for job in jobs.values():
+            self.assertIn("print-color-mode monochrome", job["test"])
+            self.assertEqual((job["values"]["copies"], job["values"]["quality"]), ("2", "3"))
+            self.assertTrue(job["page"].startswith(b"\xff\xd8\xff"))
+        ipp = next(c for c in self.cups.calls if c[0] == "ipptool" and "-d" in c)
+        self.assertEqual(ipp[-2], "ipp://192.0.2.81/ipp/print")
+        self.assertEqual(os.listdir(self.spool), [])  # (the pages and the .test files are gone)
+        # shown until the printer has finished every page; Stop cancels them there
+        job = self.p.status()["jobs"][0]
+        self.assertEqual((job["id"], job["done"]), ("printer-100", False))
+        self.assertNotIn("ids", job)
+        self.assertTrue(self.p.cancel("printer-100")[0])
+        self.assertEqual({j["state"] for j in jobs.values()}, {"canceled"})
+        self.assertTrue(self.p.status()["jobs"][0]["done"])
 
     def test_a_photo_is_fitted_to_the_page(self):
         ok, said = self.p.send(JPG, "IMG_2041.jpg")
@@ -100,9 +145,8 @@ class TestPrinting(unittest.TestCase):
         self.assertIn("print-color-mode=color", self.lp_args())
 
     def test_draft_saves_ink(self):
-        self.p.send(PDF, "form.pdf", color=False, quality="draft")
+        self.p.send(PDF, "form.pdf", quality="draft")
         self.assertIn("print-quality=3", self.lp_args())
-        self.assertIn("print-color-mode=monochrome", self.lp_args())
         self.p.send(JPG, "photo.jpg", quality="best")
         self.assertIn("print-quality=5", self.lp_args())
         self.p.send(PDF, "x.pdf", quality="ultra; lp")
@@ -116,13 +160,15 @@ class TestPrinting(unittest.TestCase):
         Image.new("RGB", (40, 30), (220, 30, 30)).save(buf, "JPEG")
         ok, said = self.p.send(buf.getvalue(), "red.jpg", color=False)
         self.assertTrue(ok, said)
-        with Image.open(io.BytesIO(self.cups.files[-1])) as im:
-            self.assertEqual(im.mode, "L")
+        page = list(self.cups.printer_jobs.values())[0]["page"]
+        with Image.open(io.BytesIO(page)) as im:
+            self.assertEqual((im.format, im.mode), ("JPEG", "L"))
         self.assertEqual(os.listdir(self.spool), [])
 
     def test_no_grey_copy_no_print(self):
         self.assertFalse(self.p.send(JPG, "broken.jpg", color=False)[0])  # (not a real picture: can't be greyed)
         self.assertFalse(any(c[0] == "lp" for c in self.cups.calls))
+        self.assertEqual(self.cups.printer_jobs, {})
 
     def test_what_it_refuses(self):
         self.assertFalse(self.p.send(b"", "x.pdf")[0])

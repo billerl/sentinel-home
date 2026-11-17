@@ -450,15 +450,14 @@ class TestRoles(unittest.TestCase):
                                                                            "X-File-Name": "Field%20trip%20form.pdf"})
             r = send(user)
             self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
-            self.assertEqual(len(cups.files), 1)  # (black & white: the grey copy made before printing)
-            self.assertTrue(any(c[0] == "gs" for c in cups.calls))
-            lp = next(c for c in cups.calls if c[0] == "lp")
-            self.assertIn("Field trip form.pdf", lp)
-            self.assertIn("print-quality=3", lp)
+            self.assertEqual(len(cups.printer_jobs), 2)  # (one per page)
+            job = list(cups.printer_jobs.values())[0]  # (black & white: to the printer itself, black ink only)
+            self.assertEqual(job["values"]["title"], "Field trip form.pdf")
+            self.assertEqual(job["values"]["quality"], "3")
             self.assertEqual(user.get("/api/print").get_json()["jobs"][0]["who"], "Ben")
             self.assertEqual(send(user, headers={}).status_code, 400)  # (not from Sentinel's own page)
             self.assertEqual(send(guest).status_code, 403)
-            self.assertEqual(len(cups.files), 1)
+            self.assertEqual(len(cups.printer_jobs), 2)
         finally:
             self.engine.printer = before
 
