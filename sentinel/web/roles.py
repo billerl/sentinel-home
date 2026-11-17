@@ -102,6 +102,7 @@ ACCESS: Dict[str, Rule] = {
     "photos_page": USER, "api_photos": USER, "api_photos_folder": USER, "photo_thumb": USER, "photo_view": USER,
     "photo_original": USER, "api_photo_album_new": USER, "api_photo_album_share": USER, "api_photo_album_delete": USER,
     "api_photo_upload": USER, "api_photo_delete": USER, "api_photo_rescan": ADMIN,
+    "voice_clip": USER,  # what a voice request sounded like (the timeline's Voice row; guests don't see that row)
     # print: a PDF or photo to the household printer
     "print_page": USER, "api_print": USER, "api_print_send": USER, "api_print_cancel": USER,
     # routines: a user makes and changes only their own (checked in the route)

@@ -619,6 +619,16 @@ function visibleVoice() {
 function voiceText(v) {
   return (v.said ? "“" + v.said + "” → " : "") + (v.did || "");
 }
+var voicePlayer = null;
+function playVoice(v, btn) {  // what the request sounded like, as Jarvis heard it
+  if (voicePlayer) { voicePlayer.pause(); if (voicePlayer.btn) voicePlayer.btn.textContent = "▶"; }
+  if (voicePlayer && voicePlayer.vid === v.id) { voicePlayer = null; return; }
+  voicePlayer = new Audio("/voice/clip/" + v.id);
+  voicePlayer.vid = v.id; voicePlayer.btn = btn;
+  if (btn) btn.textContent = "■";
+  voicePlayer.onended = voicePlayer.onerror = function () { if (btn) btn.textContent = "▶"; voicePlayer = null; };
+  voicePlayer.play().catch(function () { if (btn) btn.textContent = "▶"; });
+}
 
 function setFilter(f) {
   tlFilter = f;
@@ -1331,6 +1341,12 @@ function voiceRow(v) {
   what.appendChild(title);
   what.appendChild(detail);
   row.appendChild(sw); row.appendChild(t); row.appendChild(what);
+  if (v.clip) {
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "voice-play"; b.textContent = "▶"; b.setAttribute("aria-label", "Hear it");
+    b.onclick = function() { playVoice(v, b); };
+    row.appendChild(b);
+  }
   return row;
 }
 
@@ -1522,7 +1538,15 @@ function renderTimeline(scrollToFocus) {
       mark.style.left = (v.s / day * 100) + "%";
       mark.title = fmtOffset(v.s) + " · " + v.place + ": " + voiceText(v);
       mark.onclick = function() {
-        document.getElementById("tl-summary").textContent = "🎙️ " + fmtOffset(v.s).slice(0, 5) + " " + v.place + ": " + voiceText(v);
+        var sum = document.getElementById("tl-summary");
+        sum.textContent = "🎙️ " + fmtOffset(v.s).slice(0, 5) + " " + v.place + ": " + voiceText(v) + " ";
+        if (v.clip) {
+          var b = document.createElement("button");
+          b.type = "button"; b.className = "voice-play"; b.textContent = "▶"; b.title = "Hear it";
+          b.onclick = function(e) { e.stopPropagation(); playVoice(v, b); };
+          sum.appendChild(b);
+          playVoice(v, b);
+        }
       };
       vtrack.appendChild(mark);
     });

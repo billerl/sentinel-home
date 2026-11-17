@@ -427,6 +427,8 @@ button:disabled { opacity: 0.35; cursor: default; }
 .ev .sw.g-voice { background: #ff5fd2; }
 .ev.voice .what span { white-space: normal; }
 .ev.voice.failed .sw { opacity: 0.45; }
+.voice-play { flex: none; min-width: 40px; min-height: 36px; border-radius: 999px; border: 1px solid #a83c8c;
+              background: #2a0f24; color: #ff8fe0; cursor: pointer; padding: 0 10px; }
 .ev .t { flex: none; width: 4.6em; font-variant-numeric: tabular-nums; color: #00ffff; }
 .ev .what { flex: 1; min-width: 0; }
 .ev .what b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

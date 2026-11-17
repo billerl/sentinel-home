@@ -68,8 +68,8 @@ def register(app: Flask, ctx: WebContext) -> None:
         now = time.time()
         # what was asked of Jarvis that day, and where (the Voice row); not for guest passes
         viewer, voice_log = ctx.viewer(), getattr(ctx.engine, "voice_log", None)
-        voice = [{"s": round(v["ts"] - day_start, 1), "place": v["place"], "said": v["said"], "did": v["did"],
-                  "ok": v["ok"]} for v in voice_log.between(day_start, day_end)] \
+        voice = [{"id": v["id"], "s": round(v["ts"] - day_start, 1), "place": v["place"], "said": v["said"],
+                  "did": v["did"], "ok": v["ok"], "clip": v["clip"]} for v in voice_log.between(day_start, day_end)] \
             if voice_log is not None and viewer is not None and viewer.at_least(USER) else []
         return jsonify(
             {
@@ -94,6 +94,20 @@ def register(app: Flask, ctx: WebContext) -> None:
                 "voice": voice,
             }
         )
+
+    @app.route("/voice/clip/<int:request_id>")
+    def voice_clip(request_id: int):
+        """What a voice request sounded like (sentinel/engine/voice_log.py): the play button on the Voice row."""
+        redir = _require_session()
+        if redir:
+            return redir
+        voice_log = getattr(ctx.engine, "voice_log", None)
+        path = voice_log.clip_path(request_id) if voice_log is not None else None
+        if path is None:
+            return "", 404
+        resp = send_file(path, mimetype="audio/wav", conditional=True)
+        resp.headers["Cache-Control"] = "private, max-age=86400"
+        return resp
 
     @app.route("/recordings/<int:recording_id>/video")
     def recording_video(recording_id: int):

@@ -72,15 +72,16 @@ class TestCameraEar(unittest.TestCase):
 
     def test_a_command_is_done_and_the_light_flashes_once(self):
         acted = []
-        ear = self.make(lambda text: acted.append(text) or True)
+        ear = self.make(lambda text, audio: acted.append((text, len(audio))) or True)
         self.say_command(ear)
-        self.assertEqual(acted, ["turn on the patio lights"])
+        self.assertEqual([t for t, _ in acted], ["turn on the patio lights"])
+        self.assertGreater(acted[0][1], 0)  # (the sound goes along: the Voice row's clip)
         self.assertEqual(self.light.calls, [("listening", "192.0.2.10"), ("answer", "192.0.2.10", 1)])
         self.assertEqual(ear._mode, "wake")
 
     def test_not_understood_flashes_twice(self):
         # (the listener itself writes no words: Engine._ear_command notes what was said after the wake word)
-        ear = self.make(lambda text: False)
+        ear = self.make(lambda text, audio: False)
         from sentinel.logging_utils import app_logger
         logged = []
         real = app_logger.log
@@ -95,7 +96,7 @@ class TestCameraEar(unittest.TestCase):
 
     def test_nothing_said_after_the_wake_word(self):
         acted = []
-        ear = self.make(lambda text: acted.append(text) or True)
+        ear = self.make(lambda text, audio: acted.append((text, len(audio))) or True)
         self.wake.scores = [0.95]
         ear._on_chunk(loud())
         for _ in range(60):  # past WAIT_FOR_SPEECH
@@ -108,7 +109,7 @@ class TestCameraEar(unittest.TestCase):
         self.assertEqual(self.light.calls[-1], ("answer", "192.0.2.10", 2))
 
     def test_below_the_threshold_it_stays_asleep(self):
-        ear = self.make(lambda text: True)
+        ear = self.make(lambda text, audio: True)
         self.wake.scores = [0.6, 0.7]
         ear._on_chunk(loud())
         ear._on_chunk(loud())
@@ -127,7 +128,7 @@ class TestCameraEar(unittest.TestCase):
 
             def wait(self, timeout=None):
                 return 0
-        ear = CameraEar("192.0.2.10", "rtsp://admin:secret@cam/main", lambda a: "", lambda t: False,
+        ear = CameraEar("192.0.2.10", "rtsp://admin:secret@cam/main", lambda a: "", lambda t, a: False,
                         popen=lambda args, **kw: started.append(args) or Proc(), wake_model=FakeWake(), ffmpeg="ffmpeg")
         ear._listen()
         args = started[0]
@@ -166,6 +167,27 @@ class TestOutsideCommands(unittest.TestCase):
 
 
 class TestVoiceLog(unittest.TestCase):
+    def test_each_request_keeps_its_sound_for_a_while(self):
+        import wave
+        now = [1_800_000_000.0]
+        log = VoiceLog(tempfile.mkdtemp(prefix="sentinel-voicelog-"), clock=lambda: now[0])
+        log.add("Back Yard", "turn on the patio lights", "patio lights on", audio=np.full(16000, 0.25, np.float32))
+        log.add("Inside", "what time is it", "It's 4 pm.", audio=np.zeros(30 * 16000, np.float32))
+        log.add("Phone", "hello", "hi")  # (no sound: no clip)
+        rows = log.between(0, now[0] + 1)
+        self.assertEqual([r["clip"] for r in rows], [True, True, False])
+        with wave.open(log.clip_path(rows[0]["id"])) as w:
+            self.assertEqual((w.getframerate(), w.getnchannels(), w.getnframes()), (16000, 1, 16000))
+        with wave.open(log.clip_path(rows[1]["id"])) as w:
+            self.assertEqual(w.getnframes(), 20 * 16000)  # (a long one: its start is enough)
+        self.assertIsNone(log.clip_path(rows[2]["id"]))
+        self.assertTrue(os.path.isabs(log.clips))
+        now[0] += 31 * 86400  # past CLIP_DAYS: the sound goes, the words stay
+        log.add("Inside", "x", "y")
+        old = [r for r in log.between(0, now[0] + 1) if r["place"] == "Back Yard"][0]
+        self.assertEqual((old["clip"], old["said"]), (False, "turn on the patio lights"))
+        self.assertEqual(os.listdir(log.clips), [])
+
     def test_requests_by_day_and_old_ones_go(self):
         now = [1_800_000_000.0]
         log = VoiceLog(tempfile.mkdtemp(prefix="sentinel-voicelog-"), clock=lambda: now[0])
@@ -184,12 +206,12 @@ class TestAnswerFrom(unittest.TestCase):
         log = VoiceLog(tempfile.mkdtemp(prefix="sentinel-voicelog-"))
         fake = types.SimpleNamespace(voice_log=log,
                                      answer_voice=lambda text, say, doubtful=False: types.SimpleNamespace(text="Okay."))
-        answer = Engine._answer_from(fake, "Inside")
+        answer = Engine._answer_from(fake, "Inside", lambda: np.full(8000, 0.1, np.float32))
         self.assertEqual(answer("turn on the patio lights", print).text, "Okay.")
         Engine._answer_from(fake, "Phone")("what's the weather", print)
         rows = log.between(0, time.time() + 1)
-        self.assertEqual([(r["place"], r["said"], r["did"]) for r in rows],
-                         [("Inside", "turn on the patio lights", "Okay."), ("Phone", "what's the weather", "Okay.")])
+        self.assertEqual([(r["place"], r["said"], r["did"], r["clip"]) for r in rows],
+                         [("Inside", "turn on the patio lights", "Okay.", True), ("Phone", "what's the weather", "Okay.", False)])
 
 
 class TestLightSignals(unittest.TestCase):

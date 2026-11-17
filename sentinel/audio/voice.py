@@ -536,6 +536,7 @@ class VoiceAssistant:
         if not end.heard:
             return None
         audio = normalise(np.concatenate(chunks))
+        self.last_audio = audio  # (the request as heard: kept with it for the timeline's Voice row)
         started = time.time()
         text, segments = self._transcribe(audio, prompt)
         self.last_doubt = doubt(segments)

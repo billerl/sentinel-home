@@ -35,7 +35,7 @@ RETRY_SECONDS = (5.0, 300.0)  # the camera's sound stopped: try again, backing o
 
 class CameraEar:
     def __init__(self, host: str, source: str, transcribe: Callable[[np.ndarray], str],
-                 act: Callable[[str], bool], light: Any = None, threshold: Callable[[], float] = lambda: 0.89,
+                 act: Callable[[str, np.ndarray], bool], light: Any = None, threshold: Callable[[], float] = lambda: 0.89,
                  gain: Callable[[], float] = lambda: 4.0, popen: Callable[..., Any] = subprocess.Popen,
                  wake_model: Any = None, ffmpeg: str = "") -> None:
         self.host, self.source = host, source
@@ -178,8 +178,9 @@ class CameraEar:
             if end.heard:
                 audio, _talking = trim_speech(chunks, end.start_level, end.quiet_level)
                 if len(audio):
-                    text = self._transcribe(normalise(audio))
-                    done = bool(text) and self._act(text)
+                    audio = normalise(audio)
+                    text = self._transcribe(audio)
+                    done = bool(text) and self._act(text, audio)  # (the sound too: the Voice row's clip)
             if not done:
                 app_logger.log("info", "camera_ear_not_done", camera_ip=self.host, component="camera_ear",
                                action="command")

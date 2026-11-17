@@ -52,6 +52,7 @@ class PhoneTalk:
         if job is not None:
             return self._out(text, "Okay, cancelled." if is_cancel(text) else job(text))
         said = []
+        self.last_audio = pcm  # (the request as heard: kept with it for the timeline's Voice row)
         reply = self._answer(text, said.append)
         if reply is None:  # room talk / "stop" with nothing playing: nothing to say
             return {"heard": text, "reply": "", "note": "Nothing to do there."}

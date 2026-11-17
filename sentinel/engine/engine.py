@@ -252,7 +252,8 @@ class Engine:
         from sentinel.engine.phone_talk import PhoneTalk
 
         self.phone_talk = PhoneTalk(  # the web page's Talk button: Jarvis through a phone's microphone
-            self.settings, voice=lambda: self.voice, speaker=lambda: self.audio, answer=self._answer_from("Phone"))
+            self.settings, voice=lambda: self.voice, speaker=lambda: self.audio, answer=self._answer_from(
+                "Phone", lambda: getattr(self.phone_talk, "last_audio", None)))
         from sentinel.engine.mesh import MeshChat
 
         self.mesh = MeshChat(  # chat over the LoRa mesh, through the pets' base station (the Mesh page)
@@ -1051,7 +1052,8 @@ class Engine:
         except ImportError as e:  # faster-whisper / openwakeword not installed
             app_logger.log("warning", "voice_unavailable", error_message=str(e), component="voice", action="start")
             return
-        self.voice = VoiceAssistant(self.settings, self._answer_from("Inside"), self.audio, names=self._voice_names,
+        inside = self._answer_from("Inside", lambda: getattr(self.voice, "last_audio", None))
+        self.voice = VoiceAssistant(self.settings, inside, self.audio, names=self._voice_names,
                                     switches=lambda: [s.name for s in self.switches.switches()],
                                     apps=self.switches.tv_apps, artists=self.spotify.artists,
                                     tv_on=self.switches.samsung_tv_on,
@@ -1079,13 +1081,15 @@ class Engine:
             self.voice.stop()
             self.voice = None
 
-    def _answer_from(self, place: str) -> Callable[..., Any]:
-        """answer_voice, noting the request and its answer for the timeline's Voice row (where it was heard)."""
+    def _answer_from(self, place: str, heard: Optional[Callable[[], Any]] = None) -> Callable[..., Any]:
+        """answer_voice, noting the request, its answer and its sound (heard(): the audio Jarvis just turned into
+        these words) for the timeline's Voice row (where it was heard)."""
         def answer(text: str, say: Callable[[str], None], doubtful: bool = False):
             reply = self.answer_voice(text, say, doubtful=doubtful)
             if reply is not None and text:
                 try:
-                    self.voice_log.add(place, text, getattr(reply, "text", "") or "")
+                    self.voice_log.add(place, text, getattr(reply, "text", "") or "",
+                                       audio=heard() if heard is not None else None)
                 except Exception as e:  # (never cost the answer)
                     app_logger.log("warning", "voice_log_failed", error_message=str(e), component="voice",
                                    action="log")
@@ -1115,7 +1119,8 @@ class Engine:
                                                              "or its admin login (camera_admin.json) is missing")
                 continue
             place = pipeline.display_name
-            ear = CameraEar(host, source, self._ear_words, lambda text, place=place: self._ear_command(text, place),
+            ear = CameraEar(host, source, self._ear_words,
+                            lambda text, audio, place=place: self._ear_command(text, place, audio),
                             light=self.camera_lights,
                             threshold=lambda: float(self.settings.get("voice_wake_threshold", 0.5)),
                             gain=lambda: float(self.settings.get("voice_gain", 4.0)))
@@ -1141,7 +1146,7 @@ class Engine:
                                                    condition_on_previous_text=False)
         return clean_transcript(list(segments))
 
-    def _ear_command(self, text: str, place: str) -> bool:
+    def _ear_command(self, text: str, place: str, audio: Any = None) -> bool:
         """From outside only plugs and lights, on or off: never the TVs, the cameras, alerts or routines (anyone
         in the yard can say "Hey Jarvis"). True when it was one and it worked. Noted for the timeline with what
         was done and what was said to Jarvis (after the wake word, like the house mic; 2026-11-17: the privacy
@@ -1150,13 +1155,14 @@ class Engine:
         parsed = self.switches.parse(text)
         found = [s for s in parsed[1] if s.icon != "tv"] if parsed is not None and parsed[0] is not None else []
         if not found:
-            self.voice_log.add(place, text, "Didn't understand (or not allowed from outside)", ok=False)
+            self.voice_log.add(place, text, "Didn't understand (or not allowed from outside)", ok=False, audio=audio)
             return False
         on = parsed[0]
         results = [self.switches.set(s.id, on, f"voice ({place})") for s in found]
         ok = all(done for done, _ in results)
         names = " and ".join(s.name for s in found)
-        self.voice_log.add(place, text, f"{names} {'on' if on else 'off'}" if ok else f"{names}: didn't answer", ok=ok)
+        self.voice_log.add(place, text, f"{names} {'on' if on else 'off'}" if ok else f"{names}: didn't answer", ok=ok,
+                           audio=audio)
         return ok
 
     NOTES_FILE = os.path.join(os.path.expanduser("~"), "Documents", "sentinel_home", "claude-notes.md")

@@ -110,7 +110,7 @@ class TestRoles(unittest.TestCase):
     def rules(self):
         """(endpoint, a URL for it, its methods) for every route, with stand-in values in the path."""
         stand_ins = {"person_id": 999, "place_id": 999, "vehicle_id": 999, "routine_id": 999, "recording_id": 999,
-                     "sighting_id": 999, "rid": 999, "note_id": 999, "album_id": 999, "alert_id": 999, "z": 1, "x": 1, "y": 1, "filename": "icon.svg"}
+                     "sighting_id": 999, "rid": 999, "note_id": 999, "album_id": 999, "request_id": 999, "alert_id": 999, "z": 1, "x": 1, "y": 1, "filename": "icon.svg"}
         for rule in self.server._app.url_map.iter_rules():
             args = {a: stand_ins.get(a, "x") for a in rule.arguments}
             yield rule.endpoint, rule.build(args)[1], rule.methods
@@ -431,6 +431,15 @@ class TestRoles(unittest.TestCase):
         voice = user.get("/api/recordings").get_json()["voice"]
         self.assertIn(("Back Yard", "patio lights on"), [(v["place"], v["did"]) for v in voice])
         self.assertEqual(guest.get("/api/recordings").get_json()["voice"], [])
+        # what it sounded like: for the family, not guests
+        import numpy as np
+        self.engine.voice_log.add("Back Yard", "turn on the patio lights", "patio lights on",
+                                  audio=np.full(8000, 0.2, np.float32))
+        rid = [v for v in user.get("/api/recordings").get_json()["voice"] if v["clip"]][-1]["id"]
+        clip = user.get(f"/voice/clip/{rid}")
+        self.assertEqual((clip.status_code, clip.mimetype), (200, "audio/wav"))
+        self.assertEqual(guest.get(f"/voice/clip/{rid}").status_code, 403)
+        self.assertEqual(user.get("/voice/clip/999999").status_code, 404)
 
     # ---------------------------------------------------------------- photos
     def test_photos_private_albums_and_uploads_through_the_pages(self):
