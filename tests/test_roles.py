@@ -110,7 +110,7 @@ class TestRoles(unittest.TestCase):
     def rules(self):
         """(endpoint, a URL for it, its methods) for every route, with stand-in values in the path."""
         stand_ins = {"person_id": 999, "place_id": 999, "vehicle_id": 999, "routine_id": 999, "recording_id": 999,
-                     "sighting_id": 999, "rid": 999, "note_id": 999, "alert_id": 999, "z": 1, "x": 1, "y": 1, "filename": "icon.svg"}
+                     "sighting_id": 999, "rid": 999, "note_id": 999, "album_id": 999, "alert_id": 999, "z": 1, "x": 1, "y": 1, "filename": "icon.svg"}
         for rule in self.server._app.url_map.iter_rules():
             args = {a: stand_ins.get(a, "x") for a in rule.arguments}
             yield rule.endpoint, rule.build(args)[1], rule.methods
@@ -431,6 +431,47 @@ class TestRoles(unittest.TestCase):
         voice = user.get("/api/recordings").get_json()["voice"]
         self.assertIn(("Back Yard", "patio lights on"), [(v["place"], v["did"]) for v in voice])
         self.assertEqual(guest.get("/api/recordings").get_json()["voice"], [])
+
+    # ---------------------------------------------------------------- photos
+    def test_photos_private_albums_and_uploads_through_the_pages(self):
+        import io
+
+        from PIL import Image
+
+        from sentinel.engine.photos import Photos
+        drive = tempfile.mkdtemp(prefix="sentinel-drive-")
+        self.addCleanup(shutil.rmtree, drive, ignore_errors=True)
+        before = self.engine.photos
+        self.engine.photos = Photos(tempfile.mkdtemp(prefix="sentinel-photodata-"), {}, drive=lambda: drive)
+        try:
+            user, admin, guest = self.clients[USER], self.clients[ADMIN], self.clients[GUEST]  # Ben, Kate, Grace
+            r = self.post(user, "/api/photos/albums", {"name": "Ben private", "shared": False})
+            self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+            aid = r.get_json()["message"]
+            buf = io.BytesIO()
+            Image.new("RGB", (600, 400), (10, 120, 200)).save(buf, "JPEG")
+            up = user.post(f"/api/photos/albums/{aid}/upload", data=buf.getvalue(), content_type="image/jpeg",
+                           headers={"X-Sentinel-Request": "1", "X-File-Name": "IMG%201.jpg"})
+            self.assertEqual(up.get_json()["message"], "IMG 1.jpg")
+            self.assertEqual(user.post(f"/api/photos/albums/{aid}/upload", data=b"x",
+                                       headers={"X-File-Name": "y.jpg"}).status_code, 400)  # (not from Sentinel's page)
+            mine = user.get("/api/photos").get_json()["albums"]
+            self.assertEqual([(a["name"], a["mine"]) for a in mine], [("Ben private", True)])
+            path = mine[0]["path"] + "/IMG 1.jpg"
+            self.assertEqual(user.get("/photos/thumb?p=" + path).status_code, 200)
+            # Kate (an admin) doesn't see Ben's private album at all
+            self.assertEqual(admin.get("/api/photos").get_json()["albums"], [])
+            self.assertEqual(admin.get("/api/photos/folder?path=" + mine[0]["path"]).status_code, 404)
+            self.assertEqual(admin.get("/photos/view?p=" + path).status_code, 404)
+            self.assertEqual(self.post(admin, "/api/photos/delete", {"path": path}).status_code, 400)
+            # guest passes: no photos at all
+            self.assertEqual(guest.get("/api/photos").status_code, 403)
+            self.assertEqual(guest.get("/photos/thumb?p=" + path).status_code, 403)
+            # shared with the family: Kate sees it
+            self.assertEqual(self.post(user, f"/api/photos/albums/{aid}/share", {"shared": True}).status_code, 200)
+            self.assertEqual(admin.get("/photos/view?p=" + path).status_code, 200)
+        finally:
+            self.engine.photos = before
 
     # ---------------------------------------------------------------- print
     def test_a_family_member_prints_an_uploaded_file(self):

@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#001525">
+  <title>Photos - Sentinel</title>
+  <style>
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; }
+    a { color: #00ffff; }
+    header { position: sticky; top: 0; z-index: 10; background: #1a1a1a; border-bottom: 1px solid #033; }
+    .bar { display: flex; align-items: center; gap: 12px; padding: 0 1rem; height: 48px; max-width: 1100px; margin: 0 auto; }
+    .bar a { text-decoration: none; font-size: 0.9rem; }
+    h1 { font-size: 1.05rem; margin: 0; flex: 1; color: #00ffff; }
+    h2 { font-size: 0.85rem; color: #6f97a5; font-weight: 600; margin: 20px 0 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+    main { max-width: 1100px; margin: 0 auto; padding: 12px 16px 60px; }
+    button, input { font: inherit; }
+    button { cursor: pointer; border-radius: 10px; border: 1px solid #1d3a44; background: #0c151c; color: #cfe; padding: 8px 14px; min-height: 42px; }
+    button.primary { background: #00ffff; border-color: #00ffff; color: #001; font-weight: 700; }
+    button.danger { border-color: #7a2b2b; color: #ff9c9c; }
+    button.small { min-height: 34px; padding: 5px 10px; font-size: 0.85rem; }
+    a.btn { display: inline-flex; align-items: center; min-height: 34px; padding: 5px 10px; font-size: 0.85rem; border-radius: 10px;
+            border: 1px solid #1d3a44; background: #0c151c; color: #cfe; text-decoration: none; }
+    button:disabled { opacity: 0.45; cursor: default; }
+    button:focus-visible, a:focus-visible, .card:focus-visible, .tile:focus-visible { outline: 2px solid #00a8a8; outline-offset: 2px; }
+    .note { background: #0c151c; border: 1px solid #16303a; border-radius: 12px; padding: 12px 14px; margin: 10px 0; color: #9fb8c2; line-height: 1.45; }
+    .crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 12px; font-size: 0.9rem; }
+    .crumbs a { text-decoration: none; }
+    .crumbs span { color: #4d6b76; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+    .card { display: block; text-decoration: none; color: inherit; background: #0c151c; border: 1px solid #16303a; border-radius: 12px; overflow: hidden; cursor: pointer; }
+    .card .cover { aspect-ratio: 4 / 3; background: #08161c center / cover no-repeat; display: flex; align-items: center; justify-content: center; font-size: 2.2rem; color: #2a4752; }
+    .card .lbl { padding: 8px 10px; }
+    .card .lbl b { display: block; color: #fff; font-size: 0.92rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .card .lbl small { color: #6f97a5; font-size: 0.78rem; }
+    .badge { font-size: 0.72rem; border-radius: 999px; padding: 2px 8px; margin-left: 4px; white-space: nowrap; }
+    .badge.private { background: #2a2108; color: #ffd166; }
+    .badge.shared { background: #06262e; color: #7fe7e7; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 4px; margin-top: 14px; }
+    .tile { position: relative; aspect-ratio: 1; background: #0b1418; border: 0; padding: 0; border-radius: 4px; overflow: hidden; cursor: pointer; min-height: 0; }
+    .tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .tile .vid { position: absolute; right: 5px; bottom: 4px; font-size: 0.8rem; color: #fff; text-shadow: 0 0 4px #000; }
+    .tile .none { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 1.6rem; color: #2a4752; }
+    .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 6px; }
+    .tools .count { color: #6f97a5; font-size: 0.85rem; margin-right: auto; }
+    .msg { min-height: 1.3em; margin: 6px 0; color: #ffb3b3; }
+    .msg.ok { color: #7ef0b0; }
+    progress { width: 100%; height: 8px; accent-color: #00d0d0; }
+    .more { width: 100%; margin-top: 12px; }
+    /* the viewer */
+    #viewer { position: fixed; inset: 0; z-index: 50; background: #000; display: flex; flex-direction: column; }
+    #v-stage { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; touch-action: pan-y; }
+    #v-stage img, #v-stage video { max-width: 100%; max-height: 100%; object-fit: contain; }
+    #v-stage .cant { color: #9fb8c2; text-align: center; padding: 20px; line-height: 1.5; }
+    .v-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #0a0a0a; }
+    .v-bar .name { flex: 1; min-width: 0; font-size: 0.85rem; color: #9fb8c2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .v-nav { position: absolute; top: 50%; transform: translateY(-50%); background: #0008; border: 0; font-size: 1.6rem; width: 48px; height: 64px; }
+    #v-prev { left: 6px; } #v-next { right: 6px; }
+    /* new album */
+    dialog { background: #0c151c; color: #cfe; border: 1px solid #16303a; border-radius: 14px; padding: 18px; width: min(420px, 92vw); }
+    dialog::backdrop { background: #000a; }
+    dialog input[type="text"] { width: 100%; background: #05090c; color: #fff; border: 1px solid #1d3a44; border-radius: 10px; padding: 10px 12px; margin: 6px 0 12px; }
+    .who { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+    .who label { border: 1px solid #1d3a44; border-radius: 12px; padding: 10px; cursor: pointer; }
+    .who input { position: absolute; opacity: 0; }
+    .who b { display: block; color: #fff; } .who small { color: #6f97a5; }
+    .who input:checked + label { border-color: #00a8a8; background: #062f3a; }
+    .who input:focus-visible + label { outline: 2px solid #00a8a8; }
+    .dlg-acts { display: flex; gap: 8px; justify-content: flex-end; }
+  </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
+</head>
+<body data-role="{{ role }}">
+  <header>
+    <div class="bar">
+      <a href="{{ url_for('index') }}">← Home</a>
+      <h1>Photos</h1>
+      <button type="button" class="small" id="new-album" onclick="openNewAlbum()">＋ Album</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="notice" class="note" hidden></div>
+    <div id="home">
+      <div id="shared-box">
+        <h2>Shared folders</h2>
+        <div class="cards" id="folders"></div>
+      </div>
+      <h2>Albums</h2>
+      <div class="cards" id="albums"></div>
+      <p class="note" id="no-albums" hidden>No albums yet. Tap <b>＋ Album</b> to make one for your own photos: just for you, or shared with the family.</p>
+      <div id="admin-tools" hidden style="margin-top:18px">
+        <button type="button" class="small" onclick="rescan()">Look through the drive again</button>
+        <span class="msg" id="rescan-msg"></span>
+        <p class="note">Which drive folders everyone sees is chosen under <a href="/settings#photos">Settings → Photos</a>.</p>
+      </div>
+    </div>
+
+    <div id="folder" hidden>
+      <div class="crumbs" id="crumbs"></div>
+      <div class="tools" id="tools"></div>
+      <div id="upload-box" hidden><progress id="up-prog" max="100" value="0"></progress></div>
+      <div class="msg" id="msg" role="status"></div>
+      <div class="cards" id="subfolders"></div>
+      <div class="grid" id="grid"></div>
+      <button type="button" class="more" id="more" hidden onclick="loadMore()">Show more</button>
+    </div>
+  </main>
+
+  <div id="viewer" hidden role="dialog" aria-label="Photo">
+    <div id="v-stage"></div>
+    <button type="button" class="v-nav" id="v-prev" aria-label="Previous" onclick="step(-1)">‹</button>
+    <button type="button" class="v-nav" id="v-next" aria-label="Next" onclick="step(1)">›</button>
+    <div class="v-bar">
+      <span class="name" id="v-name"></span>
+      <a id="v-download" class="btn" href="#" download>Download</a>
+      <button type="button" class="small danger" id="v-delete" hidden onclick="deleteShown()">Delete</button>
+      <button type="button" class="small" onclick="closeViewer()">Close</button>
+    </div>
+  </div>
+
+  <dialog id="album-dlg">
+    <b>New album</b>
+    <input type="text" id="album-name" maxlength="60" placeholder="e.g. Christmas 2026" aria-label="Album name">
+    <div class="who" role="radiogroup" aria-label="Who can see it">
+      <input type="radio" name="who" id="who-me" value="private" checked><label for="who-me"><b>🔒 Only me</b><small>Nobody else sees it</small></label>
+      <input type="radio" name="who" id="who-fam" value="shared"><label for="who-fam"><b>👪 The family</b><small>Everyone with a login</small></label>
+    </div>
+    <div class="msg" id="album-msg"></div>
+    <div class="dlg-acts"><button type="button" onclick="document.getElementById('album-dlg').close()">Cancel</button>
+      <button type="button" class="primary" onclick="createAlbum()">Make it</button></div>
+  </dialog>
+
+  <script>
+    var current = null, items = [], shown = -1, touchX = null;
+    function $(id) { return document.getElementById(id); }
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+      });
+    }
+    function q(p) { return encodeURIComponent(p); }
+    function plural(n, one, many) { return n.toLocaleString() + " " + (n === 1 ? one : many); }
+    function msg(text, ok) { var m = $("msg"); m.textContent = text || ""; m.className = "msg" + (ok ? " ok" : ""); }
+    async function getJson(url) {
+      var r = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+      if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
+      var d = await r.json().catch(function () { return {}; });
+      if (!r.ok) throw new Error(d.error || "That didn't work.");
+      return d;
+    }
+    async function post(url, body) {
+      var r = await fetch(url, { method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" }, body: JSON.stringify(body || {}) });
+      if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
+      var d = await r.json().catch(function () { return {}; });
+      return { ok: r.ok && d.ok, text: d.ok ? d.message : (d.error || "That didn't work.") };
+    }
+    function card(o, badge) {
+      var a = document.createElement("a");
+      a.className = "card";
+      a.href = "#/" + q(o.path);
+      a.innerHTML = '<div class="cover">📁</div><div class="lbl"><b>' + esc(o.name) + "</b><small>" +
+        plural(o.count || 0, "item", "items") + (badge || "") + "</small></div>";
+      if (o.cover) {
+        var img = new Image();
+        img.onload = function () { var c = a.querySelector(".cover"); c.textContent = ""; c.style.backgroundImage = "url('" + img.src + "')"; };
+        img.src = "/photos/thumb?p=" + q(o.cover);
+      }
+      return a;
+    }
+
+    // ---------------- the first screen: shared folders and albums
+    async function loadHome() {
+      $("home").hidden = false; $("folder").hidden = true; current = null;
+      var d;
+      try { d = await getJson("/api/photos"); } catch (e) { return note(e.message); }
+      note(!d.drive ? "The backup drive isn't plugged in, so the photos can't be shown right now." :
+           d.scanning && !d.indexed ? "Looking through the drive for the first time. This takes a few minutes; the folders fill in when it's done." :
+           d.scanning ? "Looking through the drive for new photos…" : "");
+      if (d.scanning) setTimeout(function () { if (!current) loadHome(); }, 15000);
+      $("shared-box").hidden = !d.folders.length;
+      var f = $("folders"); f.innerHTML = "";
+      d.folders.forEach(function (o) { f.appendChild(card(o)); });
+      var a = $("albums"); a.innerHTML = "";
+      d.albums.forEach(function (o) {
+        a.appendChild(card(o, ' · ' + esc(o.owner) + '<span class="badge ' + (o.shared ? 'shared">👪 Family' : 'private">🔒 Only me') + "</span>"));
+      });
+      $("no-albums").hidden = d.albums.length > 0;
+      $("admin-tools").hidden = !d.admin;
+      $("new-album").disabled = !d.drive;
+    }
+    function note(text) { var n = $("notice"); n.textContent = text || ""; n.hidden = !text; }
+
+    // ---------------- a folder or album
+    async function loadFolder(path, offset) {
+      $("home").hidden = true; $("folder").hidden = false;
+      if (!offset) { msg(""); $("grid").innerHTML = ""; items = []; }
+      var d;
+      try { d = await getJson("/api/photos/folder?path=" + q(path) + "&offset=" + (offset || 0)); }
+      catch (e) { note(e.message); $("folder").hidden = true; $("home").hidden = false; return; }
+      note("");
+      current = d;
+      if (!offset) {
+        crumbs(d);
+        tools(d);
+        var s = $("subfolders"); s.innerHTML = "";
+        d.folders.forEach(function (o) { s.appendChild(card(o)); });
+      }
+      d.items.forEach(addTile);
+      $("more").hidden = items.length >= d.count;
+      $("more").textContent = "Show more (" + (d.count - items.length).toLocaleString() + " left)";
+    }
+    function loadMore() { if (current) loadFolder(current.path, items.length); }
+    function crumbs(d) {
+      var c = $("crumbs"), parts = d.path.split("/"), html = '<a href="#">Photos</a>';
+      if (d.album) html += " <span>›</span> " + esc(d.album.name);
+      else parts.forEach(function (p, i) {
+        var path = parts.slice(0, i + 1).join("/");
+        html += " <span>›</span> " + (i === parts.length - 1 ? esc(p) : '<a href="#/' + q(path) + '">' + esc(p) + "</a>");
+      });
+      c.innerHTML = html;
+    }
+    function tools(d) {
+      var t = $("tools"), al = d.album;
+      t.innerHTML = '<span class="count">' + plural(d.count, "photo or video", "photos and videos") +
+        (al ? ' · ' + esc(al.owner) + '<span class="badge ' + (al.shared ? 'shared">👪 Family' : 'private">🔒 Only me') + "</span>" : "") + "</span>";
+      if (!al || !al.mine) return;
+      var add = document.createElement("label");
+      add.innerHTML = '<span class="primary" style="display:inline-flex;align-items:center;min-height:42px;padding:8px 14px;border-radius:10px;background:#00ffff;color:#001;font-weight:700;cursor:pointer">＋ Add photos</span>';
+      var input = document.createElement("input");
+      input.type = "file"; input.multiple = true; input.accept = "image/*,video/*"; input.hidden = true;
+      input.onchange = function () { uploadAll(al.id, Array.prototype.slice.call(input.files)); input.value = ""; };
+      add.appendChild(input);
+      t.appendChild(add);
+      var share = document.createElement("button");
+      share.type = "button"; share.className = "small";
+      share.textContent = al.shared ? "Make it private" : "Share with the family";
+      share.onclick = async function () {
+        var r = await post("/api/photos/albums/" + al.id + "/share", { shared: !al.shared });
+        msg(r.text, r.ok); if (r.ok) loadFolder(d.path);
+      };
+      t.appendChild(share);
+      var del = document.createElement("button");
+      del.type = "button"; del.className = "small danger"; del.textContent = "Delete album";
+      del.onclick = async function () {
+        if (!confirm("Delete the album “" + al.name + "” and its " + plural(d.count, "photo", "photos") +
+                     " from the backup drive?\n\n(The nightly copy on the old PC keeps them.)")) return;
+        var r = await post("/api/photos/albums/" + al.id + "/delete");
+        if (r.ok) location.hash = ""; else msg(r.text);
+      };
+      t.appendChild(del);
+    }
+    function addTile(it) {
+      var i = items.length;
+      items.push(it);
+      var b = document.createElement("button");
+      b.type = "button"; b.className = "tile"; b.setAttribute("aria-label", it.name);
+      var img = document.createElement("img");
+      img.loading = "lazy"; img.alt = ""; img.src = "/photos/thumb?p=" + q(it.path);
+      img.onerror = function () { img.remove(); var n = document.createElement("span"); n.className = "none"; n.textContent = it.kind === "video" ? "🎞️" : "🖼️"; b.appendChild(n); };
+      b.appendChild(img);
+      if (it.kind === "video") { var v = document.createElement("span"); v.className = "vid"; v.textContent = "▶"; b.appendChild(v); }
+      b.onclick = function () { openViewer(i); };
+      $("grid").appendChild(b);
+    }
+
+    // ---------------- uploads (one at a time: the drive is one USB disk, and a phone's connection is slow)
+    async function uploadAll(albumId, files) {
+      if (!files.length) return;
+      var box = $("upload-box"), prog = $("up-prog"), done = 0, failed = [];
+      box.hidden = false;
+      for (var i = 0; i < files.length; i++) {
+        msg("Adding " + (i + 1) + " of " + files.length + "…", true);
+        var r = await sendOne(albumId, files[i], function (p) { prog.value = Math.round((i + p) / files.length * 100); });
+        if (r.ok) done++; else failed.push(files[i].name + ": " + r.text);
+      }
+      box.hidden = true;
+      msg(failed.length ? done + " added. Not added: " + failed.join("; ") : "✓ " + plural(done, "photo", "photos") + " added.", !failed.length);
+      if (current) loadFolder(current.path);
+    }
+    function sendOne(albumId, file, onProgress) {
+      return new Promise(function (done) {
+        var x = new XMLHttpRequest();
+        x.open("POST", "/api/photos/albums/" + albumId + "/upload");
+        x.setRequestHeader("X-Sentinel-Request", "1");
+        x.setRequestHeader("X-File-Name", encodeURIComponent(file.name));
+        x.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+        x.upload.onprogress = function (e) { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+        x.onload = function () {
+          if (x.status === 401) { location.href = "/login"; return; }
+          var d = {}; try { d = JSON.parse(x.responseText); } catch (e) {}
+          if (x.status === 413) d.error = "too big";
+          done({ ok: !!d.ok, text: d.ok ? d.message : (d.error || "didn't work") });
+        };
+        x.onerror = function () { done({ ok: false, text: "couldn't reach Sentinel" }); };
+        x.send(file);
+      });
+    }
+
+    // ---------------- the viewer
+    function openViewer(i) { shown = i; $("viewer").hidden = false; document.body.style.overflow = "hidden"; show(); }
+    function closeViewer() {
+      $("viewer").hidden = true; document.body.style.overflow = "";
+      var v = $("v-stage").querySelector("video"); if (v) v.pause();
+      $("v-stage").innerHTML = "";
+    }
+    function show() {
+      var it = items[shown], stage = $("v-stage");
+      if (!it) return closeViewer();
+      stage.innerHTML = "";
+      if (it.kind === "video" && it.plays) {
+        var v = document.createElement("video");
+        v.controls = true; v.playsInline = true; v.preload = "metadata"; v.src = "/photos/view?p=" + q(it.path);
+        stage.appendChild(v);
+      } else if (it.kind === "video") {
+        stage.innerHTML = '<div class="cant">🎞️<br>This older video type doesn\'t play in a browser.<br>Use <b>Download</b> to watch it on this device.</div>';
+      } else {
+        var img = new Image();
+        img.alt = it.name; img.src = "/photos/view?p=" + q(it.path);
+        stage.appendChild(img);
+        var next = items[shown + 1];  // (the next one ready for a swipe)
+        if (next && next.kind === "photo") new Image().src = "/photos/view?p=" + q(next.path);
+      }
+      $("v-name").textContent = it.name + "  ·  " + (shown + 1) + " of " + current.count.toLocaleString();
+      $("v-download").href = "/photos/original?p=" + q(it.path);
+      $("v-prev").hidden = shown <= 0;
+      $("v-next").hidden = shown >= items.length - 1;
+      $("v-delete").hidden = !(current.album && current.album.mine);
+    }
+    async function step(d) {
+      var next = shown + d;
+      if (next >= items.length && items.length < current.count) { await loadFolder(current.path, items.length); }
+      if (next < 0 || next >= items.length) return;
+      shown = next; show();
+    }
+    async function deleteShown() {
+      var it = items[shown];
+      if (!it || !confirm("Delete “" + it.name + "” from this album?\n\n(The nightly copy on the old PC keeps it.)")) return;
+      var r = await post("/api/photos/delete", { path: it.path });
+      if (!r.ok) { alert(r.text); return; }
+      closeViewer(); loadFolder(current.path);
+    }
+    document.addEventListener("keydown", function (e) {
+      if ($("viewer").hidden) return;
+      if (e.key === "ArrowRight") step(1); else if (e.key === "ArrowLeft") step(-1); else if (e.key === "Escape") closeViewer();
+    });
+    $("v-stage").addEventListener("touchstart", function (e) { touchX = e.touches[0].clientX; }, { passive: true });
+    $("v-stage").addEventListener("touchend", function (e) {
+      if (touchX == null) return;
+      var dx = e.changedTouches[0].clientX - touchX; touchX = null;
+      if (Math.abs(dx) > 50) step(dx < 0 ? 1 : -1);
+    });
+
+    // ---------------- albums
+    function openNewAlbum() { $("album-name").value = ""; $("album-msg").textContent = ""; $("album-dlg").showModal(); $("album-name").focus(); }
+    async function createAlbum() {
+      var name = $("album-name").value.trim();
+      if (!name) { $("album-msg").textContent = "Give it a name."; return; }
+      var r = await post("/api/photos/albums", { name: name, shared: document.querySelector('input[name="who"]:checked').value === "shared" });
+      if (!r.ok) { $("album-msg").textContent = r.text; return; }
+      $("album-dlg").close();
+      var d = await getJson("/api/photos");
+      var a = d.albums.filter(function (x) { return String(x.id) === r.text; })[0];
+      location.hash = a ? "#/" + q(a.path) : "";
+      if (!a) loadHome();
+    }
+    async function rescan() {
+      var r = await post("/api/photos/rescan");
+      $("rescan-msg").textContent = r.text; $("rescan-msg").className = "msg" + (r.ok ? " ok" : "");
+      if (r.ok) setTimeout(loadHome, 3000);
+    }
+
+    // ---------------- where we are (the Back button works)
+    function route() {
+      closeViewer();
+      var h = location.hash;
+      if (h.indexOf("#/") === 0 && h.length > 2) loadFolder(decodeURIComponent(h.slice(2)), 0);
+      else loadHome();
+    }
+    window.addEventListener("hashchange", route);
+    route();
+  </script>
+</body>
+</html>

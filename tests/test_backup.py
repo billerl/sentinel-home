@@ -257,9 +257,21 @@ class TestBackup(unittest.TestCase):
         self.assertEqual(result["photos_ok"], self.now)
         rsync = next(c for c in self.disks.calls if c[0] == "rsync" and "oldpc:PhotoBackup/" in c)
         self.assertNotIn("--delete", rsync)  # (a photo deleted from the drive by mistake stays on the other computer)
+        self.assertIn("--ignore-existing", rsync)  # (nor is one there ever replaced: a damaged one can't spoil it)
         self.assertIn("-rt", rsync)
         self.assertEqual(rsync[-2], os.path.join(self.stick, "Backup of Photos") + "/")
         self.assertEqual(self.backup.status()["photos_ok"], self.now)
+
+    def test_everyones_albums_go_too(self):
+        self._use_stick()
+        _write(os.path.join(self.stick, "Backup of Photos", "a.jpg"), b"photo")
+        _write(os.path.join(self.stick, "Family Photos", "Ben", "Trip", "b.jpg"), b"photo")
+        self.settings.update(backup_photos_folder="Backup of Photos", backup_photos_remote="oldpc")
+        self.assertEqual(self.backup.run()["problems"], [])
+        albums = next(c for c in self.disks.calls if c[0] == "rsync" and "oldpc:FamilyPhotos/" in c)
+        self.assertEqual(albums[-2], os.path.join(self.stick, "Family Photos") + "/")
+        self.assertIn("--ignore-existing", albums)
+        self.assertNotIn("--delete", albums)
 
     def test_the_photo_copy_reports_what_went_wrong(self):
         self._use_stick()

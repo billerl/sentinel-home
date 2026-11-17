@@ -39,6 +39,8 @@ sentinel-home/                         # repository root
     │   │                              #   original, swaps/twists, what-can-I-make, cooking mode + Jarvis (recipes.db)
     │   ├── notes.py                   # Notes and lists, private to their writer or shared with the family (notes.db)
     │   ├── voice_log.py               # What was asked of Jarvis and where (Inside, Phone, a camera): the timeline's Voice row
+    │   ├── photos.py                  # The Photos page: backup-drive folders an admin shares + everyone's albums (private
+    │   │                              #   or family) in "Family Photos" on the drive; index (photos.db), thumbnails cache
     │   ├── printing.py                # The Print page: a PDF/photo to the computer's default printer (CUPS lp), the
     │   │                              #   printer's own paper/ink/state (ipptool) in plain words, jobs sent, stop one
     │   ├── home_layout.py             # Each login's home page tile order (press-and-hold to move; home_layouts.json)
@@ -101,7 +103,7 @@ sentinel-home/                         # repository root
     │   ├── map_tiles.py               # Location map pictures fetched by Sentinel and kept a week (the TV browser was turned away)
     │   ├── routes/                    # Pages + API, one module per area, each with register(app, ctx):
     │   │                              #   signin, live, cameras, recordings, family, vehicles, switches (+ TV
-    │   │                              #   remote), spotify, sensors, house, routines, settings, mesh, recipes, notes, printing, talk
+    │   │                              #   remote), spotify, sensors, house, routines, settings, mesh, recipes, notes, photos, printing, talk
     │   ├── auth.py                    # Bcrypt login, sessions (saved as hashes in .web_sessions.json),
     │   │                              #   lockout / backoff, QR sign-in pairing for TVs
     │   ├── frame_broker.py            # Latest frame per camera; opaque ids; lazy JPEG encoding
@@ -125,7 +127,7 @@ sentinel-home/                         # repository root
     │                                  #   mesh (Mesh chat: conversations, invite QR codes, radios heard),
     │                                  #   recipes (recipe box, one recipe, cooking mode),
     │                                  #   remotes (learned IR/RF buttons: teach, press, rename), notes (private notes, shared lists),
-    │                                  #   print (upload a PDF or photo to print),
+    │                                  #   print (upload a PDF or photo to print), photos (folders, albums, viewer),
     │                                  #   lost (Pet tracker: live collar map, recall beep, search on/off),
     │                                  #   where (full-screen "where is everyone" map for a TV, pictures as pins)
     ├── notifications/

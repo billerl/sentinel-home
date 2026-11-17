@@ -93,6 +93,7 @@
       <a href="#detection" data-min="admin">Detection</a>
       <a href="#telegram" data-min="admin">Telegram</a>
       <a href="#recording" data-min="admin">Recording</a>
+      <a href="#photos" data-min="admin">Photos</a>
       <a href="#backup" data-min="owner">Backup</a>
       <a href="#audio" data-min="admin">Audio</a>
       <a href="#spotify" data-min="admin">Spotify</a>
@@ -268,6 +269,18 @@
         </div>
         <p class="hint">Processing rate changes apply after a camera reconnects.</p>
         <div class="save-row"><button class="primary" onclick="saveSection('recording')">Save</button><span class="msg" id="msg-recording"></span></div>
+      </div>
+    </section>
+
+    <!-- ======================= PHOTOS ======================= -->
+    <section id="photos" data-min="admin">
+      <h2>Photos</h2>
+      <div class="card">
+        <div class="field"><span>Folders on the backup drive everyone can see on the <a href="/photos">Photos</a> page</span>
+          <div id="photo-folder-boxes" class="row" style="gap:14px"></div>
+          <input type="hidden" data-key="photos_shared_folders" id="photos-shared"></div>
+        <p class="hint">Everyone with their own login sees these (guest passes don't). They're shown as they are and can't be changed or deleted from the Photos page, so the original backups stay safe. People's own albums are separate: each person makes theirs private or shared with the family.</p>
+        <div class="save-row"><button class="primary" onclick="saveSection('photos')">Save</button><span class="msg" id="msg-photos"></span></div>
       </div>
     </section>
 
@@ -492,6 +505,15 @@
           <li><b>Timeline privacy</b> — a person's timeline is their own. Other users can't open it. The owner and
             admins see only the last 48 hours of someone else's (enough to help find someone), nothing further back.
             Pets' history is open to everyone. Where people are <i>right now</i> (the home page, “Where is Liz?”) is unchanged.</li>
+          <li><b>Photos</b> — the <a href="/photos">Photos</a> page (🖼️ on the home page) shows the family's photos from the
+            backup drive plugged into this computer. <b>Shared folders</b> are backups on that drive (an admin picks which
+            under <a href="#photos">Settings → Photos</a>); everyone with a login can look, but nothing in them can be changed
+            or deleted from here. <b>Albums</b> are your own: tap <b>＋ Album</b>, name it, and choose <b>🔒 Only me</b> or
+            <b>👪 The family</b> (change it any time). Open it and tap <b>＋ Add photos</b> to upload from your phone. Tap a
+            photo to see it big; swipe (or the arrows) for the next; <b>Download</b> saves the original. Newer phone videos
+            play in the page; old AVI/3GP ones download. Every night the backup drive's photos and everyone's albums are
+            copied to the old Ubuntu PC, adding new ones only: a photo deleted here (or damaged on the drive) is still safe
+            there. Private albums stay private to their owner, whatever their role. Guest passes can't see photos.</li>
           <li><b>Print</b> — the <a href="/print">Print</a> page prints a PDF or photo from your phone: tap <b>Choose a PDF or
             photo</b> (or take a picture), pick how many copies, colour or black &amp; white, and the quality (<b>💧 Draft</b> uses the least ink: good for a
             form or a list; <b>✨ Best</b> is for photos), and which pages for a PDF. The page remembers your last choices. Then <b>Print</b>. <b>Black &amp; white</b> uses the black ink only: each page is sent to the printer as a grey picture with the printer's own black-ink-only mode (a long PDF is sent a page at a time). A photo is fitted to the page. The top of the page says whether the printer is ready, and if
@@ -615,6 +637,7 @@
                   "night_bug_start_hour", "night_bug_end_hour", "auto_reconnect_enabled",
                   "reconnect_interval_seconds", "feed_fps", "web.max_fps", "web.show_zones"],
       backup: ["backup_enabled", "backup_time", "backup_video_days", "backup_remote"],
+      photos: ["photos_shared_folders"],
       audio: ["volume", "speech_speed", "voice_id", "voice_jarvis_id", "audio_output", "voice_device", "audio_device", "music_device", "voice_enabled", "voice_wake_threshold", "voice_cameras", "voice_follow_up", "voice_quiet_commands"],
       access: ["remote_web_url", "remote_rdp_user"],
       spotify: ["spotify_client_id", "spotify_device", "spotify_fallback_device", "spotify_speaker_name"],
@@ -664,6 +687,19 @@
       });
       $("token-state").textContent = settings.secrets.telegram_bot_token ? "(set)" : "(not set)";
       if (ROLE === "owner") $("web-user").textContent = settings.web_username || "?";
+      var pfOn = (v.photos_shared_folders || "").split(",").filter(Boolean), pfBox = $("photo-folder-boxes");
+      var pfAll = (settings.photo_folder_choices || []).concat(pfOn.filter(function(n) { return (settings.photo_folder_choices || []).indexOf(n) < 0; }));
+      pfBox.innerHTML = pfAll.length ? "" : '<span class="hint">The backup drive isn\'t plugged in, or has no folders of its own yet.</span>';
+      pfAll.forEach(function(n) {
+        var l = document.createElement("label"), box = document.createElement("input");
+        box.type = "checkbox"; box.value = n; box.checked = pfOn.indexOf(n) >= 0;
+        box.onchange = function() {
+          $("photos-shared").value = Array.prototype.filter.call(pfBox.querySelectorAll("input"), function(b) { return b.checked; })
+            .map(function(b) { return b.value; }).join(",");
+        };
+        l.appendChild(box); l.appendChild(document.createTextNode(" " + n)); pfBox.appendChild(l);
+      });
+      $("photos-shared").value = pfOn.join(",");
       var vcOn = (v.voice_cameras || "").split(",").filter(Boolean), vcBox = $("voice-camera-boxes");
       vcBox.innerHTML = (settings.listen_cameras || []).length ? "" : '<span class="hint">No camera with a known admin login yet.</span>';
       (settings.listen_cameras || []).forEach(function(c) {
@@ -784,7 +820,7 @@
       }
       if (ours) lines.push("💾 Backup drive: " + (ours.label || ours.path) + ", " + gb(ours.free) + " free of " + gb(ours.size) + ".");
       if (b.remote) lines.push("🖥️ Copy to " + b.remote + ": " + (b.remote_ok ? "last made " + when(b.remote_ok) : "not made yet") + ".");
-      if (b.photos && b.photos_remote) lines.push("🖼️ “" + b.photos + "” copied to " + b.photos_remote + ": " + (b.photos_ok ? "last made " + when(b.photos_ok) : "not made yet") + " (new photos added each night, nothing deleted).");
+      if (b.photos && b.photos_remote) lines.push("🖼️ “" + b.photos + "” copied to " + b.photos_remote + ": " + (b.photos_ok ? "last made " + when(b.photos_ok) : "not made yet") + " (new photos added each night; nothing there is ever replaced or deleted).");
       $("bk-state").innerHTML = lines.map(esc).join("<br>");
       var html = "";
       b.drives.forEach(function(d) {

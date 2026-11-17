@@ -167,6 +167,9 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "backup_time": _hhmm,
     "backup_video_days": _num(0, 60, int),
     "backup_remote": _backup_remote,
+    # the backup drive's top-level folders everyone with a login sees on the Photos page (admins choose)
+    "photos_shared_folders": lambda v: ",".join(dict.fromkeys(
+        n.strip() for n in str(v or "").split(",") if n.strip() and "/" not in n and n.strip() not in ("..", ".")))[:1000],
     "weather_alerts_speak": _bool,
     "household_ask_per_day": _num(0, 20, int),
     "detector_model": _detector_model,

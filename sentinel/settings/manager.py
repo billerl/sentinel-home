@@ -140,6 +140,7 @@ class SettingsManager:
             "backup_extra": ["~/.ssh", "CLAUDE.local.md"],
             "backup_photos_folder": "",  # a folder on the backup drive copied nightly to backup_photos_remote
             "backup_photos_remote": "",  # an SSH host (e.g. "oldpc" in ~/.ssh/config)
+            "photos_shared_folders": "",  # the Photos page: backup-drive folders everyone sees (comma-separated)
             "package_cameras": "",
             "weather_alerts_enabled": True,
             "weather_alerts_speak": True,

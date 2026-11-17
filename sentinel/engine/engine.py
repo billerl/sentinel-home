@@ -314,6 +314,10 @@ class Engine:
 
         self.backup = Backup(self.settings, VIDEO_DIR, os.getcwd(),  # nightly, to a USB drive (Settings → Backup)
                              warn=lambda text: [self.telegram.reply_to_chat(c, text) for c in self.telegram.chat_ids[:1]])
+        from sentinel.engine.photos import Photos
+
+        self.photos = Photos(VIDEO_DIR, self.settings,  # the Photos page: the family's photos on the backup drive
+                             drive=lambda: next((d["mount"] for d in self.backup.drives() if d["ours"]), None))
         self.spotify = SpotifyService(self.settings, lambda: self.settings_manager.save_settings(force=True))
         self.spotify.open_on_tv = lambda words: self.switches.open_app(words, "spotify", "spotify")
         from sentinel.audio.spotify_player import SpotifyPlayer  # (sentinel.audio loads the speech engines)
@@ -523,6 +527,7 @@ class Engine:
         self.telegram.start_listening()  # (only now: every filter and handler above is in place)
         self._start_voice()
         self._start_camera_ears()
+        self.photos.rescan_if_old()  # (in the background: a few minutes the first time)
         if self.settings.get("pc_volume") is not None:  # ALSA forgets it at reboot without `alsactl store` (sudo)
             from sentinel.audio.alert_system import set_pc_volume
 
@@ -1895,6 +1900,7 @@ class Engine:
             "detector_models": admin.available_detector_models(),
             "sound_cards": __import__("sentinel.audio.devices", fromlist=["sound_cards"]).sound_cards(),
             # cameras that can listen for "Hey Jarvis": their admin login is known (to turn their sound and light on)
+            "photo_folder_choices": self.photos.folder_choices(),
             "listen_cameras": [{"ip": p.host, "name": p.display_name} for p in self.cameras.values()
                               if self.camera_lights.can_signal(p.host)],
         }
@@ -1949,6 +1955,8 @@ class Engine:
         if {"voice_enabled", "volume", "voice_device", "audio_device", "music_device"} & cleaned.keys() and self._started:
             self._stop_voice()
             self._start_voice()
+        if "photos_shared_folders" in cleaned and self._started:
+            self.photos.rescan()  # (a newly shared folder shows once it's been looked through)
         if "voice_cameras" in cleaned and self._started:
             self._stop_camera_ears()
             self._start_camera_ears()

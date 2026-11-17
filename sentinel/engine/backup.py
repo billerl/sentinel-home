@@ -17,8 +17,9 @@ in <date> folders hard-linked to the night before, keeping the same number of ni
 
 The family's photos (2026-11-17): a folder of their own on the backup drive (backup_photos_folder, e.g. "Backup of
 Photos", outside "Sentinel Backup") was their only copy. Each night it's copied to another computer
-(backup_photos_remote, an SSH host; into PHOTOS_DEST there), adding new and changed files and never deleting:
-a photo deleted from the drive by mistake is still on the other computer. The drive is only read.
+(backup_photos_remote, an SSH host; into PHOTOS_DEST there), adding new files only: nothing there is ever
+deleted or replaced, so a photo deleted from the drive by mistake, or one the drive damages, is still whole on
+the other computer (the family's choice, 2026-11-17). The drive is only read.
 """
 
 import json
@@ -48,6 +49,8 @@ SKIP_DIR = re.compile(r"^build(?:-.*)?$")  # firmware build output
 REMOTE_HOST = re.compile(r"^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9.-]*$")
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
 PHOTOS_DEST = "PhotoBackup"
+ALBUMS_DIR = "Family Photos"  # the Photos page's albums (sentinel/engine/photos.py ALBUMS_DIR)
+ALBUMS_DEST = "FamilyPhotos"
 PHOTOS_TIMEOUT = 6 * 3600  # (the first copy of a few hundred GB; later nights take minutes)
 README = """This drive holds Sentinel's nightly backup.
 
@@ -329,6 +332,9 @@ class Backup:
             else:
                 self.running = f"Copying the photos to {photos_host}"
                 err = self._photos_to_remote(drive["mount"], photos, photos_host)
+                # everyone's albums from the Photos page too (sentinel/engine/photos.py), when there are any
+                if not err and os.path.isdir(os.path.join(drive["mount"], ALBUMS_DIR)):
+                    err = self._photos_to_remote(drive["mount"], ALBUMS_DIR, photos_host, ALBUMS_DEST)
                 if err:
                     problems.append(f"the photos' copy to {photos_host} failed ({err})")
                 else:
@@ -490,8 +496,8 @@ class Backup:
             return str(e)[:120]
         return ""
 
-    def _photos_to_remote(self, mount: str, name: str, host: str) -> str:
-        """The drive's photo folder to <host>:PHOTOS_DEST/, new and changed files only, never deleting; "" when it
+    def _photos_to_remote(self, mount: str, name: str, host: str, dest: str = PHOTOS_DEST) -> str:
+        """The drive's photo folder to <host>:PHOTOS_DEST/: new files only, never deleting or replacing; "" when it
         worked."""
         if not REMOTE_HOST.match(host):
             return "not a valid host name"
@@ -500,9 +506,9 @@ class Backup:
         if not name.strip("/") or ".." in parts or parts[0] == FOLDER or not os.path.isdir(folder):
             return "the photo folder isn't on the drive"
         try:
-            # -rt, not -a: the drive is exFAT (no owners or permissions to copy)
-            out = self.run_cmd(["rsync", "-rt", "--modify-window=2", "-e", " ".join(SSH),
-                                folder.rstrip("/") + "/", f"{host}:{PHOTOS_DEST}/"],
+            # -rt, not -a: the drive is exFAT (no owners or permissions to copy). --ignore-existing: never replace
+            out = self.run_cmd(["rsync", "-rt", "--modify-window=2", "--ignore-existing", "-e", " ".join(SSH),
+                                folder.rstrip("/") + "/", f"{host}:{dest}/"],
                                capture_output=True, text=True, timeout=PHOTOS_TIMEOUT)
         except (OSError, subprocess.SubprocessError) as e:
             return str(e)[:120]
