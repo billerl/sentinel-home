@@ -11,7 +11,7 @@ from typing import Dict, List
 from flask import Flask, jsonify, request, send_file
 
 from sentinel.web.context import WebContext
-from sentinel.web.roles import GUEST
+from sentinel.web.roles import GUEST, USER
 
 
 def register(app: Flask, ctx: WebContext) -> None:
@@ -66,6 +66,11 @@ def register(app: Flask, ctx: WebContext) -> None:
             )
 
         now = time.time()
+        # what was asked of Jarvis that day, and where (the Voice row); not for guest passes
+        viewer, voice_log = ctx.viewer(), getattr(ctx.engine, "voice_log", None)
+        voice = [{"s": round(v["ts"] - day_start, 1), "place": v["place"], "said": v["said"], "did": v["did"],
+                  "ok": v["ok"]} for v in voice_log.between(day_start, day_end)] \
+            if voice_log is not None and viewer is not None and viewer.at_least(USER) else []
         return jsonify(
             {
                 "date": date_str,
@@ -86,6 +91,7 @@ def register(app: Flask, ctx: WebContext) -> None:
                     }
                     for c in clips
                 ],
+                "voice": voice,
             }
         )
 

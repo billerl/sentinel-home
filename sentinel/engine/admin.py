@@ -193,8 +193,9 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "voice_quiet_commands": _bool,
     "audio_output": lambda v: _choice(v or "speakers", ("speakers", "remote")),
     "voice_wake_threshold": _num(0.1, 0.95),
-    # a camera whose microphone listens for "Hey Jarvis" too ("" = none; sentinel/audio/camera_ear.py)
-    "voice_camera": lambda v: str(v or "") if re.fullmatch(r"(\d{1,3}(\.\d{1,3}){3})?", str(v or "")) else "",
+    # cameras whose microphones listen for "Hey Jarvis" too: their IPs, comma-separated (sentinel/audio/camera_ear.py)
+    "voice_cameras": lambda v: ",".join(dict.fromkeys(
+        ip for ip in re.split(r"[,\s]+", str(v or "")) if re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", ip)))[:200],
     "voice_gain": _num(1, 20),
     # Settings > Audio: which sound card listens and speaks ("" = the PC's own jacks; see sentinel/audio/devices.py)
     "voice_device": lambda v: str(v or "") if re.fullmatch(r"(plughw:CARD=\w{1,32},DEV=\d)?", str(v or "")) else "",

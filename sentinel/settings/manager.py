@@ -161,7 +161,7 @@ class SettingsManager:
             "voice_quiet_commands": True,  # a light / the music / the volume: a chime when done, not a sentence
             "voice_follow_up": True,  # after an open-ended answer, listen ~30 s for a follow-up without the wake word
             "voice_wake_threshold": 0.5,
-            "voice_camera": "",  # a camera that also listens for "Hey Jarvis" (its IP; "" = none)
+            "voice_cameras": "",  # cameras that also listen for "Hey Jarvis" (IPs, comma-separated; "" = none)
             "voice_gain": 4.0,
             "pc_volume": None,  # the sound card's Master %, set by voice ("turn the PC down"); None = leave it
             "audio_output": "speakers",  # or "remote": the Remote Desktop session, when one is open

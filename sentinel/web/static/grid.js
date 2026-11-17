@@ -611,6 +611,15 @@ function visibleClips() {
   return tl.clips.filter(function(c) { return tlFilter === "all" || clipGroup(c) === tlFilter; });
 }
 
+// What was asked of Jarvis that day, and where (sentinel/engine/voice_log.py): its own pink row
+function visibleVoice() {
+  if (!tl || !tl.voice) return [];
+  return tlFilter === "all" || tlFilter === "voice" ? tl.voice : [];
+}
+function voiceText(v) {
+  return (v.said ? "“" + v.said + "” → " : "") + (v.did || "");
+}
+
 function setFilter(f) {
   tlFilter = f;
   document.querySelectorAll("#tl-legend button").forEach(function(b) { b.classList.toggle("active", b.dataset.filter === f); });
@@ -1305,13 +1314,38 @@ function setTab(tab) {
   }
 }
 
+function voiceRow(v) {
+  var row = document.createElement("div");
+  row.className = "ev voice" + (v.ok ? "" : " failed");
+  var sw = document.createElement("span");
+  sw.className = "sw g-voice";
+  var t = document.createElement("span");
+  t.className = "t";
+  t.textContent = fmtOffset(v.s);
+  var what = document.createElement("span");
+  what.className = "what";
+  var title = document.createElement("b");
+  title.textContent = "🎙️ " + v.place;
+  var detail = document.createElement("span");
+  detail.textContent = voiceText(v);
+  what.appendChild(title);
+  what.appendChild(detail);
+  row.appendChild(sw); row.appendChild(t); row.appendChild(what);
+  return row;
+}
+
 var LIST_PAGE = 50;
 var listShown = LIST_PAGE;
 function renderList() {
   var root = document.getElementById("tl-list");
   root.innerHTML = "";
-  var clips = visibleClips().slice().reverse();
-  clips.slice(0, listShown).forEach(function(clip) {
+  // newest first, voice requests in among the clips by time
+  var clips = visibleClips().map(function(c) { return { s: c.s, clip: c }; })
+    .concat(visibleVoice().map(function(v) { return { s: v.s, voice: v }; }))
+    .sort(function(a, b) { return b.s - a.s; });
+  clips.slice(0, listShown).forEach(function(item) {
+    if (item.voice) { root.appendChild(voiceRow(item.voice)); return; }
+    var clip = item.clip;
     var row = document.createElement("button");
     row.type = "button";
     row.className = "ev" + (playingClip && playingClip.id === clip.id ? " playing" : "");
@@ -1435,10 +1469,11 @@ async function loadTimeline(date) {
 function renderTimeline(scrollToFocus) {
   document.getElementById("tl-date").value = tl.date;
   document.getElementById("tl-next").disabled = !tl.next_date;
-  var n = visibleClips().length;
-  document.getElementById("tl-summary").textContent = n + (n === 1 ? " clip" : " clips");
+  var n = visibleClips().length, nv = visibleVoice().length;
+  document.getElementById("tl-summary").textContent = n + (n === 1 ? " clip" : " clips") +
+    (nv ? " · " + nv + (nv === 1 ? " voice request" : " voice requests") : "");
   document.getElementById("tl-latest").disabled = n === 0;
-  document.getElementById("tl-empty").hidden = n > 0;
+  document.getElementById("tl-empty").hidden = n > 0 || nv > 0;
 
   var day = tl.day_seconds;
   var labels = document.getElementById("tl-labels");
@@ -1473,6 +1508,26 @@ function renderTimeline(scrollToFocus) {
     (frag[clip.cam] = frag[clip.cam] || document.createDocumentFragment()).appendChild(mark);
   });
   Object.keys(frag).forEach(function(k) { trackByCam[k].appendChild(frag[k]); });
+  if (nv) {
+    var vlabel = document.createElement("div");
+    vlabel.className = "tl-label";
+    vlabel.textContent = "🎙️ Voice";
+    vlabel.title = "What was asked of Jarvis, and where";
+    labels.appendChild(vlabel);
+    var vtrack = document.createElement("div");
+    vtrack.className = "tl-track";
+    visibleVoice().forEach(function(v) {
+      var mark = document.createElement("div");
+      mark.className = "tl-mark g-voice" + (v.ok ? "" : " failed");
+      mark.style.left = (v.s / day * 100) + "%";
+      mark.title = fmtOffset(v.s) + " · " + v.place + ": " + voiceText(v);
+      mark.onclick = function() {
+        document.getElementById("tl-summary").textContent = "🎙️ " + fmtOffset(v.s).slice(0, 5) + " " + v.place + ": " + voiceText(v);
+      };
+      vtrack.appendChild(mark);
+    });
+    tracks.appendChild(vtrack);
+  }
   if (scrollToFocus) listShown = LIST_PAGE;
   renderList();
 

@@ -312,7 +312,7 @@
         <p class="hint" style="margin-top:0">Listens only for the wake word; nothing is recorded or saved, and speech is understood on this PC. (The one exception is when you ask for it: “train Jezebel” keeps the short recordings you make of her name; see Help.) Needs the volume above 0. Questions Sentinel can't answer itself go to Claude if “ask Claude” is on under <a href="#telegram">Telegram</a>.</p>
         <div class="row"><div class="field" style="flex: 0 1 280px"><span>Wake word: how sure it must be (0.1–0.95)</span><input type="number" min="0.1" max="0.95" step="0.01" data-key="voice_wake_threshold"></div></div>
         <p class="hint" style="margin-top:0">Higher = fewer false wake-ups from the TV or room talk, but you may have to speak up. Lower = hears you more easily. Real wake-ups usually score 0.9 or more; Settings changes apply at once.</p>
-        <div class="row"><div class="field" style="flex: 0 1 320px"><span>Also listen for “Hey Jarvis” outside, at a camera</span><select data-key="voice_camera" id="voice-camera-select"></select></div></div>
+        <div class="row"><div class="field"><span>Also listen for “Hey Jarvis” outside, at these cameras</span><div id="voice-camera-boxes" class="row" style="gap:14px"></div><input type="hidden" data-key="voice_cameras" id="voice-cameras"></div></div>
         <p class="hint" style="margin-top:0">The camera's microphone is listened to like the one inside: only for “Hey Jarvis”, nothing recorded or kept, and the words aren't even written in the log (only what was done). Out there it can only switch plugs and lights on or off. The camera answers with its white light: on while it listens, <b>one flash</b> = done, <b>two</b> = didn't understand (or not allowed outside). Cameras show up here once their admin login is known.</p>
         <div class="row"><label><input type="checkbox" data-key="voice_quiet_commands"> Quiet commands: for a light, a plug, the TV, the music or the volume, just do it and play a short chime (untick to hear “Okay, turning on the…”)</label></div>
         <p class="hint" style="margin-top:0">Anything that goes wrong is still said out loud, and questions are answered as before. After a command she never listens for a follow-up, so the room or the music can't be taken for one.</p>
@@ -450,10 +450,11 @@
           <li><b>Commands and questions</b> — a plain command (a light, a plug, the TV, pause or skip the music, the volume) is just done, with a short two-note chime instead of a sentence, and she stops listening straight away. A plain question (who's home, the weather, a fact) gets its answer and that's it. An open-ended one (“what do you think about…”, advice, an explanation) gets its answer and she keeps listening about 30 seconds for a follow-up, no wake word needed, and remembers what was just said; say “stop” or stay quiet to end it. If a command can't be done she says why. To hear “Okay, turning on the…” again, untick <b>Quiet commands</b> under Audio.</li>
           <li><b>Looking things up</b> — with <b>Let Jarvis / Jezebel look things up on the web</b> ticked (Settings → Telegram &amp; assistant), spoken questions about news, prices, scores or opening hours are searched for on the web first (“Hey Jarvis, any news about the election today?”). It takes about 20 seconds; he says “Let me think” while he looks.</li>
           <li><b>“Hey Jarvis” outside</b> — a camera with a microphone (chosen under Settings → Audio → “Also listen
-            for Hey Jarvis outside”) listens for the wake word too. Stand near it and say it in one go: “Hey Jarvis, turn on
+            for Hey Jarvis outside”; tick each camera) listens for the wake word too. Stand near it and say it in one go: “Hey Jarvis, turn on
             the patio lights.” The camera's white light comes on while it listens, then <b>flashes once</b> when it's done,
             or <b>twice</b> if it didn't understand. Out there it only switches plugs and lights (not the TVs, cameras,
-            alerts or routines: anyone in the yard could say it). Nothing is recorded: the sound is checked for the wake
+            alerts or routines: anyone in the yard could say it). The light can only be seen after dark: in daylight these cameras keep it off.
+            Nothing is recorded: the sound is checked for the wake
             word and dropped, the camera's recordings stay silent, and the log shows only what was switched.</li>
           <li><b>Notes for Claude</b> — say “Jezebel, take a note for Claude”, wait for “Go ahead”, then say what you'd like changed or fixed (pauses are fine; up to about 90 seconds). She saves it and sends you a copy on Telegram. Next time you work with Claude, say “check notes”. You can also say it in one go: “Jezebel, note for Claude: make the music bar bigger.”</li>
           <li><b>Music (Spotify)</b> — once Spotify is connected under <a href="#spotify">Spotify</a>: “Hey Jarvis, play some jazz”, “play Tom Petty”, “play Free Fallin'”, “pause” (“pause the music” while the TV is on: plain “pause” is the TV's then), “skip”, “go back”, “Spotify up / down”, “music volume 40”, “what's playing?”, “play on the TV”, “play Spotify on Sentinel” (any speaker's name; if Jezebel doesn't know the name she offers to read out the list — say “yes”). “Play Spotify here” or “on this speaker” means the speaker plugged into this PC (see <b>This PC as a speaker</b> under <a href="#spotify">Spotify</a>). Jarvis learns your Spotify artists (top, followed and recently played, once a day), so band names like Mötley Crüe are heard right; a Spotify connection made before November 2026 needs <b>Connect Spotify</b> once more for that.</li>
@@ -466,7 +467,7 @@
           <li><b>⟳ Reload</b> (top of the live page) — reloads the page, for TVs and browsers without F5. Open pages also reload themselves after Sentinel is updated.</li>
           <li><b>Signing in a TV (QR code)</b> — on a big screen the sign-in page shows a QR code. Scan it with your phone's camera (the phone must already be signed in), check the 4-letter code matches, and tap <b>Yes</b>. The TV stays signed in, even after Sentinel restarts. If the phone says the screen is on a <i>different internet connection</i>, only approve if you're standing in front of it.</li>
           <li><b>Timeline: on / off</b> (top of the live page, or press <b>T</b>) — hides the timeline so the cameras fill the screen; the grid always arranges the cameras as large as your window allows.</li>
-          <li><b>Timeline</b> (under the cameras) — a mark for every clip, coloured by what was in it: <b style="color:#ff4d6d">people</b>, <b style="color:#4da3ff">vehicles</b>, <b style="color:#5fd38a">animals</b>, <b style="color:#b98cff">deliveries</b>, grey for motion with nothing recognised, orange for clips you requested from Telegram. The buttons next to the zoom filter by type. Tap a mark to play it. Use <b>◀ ▶</b> or the date box to change day, <b>24h / 6h / 1h</b> to zoom, and <b>▶ Latest clip</b> to jump to the newest. In the player, <b>Previous / Next</b> step through that camera's clips.</li>
+          <li><b>Timeline</b> (under the cameras) — a mark for every clip, coloured by what was in it: <b style="color:#ff4d6d">people</b>, <b style="color:#4da3ff">vehicles</b>, <b style="color:#5fd38a">animals</b>, <b style="color:#b98cff">deliveries</b>, grey for motion with nothing recognised, orange for clips you requested from Telegram. The buttons next to the zoom filter by type. Tap a mark to play it. Use <b>◀ ▶</b> or the date box to change day, <b>24h / 6h / 1h</b> to zoom, and <b>▶ Latest clip</b> to jump to the newest. In the player, <b>Previous / Next</b> step through that camera's clips. <b style="color:#ff5fd2">Voice</b> (its own 🎙️ row, pink): every time someone asked Jarvis for something, and where: <i>Inside</i>, <i>Phone</i> (the Talk button) or the camera that heard it (Back Yard, Front Door, Garage), with what was asked and what Jarvis did. From a camera it shows only what was done, never the words. Tap a pink mark to read it; the <b>Voice</b> button shows only these. Guest passes don't see them.</li>
           <li><b>Zones</b> — tell Sentinel which parts of each picture matter.</li>
           <li><b>Settings</b> — this page.</li>
         </ul>
@@ -614,7 +615,7 @@
                   "night_bug_start_hour", "night_bug_end_hour", "auto_reconnect_enabled",
                   "reconnect_interval_seconds", "feed_fps", "web.max_fps", "web.show_zones"],
       backup: ["backup_enabled", "backup_time", "backup_video_days", "backup_remote"],
-      audio: ["volume", "speech_speed", "voice_id", "voice_jarvis_id", "audio_output", "voice_device", "audio_device", "music_device", "voice_enabled", "voice_wake_threshold", "voice_camera", "voice_follow_up", "voice_quiet_commands"],
+      audio: ["volume", "speech_speed", "voice_id", "voice_jarvis_id", "audio_output", "voice_device", "audio_device", "music_device", "voice_enabled", "voice_wake_threshold", "voice_cameras", "voice_follow_up", "voice_quiet_commands"],
       access: ["remote_web_url", "remote_rdp_user"],
       spotify: ["spotify_client_id", "spotify_device", "spotify_fallback_device", "spotify_speaker_name"],
       weather: ["weather_location", "weather_units", "weather_alerts_enabled", "weather_alerts_speak"],
@@ -663,11 +664,18 @@
       });
       $("token-state").textContent = settings.secrets.telegram_bot_token ? "(set)" : "(not set)";
       if (ROLE === "owner") $("web-user").textContent = settings.web_username || "?";
-      var vc = $("voice-camera-select");
-      vc.innerHTML = '<option value="">Off</option>' + (settings.voice_cameras || []).map(function(c) {
-        return '<option value="' + esc(c.ip) + '">' + esc(c.name) + "</option>";
-      }).join("");
-      vc.value = v.voice_camera || "";
+      var vcOn = (v.voice_cameras || "").split(",").filter(Boolean), vcBox = $("voice-camera-boxes");
+      vcBox.innerHTML = (settings.listen_cameras || []).length ? "" : '<span class="hint">No camera with a known admin login yet.</span>';
+      (settings.listen_cameras || []).forEach(function(c) {
+        var l = document.createElement("label"), box = document.createElement("input");
+        box.type = "checkbox"; box.value = c.ip; box.checked = vcOn.indexOf(c.ip) >= 0;
+        box.onchange = function() {
+          $("voice-cameras").value = Array.prototype.filter.call(vcBox.querySelectorAll("input"), function(b) { return b.checked; })
+            .map(function(b) { return b.value; }).join(",");
+        };
+        l.appendChild(box); l.appendChild(document.createTextNode(" " + c.name)); vcBox.appendChild(l);
+      });
+      $("voice-cameras").value = vcOn.join(",");
       var sel = $("voice-select");
       sel.innerHTML = "";
       var opt0 = document.createElement("option"); opt0.value = ""; opt0.textContent = "System default"; sel.appendChild(opt0);

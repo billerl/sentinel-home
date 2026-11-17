@@ -424,6 +424,14 @@ class TestRoles(unittest.TestCase):
         self.assertEqual(self.post(user, f"/api/routines/{mine}/delete").status_code, 200)
         self.assertEqual(self.post(self.clients[GUEST], "/api/routines", {"spec": SAY}).status_code, 403)
 
+    # ---------------------------------------------------------------- voice requests on the timeline
+    def test_voice_requests_show_on_the_timeline_for_the_family_not_guests(self):
+        self.engine.voice_log.add("Back Yard", "", "patio lights on")
+        user, guest = self.clients[USER], self.clients[GUEST]
+        voice = user.get("/api/recordings").get_json()["voice"]
+        self.assertIn(("Back Yard", "patio lights on"), [(v["place"], v["did"]) for v in voice])
+        self.assertEqual(guest.get("/api/recordings").get_json()["voice"], [])
+
     # ---------------------------------------------------------------- print
     def test_a_family_member_prints_an_uploaded_file(self):
         from test_printing import FakeCups

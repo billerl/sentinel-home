@@ -38,6 +38,7 @@ sentinel-home/                         # repository root
     │   │                              #   cooking videos (yt-dlp + Whisper + Claude), family version beside the
     │   │                              #   original, swaps/twists, what-can-I-make, cooking mode + Jarvis (recipes.db)
     │   ├── notes.py                   # Notes and lists, private to their writer or shared with the family (notes.db)
+    │   ├── voice_log.py               # What was asked of Jarvis and where (Inside, Phone, a camera): the timeline's Voice row
     │   ├── printing.py                # The Print page: a PDF/photo to the computer's default printer (CUPS lp), the
     │   │                              #   printer's own paper/ink/state (ipptool) in plain words, jobs sent, stop one
     │   ├── home_layout.py             # Each login's home page tile order (press-and-hold to move; home_layouts.json)

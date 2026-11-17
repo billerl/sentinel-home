@@ -180,6 +180,9 @@ class Engine:
         from sentinel.engine.notes import Notes
 
         self.notes = Notes(VIDEO_DIR)  # each person's notes and lists, private or shared (the Notes page)
+        from sentinel.engine.voice_log import VoiceLog
+
+        self.voice_log = VoiceLog(VIDEO_DIR)  # what was asked of Jarvis and where (the timeline's Voice row)
         from sentinel.engine.printing import Printer
 
         self.printer = Printer((self.settings.get("printing") or {}).get("queue"))  # the Print page (CUPS)
@@ -249,7 +252,7 @@ class Engine:
         from sentinel.engine.phone_talk import PhoneTalk
 
         self.phone_talk = PhoneTalk(  # the web page's Talk button: Jarvis through a phone's microphone
-            self.settings, voice=lambda: self.voice, speaker=lambda: self.audio, answer=self.answer_voice)
+            self.settings, voice=lambda: self.voice, speaker=lambda: self.audio, answer=self._answer_from("Phone"))
         from sentinel.engine.mesh import MeshChat
 
         self.mesh = MeshChat(  # chat over the LoRa mesh, through the pets' base station (the Mesh page)
@@ -324,7 +327,7 @@ class Engine:
         self.commands = self._build_commands()
         self.audio = self._init_audio()
         self.voice = None  # "Hey Jarvis" listener (sentinel.audio.voice), when enabled
-        self.camera_ear = None  # "Hey Jarvis" at a camera's microphone (sentinel.audio.camera_ear), when chosen
+        self.camera_ears: Dict[str, Any] = {}  # camera ip -> its "Hey Jarvis" listener (sentinel.audio.camera_ear)
         self._ear_whisper = None  # (its own speech model when the house's voice is off)
         self.frame_broker = None
         self.web_server = None
@@ -519,7 +522,7 @@ class Engine:
         self._command_thread.start()
         self.telegram.start_listening()  # (only now: every filter and handler above is in place)
         self._start_voice()
-        self._start_camera_ear()
+        self._start_camera_ears()
         if self.settings.get("pc_volume") is not None:  # ALSA forgets it at reboot without `alsactl store` (sudo)
             from sentinel.audio.alert_system import set_pc_volume
 
@@ -547,7 +550,7 @@ class Engine:
         self.camera_lights.stop()
         self.switches.stop()
         self.wifi_motion.stop()
-        self._stop_camera_ear()
+        self._stop_camera_ears()
         self._stop_voice()
         self.spotify_player.stop()
         self.telegram.cleanup()
@@ -1043,7 +1046,7 @@ class Engine:
         except ImportError as e:  # faster-whisper / openwakeword not installed
             app_logger.log("warning", "voice_unavailable", error_message=str(e), component="voice", action="start")
             return
-        self.voice = VoiceAssistant(self.settings, self.answer_voice, self.audio, names=self._voice_names,
+        self.voice = VoiceAssistant(self.settings, self._answer_from("Inside"), self.audio, names=self._voice_names,
                                     switches=lambda: [s.name for s in self.switches.switches()],
                                     apps=self.switches.tv_apps, artists=self.spotify.artists,
                                     tv_on=self.switches.samsung_tv_on,
@@ -1071,35 +1074,53 @@ class Engine:
             self.voice.stop()
             self.voice = None
 
-    # ------------------------------------------------------ "Hey Jarvis" at a camera (outdoors)
-    EAR_SOURCE = "camera voice"
+    def _answer_from(self, place: str) -> Callable[..., Any]:
+        """answer_voice, noting the request and its answer for the timeline's Voice row (where it was heard)."""
+        def answer(text: str, say: Callable[[str], None], doubtful: bool = False):
+            reply = self.answer_voice(text, say, doubtful=doubtful)
+            if reply is not None and text:
+                try:
+                    self.voice_log.add(place, text, getattr(reply, "text", "") or "")
+                except Exception as e:  # (never cost the answer)
+                    app_logger.log("warning", "voice_log_failed", error_message=str(e), component="voice",
+                                   action="log")
+            return reply
+        return answer
 
-    def _start_camera_ear(self) -> None:
-        host = str(self.settings.get("voice_camera") or "")
-        if not host or self.camera_ear is not None:
-            return
-        pipeline = next((p for p in self.cameras.values() if p.host == host), None)
-        source = pipeline.hd_source() if pipeline is not None else None
-        if source is None or not self.camera_lights.ensure_sound(host):
-            app_logger.log("warning", "camera_ear_unavailable", camera_ip=host, component="camera_ear", action="start",
-                           error_message="that camera isn't here, has no full-quality stream, or its admin login "
-                                         "(camera_admin.json) is missing")
-            return
+    # ------------------------------------------------------ "Hey Jarvis" at the cameras (outdoors)
+    def _voice_camera_ips(self) -> List[str]:
+        return [ip for ip in str(self.settings.get("voice_cameras") or "").split(",") if ip]
+
+    def _start_camera_ears(self) -> None:
         try:
             from sentinel.audio.camera_ear import CameraEar
         except ImportError as e:
-            app_logger.log("warning", "camera_ear_unavailable", camera_ip=host, error_message=str(e),
-                           component="camera_ear", action="start")
+            if self._voice_camera_ips():
+                app_logger.log("warning", "camera_ear_unavailable", error_message=str(e), component="camera_ear",
+                               action="start")
             return
-        self.camera_ear = CameraEar(host, source, self._ear_words, self._ear_command, light=self.camera_lights,
-                                    threshold=lambda: float(self.settings.get("voice_wake_threshold", 0.5)),
-                                    gain=lambda: float(self.settings.get("voice_gain", 4.0)))
-        self.camera_ear.start()
+        for host in self._voice_camera_ips():
+            if host in self.camera_ears:
+                continue
+            pipeline = next((p for p in self.cameras.values() if p.host == host), None)
+            source = pipeline.hd_source() if pipeline is not None else None
+            if source is None or not self.camera_lights.ensure_sound(host):
+                app_logger.log("warning", "camera_ear_unavailable", camera_ip=host, component="camera_ear",
+                               action="start", error_message="that camera isn't here, has no full-quality stream, "
+                                                             "or its admin login (camera_admin.json) is missing")
+                continue
+            place = pipeline.display_name
+            ear = CameraEar(host, source, self._ear_words, lambda text, place=place: self._ear_command(text, place),
+                            light=self.camera_lights,
+                            threshold=lambda: float(self.settings.get("voice_wake_threshold", 0.5)),
+                            gain=lambda: float(self.settings.get("voice_gain", 4.0)))
+            self.camera_ears[host] = ear
+            ear.start()
 
-    def _stop_camera_ear(self) -> None:
-        if self.camera_ear is not None:
-            self.camera_ear.stop()
-            self.camera_ear = None
+    def _stop_camera_ears(self) -> None:
+        for ear in self.camera_ears.values():
+            ear.stop()
+        self.camera_ears = {}
 
     def _ear_words(self, audio) -> str:
         """Speech -> words for the camera's microphone, without logging them (the yard's words stay private)."""
@@ -1115,18 +1136,21 @@ class Engine:
                                                    condition_on_previous_text=False)
         return clean_transcript(list(segments))
 
-    def _ear_command(self, text: str) -> bool:
+    def _ear_command(self, text: str, place: str) -> bool:
         """From outside only plugs and lights, on or off: never the TVs, the cameras, alerts or routines (anyone
-        in the yard can say "Hey Jarvis"). True when it was one and it worked."""
+        in the yard can say "Hey Jarvis"). True when it was one and it worked. Noted for the timeline with what
+        was done, never the words (they stay private)."""
         parsed = self.switches.parse(text)
-        if parsed is None or parsed[0] is None:
-            return False
-        on, found = parsed
-        found = [s for s in found if s.icon != "tv"]
+        found = [s for s in parsed[1] if s.icon != "tv"] if parsed is not None and parsed[0] is not None else []
         if not found:
+            self.voice_log.add(place, "", "Didn't understand (or not allowed from outside)", ok=False)
             return False
-        results = [self.switches.set(s.id, on, self.EAR_SOURCE) for s in found]
-        return all(ok for ok, _ in results)
+        on = parsed[0]
+        results = [self.switches.set(s.id, on, f"voice ({place})") for s in found]
+        ok = all(done for done, _ in results)
+        names = " and ".join(s.name for s in found)
+        self.voice_log.add(place, "", f"{names} {'on' if on else 'off'}" if ok else f"{names}: didn't answer", ok=ok)
+        return ok
 
     NOTES_FILE = os.path.join(os.path.expanduser("~"), "Documents", "sentinel_home", "claude-notes.md")
     # "for <one word>": Whisper hears "Claude" as "Pause", "cloud", "Klaus"... (2026-10-27), so any single
@@ -1871,7 +1895,7 @@ class Engine:
             "detector_models": admin.available_detector_models(),
             "sound_cards": __import__("sentinel.audio.devices", fromlist=["sound_cards"]).sound_cards(),
             # cameras that can listen for "Hey Jarvis": their admin login is known (to turn their sound and light on)
-            "voice_cameras": [{"ip": p.host, "name": p.display_name} for p in self.cameras.values()
+            "listen_cameras": [{"ip": p.host, "name": p.display_name} for p in self.cameras.values()
                               if self.camera_lights.can_signal(p.host)],
         }
 
@@ -1925,9 +1949,9 @@ class Engine:
         if {"voice_enabled", "volume", "voice_device", "audio_device", "music_device"} & cleaned.keys() and self._started:
             self._stop_voice()
             self._start_voice()
-        if "voice_camera" in cleaned and self._started:
-            self._stop_camera_ear()
-            self._start_camera_ear()
+        if "voice_cameras" in cleaned and self._started:
+            self._stop_camera_ears()
+            self._start_camera_ears()
 
     def send_telegram_test(self) -> Tuple[bool, str]:
         if not self.telegram.enabled:

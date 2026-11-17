@@ -12,6 +12,7 @@ import numpy as np
 from sentinel.audio.camera_ear import CHUNK, WAKE_MODEL, CameraEar
 from sentinel.engine.camera_light import WHITE, CameraLights
 from sentinel.engine.engine import Engine
+from sentinel.engine.voice_log import VoiceLog
 
 
 class FakeWake:
@@ -138,19 +139,55 @@ class TestCameraEar(unittest.TestCase):
 class TestOutsideCommands(unittest.TestCase):
     """Engine._ear_command: from the yard, only plugs and lights."""
 
+    def setUp(self):
+        self.log = VoiceLog(tempfile.mkdtemp(prefix="sentinel-voicelog-"))
+
     def run_it(self, parsed):
         sets = []
         sw = types.SimpleNamespace(parse=lambda text: parsed, set=lambda sid, on, src: sets.append((sid, on, src)) or (True, "ok"))
-        fake = types.SimpleNamespace(switches=sw, EAR_SOURCE=Engine.EAR_SOURCE)
-        return Engine._ear_command(fake, "whatever was said"), sets
+        fake = types.SimpleNamespace(switches=sw, voice_log=self.log)
+        return Engine._ear_command(fake, "turn on the patio lights", "Back Yard"), sets
 
     def test_lights_and_plugs_only(self):
         patio = types.SimpleNamespace(id="kasa-1", name="patio lights", icon="light")
         tv = types.SimpleNamespace(id="samsung-1", name="TV", icon="tv")
-        self.assertEqual(self.run_it((True, [patio])), (True, [("kasa-1", True, "camera voice")]))
+        self.assertEqual(self.run_it((True, [patio])), (True, [("kasa-1", True, "voice (Back Yard)")]))
         self.assertEqual(self.run_it((True, [tv])), (False, []))  # the TVs: not from outside
         self.assertEqual(self.run_it((None, [patio])), (False, []))  # "are the patio lights on?": can't answer
         self.assertEqual(self.run_it(None), (False, []))  # "quiet the cameras", anything else: no
+        # the timeline's Voice row: where and what was done, never the words heard out there
+        rows = self.log.between(0, time.time() + 1)
+        self.assertEqual([(r["place"], r["did"], r["ok"]) for r in rows][0], ("Back Yard", "patio lights on", True))
+        self.assertEqual(len(rows), 4)
+        self.assertFalse(any(r["said"] for r in rows))
+        self.assertFalse(rows[1]["ok"])
+
+
+class TestVoiceLog(unittest.TestCase):
+    def test_requests_by_day_and_old_ones_go(self):
+        now = [1_800_000_000.0]
+        log = VoiceLog(tempfile.mkdtemp(prefix="sentinel-voicelog-"), clock=lambda: now[0])
+        log.add("Inside", "turn on the patio lights", "Okay, turning on the patio lights.")
+        log.add("Phone", "x" * 500, "ok", ts=now[0] - 3600)
+        rows = log.between(now[0] - 7200, now[0] + 1)
+        self.assertEqual([r["place"] for r in rows], ["Phone", "Inside"])
+        self.assertEqual(len(rows[0]["said"]), 200)
+        now[0] += 100 * 86400
+        log.add("Inside", "hello", "hi")  # (a day later than the last tidy: the old ones go)
+        self.assertEqual(len(log.between(0, now[0] + 1)), 1)
+
+
+class TestAnswerFrom(unittest.TestCase):
+    def test_the_house_mic_and_phone_note_where_a_request_came_from(self):
+        log = VoiceLog(tempfile.mkdtemp(prefix="sentinel-voicelog-"))
+        fake = types.SimpleNamespace(voice_log=log,
+                                     answer_voice=lambda text, say, doubtful=False: types.SimpleNamespace(text="Okay."))
+        answer = Engine._answer_from(fake, "Inside")
+        self.assertEqual(answer("turn on the patio lights", print).text, "Okay.")
+        Engine._answer_from(fake, "Phone")("what's the weather", print)
+        rows = log.between(0, time.time() + 1)
+        self.assertEqual([(r["place"], r["said"], r["did"]) for r in rows],
+                         [("Inside", "turn on the patio lights", "Okay."), ("Phone", "what's the weather", "Okay.")])
 
 
 class TestLightSignals(unittest.TestCase):
