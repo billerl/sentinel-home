@@ -34,6 +34,13 @@ SLOW_SECONDS = 1.0  # a request Sentinel took longer than this over is logged (w
 LONG_PATHS = ("/stream", "/api/talk")  # (meant to take long: live video, speech recognition)
 
 
+def _tailscale_address(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host) in ipaddress.ip_network("100.64.0.0/10")
+    except ValueError:
+        return False
+
+
 def _home_lan_address(host: str) -> bool:
     """A bind address other screens in the house can use: private IPv4, not loopback or Tailscale's range."""
     try:
@@ -220,6 +227,7 @@ class WebServer:
         # screens in the house that came in through the tunnel move to the home-network address
         home_base = next((f"http://{h}:{port}" for h in bind_hosts if _home_lan_address(h)), None)
         ctx.home_base = home_base  # (the Photos page sends visitors from outside here)
+        ctx.tailscale_base = next((f"http://{h}:{port}" for h in bind_hosts if _tailscale_address(h)), None)
         signin.register(app, ctx, home_base)
         roles.install(app, ctx)  # every route's minimum role, checked before the route runs
         for area in (live, family, mesh, notes, photos, printing, recipes, spotify, switches, sensors, house, routines,

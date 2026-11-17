@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 
 HOME_NETS = tuple(ipaddress.ip_network(n) for n in (
     "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "::1/128", "fc00::/7"))  # the house and this PC
+# Tailscale: the family's own devices, end to end encrypted straight to this PC (never through Cloudflare)
+TAILSCALE_NETS = tuple(ipaddress.ip_network(n) for n in ("100.64.0.0/10", "fd7a:115c:a1e0::/48"))
 PERSON_PREFIX = "person:"  # session username of a family member signed in with their own password
 
 # TV browsers show the live cameras full-time (Fire TV "AFT..." models in Fully Kiosk, Samsung/LG TV browsers).
@@ -42,6 +44,7 @@ class WebContext:
         self._device_failures: Dict[str, List[float]] = {}  # ip -> recent wrong logins (phones, base station, links)
         self.changes: Optional[ChangeLog] = None  # who changed what (kept beside the other data)
         self.home_base: Optional[str] = None  # this PC on the home network ("http://192.168.x.y:8088"), if any
+        self.tailscale_base: Optional[str] = None  # and on Tailscale ("http://100.x.y.z:8088"), if it listens there
         data_db = getattr(getattr(self.engine, "locations", None), "db_path", None)
         if isinstance(data_db, str):
             import os
@@ -83,10 +86,11 @@ class WebContext:
         return g.viewer
 
     @staticmethod
-    def from_home_network() -> bool:
-        """This request came straight from the home network (or this computer), not through the Cloudflare
-        tunnel. cloudflared connects from 127.0.0.1 and always adds Cloudflare's headers, which a visitor can't
-        take off; someone at home adding them only locks themselves out."""
+    def from_home_network(tailscale: bool = False) -> bool:
+        """This request came straight from the home network (or this computer, or with tailscale=True one of the
+        family's Tailscale devices), not through the Cloudflare tunnel. cloudflared connects from 127.0.0.1 and
+        always adds Cloudflare's headers, which a visitor can't take off; someone at home adding them only locks
+        themselves out."""
         if request.headers.get("Cf-Connecting-Ip") or request.headers.get("Cf-Ray"):
             return False
         try:
@@ -94,7 +98,8 @@ class WebContext:
         except ValueError:
             return False
         # named ranges, not ip.is_private: that also counts reserved/documentation blocks such as 203.0.113.0/24
-        return any(ip in net for net in HOME_NETS if net.version == ip.version)
+        nets = HOME_NETS + (TAILSCALE_NETS if tailscale else ())
+        return any(ip in net for net in nets if net.version == ip.version)
 
     def require_session(self):
         if self.auth is None or self.viewer() is None:

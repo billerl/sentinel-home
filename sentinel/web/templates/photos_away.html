@@ -12,19 +12,24 @@
     main { max-width: 520px; margin: 0 auto; line-height: 1.5; }
     h1 { font-size: 1.2rem; color: #00ffff; }
     .card { background: #0c151c; border: 1px solid #16303a; border-radius: 14px; padding: 16px; margin: 14px 0; }
-    a { color: #00ffff; word-break: break-all; }
+    a { color: #00ffff; }
+    code { color: #00ffff; word-break: break-all; font-size: 1.02rem; user-select: all; }
     .hint { color: #6f97a5; font-size: 0.9rem; }
   </style>
 </head>
 <body>
   <main>
     <a href="/">← Home</a>
-    <h1>🖼️ Photos open at home only</h1>
-    <p>The family's photos aren't sent over the internet: this page only opens on the home Wi-Fi.</p>
-    {% if home != "/photos" %}
-    <div class="card">On the home Wi-Fi, open:<br><a href="{{ home }}">{{ home }}</a>
-      <p class="hint">(It asks you to sign in there the first time. Add it to your home screen to come back quickly.)</p></div>
+    <h1>🖼️ Photos don't open through this address</h1>
+    <p>The family's photos aren't sent through Cloudflare. Open them one of these ways (type the address into a new
+      tab: browsers may refuse a link from this page to a home address):</p>
+    {% if tailscale %}
+    <div class="card"><b>Anywhere, with the Tailscale app connected:</b><br><code>{{ tailscale }}</code></div>
     {% endif %}
+    {% if home %}
+    <div class="card"><b>At home, on the Wi-Fi:</b><br><code>{{ home }}</code></div>
+    {% endif %}
+    <p class="hint">It asks you to sign in there the first time. Add it to your home screen to come back quickly.</p>
   </main>
 </body>
 </html>

@@ -1,9 +1,9 @@
 """
 Photos: the family's photos on the backup drive, and everyone's own albums (sentinel/engine/photos.py).
 
-Home network only (the family's choice, 2026-11-17: "I don't want to expose it to Cloudflare yet"): through the
-tunnel every photo route is refused, and the page says to open it at home. A before_request check covers every
-route here, so a new one can't be forgotten.
+Home network or Tailscale only (the family's choice, 2026-11-17: "I don't want to expose it to Cloudflare yet"):
+through the tunnel every photo route is refused, and the page gives the home and Tailscale addresses. A
+before_request check covers every route here, so a new one can't be forgotten.
 """
 
 from __future__ import annotations
@@ -37,10 +37,11 @@ def register(app: Flask, ctx: WebContext) -> None:
 
     @app.before_request
     def _photos_at_home_only():
-        if request.endpoint not in PHOTO_ENDPOINTS or ctx.from_home_network():
+        if request.endpoint not in PHOTO_ENDPOINTS or ctx.from_home_network(tailscale=True):
             return None
         if request.endpoint == "photos_page":
-            return render_template("photos_away.html", home=(ctx.home_base or "") + "/photos"), 403
+            return render_template("photos_away.html", home=ctx.home_base and ctx.home_base + "/photos",
+                                   tailscale=ctx.tailscale_base and ctx.tailscale_base + "/photos"), 403
         return jsonify({"error": "Photos open only on the home network."}), 403
 
     def _unauthorized():
