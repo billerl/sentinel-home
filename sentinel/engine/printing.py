@@ -33,6 +33,13 @@ KINDS = (
     (b"\xff\xd8\xff", "jpg", "photo"),
     (b"\x89PNG\r\n\x1a\n", "png", "picture"),
 )
+# Black & white is done here, before CUPS: this computer's CUPS (cups-filters 2.0.0, its "universal" filter)
+# printed in colour whatever it was told (print-color-mode=monochrome, ColorModel=Gray, cupsColorSpace=18: the
+# raster it made was always sRGB; 2026-11-17, a draft "black and white" form came out in colour). A grey file
+# can't come out in colour.
+GRAY_PDF = ["gs", "-q", "-dSAFER", "-dBATCH", "-dNOPAUSE", "-sDEVICE=pdfwrite", "-sColorConversionStrategy=Gray",
+            "-dProcessColorModel=/DeviceGray", "-dCompatibilityLevel=1.4"]
+
 # IPP print-quality: draft prints at 300 dpi and lays down least ink (a form, a shopping list); best is for photos
 QUALITY = {"draft": 3, "normal": 4, "best": 5}
 PAGES = re.compile(r"^\d{1,4}(-\d{1,4})?(,\d{1,4}(-\d{1,4})?)*$")
@@ -174,6 +181,21 @@ class Printer:
                 "state": state, "problems": problems, "ink": ink, "jobs": jobs}
 
     # ------------------------------------------------------------------ printing
+    def _gray(self, path: str, ext: str) -> Optional[str]:
+        """A grey copy of the file beside it (removed with it), or None when it couldn't be made."""
+        out = path + ".gray." + ("pdf" if ext == "pdf" else "png")
+        if ext == "pdf":
+            code, text = self._cmd(GRAY_PDF + ["-sOutputFile=" + out, path], timeout=120)
+            return out if code == 0 and os.path.exists(out) and os.path.getsize(out) > 0 else None
+        try:
+            from PIL import Image, ImageOps
+
+            with Image.open(path) as im:
+                ImageOps.exif_transpose(im).convert("L").save(out)  # (a phone photo the right way up, too)
+            return out
+        except Exception:
+            return None
+
     def send(self, data: bytes, filename: str, copies: Any = 1, color: bool = True, pages: str = "",
              who: str = "", quality: str = "normal") -> Tuple[bool, str]:
         """Print an uploaded PDF or photo. (ok, what to tell the person)."""
@@ -203,15 +225,22 @@ class Printer:
         if kind[0] != "pdf":
             args += ["-o", "print-scaling=fit"]  # a photo fills the page, whole (not cut off, not tiny)
         fd, path = tempfile.mkstemp(prefix="sentinel-print-", suffix="." + kind[0], dir=self._spool_dir)
+        gray = None
         try:
             with os.fdopen(fd, "wb") as f:
                 f.write(data)
-            code, text = self._cmd(args + ["--", path], timeout=60)
+            if not color:
+                gray = self._gray(path, kind[0])
+                if gray is None:
+                    return False, "It couldn't be made black and white, so it wasn't printed (to save the colour ink)."
+            code, text = self._cmd(args + ["--", gray or path], timeout=60)
         finally:
-            try:
-                os.unlink(path)  # (lp has handed CUPS its own copy by the time it returns)
-            except OSError:
-                pass
+            for leftover in (path, gray):
+                try:
+                    if leftover:
+                        os.unlink(leftover)  # (lp has handed CUPS its own copy by the time it returns)
+                except OSError:
+                    pass
         m = re.search(r"request id is (\S+)", text)
         if code != 0 or not m:
             app_logger.log("warning", "print_failed", error_message=text.strip()[:200], component="printing",

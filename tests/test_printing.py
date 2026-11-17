@@ -9,6 +9,7 @@ from sentinel.engine.printing import MAX_BYTES, Printer, clean_title, file_kind
 
 PDF = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n"
 JPG = b"\xff\xd8\xff\xe0\x00\x10JFIF" + b"\x00" * 50
+GRAY_PDF_OUT = b"%PDF-1.4 grey"
 IPP_OK = """
         printer-make-and-model (textWithoutLanguage) = HP DeskJet 2700 series
         printer-state (enum) = idle
@@ -42,6 +43,10 @@ class FakeCups:
                 code, out = 1, "ipptool: Unable to connect to 192.0.2.81: No route to host"
             else:
                 out = self.ipp
+        elif args[0] == "gs":  # black & white: a grey copy of the PDF
+            out = next(a for a in args if a.startswith("-sOutputFile="))[len("-sOutputFile="):]
+            with open(out, "wb") as f:
+                f.write(GRAY_PDF_OUT)
         elif args[0] == "lp":
             path = args[-1]
             with open(path, "rb") as f:
@@ -82,8 +87,10 @@ class TestPrinting(unittest.TestCase):
         self.assertIn("page-ranges=1-3,5", args)
         self.assertIn("print-quality=4", args)  # (normal unless asked)
         self.assertNotIn("print-scaling=fit", args)
-        self.assertEqual(self.cups.files, [PDF])
-        self.assertEqual(os.listdir(self.spool), [])  # (CUPS has its own copy)
+        self.assertEqual(self.cups.files, [GRAY_PDF_OUT])  # (made grey here: CUPS printed colour anyway)
+        self.assertEqual(os.listdir(self.spool), [])  # (CUPS has its own copy; the grey one goes too)
+        self.p.send(PDF, "Report.pdf")
+        self.assertEqual(self.cups.files[-1], PDF)  # colour: as it came
 
     def test_a_photo_is_fitted_to_the_page(self):
         ok, said = self.p.send(JPG, "IMG_2041.jpg")
@@ -100,6 +107,22 @@ class TestPrinting(unittest.TestCase):
         self.assertIn("print-quality=5", self.lp_args())
         self.p.send(PDF, "x.pdf", quality="ultra; lp")
         self.assertIn("print-quality=4", self.lp_args())
+
+    def test_a_black_and_white_photo_arrives_grey(self):
+        import io
+
+        from PIL import Image
+        buf = io.BytesIO()
+        Image.new("RGB", (40, 30), (220, 30, 30)).save(buf, "JPEG")
+        ok, said = self.p.send(buf.getvalue(), "red.jpg", color=False)
+        self.assertTrue(ok, said)
+        with Image.open(io.BytesIO(self.cups.files[-1])) as im:
+            self.assertEqual(im.mode, "L")
+        self.assertEqual(os.listdir(self.spool), [])
+
+    def test_no_grey_copy_no_print(self):
+        self.assertFalse(self.p.send(JPG, "broken.jpg", color=False)[0])  # (not a real picture: can't be greyed)
+        self.assertFalse(any(c[0] == "lp" for c in self.cups.calls))
 
     def test_what_it_refuses(self):
         self.assertFalse(self.p.send(b"", "x.pdf")[0])
