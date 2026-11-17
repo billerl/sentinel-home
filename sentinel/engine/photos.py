@@ -96,8 +96,10 @@ class Photos:
         self._drive = drive  # -> the backup drive's mount point, None when it isn't plugged in
         self._clock = clock
         self._ffmpeg = ffmpeg
-        self.db_path = os.path.join(data_dir, "photos.db")
-        self.cache = os.path.join(data_dir, CACHE_DIR)
+        # full paths: Flask's send_file reads a relative one from the web package's folder, not the working one
+        # (every thumbnail came back missing on the first day, 2026-11-17: the data folder is "recorded_videos")
+        self.db_path = os.path.join(os.path.abspath(data_dir), "photos.db")
+        self.cache = os.path.join(os.path.abspath(data_dir), CACHE_DIR)
         self._lock = threading.Lock()
         self._makers = threading.Semaphore(3)  # thumbnails made at once (the drive is one USB disk)
         self._scan_thread: Optional[threading.Thread] = None

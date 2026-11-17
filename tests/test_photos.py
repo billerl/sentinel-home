@@ -134,6 +134,18 @@ class TestPhotos(unittest.TestCase):
             self.assertEqual(im.size, (800, 600))  # (already smaller than a screen: not made bigger)
         self.assertTrue(thumb.startswith(self.p.cache))
 
+    def test_a_relative_data_folder_still_gives_full_paths(self):
+        # (the engine passes "recorded_videos"; Flask's send_file reads relative paths from its own package folder)
+        here = os.getcwd()
+        os.chdir(self.tmp)
+        try:
+            p = Photos("data", self.settings, drive=lambda: self.drive)
+            p.rescan(wait=True)
+            thumb = p.thumbnail(*p.file_for("Backup of Photos/2015/beach.jpg", BEN, False))
+        finally:
+            os.chdir(here)
+        self.assertTrue(os.path.isabs(thumb) and os.path.exists(thumb), thumb)
+
     def test_no_drive(self):
         self.p._drive = lambda: None
         self.p._drive_at = (0.0, None)
