@@ -997,7 +997,20 @@ document.addEventListener("visibilitychange", function() {  // phone locked or t
 // After the phone has slept, its browser can keep trying a dead connection to Sentinel for 20 s to 4 minutes before
 // it makes a new one (seen in web_slow reports, 2026-11-15). The remote then looked broken: it now says it's
 // reconnecting and holds presses until Sentinel answers again (a late Back or arrow lands on the wrong screen).
+// Still stuck after WAKE_RELOAD_MS it refreshes the page once, back on the same remote: a refresh is what
+// fixed it by hand (2026-11-16: HTTP/3 off didn't end the stalls). Not twice within a minute (no reload loop).
 var hiddenAt = 0, tvWaking = false, WAKE_AFTER_MS = 20000, WAKE_TRY_MS = 5000, WAKE_SAY_MS = 1200;
+var WAKE_RELOAD_MS = 4000, WAKE_RELOAD_KEY = "sentinel.wakeReload";
+function remoteReload() {
+  var last = 0;
+  try { last = Number(sessionStorage.getItem(WAKE_RELOAD_KEY) || 0); } catch (e) {}
+  if (!tvId || document.hidden || Date.now() - last < 60000) return false;
+  try { sessionStorage.setItem(WAKE_RELOAD_KEY, String(Date.now())); } catch (e) { return false; }  // (can't remember: no reload)
+  remoteMsg("Reconnecting… refreshing the page.");
+  history.replaceState(null, "", location.pathname + "#remote=" + encodeURIComponent(tvId));
+  location.reload();
+  return true;
+}
 document.addEventListener("visibilitychange", function() {
   if (document.hidden) { if (!hiddenAt) hiddenAt = Date.now(); return; }
   var slept = hiddenAt && Date.now() - hiddenAt > WAKE_AFTER_MS;
@@ -1009,6 +1022,7 @@ async function remoteWake() {
   tvWaking = true;
   var started = Date.now(), said = false;
   var say = setTimeout(function() { said = true; remoteMsg("Reconnecting to Sentinel…"); }, WAKE_SAY_MS);  // only if slow
+  var reload = setTimeout(function() { if (tvWaking) remoteReload(); }, WAKE_RELOAD_MS);
   while (tvId && remoteOpen() && !document.hidden) {
     var ctl = window.AbortController ? new AbortController() : null;
     var timer = ctl ? setTimeout(function() { ctl.abort(); }, WAKE_TRY_MS) : null;
@@ -1022,6 +1036,7 @@ async function remoteWake() {
     await new Promise(function(done) { setTimeout(done, 1000); });
   }
   clearTimeout(say);
+  clearTimeout(reload);
   tvWaking = false;
   if (said) remoteMsg(document.hidden ? "" : "Connected ✓", true);
 }
