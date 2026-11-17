@@ -144,11 +144,26 @@ class TestOutsideCommands(unittest.TestCase):
     def setUp(self):
         self.log = VoiceLog(tempfile.mkdtemp(prefix="sentinel-voicelog-"))
 
-    def run_it(self, parsed):
+    def run_it(self, parsed, text="turn on the patio lights", people=()):
         sets = []
         sw = types.SimpleNamespace(parse=lambda text: parsed, set=lambda sid, on, src: sets.append((sid, on, src)) or (True, "ok"))
-        fake = types.SimpleNamespace(switches=sw, voice_log=self.log)
-        return Engine._ear_command(fake, "turn on the patio lights", "Back Yard"), sets
+        self.family = types.SimpleNamespace(calls=[])
+        self.family.start_outing = lambda kind, pets: self.family.calls.append(("outing", kind, [p.name for p in pets]))
+        self.family.beep_pets = lambda pets: self.family.calls.append(("beep", [p.name for p in pets]))
+        fake = types.SimpleNamespace(switches=sw, voice_log=self.log, family=self.family,
+                                     locations=types.SimpleNamespace(people=lambda: list(people)))
+        return Engine._ear_command(fake, text, "Back Yard"), sets
+
+    def test_the_dogs_from_outside(self):
+        xena = types.SimpleNamespace(id=7, name="Xena", tracker=True, words=lambda: ["xena"])
+        self.assertTrue(self.run_it(None, "Keep an eye on Xena.", [xena])[0])
+        self.assertTrue(self.run_it(None, "Recall Xena", [xena])[0])
+        self.assertEqual(self.family.calls, [("beep", ["Xena"])])
+        self.assertTrue(self.run_it(None, "Xena's back inside.", [xena])[0])
+        self.assertEqual(self.family.calls, [("outing", "in", ["Xena"])])
+        did = [r["did"] for r in self.log.between(0, time.time() + 1)]
+        self.assertEqual(did, ["watching Xena", "beeping Xena's collar", "Xena in: back to normal"])
+        self.assertFalse(self.run_it(None, "Xena is lost", [xena])[0])  # (not this: it messages everyone)
 
     def test_lights_and_plugs_only(self):
         patio = types.SimpleNamespace(id="kasa-1", name="patio lights", icon="light")

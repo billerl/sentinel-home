@@ -1147,11 +1147,30 @@ class Engine:
         return clean_transcript(list(segments))
 
     def _ear_command(self, text: str, place: str, audio: Any = None) -> bool:
-        """From outside only plugs and lights, on or off: never the TVs, the cameras, alerts or routines (anyone
-        in the yard can say "Hey Jarvis"). True when it was one and it worked. Noted for the timeline with what
+        """From outside only plugs and lights, on or off, and the dogs (watch them, recall them): never the TVs, the
+        cameras, alerts or routines (anyone in the yard can say "Hey Jarvis"). True when it was one and it worked. Noted for the timeline with what
         was done and what was said to Jarvis (after the wake word, like the house mic; 2026-11-17: the privacy
         wanted is for conversations outside, not for requests)."""
         app_logger.log("info", "voice_heard", text=text[:200], source=place, component="voice", action="hear")
+        # the dogs too (2026-11-17: often said out in the yard): watching them, "she's in", recalling (the collar
+        # beeps). Nothing here lowers the house's guard.
+        from sentinel.engine.location import beep_command, outing_command
+
+        people = self.locations.people()
+        outing = outing_command(text, people)
+        if outing is not None:
+            kind, pets = outing
+            self.family.start_outing(kind, pets)
+            names = " and ".join(p.name for p in pets)
+            self.voice_log.add(place, text, f"watching {names}" if kind == "out" else f"{names} in: back to normal",
+                               audio=audio)
+            return True
+        recall = beep_command(text, people)
+        if recall:
+            self.family.beep_pets(recall)
+            self.voice_log.add(place, text, "beeping " + " and ".join(p.name for p in recall) + "'s collar",
+                               audio=audio)
+            return True
         parsed = self.switches.parse(text)
         found = [s for s in parsed[1] if s.icon != "tv"] if parsed is not None and parsed[0] is not None else []
         if not found:
