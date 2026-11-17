@@ -133,6 +133,8 @@ sentinel-home/                         # repository root
     │   ├── alert_system.py            # Piper TTS + `aplay` (or the Remote Desktop session via `paplay`),
     │   │                              #   pyttsx3 fallback (skipped when volume is 0), chimes
     │   ├── alsa-sentinel.conf         # dmix: the line-out shared by voice/alerts and the Spotify speaker
+    │   ├── camera_ear.py              # "Hey Jarvis" at a camera's mic (sound-only RTSP -> wake word -> words, never
+    │   │                              #   kept or logged); plugs/lights only; answers with the camera's white light
     │   ├── devices.py                 # which sound card listens/speaks (PC jacks or a USB speakerphone); music's card
     │   ├── spotify_player.py          # this PC as a Spotify speaker: runs bin/spotifyd, its sign-in relay
     │   ├── wake_samples.py            # "train Jezebel": real recordings of the wake word, kept for retraining its model

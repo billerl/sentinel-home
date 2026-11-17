@@ -560,6 +560,11 @@ class VoiceAssistant:
             segments = list(segments)
         return clean_transcript(segments), segments
 
+    def words(self, audio: np.ndarray) -> str:
+        """The words only, logged nowhere (a camera's microphone: sentinel/audio/camera_ear.py keeps the yard's
+        words private)."""
+        return self._transcribe(audio)[0]
+
     def transcribe(self, audio: np.ndarray) -> Tuple[str, float]:
         """A recording made elsewhere (the Talk button on a phone): (words, doubt)."""
         started = time.time()
