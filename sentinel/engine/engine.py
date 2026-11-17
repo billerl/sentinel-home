@@ -1128,7 +1128,7 @@ class Engine:
         self.camera_ears = {}
 
     def _ear_words(self, audio) -> str:
-        """Speech -> words for the camera's microphone, without logging them (the yard's words stay private)."""
+        """Speech -> words for the camera's microphone (after "Hey Jarvis" only); _ear_command notes them."""
         if self.voice is not None:
             return self.voice.words(audio)
         from sentinel.audio.voice import WHISPER_DIR, clean_transcript
@@ -1144,17 +1144,19 @@ class Engine:
     def _ear_command(self, text: str, place: str) -> bool:
         """From outside only plugs and lights, on or off: never the TVs, the cameras, alerts or routines (anyone
         in the yard can say "Hey Jarvis"). True when it was one and it worked. Noted for the timeline with what
-        was done, never the words (they stay private)."""
+        was done and what was said to Jarvis (after the wake word, like the house mic; 2026-11-17: the privacy
+        wanted is for conversations outside, not for requests)."""
+        app_logger.log("info", "voice_heard", text=text[:200], source=place, component="voice", action="hear")
         parsed = self.switches.parse(text)
         found = [s for s in parsed[1] if s.icon != "tv"] if parsed is not None and parsed[0] is not None else []
         if not found:
-            self.voice_log.add(place, "", "Didn't understand (or not allowed from outside)", ok=False)
+            self.voice_log.add(place, text, "Didn't understand (or not allowed from outside)", ok=False)
             return False
         on = parsed[0]
         results = [self.switches.set(s.id, on, f"voice ({place})") for s in found]
         ok = all(done for done, _ in results)
         names = " and ".join(s.name for s in found)
-        self.voice_log.add(place, "", f"{names} {'on' if on else 'off'}" if ok else f"{names}: didn't answer", ok=ok)
+        self.voice_log.add(place, text, f"{names} {'on' if on else 'off'}" if ok else f"{names}: didn't answer", ok=ok)
         return ok
 
     NOTES_FILE = os.path.join(os.path.expanduser("~"), "Documents", "sentinel_home", "claude-notes.md")

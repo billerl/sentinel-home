@@ -7,8 +7,8 @@ people's conversational privacy"), so:
 
 - The camera's sound is read 80 ms at a time and checked for the wake word, then dropped. Nothing is written
   anywhere, and the camera's recordings stay silent (the HD recorder takes only the picture, -map 0:v:0).
-- Only after "Hey Jarvis" are the next few seconds turned into words, in memory, to find the command.
-- The log says what was done ("patio lights on"), never the words heard.
+- Only after "Hey Jarvis" are the next few seconds turned into words, to find the command. Those words (what was
+  said to Jarvis, like the house mic) are noted with what was done; nothing said without the wake word ever is.
 
 The camera has no speaker, so it answers with its white light (sentinel/engine/camera_light.py): on while it
 listens, one flash for done, two for "didn't understand" or "not from out here". Out here only plugs and lights
@@ -182,7 +182,7 @@ class CameraEar:
                     done = bool(text) and self._act(text)
             if not done:
                 app_logger.log("info", "camera_ear_not_done", camera_ip=self.host, component="camera_ear",
-                               action="command")  # (not the words: they stay private)
+                               action="command")
         except Exception as e:
             app_logger.log("warning", "camera_ear_failed", camera_ip=self.host, error_message=str(e)[:200],
                            component="camera_ear", action="command")

@@ -78,7 +78,8 @@ class TestCameraEar(unittest.TestCase):
         self.assertEqual(self.light.calls, [("listening", "192.0.2.10"), ("answer", "192.0.2.10", 1)])
         self.assertEqual(ear._mode, "wake")
 
-    def test_not_understood_flashes_twice_and_the_words_are_never_logged(self):
+    def test_not_understood_flashes_twice(self):
+        # (the listener itself writes no words: Engine._ear_command notes what was said after the wake word)
         ear = self.make(lambda text: False)
         from sentinel.logging_utils import app_logger
         logged = []
@@ -155,11 +156,12 @@ class TestOutsideCommands(unittest.TestCase):
         self.assertEqual(self.run_it((True, [tv])), (False, []))  # the TVs: not from outside
         self.assertEqual(self.run_it((None, [patio])), (False, []))  # "are the patio lights on?": can't answer
         self.assertEqual(self.run_it(None), (False, []))  # "quiet the cameras", anything else: no
-        # the timeline's Voice row: where and what was done, never the words heard out there
+        # the timeline's Voice row: where, what was said to Jarvis (after the wake word only) and what was done
         rows = self.log.between(0, time.time() + 1)
-        self.assertEqual([(r["place"], r["did"], r["ok"]) for r in rows][0], ("Back Yard", "patio lights on", True))
+        self.assertEqual([(r["place"], r["said"], r["did"], r["ok"]) for r in rows][0],
+                         ("Back Yard", "turn on the patio lights", "patio lights on", True))
         self.assertEqual(len(rows), 4)
-        self.assertFalse(any(r["said"] for r in rows))
+        self.assertTrue(all(r["said"] == "turn on the patio lights" for r in rows))
         self.assertFalse(rows[1]["ok"])
 
 

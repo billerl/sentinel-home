@@ -2,8 +2,8 @@
 What was asked of Jarvis, and where: the events timeline's Voice row (pink), next to the camera clips.
 
 One row per request: when, where it was heard (Inside, Phone, or a camera's name), what was said and what
-Jarvis did. A camera's microphone keeps the yard's words private (sentinel/audio/camera_ear.py), so its rows
-have only what was done. Kept KEEP_DAYS (voice_requests.db beside the other stores).
+Jarvis did. A camera's microphone keeps only what's said after "Hey Jarvis", like the house mic: conversations
+outside are never kept (sentinel/audio/camera_ear.py). Kept KEEP_DAYS (voice_requests.db beside the other stores).
 """
 
 from __future__ import annotations
