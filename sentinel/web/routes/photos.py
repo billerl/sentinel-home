@@ -1,5 +1,9 @@
 """
 Photos: the family's photos on the backup drive, and everyone's own albums (sentinel/engine/photos.py).
+
+Home network only (the family's choice, 2026-11-17: "I don't want to expose it to Cloudflare yet"): through the
+tunnel every photo route is refused, and the page says to open it at home. A before_request check covers every
+route here, so a new one can't be forgotten.
 """
 
 from __future__ import annotations
@@ -26,6 +30,18 @@ def register(app: Flask, ctx: WebContext) -> None:
 
     def _photos():
         return getattr(engine, "photos", None)
+
+    PHOTO_ENDPOINTS = {"photos_page", "api_photos", "api_photos_folder", "photo_thumb", "photo_view", "photo_original",
+                       "api_photo_album_new", "api_photo_album_share", "api_photo_album_delete", "api_photo_upload",
+                       "api_photo_delete", "api_photo_rescan"}
+
+    @app.before_request
+    def _photos_at_home_only():
+        if request.endpoint not in PHOTO_ENDPOINTS or ctx.from_home_network():
+            return None
+        if request.endpoint == "photos_page":
+            return render_template("photos_away.html", home=(ctx.home_base or "") + "/photos"), 403
+        return jsonify({"error": "Photos open only on the home network."}), 403
 
     def _unauthorized():
         return jsonify({"error": "unauthorized"}), 401

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <meta name="theme-color" content="#001525">
+  <title>Photos - Sentinel</title>
+  <style>
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; padding: 24px 16px; }
+    main { max-width: 520px; margin: 0 auto; line-height: 1.5; }
+    h1 { font-size: 1.2rem; color: #00ffff; }
+    .card { background: #0c151c; border: 1px solid #16303a; border-radius: 14px; padding: 16px; margin: 14px 0; }
+    a { color: #00ffff; word-break: break-all; }
+    .hint { color: #6f97a5; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <a href="/">← Home</a>
+    <h1>🖼️ Photos open at home only</h1>
+    <p>The family's photos aren't sent over the internet: this page only opens on the home Wi-Fi.</p>
+    {% if home != "/photos" %}
+    <div class="card">On the home Wi-Fi, open:<br><a href="{{ home }}">{{ home }}</a>
+      <p class="hint">(It asks you to sign in there the first time. Add it to your home screen to come back quickly.)</p></div>
+    {% endif %}
+  </main>
+</body>
+</html>

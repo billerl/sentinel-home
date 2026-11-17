@@ -219,6 +219,7 @@ class WebServer:
 
         # screens in the house that came in through the tunnel move to the home-network address
         home_base = next((f"http://{h}:{port}" for h in bind_hosts if _home_lan_address(h)), None)
+        ctx.home_base = home_base  # (the Photos page sends visitors from outside here)
         signin.register(app, ctx, home_base)
         roles.install(app, ctx)  # every route's minimum role, checked before the route runs
         for area in (live, family, mesh, notes, photos, printing, recipes, spotify, switches, sensors, house, routines,

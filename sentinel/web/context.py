@@ -4,6 +4,7 @@ What every area's routes (sentinel/web/routes/) share: Sentinel's parts and the 
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
@@ -18,6 +19,8 @@ from sentinel.web.roles import OWNER, Viewer
 if TYPE_CHECKING:
     from sentinel.web.server import WebServer
 
+HOME_NETS = tuple(ipaddress.ip_network(n) for n in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "::1/128", "fc00::/7"))  # the house and this PC
 PERSON_PREFIX = "person:"  # session username of a family member signed in with their own password
 
 # TV browsers show the live cameras full-time (Fire TV "AFT..." models in Fully Kiosk, Samsung/LG TV browsers).
@@ -38,6 +41,7 @@ class WebContext:
         self.auth_cfg = auth_cfg  # as read at start (session length)
         self._device_failures: Dict[str, List[float]] = {}  # ip -> recent wrong logins (phones, base station, links)
         self.changes: Optional[ChangeLog] = None  # who changed what (kept beside the other data)
+        self.home_base: Optional[str] = None  # this PC on the home network ("http://192.168.x.y:8088"), if any
         data_db = getattr(getattr(self.engine, "locations", None), "db_path", None)
         if isinstance(data_db, str):
             import os
@@ -77,6 +81,20 @@ class WebContext:
             if person is not None:
                 g.viewer = Viewer(person.role, person, rec.username)
         return g.viewer
+
+    @staticmethod
+    def from_home_network() -> bool:
+        """This request came straight from the home network (or this computer), not through the Cloudflare
+        tunnel. cloudflared connects from 127.0.0.1 and always adds Cloudflare's headers, which a visitor can't
+        take off; someone at home adding them only locks themselves out."""
+        if request.headers.get("Cf-Connecting-Ip") or request.headers.get("Cf-Ray"):
+            return False
+        try:
+            ip = ipaddress.ip_address((request.remote_addr or "").split("%")[0])
+        except ValueError:
+            return False
+        # named ranges, not ip.is_private: that also counts reserved/documentation blocks such as 203.0.113.0/24
+        return any(ip in net for net in HOME_NETS if net.version == ip.version)
 
     def require_session(self):
         if self.auth is None or self.viewer() is None:

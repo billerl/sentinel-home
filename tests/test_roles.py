@@ -473,6 +473,24 @@ class TestRoles(unittest.TestCase):
         finally:
             self.engine.photos = before
 
+    def test_photos_open_on_the_home_network_only(self):
+        user = self.clients[USER]
+        tunnel = {"Cf-Connecting-Ip": "203.0.113.9", "Cf-Ray": "8a1b2c3d4e5f-ORD"}  # (cloudflared adds these)
+        page = user.get("/photos", headers=tunnel)
+        self.assertEqual(page.status_code, 403)
+        self.assertIn("home Wi-Fi", page.get_data(as_text=True))
+        for url in ("/api/photos", "/api/photos/folder?path=x", "/photos/thumb?p=x", "/photos/view?p=x",
+                    "/photos/original?p=x"):
+            self.assertEqual(user.get(url, headers=tunnel).status_code, 403, url)
+        self.assertEqual(user.post("/api/photos/albums/1/upload", data=b"x", headers=dict(tunnel, **{
+            "X-Sentinel-Request": "1"})).status_code, 403)
+        home = {"REMOTE_ADDR": "192.168.1.23"}  # a phone on the home Wi-Fi
+        self.assertEqual(user.get("/photos", environ_base=home).status_code, 200)
+        self.assertEqual(user.get("/api/photos", environ_base=home).status_code, 200)
+        for outside in ("203.0.113.9", "8.8.8.8", "2001:db8::5"):  # (straight in from outside: a forwarded port)
+            self.assertEqual(user.get("/api/photos", environ_base={"REMOTE_ADDR": outside}).status_code, 403, outside)
+        self.assertEqual(user.get("/", headers=tunnel).status_code, 200)  # (the rest of Sentinel as before)
+
     # ---------------------------------------------------------------- print
     def test_a_family_member_prints_an_uploaded_file(self):
         from test_printing import FakeCups
