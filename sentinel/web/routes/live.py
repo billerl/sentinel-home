@@ -31,7 +31,11 @@ def register(app: Flask, ctx: WebContext) -> None:
         if TV_BROWSER.search(request.headers.get("User-Agent", "")):
             return live_page()
         order = engine.home_layouts.get(ctx.viewer_person_id()) if engine is not None else []
-        return render_template("home.html", boot_id=BOOT_ID, tile_order=order)
+        # Photos never go through Cloudflare: from the tunnel the tile opens them over Tailscale instead (the
+        # family's phones run it; tested 2026-11-17: a tap from the tunnel page to the Tailscale address opens)
+        photos_url = None if ctx.from_home_network(tailscale=True) or not ctx.tailscale_base else \
+            ctx.tailscale_base + "/photos"
+        return render_template("home.html", boot_id=BOOT_ID, tile_order=order, photos_url=photos_url)
 
     @app.route("/api/home_layout", methods=["POST"])
     def api_home_layout():

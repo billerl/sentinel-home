@@ -493,6 +493,15 @@ class TestRoles(unittest.TestCase):
         for outside in ("203.0.113.9", "8.8.8.8", "2001:db8::5"):  # (straight in from outside: a forwarded port)
             self.assertEqual(user.get("/api/photos", environ_base={"REMOTE_ADDR": outside}).status_code, 403, outside)
         self.assertEqual(user.get("/", headers=tunnel).status_code, 200)  # (the rest of Sentinel as before)
+        # with a Tailscale address, Home's Photos tile goes there from the tunnel (and stays put at home)
+        before = self.server._app.view_functions  # (ctx lives in the routes' closures: reach it through a route)
+        ctx = next(c.cell_contents for c in before["index"].__closure__ if type(c.cell_contents).__name__ == "WebContext")
+        ctx.tailscale_base = "http://100.64.1.2:8088"
+        try:
+            self.assertIn('href="http://100.64.1.2:8088/photos"', user.get("/", headers=tunnel).get_data(as_text=True))
+            self.assertNotIn("100.64.1.2", user.get("/", environ_base=home).get_data(as_text=True))
+        finally:
+            ctx.tailscale_base = None
 
     # ---------------------------------------------------------------- print
     def test_a_family_member_prints_an_uploaded_file(self):
