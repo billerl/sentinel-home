@@ -478,7 +478,13 @@ class SmartSwitches:
         index = int(m.group(2)) - 1
         if not 0 <= index < len(children):
             return None, None, None
-        return key, dev, str(children[index].get("id") or "")
+        child = str(children[index].get("id") or "")
+        # The broadcast scan's answer gives only the short outlet number ("00"); the plug refuses that
+        # ("entry not exist") and wants its device id in front, as the direct status answer gives it.
+        device_id = str(info.get("deviceId") or "")
+        if child and device_id and not child.startswith(device_id):
+            child = device_id + child
+        return key, dev, child
 
     # ------------------------------------------------------------ changing them
     def set(self, switch_id: str, on: bool, source: str = "web") -> Tuple[bool, str]:

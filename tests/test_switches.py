@@ -22,7 +22,8 @@ NOW = 1_800_000_000.0
 
 def ep40(lights=0, outlet=1):
     """An EP40 outdoor plug's answer (two outlets)."""
-    return {"model": "EP40(US)", "alias": "TP-LINK_Smart Plug_00AA", "mac": "9C:53:22:00:00:AA", "children": [
+    return {"model": "EP40(US)", "alias": "TP-LINK_Smart Plug_00AA", "mac": "9C:53:22:00:00:AA",
+            "deviceId": "800600", "children": [
         {"id": "80060000", "state": lights, "alias": "patio lights", "on_time": 0},
         {"id": "80060001", "state": outlet, "alias": "patio outlet", "on_time": 3600 if outlet else 0}]}
 
@@ -121,6 +122,21 @@ class TestSwitches(unittest.TestCase):
         no["left"] = 2  # twice in a row: given up (no more waiting than one short pause)
         self.assertFalse(self.sw.set("kasa-9c53220000aa-1", False)[0])
         self.assertEqual(len(naps), 2)
+
+    def test_the_scans_short_outlet_ids_get_the_device_id_in_front(self):
+        """A real EP40 answers the broadcast scan with "00"/"01" and refuses those ("entry not exist")."""
+        real = self.kasa.discover
+
+        def short_ids(wait=2.0):
+            out = real(wait)
+            for _, info in out:
+                for c in info.get("children", []):
+                    c["id"] = c["id"][-2:]
+            return out
+        self.kasa.discover = short_ids
+        self.sw.discover()
+        self.assertTrue(self.sw.set("kasa-9c53220000aa-2", False)[0])
+        self.assertEqual(self.kasa.calls[-1], ("192.168.1.40", "80060001", False))
 
     def test_known_devices_survive_restart_and_moves(self):
         self.assertEqual(os.stat(os.path.join(self.dir, "switches.json")).st_mode & 0o777, 0o600)
