@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#001525">
+  <title>Print - Sentinel</title>
+  <style>
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; }
+    a { color: #00ffff; }
+    header { position: sticky; top: 0; z-index: 10; background: #1a1a1a; border-bottom: 1px solid #033; }
+    .bar { display: flex; align-items: center; gap: 12px; padding: 0 1rem; height: 48px; max-width: 640px; margin: 0 auto; }
+    .bar a { text-decoration: none; font-size: 0.9rem; }
+    h1 { font-size: 1.05rem; margin: 0; flex: 1; color: #00ffff; }
+    h2 { font-size: 0.85rem; color: #6f97a5; font-weight: 600; margin: 18px 0 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+    main { max-width: 640px; margin: 0 auto; padding: 14px 16px 60px; }
+    button, input { font: inherit; }
+    button { cursor: pointer; border-radius: 10px; border: 1px solid #1d3a44; background: #0c151c; color: #cfe; padding: 9px 14px; min-height: 44px; }
+    button.primary { background: #00ffff; border-color: #00ffff; color: #001; font-weight: 700; }
+    button.small { min-height: 34px; padding: 5px 10px; font-size: 0.85rem; }
+    button:disabled { opacity: 0.45; cursor: default; }
+    input:focus-visible, button:focus-visible, label.pick:focus-within { outline: 2px solid #00a8a8; outline-offset: 1px; }
+    .card { background: linear-gradient(180deg, #0c151c, #091015); border: 1px solid #16303a; border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; }
+    .state { display: flex; align-items: center; gap: 10px; }
+    .dot { width: 12px; height: 12px; border-radius: 50%; background: #555; flex: none; }
+    .dot.ok { background: #34d399; box-shadow: 0 0 8px #34d39988; }
+    .dot.bad { background: #f87171; }
+    .pname { font-weight: 700; color: #fff; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .problems { margin: 10px 0 0; padding-left: 20px; color: #ffcf7a; line-height: 1.45; }
+    .ink { display: flex; gap: 14px; margin-top: 12px; flex-wrap: wrap; }
+    .ink > div { flex: 1; min-width: 120px; font-size: 0.8rem; color: #9fb8c2; }
+    .meter { height: 8px; border-radius: 4px; background: #13242b; overflow: hidden; margin-top: 4px; }
+    .meter span { display: block; height: 100%; border-radius: 4px; }
+    label.pick { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 130px;
+                 border: 2px dashed #1d4a56; border-radius: 14px; cursor: pointer; text-align: center; padding: 14px; color: #9fd; }
+    label.pick.has { border-style: solid; border-color: #00a8a8; background: #06202a; }
+    label.pick .big { font-size: 2rem; }
+    label.pick input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+    .fname { color: #fff; font-weight: 600; overflow-wrap: anywhere; }
+    .thumb { max-width: 100%; max-height: 180px; border-radius: 8px; display: block; }
+    .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+    .row > span { color: #9fb8c2; min-width: 70px; }
+    .stepper { display: flex; align-items: center; gap: 0; }
+    .stepper button { width: 44px; padding: 0; font-size: 1.2rem; }
+    .stepper output { min-width: 44px; text-align: center; font-weight: 700; color: #fff; font-size: 1.1rem; }
+    .chip { border-radius: 999px; min-height: 40px; }
+    .chip[aria-pressed="true"] { background: #062f3a; border-color: #00a8a8; color: #fff; }
+    input[type="text"] { background: #05090c; color: #fff; border: 1px solid #1d3a44; border-radius: 10px; padding: 9px 12px; width: 150px; }
+    .go { width: 100%; margin-top: 16px; min-height: 52px; font-size: 1.05rem; }
+    .msg { margin-top: 10px; min-height: 1.3em; color: #ffb3b3; }
+    .msg.ok { color: #7ef0b0; }
+    progress { width: 100%; height: 8px; margin-top: 10px; accent-color: #00d0d0; }
+    .jobs { list-style: none; margin: 0; padding: 0; }
+    .jobs li { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid #0f222a; }
+    .jobs .t { flex: 1; min-width: 0; overflow-wrap: anywhere; color: #fff; }
+    .jobs small { display: block; color: #6f97a5; }
+    .jobs .s { font-size: 0.85rem; white-space: nowrap; }
+    .jobs .s.done { color: #7ef0b0; }
+    .jobs .s.wait { color: #ffcf7a; }
+    .hint { color: #6f97a5; font-size: 0.8rem; line-height: 1.45; }
+  </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
+</head>
+<body data-role="{{ role }}">
+  <header>
+    <div class="bar">
+      <a href="{{ url_for('index') }}">← Home</a>
+      <h1>Print</h1>
+    </div>
+  </header>
+
+  <main>
+    <div class="card" id="printer" aria-live="polite">
+      <div class="state"><span class="dot" id="p-dot"></span><span class="pname" id="p-name">Checking the printer…</span></div>
+      <ul class="problems" id="p-problems" hidden></ul>
+      <div class="ink" id="p-ink"></div>
+    </div>
+
+    <div class="card">
+      <label class="pick" id="pick">
+        <input type="file" id="file" accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png">
+        <span class="big" id="pick-ic">📄</span>
+        <span id="pick-text"><b>Choose a PDF or photo</b><br><span class="hint">or take a picture with the camera</span></span>
+      </label>
+
+      <div class="row">
+        <span>Copies</span>
+        <div class="stepper">
+          <button type="button" aria-label="Fewer copies" onclick="setCopies(copies - 1)">−</button>
+          <output id="copies" aria-live="polite">1</output>
+          <button type="button" aria-label="More copies" onclick="setCopies(copies + 1)">＋</button>
+        </div>
+      </div>
+      <div class="row" role="group" aria-label="Colour">
+        <span>Colour</span>
+        <button type="button" class="chip" id="c-color" aria-pressed="true" onclick="setColor(true)">🎨 Colour</button>
+        <button type="button" class="chip" id="c-bw" aria-pressed="false" onclick="setColor(false)">⚫ Black &amp; white</button>
+      </div>
+      <div class="row" id="pages-row" hidden>
+        <span>Pages</span>
+        <input type="text" id="pages" inputmode="numeric" placeholder="All" aria-label="Pages to print, like 1-3 or 2,5">
+        <span class="hint" id="pages-hint">e.g. 1-3 or 2,5</span>
+      </div>
+
+      <button type="button" class="primary go" id="go" disabled onclick="sendIt()">🖨️ Print</button>
+      <progress id="prog" max="100" value="0" hidden></progress>
+      <div class="msg" id="msg" role="status"></div>
+    </div>
+
+    <div id="jobs-box" hidden>
+      <h2>Sent from here</h2>
+      <div class="card"><ul class="jobs" id="jobs"></ul></div>
+    </div>
+
+    <p class="hint">PDFs and photos (JPG or PNG) up to {{ max_mb }} MB. A photo is fitted to the page. To print something else
+      (a Word file, a web page), save or share it as a PDF first. The printer is the one set up on the Sentinel computer.</p>
+  </main>
+
+  <script>
+    var copies = 1, color = true, file = null, polling = null;
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+      });
+    }
+    function msg(text, ok) { var m = document.getElementById("msg"); m.textContent = text || ""; m.className = "msg" + (ok ? " ok" : ""); }
+    function setCopies(n) { copies = Math.max(1, Math.min(20, n)); document.getElementById("copies").textContent = copies; }
+    function setColor(on) {
+      color = on;
+      document.getElementById("c-color").setAttribute("aria-pressed", on ? "true" : "false");
+      document.getElementById("c-bw").setAttribute("aria-pressed", on ? "false" : "true");
+    }
+    function isPdf(f) { return f.type === "application/pdf" || /\.pdf$/i.test(f.name); }
+
+    document.getElementById("file").addEventListener("change", function () {
+      file = this.files && this.files[0] || null;
+      var pick = document.getElementById("pick"), text = document.getElementById("pick-text"), ic = document.getElementById("pick-ic");
+      msg("");
+      pick.classList.toggle("has", !!file);
+      document.getElementById("go").disabled = !file;
+      document.getElementById("pages-row").hidden = !(file && isPdf(file));
+      if (!file) { ic.textContent = "📄"; text.innerHTML = "<b>Choose a PDF or photo</b>"; return; }
+      var size = file.size > 1048576 ? (file.size / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(file.size / 1024)) + " KB";
+      ic.textContent = isPdf(file) ? "📄" : "";
+      text.innerHTML = '<span class="fname">' + esc(file.name) + '</span><br><span class="hint">' + size + " · tap to choose another</span>";
+      if (!isPdf(file) && /^image\//.test(file.type)) {
+        var img = document.createElement("img");
+        img.className = "thumb";
+        img.alt = "";
+        img.src = URL.createObjectURL(file);
+        ic.appendChild(img);
+      }
+    });
+
+    function sendIt() {
+      if (!file) return;
+      var go = document.getElementById("go"), prog = document.getElementById("prog");
+      var q = "?copies=" + copies + "&color=" + (color ? "1" : "0");
+      var pages = document.getElementById("pages").value.trim();
+      if (pages && isPdf(file)) q += "&pages=" + encodeURIComponent(pages);
+      go.disabled = true;
+      prog.hidden = false; prog.value = 0;
+      msg("Sending…", true);
+      var x = new XMLHttpRequest();  // (not fetch: it shows how far a big file has got over a slow phone connection)
+      x.open("POST", "/api/print" + q);
+      x.setRequestHeader("X-Sentinel-Request", "1");
+      x.setRequestHeader("X-File-Name", encodeURIComponent(file.name));
+      x.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+      x.upload.onprogress = function (e) { if (e.lengthComputable) prog.value = Math.round(e.loaded / e.total * 100); };
+      x.onload = function () {
+        prog.hidden = true;
+        go.disabled = false;
+        if (x.status === 401) { location.href = "/login"; return; }
+        var d = {};
+        try { d = JSON.parse(x.responseText); } catch (e) {}
+        if (x.status === 413) d.error = "That file is too big to print from here.";
+        if (d.ok) { msg("✓ " + d.message, true); load(); } else msg(d.error || "That didn't work. Try again in a moment.");
+      };
+      x.onerror = function () { prog.hidden = true; go.disabled = false; msg("Couldn't reach Sentinel. Try again in a moment."); };
+      x.send(file);
+    }
+
+    async function cancelJob(id, btn) {
+      btn.disabled = true;
+      try {
+        var r = await fetch("/api/print/cancel", { method: "POST", credentials: "same-origin",
+          headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" }, body: JSON.stringify({ job: id }) });
+        var d = await r.json();
+        msg(d.ok ? d.message : (d.error || "That didn't work."), d.ok);
+      } catch (e) { msg("Couldn't reach Sentinel."); }
+      load();
+    }
+
+    function ago(t) {
+      var s = Math.max(0, Date.now() / 1000 - t);
+      if (s < 60) return "just now";
+      if (s < 3600) return Math.round(s / 60) + " min ago";
+      return new Date(t * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    }
+
+    async function load() {
+      clearTimeout(polling);
+      var d;
+      try {
+        var r = await fetch("/api/print", { credentials: "same-origin", cache: "no-store" });
+        if (r.status === 401) { location.href = "/login"; return; }
+        d = await r.json();
+      } catch (e) { polling = setTimeout(load, 15000); return; }
+      var dot = document.getElementById("p-dot");
+      dot.className = "dot " + (d.ready ? "ok" : "bad");
+      document.getElementById("p-name").textContent = (d.printer || "No printer") + (d.ready ? " · ready" : d.state === "processing" ? " · printing" : "");
+      var probs = document.getElementById("p-problems");
+      probs.hidden = !(d.problems && d.problems.length);
+      probs.innerHTML = (d.problems || []).map(function (p) { return "<li>" + esc(p) + "</li>"; }).join("");
+      document.getElementById("p-ink").innerHTML = (d.ink || []).map(function (k) {
+        var lv = k.level, col = lv == null ? "#555" : lv <= 10 ? "#f87171" : lv <= 25 ? "#facc15" : "#34d399";
+        return "<div>" + esc(k.name) + " ink · " + (lv == null ? "?" : lv + "%") +
+          '<div class="meter"><span style="width:' + (lv == null ? 0 : lv) + "%;background:" + col + '"></span></div></div>';
+      }).join("");
+      var jobs = d.jobs || [];
+      document.getElementById("jobs-box").hidden = !jobs.length;
+      var list = document.getElementById("jobs");
+      list.innerHTML = "";
+      jobs.forEach(function (j) {
+        var li = document.createElement("li");
+        li.innerHTML = '<span class="t">' + esc(j.title) + "<small>" + esc(j.who) + " · " + ago(j.at) +
+          (j.copies > 1 ? " · " + j.copies + " copies" : "") + "</small></span>" +
+          '<span class="s ' + (j.done ? "done" : "wait") + '">' + (j.stopped ? "Stopped" : j.done ? "Done ✓" : "Printing…") + "</span>";
+        if (!j.done) {
+          var b = document.createElement("button");
+          b.type = "button"; b.className = "small"; b.textContent = "Stop";
+          b.onclick = function () { cancelJob(j.id, b); };
+          li.appendChild(b);
+        }
+        list.appendChild(li);
+      });
+      // quicker while something is printing (to show it finish), slow otherwise
+      polling = setTimeout(load, jobs.some(function (j) { return !j.done; }) ? 4000 : 30000);
+    }
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) load(); });
+    load();
+  </script>
+</body>
+</html>

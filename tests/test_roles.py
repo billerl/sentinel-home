@@ -424,6 +424,34 @@ class TestRoles(unittest.TestCase):
         self.assertEqual(self.post(user, f"/api/routines/{mine}/delete").status_code, 200)
         self.assertEqual(self.post(self.clients[GUEST], "/api/routines", {"spec": SAY}).status_code, 403)
 
+    # ---------------------------------------------------------------- print
+    def test_a_family_member_prints_an_uploaded_file(self):
+        from test_printing import FakeCups
+
+        from sentinel.engine.printing import Printer
+
+        cups, before = FakeCups(), self.engine.printer
+        self.engine.printer = Printer(run=cups)
+        try:
+            user, guest = self.clients[USER], self.clients[GUEST]
+            pdf = b"%PDF-1.7\n" + b"0" * (2 * 1024 * 1024)  # bigger than the 256 KB the rest of Sentinel takes
+
+            def send(c, headers=None):
+                return c.post("/api/print?copies=2&color=0", data=pdf, content_type="application/pdf",
+                              headers=headers if headers is not None else {"X-Sentinel-Request": "1",
+                                                                           "X-File-Name": "Field%20trip%20form.pdf"})
+            r = send(user)
+            self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+            self.assertEqual(cups.files, [pdf])
+            lp = next(c for c in cups.calls if c[0] == "lp")
+            self.assertIn("Field trip form.pdf", lp)
+            self.assertEqual(user.get("/api/print").get_json()["jobs"][0]["who"], "Ben")
+            self.assertEqual(send(user, headers={}).status_code, 400)  # (not from Sentinel's own page)
+            self.assertEqual(send(guest).status_code, 403)
+            self.assertEqual(len(cups.files), 1)
+        finally:
+            self.engine.printer = before
+
     # ---------------------------------------------------------------- notes
     def notes(self, c):
         return {n["title"]: n for n in c.get("/api/notes").get_json()["notes"]}

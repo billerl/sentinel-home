@@ -136,6 +136,8 @@
         <span class="ic">🍳</span><span class="t">Recipes</span><span class="s">Family recipe box and cooking mode</span></a>
       <a data-key="notes" class="tile" href="{{ url_for('notes_page') }}" data-min="user">
         <span class="ic">📝</span><span class="t">Notes</span><span class="s">Shared lists, and notes only you can see</span></a>
+      <a data-key="print" class="tile" href="{{ url_for('print_page') }}" data-min="user" data-needs="printer">
+        <span class="ic">🖨️</span><span class="t">Print</span><span class="s" id="s-print">Print a PDF or photo from your phone</span></a>
       <a data-key="mesh" class="tile" href="{{ url_for('mesh_page') }}" data-min="user" data-needs="mesh">
         <span class="ic">📡</span><span class="t">Mesh chat</span><span class="s" id="s-mesh">Text over the radio mesh</span></a>
       <a data-key="vehicles" class="tile" href="{{ url_for('vehicles_page') }}" data-min="admin">
@@ -233,6 +235,12 @@
         else if (moving.length) setText("s-sensors", "Movement now: " + moving.join(", "), true);
         else setText("s-sensors", "All still · " + wm.sensors.length + " line" + (wm.sensors.length === 1 ? "" : "s"));
       } catch (e) { }
+    }
+
+    async function loadPrinter() {
+      try { var d = await getJson("/api/print"); } catch (e) { return; }
+      setReady("printer", !!d.printer);
+      if (d.printer) setText("s-print", d.ready ? "Printer ready" : (d.problems[0] || "Printer not ready"), !d.ready);
     }
 
     async function loadSwitches() {
@@ -402,6 +410,7 @@
       } catch (e) { }
     }
     loadExtras(); setInterval(loadExtras, 60000);
+    loadPrinter(); setInterval(loadPrinter, 5 * 60 * 1000);  // (asks the printer itself: not every refresh)
 
     function refresh() { loadPeople(); loadStatus(); loadSwitches(); loadLost(); }
     clock(); setInterval(clock, 15000);

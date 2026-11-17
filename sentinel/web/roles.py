@@ -97,6 +97,8 @@ ACCESS: Dict[str, Rule] = {
     "api_recipes_can_make": USER, "api_recipes_cooking": USER, "api_recipes_timer": USER,
     # notes: private ones are their writer's alone, whatever the role (decided in sentinel/engine/notes.py)
     "notes_page": USER, "api_notes": USER, "api_notes_save": USER, "api_notes_items": USER, "api_notes_delete": USER,
+    # print: a PDF or photo to the household printer
+    "print_page": USER, "api_print": USER, "api_print_send": USER, "api_print_cancel": USER,
     # routines: a user makes and changes only their own (checked in the route)
     "routines_page": USER, "api_routines": USER, "api_routines_save": USER, "api_routines_check": USER,
     "api_routines_action": USER,

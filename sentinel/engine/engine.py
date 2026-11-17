@@ -180,6 +180,9 @@ class Engine:
         from sentinel.engine.notes import Notes
 
         self.notes = Notes(VIDEO_DIR)  # each person's notes and lists, private or shared (the Notes page)
+        from sentinel.engine.printing import Printer
+
+        self.printer = Printer((self.settings.get("printing") or {}).get("queue"))  # the Print page (CUPS)
         from sentinel.engine.home_layout import HomeLayouts
 
         self.home_layouts = HomeLayouts(VIDEO_DIR)  # each login's home page tile order (press-and-hold to move)
