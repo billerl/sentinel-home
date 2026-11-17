@@ -13,7 +13,9 @@
     h1 { font-size: 1.2rem; color: #00ffff; }
     .card { background: #0c151c; border: 1px solid #16303a; border-radius: 14px; padding: 16px; margin: 14px 0; }
     a { color: #00ffff; }
-    code { color: #00ffff; word-break: break-all; font-size: 1.02rem; user-select: all; }
+    .card a { font-family: ui-monospace, monospace; font-size: 1.02rem; word-break: break-all; }
+    button { font: inherit; font-size: 0.85rem; margin-left: 6px; padding: 4px 10px; border-radius: 8px; border: 1px solid #1d3a44;
+             background: #062f3a; color: #cfe; cursor: pointer; }
     .hint { color: #6f97a5; font-size: 0.9rem; }
   </style>
 </head>
@@ -21,15 +23,26 @@
   <main>
     <a href="/">← Home</a>
     <h1>🖼️ Photos don't open through this address</h1>
-    <p>The family's photos aren't sent through Cloudflare. Open them one of these ways (type the address into a new
-      tab: browsers may refuse a link from this page to a home address):</p>
+    <p>The family's photos aren't sent through Cloudflare. Open them one of these ways:</p>
     {% if tailscale %}
-    <div class="card"><b>Anywhere, with the Tailscale app connected:</b><br><code>{{ tailscale }}</code></div>
+    <div class="card"><b>Anywhere, with the Tailscale app connected:</b><br>
+      <a href="{{ tailscale }}">{{ tailscale }}</a> <button type="button" data-copy="{{ tailscale }}">Copy</button></div>
     {% endif %}
     {% if home %}
-    <div class="card"><b>At home, on the Wi-Fi:</b><br><code>{{ home }}</code></div>
+    <div class="card"><b>At home, on the Wi-Fi:</b><br>
+      <a href="{{ home }}">{{ home }}</a> <button type="button" data-copy="{{ home }}">Copy</button></div>
     {% endif %}
+    <p class="hint">If tapping one does nothing (a browser may stop a page from the internet opening a home address),
+      tap <b>Copy</b> and paste it into a new tab.</p>
     <p class="hint">It asks you to sign in there the first time. Add it to your home screen to come back quickly.</p>
   </main>
+  <script>
+    document.querySelectorAll("[data-copy]").forEach(function (b) {
+      b.onclick = async function () {
+        try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = "Copied ✓"; }
+        catch (e) { prompt("Copy this address:", b.dataset.copy); }
+      };
+    });
+  </script>
 </body>
 </html>
