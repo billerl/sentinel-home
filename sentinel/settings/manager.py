@@ -138,6 +138,8 @@ class SettingsManager:
             "backup_remote": "",
             # Keys and notes a new install would need, copied to the drive's recovery/ folder (not the remote).
             "backup_extra": ["~/.ssh", "CLAUDE.local.md"],
+            "backup_photos_folder": "",  # a folder on the backup drive copied nightly to backup_photos_remote
+            "backup_photos_remote": "",  # an SSH host (e.g. "oldpc" in ~/.ssh/config)
             "package_cameras": "",
             "weather_alerts_enabled": True,
             "weather_alerts_speak": True,

@@ -784,6 +784,7 @@
       }
       if (ours) lines.push("💾 Backup drive: " + (ours.label || ours.path) + ", " + gb(ours.free) + " free of " + gb(ours.size) + ".");
       if (b.remote) lines.push("🖥️ Copy to " + b.remote + ": " + (b.remote_ok ? "last made " + when(b.remote_ok) : "not made yet") + ".");
+      if (b.photos && b.photos_remote) lines.push("🖼️ “" + b.photos + "” copied to " + b.photos_remote + ": " + (b.photos_ok ? "last made " + when(b.photos_ok) : "not made yet") + " (new photos added each night, nothing deleted).");
       $("bk-state").innerHTML = lines.map(esc).join("<br>");
       var html = "";
       b.drives.forEach(function(d) {

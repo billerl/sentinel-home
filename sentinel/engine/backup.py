@@ -14,6 +14,11 @@ so mounting a drive needs a one-time polkit rule (installation-guide.md "Backup 
 
 The remote copy (backup_remote: an SSH host, e.g. a Raspberry Pi elsewhere in the house) gets the snapshot only,
 in <date> folders hard-linked to the night before, keeping the same number of nights.
+
+The family's photos (2026-11-17): a folder of their own on the backup drive (backup_photos_folder, e.g. "Backup of
+Photos", outside "Sentinel Backup") was their only copy. Each night it's copied to another computer
+(backup_photos_remote, an SSH host; into PHOTOS_DEST there), adding new and changed files and never deleting:
+a photo deleted from the drive by mistake is still on the other computer. The drive is only read.
 """
 
 import json
@@ -42,6 +47,8 @@ SKIP_FILE = re.compile(r"(?:\.bak(?:-\d+)?|-wal|-shm|-journal)$")
 SKIP_DIR = re.compile(r"^build(?:-.*)?$")  # firmware build output
 REMOTE_HOST = re.compile(r"^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9.-]*$")
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
+PHOTOS_DEST = "PhotoBackup"
+PHOTOS_TIMEOUT = 6 * 3600  # (the first copy of a few hundred GB; later nights take minutes)
 README = """This drive holds Sentinel's nightly backup.
 
 snapshots/<date>  databases, settings.json, family/car photos, recipes - one folder per night
@@ -314,6 +321,18 @@ class Backup:
                 problems.append(f"the drive gave an error ({e.strerror or e})")
             except (sqlite3.Error, ValueError) as e:  # (a database that couldn't be copied, e.g. the drive full mid-copy)
                 problems.append(f"a database couldn't be copied to the drive ({str(e)[:100]})")
+        photos, photos_host = (str(self.settings.get(k) or "").strip()
+                               for k in ("backup_photos_folder", "backup_photos_remote"))
+        if photos and photos_host:
+            if drive is None:
+                problems.append("the photos weren't copied (the backup drive isn't plugged in)")
+            else:
+                self.running = f"Copying the photos to {photos_host}"
+                err = self._photos_to_remote(drive["mount"], photos, photos_host)
+                if err:
+                    problems.append(f"the photos' copy to {photos_host} failed ({err})")
+                else:
+                    result["photos_ok"] = now
         remote = str(self.settings.get("backup_remote") or "").strip()
         if remote:
             self.running = f"Copying to {remote}"
@@ -471,6 +490,26 @@ class Backup:
             return str(e)[:120]
         return ""
 
+    def _photos_to_remote(self, mount: str, name: str, host: str) -> str:
+        """The drive's photo folder to <host>:PHOTOS_DEST/, new and changed files only, never deleting; "" when it
+        worked."""
+        if not REMOTE_HOST.match(host):
+            return "not a valid host name"
+        parts = name.strip("/").split("/")
+        folder = os.path.join(mount, *parts)
+        if not name.strip("/") or ".." in parts or parts[0] == FOLDER or not os.path.isdir(folder):
+            return "the photo folder isn't on the drive"
+        try:
+            # -rt, not -a: the drive is exFAT (no owners or permissions to copy)
+            out = self.run_cmd(["rsync", "-rt", "--modify-window=2", "-e", " ".join(SSH),
+                                folder.rstrip("/") + "/", f"{host}:{PHOTOS_DEST}/"],
+                               capture_output=True, text=True, timeout=PHOTOS_TIMEOUT)
+        except (OSError, subprocess.SubprocessError) as e:
+            return str(e)[:120]
+        if out.returncode:
+            return (out.stderr or f"rsync exit {out.returncode}").strip().splitlines()[-1][:120]
+        return ""
+
     # ----------------------------------------------------------------- status
     def status(self) -> Dict[str, Any]:
         """For the Settings page: the drives plugged in, last night's result, and what's running now."""
@@ -489,4 +528,7 @@ class Backup:
             "seconds": state.get("seconds"),
             "remote": str(self.settings.get("backup_remote") or ""),
             "remote_ok": state.get("remote_ok"),
+            "photos": str(self.settings.get("backup_photos_folder") or ""),
+            "photos_remote": str(self.settings.get("backup_photos_remote") or ""),
+            "photos_ok": state.get("photos_ok"),
         }

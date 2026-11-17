@@ -248,6 +248,30 @@ class TestBackup(unittest.TestCase):
             with self.assertRaises(ValueError):
                 check(bad)
 
+    def test_the_family_photos_go_to_another_computer_add_only(self):
+        self._use_stick()
+        _write(os.path.join(self.stick, "Backup of Photos", "2015", "beach.jpg"), b"photo")
+        self.settings.update(backup_photos_folder="Backup of Photos", backup_photos_remote="oldpc")
+        result = self.backup.run()
+        self.assertEqual(result["problems"], [])
+        self.assertEqual(result["photos_ok"], self.now)
+        rsync = next(c for c in self.disks.calls if c[0] == "rsync" and "oldpc:PhotoBackup/" in c)
+        self.assertNotIn("--delete", rsync)  # (a photo deleted from the drive by mistake stays on the other computer)
+        self.assertIn("-rt", rsync)
+        self.assertEqual(rsync[-2], os.path.join(self.stick, "Backup of Photos") + "/")
+        self.assertEqual(self.backup.status()["photos_ok"], self.now)
+
+    def test_the_photo_copy_reports_what_went_wrong(self):
+        self._use_stick()
+        self.settings.update(backup_photos_folder="Not There", backup_photos_remote="oldpc")
+        self.assertIn("the photos' copy to oldpc failed (the photo folder isn't on the drive)",
+                      self.backup.run()["problems"])
+        self.assertTrue(self.warnings)
+        for bad in ("../..", "Sentinel Backup", "/"):  # (only a folder of the family's own on the drive)
+            self.assertEqual(self.backup._photos_to_remote(self.stick, bad, "oldpc"), "the photo folder isn't on the drive")
+        self.assertEqual(self.backup._photos_to_remote(self.stick, "x", "-oProxyCommand=x"), "not a valid host name")
+        self.assertFalse(any(c[0] == "rsync" and "oldpc:PhotoBackup/" in c for c in self.disks.calls))
+
     def test_runs_once_a_night_at_the_set_time(self):
         self.settings["backup_time"] = "03:30"
         at = lambda h, m, d=9: time.mktime((2026, 11, d, h, m, 0, 0, 0, -1))  # noqa: E731
