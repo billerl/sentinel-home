@@ -10,8 +10,9 @@ people's conversational privacy"), so:
 - Only after "Hey Jarvis" are the next few seconds turned into words, to find the command. Those words (what was
   said to Jarvis, like the house mic) are noted with what was done; nothing said without the wake word ever is.
 
-The camera has no speaker, so it answers with its white light (sentinel/engine/camera_light.py): on while it
-listens, one flash for done, two for "didn't understand" or "not from out here". Out here only plugs and lights
+The camera has no speaker. It can answer with its white light (``light``: on while it listens, one flash for done,
+two for "didn't understand"), but the engine doesn't pass one any more (2026-11-17: the cameras keep the light
+off in daylight, so it was rarely seen; the family said remove it). Out here only plugs and lights
 can be switched (``act`` decides): someone in the yard mustn't be able to quiet the cameras.
 """
 

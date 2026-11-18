@@ -1121,7 +1121,6 @@ class Engine:
             place = pipeline.display_name
             ear = CameraEar(host, source, self._ear_words,
                             lambda text, audio, place=place: self._ear_command(text, place, audio),
-                            light=self.camera_lights,
                             threshold=lambda: float(self.settings.get("voice_wake_threshold", 0.5)),
                             gain=lambda: float(self.settings.get("voice_gain", 4.0)))
             self.camera_ears[host] = ear
