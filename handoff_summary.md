@@ -65,6 +65,13 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     the only change was the real tractor; at night 13 parked cars had come out "tractor"). A tractor is the
     family's own when the Vehicles page has exactly one vehicle of kind "tractor" (fingerprints can't tell
     tractors apart; camera.py `_check_vehicle_type`).
+  - Which animal (2026-11-18, `subject_check.ANIMAL_ONLY_TYPES`): the family's black dog went out as "a bird" (YOLOX
+    calls it bird/cow; "a black cat" pulled CLIP to cat). Extra dog/bird descriptions ("a black dog", "a crow"...)
+    are stored in subject_prompts.npz flagged `animal_only` and used only for tracks the detector called an animal:
+    16 hand-checked back yard sightings 11 -> 15 right; 69 person tracks decided exactly as before (with them,
+    a child half behind a car in IR became a dog). The HD crop was tried too and was worse (8 of 18): the sub crop
+    is sharp enough at these sizes, and the HD keyframe is often a different moment. Rebuild with
+    `tools/build_vehicle_prompts.py <text_model> <tokenizer> subject` (only that file).
   - "2 people" (`objects.companions`, 2026-11-10): only other person tracks seen within 1 s of this one and not
     overlapping its box. Before, any confirmed track counted, incl. the same person's ghost track (lost behind a
     car, picked up as a new track; tracks live TRACK_TTL_SECONDS) and a "dog" relabelled to person: 36 of 137

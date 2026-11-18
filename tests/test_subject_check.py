@@ -11,7 +11,7 @@ import unittest
 import numpy as np
 
 from sentinel.detection.objects import Detection
-from sentinel.detection.subject_check import SubjectChecker
+from sentinel.detection.subject_check import ANIMAL_ONLY_TYPES, SubjectChecker
 
 GREY = np.full((360, 640, 3), 120, dtype=np.uint8)
 CAM_URL = "rtsp://hass:secret@192.168.0.9:554/h264/ch1/sub/av_stream"
@@ -24,7 +24,8 @@ class _Fixed(SubjectChecker):
         self.available = True
         self.probs = dict({"person": 0, "cat": 0, "dog": 0, "deer": 0, "bird": 0, "object": 0}, **probs)
 
-    def probabilities(self, frame, box):
+    def probabilities(self, frame, box, animal=False):
+        self.asked_as_animal = animal
         return dict(self.probs)
 
 
@@ -46,6 +47,21 @@ class TestRules(unittest.TestCase):
         self.assertEqual(self.kind("animal", 0.5, bird=0.1, cat=0.74, dog=0.16), "cat")  # "cow"/"bird" that's a cat
         self.assertEqual(self.kind("animal", 0.5, person=0.8, cat=0.1), "person")
         self.assertEqual(self.kind("animal", 0.5, cat=0.3, dog=0.3, person=0.3), "")
+
+    def test_black_dog_descriptions_only_for_animal_tracks(self):
+        # 2026-11-18: the family's black dog went out as "a bird"; "a black dog" fixed it, but it also turned a child
+        # half behind a car into a dog, so a person track is judged by the everyday descriptions alone
+        real = SubjectChecker(types.SimpleNamespace(available=True, embed=lambda crop: None))
+        self.assertTrue(real.available)
+        black_dog = real._text[[i for i, k in enumerate(real._owners) if k == "dog"][1]]  # "a black dog"
+        real.classifier.embed = lambda crop: black_dog
+        as_person, as_animal = real.probabilities(GREY, (0, 0, 10, 10)), real.probabilities(GREY, (0, 0, 10, 10), animal=True)
+        self.assertGreater(as_animal["dog"], as_person["dog"])
+        self.assertEqual(int((~real._everyday).sum()), sum(len(v) for v in ANIMAL_ONLY_TYPES.values()))
+        for group, animal in (("person", False), ("animal", True)):
+            fixed = _Fixed(cat=0.9)
+            fixed.check(GREY, (0, 0, 10, 10), group, 0.6)
+            self.assertIs(fixed.asked_as_animal, animal)
 
     def test_unsure_keeps_the_detector(self):
         self.assertEqual(self.kind("person", 0.6, person=0.47, cat=0.19, object=0.16), "")

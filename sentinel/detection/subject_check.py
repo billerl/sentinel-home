@@ -30,6 +30,14 @@ SUBJECT_TYPES: Dict[str, List[str]] = {
     "object": ["a trash can", "a garbage bin", "a recycling bin", "a mailbox", "a bush", "a potted plant",
                "a shadow on the ground", "a chair", "a box", "a fan", "a coat hanging up", "a bag", "a hose"],
 }
+# More ways to say it, used only when the detector already called it an animal (which animal is it?). A black dog
+# nosing about the yard was "bird"/"cow" to the detector and "cat" to "a black cat" (2026-11-18: the family's dog sent
+# as a bird); with these, 15 of 16 hand-checked back yard sightings were named right, against 11. Not for "is this a
+# person?": "a black dog" turned a child half behind a car (infrared) into a dog, so person tracks never see them.
+ANIMAL_ONLY_TYPES: Dict[str, List[str]] = {
+    "dog": ["a black dog", "a dog sniffing the ground", "a small dog"],
+    "bird": ["a crow", "a bird on the ground"],
+}
 ANIMALS = ("cat", "dog", "deer", "bird")
 # A person-sized "bird" isn't plausible: CLIP once called a girl walking past the bins a bird.
 PERSON_LOOKALIKES = ("cat", "dog", "deer")
@@ -57,17 +65,22 @@ class SubjectChecker:
             self._owners = [str(k) for k in data["keys"]]
             self._text = data["embeddings"].astype(np.float32)
             self._scale = float(data["logit_scale"])
+            only = data["animal_only"].astype(bool) if "animal_only" in data.files else np.zeros(len(self._owners), bool)
+            self._everyday = ~only  # the rows a person track is judged by
             self.available = getattr(classifier, "available", False) and set(self._owners) <= set(SUBJECT_TYPES)
         except (OSError, KeyError, ValueError):
             pass
 
-    def probabilities(self, frame: np.ndarray, box: Tuple[int, int, int, int]) -> Dict[str, float]:
+    def probabilities(self, frame: np.ndarray, box: Tuple[int, int, int, int],
+                      animal: bool = False) -> Dict[str, float]:
+        """Each kind's share; ``animal``: the detector called it an animal, so ANIMAL_ONLY_TYPES count too."""
         embedding = self.classifier.embed(crop_for_clip(frame, box))
-        logits = self._scale * (self._text @ embedding)
+        rows = np.ones(len(self._owners), bool) if animal else self._everyday
+        logits = self._scale * (self._text[rows] @ embedding)
         p = np.exp(logits - logits.max())
         p /= p.sum()
         out = dict.fromkeys(SUBJECT_TYPES, 0.0)
-        for key, value in zip(self._owners, p):
+        for key, value in zip([k for k, r in zip(self._owners, rows) if r], p):
             out[key] += float(value)
         return out
 
@@ -76,7 +89,7 @@ class SubjectChecker:
         """What the crop really is, when clearly different from what the detector said; else Verdict("")."""
         if not self.available or frame is None:
             return None
-        probs = self.probabilities(frame, box)
+        probs = self.probabilities(frame, box, animal=detector_group == "animal")
         if probs["object"] >= OBJECT_MIN and detector_score < OBJECT_MAX_DETECTOR_SCORE:
             return Verdict("object", probs)
         animal = max(ANIMALS, key=lambda k: probs[k])

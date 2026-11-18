@@ -90,6 +90,7 @@ sentinel-home/                         # repository root
     │   ├── objects.py                 # YOLOX object detector (OpenVINO)
     │   ├── vehicle_type.py            # CLIP zero-shot vehicle type / delivery-company recognition
     │   ├── package_check.py           # CLIP "is this a package?" for things left at the door (+ package_prompts.npz)
+    │   ├── subject_check.py           # CLIP second opinion on people/animals: a cat called a person, which animal (+ subject_prompts.npz)
     │   ├── car_fingerprint.py         # DINOv2 fingerprints: which of the family's cars is this?
     │   ├── vehicle_prompts.npz        # Precomputed CLIP text embeddings (tools/build_vehicle_prompts.py)
     │   └── network_discovery.py       # RTSP discovery / resolve / endpoints
