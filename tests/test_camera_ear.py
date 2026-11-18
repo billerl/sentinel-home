@@ -94,6 +94,24 @@ class TestCameraEar(unittest.TestCase):
         self.assertTrue(logged)
         self.assertNotIn("patio", json.dumps([k for _, k in logged]))
 
+    def test_a_bird_isnt_a_person_talking(self):
+        # 2026-11-18 12:08: a chirp woke the back yard camera and Whisper heard "Turn the Jabra down" in the song
+        acted = []
+        ear = self.make(lambda text, audio: acted.append(text) or True)
+        bird = lambda: (0.2 * np.sin(2 * np.pi * 4200 * np.arange(CHUNK) / 16000)).astype(np.float32)
+        self.wake.scores = [0.93]
+        ear._on_chunk(bird())
+        for _ in range(10):
+            ear._on_chunk(bird())
+        for _ in range(20):
+            ear._on_chunk(quiet())
+        deadline = time.time() + 5
+        while not self.light.calls[1:] and time.time() < deadline:
+            time.sleep(0.05)
+        self.assertEqual((acted, self.heard), ([], []))  # not even turned into words
+        self.assertEqual(self.light.calls[-1], ("answer", "192.0.2.10", 2))
+        self.assertEqual(ear._mode, "wake")
+
     def test_nothing_said_after_the_wake_word(self):
         acted = []
         ear = self.make(lambda text, audio: acted.append((text, len(audio))) or True)

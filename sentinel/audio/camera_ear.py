@@ -32,6 +32,18 @@ WAKE_MODEL = "hey_jarvis_v0.1"  # the one tested at the camera (the house's own 
 WAIT_FOR_SPEECH = 4.0  # after the wake word (most say it in one breath: "Hey Jarvis, turn on the...")
 MAX_COMMAND = 7.0
 RETRY_SECONDS = (5.0, 300.0)  # the camera's sound stopped: try again, backing off to this
+# Birds wake it too (2026-11-18: a chirp at the back yard scored 0.93, and Whisper made "Turn the Jabra down" of the
+# song). A voice is mostly low (100-1000 Hz): the yard's real requests had 41-73% of their sound there, the birds
+# 2-16%. Below this share it isn't a person talking, so it isn't turned into words at all.
+VOICE_SHARE_MIN = 0.3
+
+
+def voice_share(audio: np.ndarray) -> float:
+    """How much of a sound is in a voice's range (100-1000 Hz), 0-1."""
+    spectrum = np.abs(np.fft.rfft(np.asarray(audio, dtype=np.float32)))
+    freqs = np.fft.rfftfreq(len(audio), 1.0 / RATE)
+    total = float(spectrum.sum())
+    return float(spectrum[(freqs >= 100) & (freqs < 1000)].sum()) / total if total > 0 else 0.0
 
 
 class CameraEar:
@@ -178,7 +190,11 @@ class CameraEar:
         try:
             if end.heard:
                 audio, _talking = trim_speech(chunks, end.start_level, end.quiet_level)
-                if len(audio):
+                share = voice_share(audio) if len(audio) else 0.0
+                if len(audio) and share < VOICE_SHARE_MIN:
+                    app_logger.log("info", "camera_ear_not_voice", camera_ip=self.host, voice_share=round(share, 2),
+                                   component="camera_ear", action="command")
+                elif len(audio):
                     audio = normalise(audio)
                     text = self._transcribe(audio)
                     done = bool(text) and self._act(text, audio)  # (the sound too: the Voice row's clip)
