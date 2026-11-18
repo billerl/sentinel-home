@@ -59,6 +59,7 @@ sentinel-home/                         # repository root
     │   │                              #   every position (points) and each person's own web login
     │   ├── timeline.py                # Family timeline: positions -> stops + drives for one day
     │   ├── weather.py                 # Weather tile data (Open-Meteo, server-side, cached 10 min)
+    │   ├── moon.py                    # The weather tile's moon: tonight's phase and whether it's up (math only)
     │   ├── weather_alerts.py          # Severe weather warnings (National Weather Service): voice, Telegram, banner
     │   ├── packages.py                # Package alerts: something left at a door camera after a visit
     │   ├── recap.py                   # Morning recap: the night in one message + a highlight video

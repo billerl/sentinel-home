@@ -51,16 +51,19 @@
   background: radial-gradient(circle, #fff1c8 0, #ffc77a 45%, rgba(255,150,80,0.5) 62%, rgba(255,130,60,0) 72%);
   box-shadow: 0 0 calc(var(--skyh) * 22) calc(var(--skyh) * 8) rgba(255,150,80,0.35); }
 
-/* Moon (a crescent: the lit edge is an inset shadow) and stars, on clear or partly cloudy nights */
+/* Moon (drawn by sky.js in tonight's real phase, shown only while it's up) and stars, on clear or partly cloudy nights */
 .sky-moon { display: none; left: 66%; top: 15%; border-radius: 50%;
             width: calc(var(--skyh) * 9); height: calc(var(--skyh) * 9);
-            box-shadow: inset calc(var(--skyh) * -2.6) calc(var(--skyh) * 1) 0 0 #f3efd8,
-                        0 0 calc(var(--skyh) * 7) rgba(240,236,210,0.18); }
+            box-shadow: 0 0 calc(var(--skyh) * 7) rgba(240,236,210,0.18); }
+.sky-moon svg { display: block; width: 100%; height: 100%; }
+.sky-moon .dark { fill: rgba(150,160,180,0.12); }
+.sky-moon .lit { fill: #f3efd8; }
 .sky-stars { display: none; top: 0; left: 0; right: 0; height: 70%; opacity: 0.85;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='140'%3E%3Cg fill='%23fff'%3E%3Ccircle cx='12' cy='18' r='1'/%3E%3Ccircle cx='48' cy='62' r='.7'/%3E%3Ccircle cx='80' cy='14' r='1.2'/%3E%3Ccircle cx='104' cy='94' r='.8'/%3E%3Ccircle cx='136' cy='40' r='.9'/%3E%3Ccircle cx='170' cy='12' r='.7'/%3E%3Ccircle cx='196' cy='70' r='1.1'/%3E%3Ccircle cx='30' cy='112' r='.7'/%3E%3Ccircle cx='160' cy='118' r='.8'/%3E%3Ccircle cx='64' cy='128' r='.6'/%3E%3Ccircle cx='118' cy='4' r='.6'/%3E%3Ccircle cx='210' cy='130' r='.6'/%3E%3C/g%3E%3C/svg%3E");
   animation: sky-twinkle 5s ease-in-out infinite alternate; }
 .ph-night.sky-clear .sky-moon, .ph-night.sky-partly .sky-moon, .ph-night.sky-clear .sky-stars, .ph-night.sky-partly .sky-stars { display: block; }
 .ph-night.sky-partly .sky-stars { opacity: 0.5; }
+.moon-down .sky-moon { display: none !important; }
 @keyframes sky-twinkle { from { opacity: 0.45; } to { opacity: 0.95; } }
 
 /* Clouds: two strips twice the card's width sliding left slowly; each repeat holds two soft puffy clouds */

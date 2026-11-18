@@ -199,6 +199,7 @@
         '<span class="words">' + esc(w.words) + '<span>High ' + esc(w.high) + '° · low ' + esc(w.low) + '° · wind ' + esc(w.wind) + ' mph' +
         (w.place ? ' · ' + esc(w.place) : '') + '</span></span>';
       box.insertBefore(sky, box.firstChild);  // the sky picture behind it (sky.css)
+      WeatherSky.update(box, w);  // (again, now its moon is there to draw)
       WeatherSky.size(sky);
     }
 

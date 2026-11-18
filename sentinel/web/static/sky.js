@@ -27,10 +27,31 @@
     return m > rise && m < set ? "day" : "night";
   }
 
-  // Sets the card's classes (has-sky sky-<kind> ph-<phase>); none while there's no weather to show.
+  // The moon as it really is tonight (w.moon from sentinel/engine/moon.py): the lit part, on the right while it
+  // grows toward full and on the left after, as seen from the northern half of the world.
+  function moonSvg(m) {
+    var k = Math.max(0, Math.min(1, m.lit)), rx = Math.abs(1 - 2 * k) * 50;
+    var lit = 'M50 0A50 50 0 0 1 50 100A' + rx.toFixed(1) + ' 50 0 0 ' + (k > 0.5 ? 1 : 0) + ' 50 0Z';
+    return '<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="50" class="dark"/>' +
+      '<path d="' + lit + '" class="lit"' + (m.waxing ? '' : ' transform="matrix(-1 0 0 1 100 0)"') + '/></svg>';
+  }
+
+  function drawMoon(card, w) {
+    var el = card.querySelector ? card.querySelector(".sky-moon") : null, m = w && w.moon;
+    if (!el || !m || m.lit == null) return;
+    var key = Math.round(m.lit * 100) + (m.waxing ? "+" : "-");
+    if (el.getAttribute("data-moon") === key) return;
+    el.innerHTML = moonSvg(m);
+    el.setAttribute("data-moon", key);
+  }
+
+  // Sets the card's classes (has-sky sky-<kind> ph-<phase>, moon-down while it's set or new); none while there's
+  // no weather to show.
   function update(card, w) {
+    drawMoon(card, w);
     var want = w && w.configured !== false && w.temp != null
       ? ["has-sky", "sky-" + (w.sky || "clear"), "ph-" + phase(w)] : [];
+    if (want.length && w.moon && (w.moon.up === false || w.moon.lit < 0.03)) want.push("moon-down");
     var have = (card.getAttribute("data-sky") || "").split(" ").filter(Boolean);
     if (have.join(" ") === want.join(" ")) return;
     have.forEach(function(c) { card.classList.remove(c); });

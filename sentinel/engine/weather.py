@@ -14,6 +14,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Dict, Optional, Tuple
 
+from sentinel.engine.moon import moon
 from sentinel.logging_utils import app_logger
 
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
@@ -117,9 +118,12 @@ class WeatherService:
                 threading.Thread(target=self._refresh, args=key, daemon=True, name="weather").start()
             data = self._data if not stale_key else None
             error = self._error if failed_key == key else ""
+            place = self._place or {}
         if data is None:
             return {"configured": True, "loading": not error, "error": error}
-        return {"configured": True, **{k: v for k, v in data.items() if k != "key"}}
+        # The tile's moon: lit as it really is tonight, and only while it's up (worked out now, not cached: it moves)
+        return {"configured": True, **{k: v for k, v in data.items() if k != "key"},
+                "moon": moon(place.get("lat"), place.get("lon"))}
 
     def _refresh(self, query: str, units: str) -> None:
         try:

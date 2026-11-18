@@ -142,6 +142,9 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     changes on time between weather updates. Gradients, SVG hills, sliding cloud strips, falling rain/snow layers,
     lightning; a shade on top + text shadow keep the numbers readable. `.wx-sky` is the tile's first child and
     survives redraws (`setWeatherHtml`) so the clouds don't jump. Transform/opacity animations only (Chrome 56 TV).
+    The night moon is tonight's real one: `/api/weather` adds `moon` {lit 0-1, waxing, up} worked out on each request
+    (`sentinel/engine/moon.py`, Schlyter's low-precision moon, the weather town's coordinates, nothing fetched);
+    sky.js draws the lit part as an SVG (right side while waxing) and `moon-down` hides it while set or new (< 3%).
   - QR sign-in for the Fire TV: `/login` shows a QR on wide screens (`POST /login/pair`), a signed-in phone
     approves at `/pair/<code>`, the TV's poll (`/login/pair/<code>`) gets the session cookie. Codes: one use,
     3 min, bound to the requesting IP, 3 per IP. Sessions persist as SHA-256 token hashes in
