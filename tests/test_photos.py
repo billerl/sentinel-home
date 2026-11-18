@@ -113,6 +113,29 @@ class TestPhotos(unittest.TestCase):
         self.assertFalse(self.p.create_album("mine", False, None, "Household")[0])  # (the drive ignores case)
         self.assertFalse(self.p.create_album("../x", False, None, "Household")[0])
 
+    def test_documents_in_a_private_album_are_its_owners_to_download(self):
+        aid = int(self.p.create_album("Old PC Files", False, BEN, "Ben")[1])
+        folder = f"{ALBUMS_DIR}/Ben/Old PC Files"
+        put(os.path.join(self.drive, *folder.split("/"), "Documents", "taxes.pdf"), b"%PDF-1.7 ...")
+        put(os.path.join(self.drive, *folder.split("/"), "Documents", "antler.stl"), b"solid x")
+        put(os.path.join(self.drive, *folder.split("/"), "Documents", ".hidden"), b"x")
+        put(os.path.join(self.drive, *folder.split("/"), "Documents", ".git", "config"), b"x")
+        put(os.path.join(self.drive, "Backup of Photos", "2015", "readme.pdf"), b"%PDF")  # (shared folders: photos only)
+        self.p.rescan(wait=True)
+        docs = self.p.listing(folder + "/Documents", BEN, False)
+        self.assertEqual(sorted((i["name"], i["kind"]) for i in docs["items"]),
+                         [("antler.stl", "file"), ("taxes.pdf", "file")])
+        self.assertEqual([f["name"] for f in docs["folders"]], [])  # (.git isn't offered)
+        found = self.p.file_for(folder + "/Documents/taxes.pdf", BEN, False)
+        self.assertIsNotNone(found)
+        self.assertIsNone(self.p.thumbnail(*found))
+        self.assertIsNone(self.p.display(*found))
+        album = [a for a in self.p.overview(BEN, False)["albums"] if a["id"] == aid][0]
+        self.assertEqual((album["count"], album["cover"]), (2, None))  # (documents only: no cover picture)
+        for person, household in ((LIZ, False), (None, True)):
+            self.assertIsNone(self.p.file_for(folder + "/Documents/taxes.pdf", person, household))
+        self.assertEqual(self.paths("Backup of Photos/2015"), ["beach.jpg"])
+
     def test_the_shared_folders_are_never_changed(self):
         self.assertFalse(self.p.delete_photo("Backup of Photos/2015/beach.jpg", None, True)[0])
         self.assertTrue(os.path.exists(os.path.join(self.drive, "Backup of Photos", "2015", "beach.jpg")))

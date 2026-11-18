@@ -114,6 +114,8 @@ def register(app: Flask, ctx: WebContext) -> None:
         if found is None:
             return "", 404
         path, row = found
+        if row["kind"] == "file":  # (a document in someone's album: downloaded, never shown inline)
+            return _private(send_file(path, as_attachment=True, download_name=row["name"], conditional=True))
         if row["kind"] == "video":
             if os.path.splitext(path)[1].lower() not in PLAYS:
                 return "", 415  # (an old AVI: the page offers it as a download)

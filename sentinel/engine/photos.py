@@ -206,11 +206,11 @@ class Photos:
         base = os.path.join(root, *top.split("/"))
         album = top.split("/")[0] == ALBUMS_DIR  # (people's own photos: no icon filtering)
         for here, dirs, files in os.walk(base):
-            dirs[:] = [d for d in dirs if album or (d.lower() not in SKIP_DIRS and not d.startswith("."))]
+            dirs[:] = [d for d in dirs if not d.startswith(".") and (album or d.lower() not in SKIP_DIRS)]
             rel_dir = os.path.relpath(here, root).replace(os.sep, "/")
             for name in files:
-                kind = media_kind(name)
-                if kind is None or name.startswith("._"):  # (a Mac's shadow file)
+                kind = media_kind(name) or ("file" if album else None)  # (in one's own album: any file, to download)
+                if kind is None or name.startswith("."):  # (a Mac's "._" shadow file; hidden files)
                     continue
                 try:
                     st = os.stat(os.path.join(here, name))
@@ -250,16 +250,19 @@ class Photos:
         """Folder counts (own photos, and with everything below) and a cover photo, from the media table."""
         own: Dict[str, int] = {}
         cover: Dict[str, str] = {}
-        for d, n, first in conn.execute("SELECT dir, COUNT(*), MIN(path) FROM media GROUP BY dir"):
+        for d, n, first in conn.execute("SELECT dir, COUNT(*), MIN(CASE WHEN kind != 'file' THEN path END) FROM media "
+                                        "GROUP BY dir"):
             own[d] = n
-            cover[d] = first
+            if first is not None:  # (a folder of documents only: no cover picture)
+                cover[d] = first
         total: Dict[str, int] = {}
         for d, n in own.items():
             parts = d.split("/")
             for i in range(1, len(parts) + 1):
                 p = "/".join(parts[:i])
                 total[p] = total.get(p, 0) + n
-                cover.setdefault(p, cover[d])
+                if d in cover:
+                    cover.setdefault(p, cover[d])
         conn.execute("DELETE FROM dirs")
         conn.executemany("INSERT INTO dirs VALUES (?, ?, ?, ?, ?, ?)",
                          [(p, p.rsplit("/", 1)[0] if "/" in p else None, p.rsplit("/", 1)[-1], own.get(p, 0), t,
@@ -341,6 +344,8 @@ class Photos:
         return os.path.join(self.cache, kind, key[:2], key + ".jpg")
 
     def thumbnail(self, path: str, row: sqlite3.Row) -> Optional[str]:
+        if row["kind"] == "file":
+            return None
         out = self._cached("thumbs", row)
         if os.path.exists(out):
             return out
@@ -354,6 +359,8 @@ class Photos:
 
     def display(self, path: str, row: sqlite3.Row) -> Optional[str]:
         """A photo sized for a screen (2048 px, the right way up): a 10 MB camera photo loads fast on a phone."""
+        if row["kind"] == "file":
+            return None
         out = self._cached("display", row)
         if os.path.exists(out):
             return out

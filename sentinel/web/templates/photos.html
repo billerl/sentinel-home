@@ -45,6 +45,8 @@
     .tile { position: relative; aspect-ratio: 1; background: #0b1418; border: 0; padding: 0; border-radius: 4px; overflow: hidden; cursor: pointer; min-height: 0; }
     .tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .tile .vid { position: absolute; right: 5px; bottom: 4px; font-size: 0.8rem; color: #fff; text-shadow: 0 0 4px #000; }
+    .tile .fname { position: absolute; left: 4px; right: 4px; bottom: 4px; font-size: 0.7rem; color: #9fb8c2; overflow: hidden;
+                   text-overflow: ellipsis; white-space: nowrap; }
     .tile .none { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 1.6rem; color: #2a4752; }
     .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 6px; }
     .tools .count { color: #6f97a5; font-size: 0.85rem; margin-right: auto; }
@@ -228,7 +230,7 @@
     }
     function tools(d) {
       var t = $("tools"), al = d.album;
-      t.innerHTML = '<span class="count">' + plural(d.count, "photo or video", "photos and videos") +
+      t.innerHTML = '<span class="count">' + plural(d.count, "item", "items") +
         (al ? ' · ' + esc(al.owner) + '<span class="badge ' + (al.shared ? 'shared">👪 Family' : 'private">🔒 Only me') + "</span>" : "") + "</span>";
       if (!al || !al.mine) return;
       var add = document.createElement("label");
@@ -261,10 +263,15 @@
       items.push(it);
       var b = document.createElement("button");
       b.type = "button"; b.className = "tile"; b.setAttribute("aria-label", it.name);
-      var img = document.createElement("img");
-      img.loading = "lazy"; img.alt = ""; img.src = "/photos/thumb?p=" + q(it.path);
-      img.onerror = function () { img.remove(); var n = document.createElement("span"); n.className = "none"; n.textContent = it.kind === "video" ? "🎞️" : "🖼️"; b.appendChild(n); };
-      b.appendChild(img);
+      if (it.kind === "file") {  // (a document in one's own album: an icon and its name)
+        var n = document.createElement("span"); n.className = "none"; n.textContent = "📄"; b.appendChild(n);
+        var f = document.createElement("span"); f.className = "fname"; f.textContent = it.name; b.appendChild(f);
+      } else {
+        var img = document.createElement("img");
+        img.loading = "lazy"; img.alt = ""; img.src = "/photos/thumb?p=" + q(it.path);
+        img.onerror = function () { img.remove(); var n = document.createElement("span"); n.className = "none"; n.textContent = it.kind === "video" ? "🎞️" : "🖼️"; b.appendChild(n); };
+        b.appendChild(img);
+      }
       if (it.kind === "video") { var v = document.createElement("span"); v.className = "vid"; v.textContent = "▶"; b.appendChild(v); }
       b.onclick = function () { openViewer(i); };
       $("grid").appendChild(b);
@@ -318,6 +325,10 @@
         var v = document.createElement("video");
         v.controls = true; v.playsInline = true; v.preload = "metadata"; v.src = "/photos/view?p=" + q(it.path);
         stage.appendChild(v);
+      } else if (it.kind === "file") {
+        var mb = it.size >= 1048576 ? (it.size / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(it.size / 1024)) + " KB";
+        stage.innerHTML = '<div class="cant">📄<br><b>' + esc(it.name) + "</b><br>" + mb +
+          "<br>Not a photo: use <b>Download</b> to open it on this device.</div>";
       } else if (it.kind === "video") {
         stage.innerHTML = '<div class="cant">🎞️<br>This older video type doesn\'t play in a browser.<br>Use <b>Download</b> to watch it on this device.</div>';
       } else {
