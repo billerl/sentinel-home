@@ -33,6 +33,10 @@ APPS_RETRY = 600.0  # after a Fire TV didn't answer
 LIVE_VIEW_APPS = ("de.ozerov.fully", "com.fullykiosk.emm")  # Fully Kiosk Browser: Sentinel's live view
 PAGE_TAKE_WAIT = 4.5  # s: the kiosk page asks what to show every 2 s
 PAGE_ALIVE = 20.0  # s: a kiosk page that asked this recently is open on screen (ADB or not)
+# Just powered up, a Fire TV opens Amazon's home screen, not the kiosk (2026-11-17: after a power cut the Sentinel TV
+# sat on the Amazon screensaver). Within this long of starting, Sentinel brings its live view forward, once per start.
+BOOT_WINDOW = 600.0
+HOME_SCREENS = ("com.amazon.tv.launcher", "Dream", "screensaver")
 # The remote's keys (named as Samsung's, see switches.TV_KEYS) -> Android key codes.
 KEYS = {"KEY_UP": "KEYCODE_DPAD_UP", "KEY_DOWN": "KEYCODE_DPAD_DOWN", "KEY_LEFT": "KEYCODE_DPAD_LEFT",
         "KEY_RIGHT": "KEYCODE_DPAD_RIGHT", "KEY_ENTER": "KEYCODE_DPAD_CENTER", "KEY_RETURN": "KEYCODE_BACK",
@@ -117,6 +121,7 @@ class FireTVDriver:
         self._page: Dict[str, Dict[str, Any]] = {}
         self._page_lock = threading.Lock()
         self._page_seen: Dict[str, float] = {}  # host -> when the open page last asked (page_poll)
+        self._started: Dict[str, float] = {}  # host -> the start (power-up) already looked after (_after_start)
         try:
             with open(self.path) as f:
                 self._tvs = {k: v for k, v in json.load(f).items() if isinstance(v, dict)}
@@ -211,7 +216,32 @@ class FireTVDriver:
 
     # ------------------------------------------------------------ the switch interface
     def _screen_on(self, host: str) -> bool:
-        return "mWakefulness=Awake" in self._shell(host, "dumpsys power | grep mWakefulness=")
+        out = self._shell(host, "dumpsys power | grep mWakefulness=; cat /proc/uptime")
+        try:
+            self._after_start(host, float(out.split("mWakefulness=")[-1].split()[1]))
+        except (IndexError, ValueError):
+            pass
+        return "mWakefulness=Awake" in out
+
+    def _after_start(self, host: str, uptime: float) -> None:
+        """Just powered up and on Amazon's home screen: the live view in front (once per start, if it has one)."""
+        started = time.time() - uptime
+        if uptime > BOOT_WINDOW or abs(self._started.get(host, 0.0) - started) < 60:
+            return
+        try:
+            focus = self._shell(host, "dumpsys window | grep mCurrentFocus")
+            m = re.search(r"mCurrentFocus=Window\{\S+ \S+ ([\w.]+)/(\S*)\}", focus)
+            if m is None:
+                return  # (still starting up: no window yet; asked again next poll)
+            self._started[host] = started
+            if not any(h in m.group(0) for h in HOME_SCREENS):
+                return  # someone is already using it
+            package = next((p for p in LIVE_VIEW_APPS if p in self.apps(host)), None)
+            if package and package not in m.group(1):
+                self.launch(host, package)
+                app_logger.log("info", "firetv_live_after_start", host=host, component="fire_tv", action="show_live")
+        except (OSError, ValueError):
+            pass
 
     def _info(self, mac: str, on: bool) -> Dict[str, Any]:
         tv = self._tvs[mac]

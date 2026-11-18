@@ -1123,14 +1123,15 @@ class FakeFireShell:
     """What a Fire TV answers to the ADB shell commands FireTVDriver sends."""
 
     def __init__(self):
-        self.awake, self.focus, self.commands = True, "de.ozerov.fully", []
+        self.awake, self.focus, self.commands, self.uptime = True, "de.ozerov.fully", [], 50000.0
 
     def __call__(self, host, command, timeout=None):
         self.commands.append(command)
         if command.startswith("getprop ro.product.manufacturer"):
             return "Amazon\nAFTEAMR311\nAlex's 2nd TV\nG000SERIAL00001\n"
         if command.startswith("dumpsys power"):
-            return "  mWakefulness=" + ("Awake" if self.awake else "Asleep") + "\n"
+            return "  mWakefulness=" + ("Awake" if self.awake else "Asleep") + "\n" + (
+                f"{self.uptime:.2f} 9000.00\n" if "uptime" in command else "")
         if command.startswith("pm list packages -3"):
             return ("package:de.ozerov.fully\npackage:com.netflix.ninja\n---\npackage:com.amazon.avod\n"
                     "package:com.amazon.firebat\npackage:com.amazon.tv.launcher\npackage:com.droidlogic.factory\n"
@@ -1198,6 +1199,23 @@ class TestFireTV(unittest.TestCase):
         self.assertIsNone(self.fire.live_end("192.168.1.70"))  # (already there)
         self.assertEqual(self.sw.tv_live(self.fire_id, False), (True, "showing"))  # Show cameras: closes a map too
         self.assertEqual(self.sw.tv_page("192.168.1.70")["path"], "")
+
+    def test_the_live_view_comes_up_after_a_power_cut(self):
+        # 2026-11-17: power back on, the Sentinel TV sat on Amazon's home screen (its screensaver), not the cameras
+        launches = lambda: sum("monkey -p de.ozerov.fully" in c for c in self.shell.commands)
+        self.shell.uptime, self.shell.focus = 95.0, "com.amazon.tv.launcher"
+        self.sw.poll()
+        self.assertEqual(launches(), 1)
+        self.sw.poll()
+        self.assertEqual(launches(), 1)  # once per start: going Home afterwards is the family's choice
+        self.shell.uptime, self.shell.focus = 40.0, "com.netflix.ninja"  # started again, someone already watching
+        self.sw.poll()
+        self.sw.poll()
+        self.assertEqual(launches(), 1)
+        self.shell.uptime, self.shell.focus = 5000.0, "com.amazon.tv.launcher"  # long running: left alone
+        self.fire._started.clear()
+        self.sw.poll()
+        self.assertEqual(launches(), 1)
 
     def test_a_map_shown_while_adb_is_busy(self):
         # 2026-11-14: the phone remote's screen mirror held the one ADB connection: the kiosk page took Xena's map by
