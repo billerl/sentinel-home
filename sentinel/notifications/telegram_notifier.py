@@ -16,6 +16,30 @@ from sentinel.logging_utils import app_logger
 
 
 TELEGRAM_MAX_UPLOAD_BYTES = 49 * 1024 * 1024  # Bot API upload limit is 50 MB
+# A send that fails or takes longer than this is logged (2026-11-18: alerts from 4:36-4:49 pm reached the family's
+# phones in a burst at 5:10, and nothing here said whether Telegram had been slow or the sends had failed).
+SLOW_SEND_SECONDS = 5.0
+
+
+def _open(request: urllib.request.Request, timeout: float) -> bool:
+    """POST to the Bot API: True when Telegram took it. Failures and slow answers go in the event log
+    (the method only: the URL holds the bot's token)."""
+    method = request.full_url.rsplit("/", 1)[-1].split("?", 1)[0][:40]
+    started = time.time()
+    error = ""
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            ok = 200 <= int(response.status) < 300
+            if not ok:
+                error = f"HTTP {response.status}"
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as e:
+        ok, error = False, (str(getattr(e, "reason", "") or e) or type(e).__name__)[:120]
+    took = time.time() - started
+    if not ok or took > SLOW_SEND_SECONDS:
+        app_logger.log("warning" if not ok else "info", "telegram_send_failed" if not ok else "telegram_send_slow",
+                       method=method, seconds=round(took, 1), error_message=error, component="telegram",
+                       action="send")
+    return ok
 
 
 class TelegramNotifier:
@@ -165,11 +189,7 @@ class TelegramNotifier:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                return 200 <= int(response.status) < 300
-        except (urllib.error.URLError, TimeoutError, ValueError):
-            return False
+        return _open(request, timeout)
 
     def _send_message_to_chat(self, chat_id: str, message: str) -> bool:
         return self._post_json(
@@ -216,11 +236,7 @@ class TelegramNotifier:
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=120) as response:
-                return 200 <= int(response.status) < 300
-        except (urllib.error.URLError, TimeoutError, ValueError, OSError):
-            return False
+        return _open(request, 120)
 
     def _send_photo_to_chat(self, chat_id: str, jpeg: bytes, caption: str) -> bool:
         boundary = f"sentinel-{int(time.time() * 1000)}"
@@ -243,11 +259,7 @@ class TelegramNotifier:
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=20) as response:
-                return 200 <= int(response.status) < 300
-        except (urllib.error.URLError, TimeoutError, ValueError, OSError):
-            return False
+        return _open(request, 20)
 
     def send_photo_with_buttons(self, chat_id: str, jpeg: bytes, caption: str,
                                 buttons: List[List[Tuple[str, str]]]) -> Optional[int]:
