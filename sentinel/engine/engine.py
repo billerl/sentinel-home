@@ -287,6 +287,7 @@ class Engine:
             "tv_camera": self._routine_tv_camera,
             "coords": self.family.home_coords,
             "nobody_home": self.family.nobody_home,
+            "battery": lambda pid: (self.locations.fix(pid) or {}).get("batt"),
             "outdoor_temp": self._outdoor_temp,
             "last_motion": lambda cam: (max(self._last_motion.values(), default=0.0) if cam is None
                                         else self._last_motion.get(cam, 0.0)),

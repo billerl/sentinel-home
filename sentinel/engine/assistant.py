@@ -61,7 +61,8 @@ Rules:
   {"type": "car_arrive"|"car_leave", "cars": [family car names]}  ([] = any family car)
   "only" (optional): "dark": true (after dark / at night), "light": true (daytime), "from"/"to": "HH:MM",
   "days": ["mon", ...], "nobody_home": true, "temp_below": degrees, "temp_above": degrees (only while it's that
-  cold / warm outside, e.g. a time routine that runs a pump only above freezing).
+  cold / warm outside, e.g. a time routine that runs a pump only above freezing), "battery_of": person name with
+  "battery_below": percent (only while their phone's or tracker's battery is under it, e.g. a 9 pm "plug in the collar").
   "then", up to 5 steps: {"do": "switch", "switch": name, "on": true|false, "for": minutes} or with
   "until_quiet": minutes instead of "for" (stays on until there's been no motion on the routine's cameras or Wi-Fi
   sensors that long; camera and sensor routines only); {"do": "telegram", "text": "...", "photo": true (camera routines)}; {"do": "say", "text": "..."};

@@ -285,6 +285,40 @@ class TestRunner(unittest.TestCase):
         hooks["set_switch"] = lambda sid, on, src: (False, "the plug said no")
         return lambda: hooks.__setitem__("set_switch", real)
 
+    def test_a_bedtime_reminder_only_while_the_collar_is_low(self):
+        # 2026-11-18: Xena's collar died overnight (forgot to plug it in): at 9 pm, say so if it's under 70%
+        spec = {"name": "Charge the collar", "when": {"type": "time", "at": "21:00"},
+                "only": {"battery_of": "Kate", "battery_below": 70},
+                "then": [{"do": "say", "text": "Plug in Kate's collar"}, {"do": "telegram", "text": "Plug in Kate's collar"}]}
+        self.assertEqual(normalize(spec, CAT)["only"], {"battery_of": 2, "battery_below": 70})
+        self.assertIn("only when Kate's battery is below 70%", describe(normalize(spec, CAT), CAT))
+        for bad in ({"battery_below": 70}, {"battery_of": "Kate", "battery_below": 100}, {"battery_of": "Kate", "battery_below": "lots"}):
+            with self.assertRaises(ValueError):
+                normalize({**spec, "only": bad}, CAT)
+        levels = {}
+        self.fake.hooks = (lambda real: lambda: {**real(), "battery": levels.get})(self.fake.hooks)
+        self.runner = self.make()
+        self.add(spec)
+        nine = time.mktime(time.strptime(time.strftime("%Y-%m-%d 20:59:58", time.localtime(EVENING)), "%Y-%m-%d %H:%M:%S"))
+
+        def night(level):
+            levels.clear()
+            if level is not None:
+                levels[2] = level
+            self.now = nine + 86400 * night.n
+            night.n += 1
+            self.runner._time_checked = self.now
+            self.now += 5
+            self.runner.tick()
+            return len(self.fake.said)
+        night.n = 0
+        self.assertEqual(night(100), 0)  # on the charger it reads 100: quiet
+        self.assertEqual(night(None), 0)  # never heard from: nothing to go on
+        self.assertEqual(night(45), 1)  # low: said out loud and on Telegram
+        self.assertEqual(self.fake.said[-1], "Plug in Kate's collar")
+        self.assertEqual(self.fake.messages[-1][0], "Plug in Kate's collar")
+        self.assertEqual(night(80), 1)  # charged enough today
+
     def test_an_at_time_switch_that_fails_is_retried_for_five_minutes_only(self):
         plug = "kasa-50c7bf000001"
         self.add({"name": "Pond pump on at 8", "when": {"type": "time", "at": "20:00"},

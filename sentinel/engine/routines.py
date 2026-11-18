@@ -311,6 +311,18 @@ def normalize(spec: Any, cat: Catalog) -> Dict[str, Any]:
             o[key] = _degrees(only[key])
     if "temp_below" in o and "temp_above" in o and o["temp_above"] >= o["temp_below"]:
         raise ValueError("it can't be both above and below those temperatures")
+    if only.get("battery_below") not in (None, "") or only.get("battery_of") not in (None, ""):
+        # "only when Xena's tracker battery is below 70%" (2026-11-18: a bedtime "plug in the collar" reminder)
+        who = _pick(only.get("battery_of"), cat.people, "person")
+        if len(who) != 1:
+            raise ValueError("say whose phone or tracker battery it watches")
+        try:
+            level = int(round(float(only.get("battery_below"))))
+        except (TypeError, ValueError):
+            raise ValueError("the battery level should be a number from 5 to 95")
+        if not 5 <= level <= 95:
+            raise ValueError("the battery level should be a number from 5 to 95")
+        o["battery_of"], o["battery_below"] = who[0], level
 
     actions = spec.get("then")
     actions = [actions] if isinstance(actions, dict) else actions
@@ -452,6 +464,9 @@ def describe(spec: Dict[str, Any], cat: Catalog) -> str:
         limits.append(f"when it's below {o['temp_below']}° outside")
     elif "temp_above" in o:
         limits.append(f"when it's above {o['temp_above']}° outside")
+    if "battery_below" in o:
+        who = cat.people.get(o["battery_of"], "a removed person")
+        limits.append(f"when {who}'s battery is below {o['battery_below']}%")
     if limits:
         when += ", only " + _join(limits, "and")
     steps = []
@@ -559,7 +574,7 @@ class RoutineRunner:
     """Matches what happens (engine hooks) against the saved routines and does their steps.
 
     ``hooks`` come from the engine: set_switch(id, on, source) -> (ok, msg), switch_on(id) -> bool|None,
-    telegram(text, jpeg|None), say(text), coords() -> (lat, lon)|None, nobody_home() -> bool,
+    telegram(text, jpeg|None), say(text), coords() -> (lat, lon)|None, nobody_home() -> bool, battery(person id) -> %|None,
     outdoor_temp() -> degrees|None (the weather card's, in its unit),
     last_motion(camera key|None) -> ts, last_sensor_motion(Wi-Fi sensor path id|None) -> ts."""
 
@@ -633,6 +648,12 @@ class RoutineRunner:
                 app_logger.log("info", "routine_skipped_no_temperature", routine_id=r.id, component="routines", action="run")
                 return False
             if ("temp_below" in o and not temp < o["temp_below"]) or ("temp_above" in o and not temp > o["temp_above"]):
+                return False
+        if "battery_below" in o and not past:
+            # the last level heard (a dead or switched-off tracker keeps its last one: it still needs charging); on the
+            # charger it reads 100, so a plugged-in collar is left in peace
+            level = (self.hooks.get("battery") or (lambda pid: None))(o["battery_of"])
+            if level is None or not level < o["battery_below"]:
                 return False
         return True
 
