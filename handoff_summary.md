@@ -894,3 +894,17 @@ Nothing in this repo installs or configures `cloudflared`; the user (or next cha
 - Outdoor words (same day, the family's choice): what's said after "Hey Jarvis" at a camera is now kept like the house mic (voice_log `said`, and a `voice_heard` log line with source = the camera name); the privacy wanted was for conversations outside, which are still never kept (only post-wake-word audio is transcribed).
 - Voice clips (same day): `VoiceLog.add(..., audio=)` saves what was said after the wake word as a 16 kHz WAV (first 20 s) in recorded_videos/voice_clips/<id>.wav, CLIP_DAYS 30 (words 90). Sources: VoiceAssistant.last_audio (set in _hear), PhoneTalk.last_audio, CameraEar passes it to act(text, audio). `/voice/clip/<id>` (user role) plays it; grid.js `playVoice` (▶ on the pink mark's summary and on list rows).
 - Outdoor Jarvis and the dogs (same day): `_ear_command` also takes location.outing_command (watch / out / back in -> family.start_outing) and beep_command (recall -> family.beep_pets) before switches. Not lost_command (it messages every chat).
+- Album files (2026-11-17, 7c70127): an album (`Family Photos/<owner>/<album>`) lists any file, kind "file" (📄 tile,
+  Download only via `send_file(as_attachment=True)`, never inline; no thumbnail, never the cover). Hidden/dot files are
+  skipped everywhere; shared folders stay photos+videos only. The old PC's Documents/Downloads are in luke's private
+  album "Old PC Files": seen only when signed in as luke (the household login can't see private albums).
+- Fire TV after a power cut (2026-11-17, 22be379): `FireTVDriver._screen_on` also reads `/proc/uptime` in the same ADB
+  call; `_after_start`: uptime < `BOOT_WINDOW` (600 s) and an Amazon home screen/screensaver (`HOME_SCREENS`) in front
+  (`dumpsys window | grep mCurrentFocus`) -> launches Fully once for that power-up (`firetv_live_after_start`). Another
+  app in front = someone chose it: that power-up is marked handled. Fully's own remote admin (2323) is off.
+- Outdoor Jarvis vs birds (2026-11-18, f0bba09): `camera_ear.voice_share` = share of FFT energy in 100-1000 Hz of the
+  audio after the wake word; under `VOICE_SHARE_MIN` (0.3) -> `camera_ear_not_voice` and no Whisper. Real yard requests
+  measured 41-73 %, bird false wakes 2-16 %.
+- Telegram send log (2026-11-18, d29f3a3): `telegram_notifier._open(request, timeout)` wraps every send (`_post_json`,
+  video 120 s, photo 20 s): `telegram_send_failed` (warning) or `telegram_send_slow` (> `SLOW_SEND_SECONDS` 5 s), with
+  the method name only (the URL has the bot token). Late alerts on the phone with no such events = Telegram held them.
