@@ -165,7 +165,9 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     answered by the official `claude -p` (user's own Max login on this PC; allowed for personal use of the
     unmodified binary; `--bare` can't be used with a subscription login). Locked down: `--tools ""`, fixed
     `--system-prompt`, `--max-turns 1`, no session files, empty MCP config, cwd ~/.cache/sentinel-assistant,
-    ANTHROPIC_API_KEY removed from env. Context = last 48 h of events (150 lines max), cars home, cameras,
+    ANTHROPIC_API_KEY removed from env. If `~/.config/sentinel/claude-token` exists (mode 600, made with
+    `claude setup-token`, ~1 year), it is passed as `CLAUDE_CODE_OAUTH_TOKEN`, so Sentinel doesn't share (or
+    break with) the interactive Claude Code login; tests point `assistant.TOKEN_FILE` at a temp file. Context = last 48 h of events (150 lines max), cars home, cameras,
     weather, command list (~9k chars; ~5 s with Sonnet). Every miss is logged as `telegram_not_understood`
     so common phrasings can be taught to the rule-based parser later.
   - Voice assistant (2026-10-27, `sentinel/audio/voice.py`, settings `voice_enabled`, `voice_follow_up`,

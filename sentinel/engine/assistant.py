@@ -29,6 +29,9 @@ WEB_MAX_TURNS = 6  # search, read the results, maybe search again, answer
 MAX_EVENT_LINES = 150
 EVENT_HOURS = 48
 WORK_DIR = os.path.join(os.path.expanduser("~"), ".cache", "sentinel-assistant")  # no CLAUDE.md above it
+# Sentinel's own long-lived sign-in key (made with `claude setup-token`, private file). With it, Sentinel no
+# longer shares the interactive Claude Code login, so that login expiring or being refreshed can't break it.
+TOKEN_FILE = os.path.join(os.path.expanduser("~"), ".config", "sentinel", "claude-token")
 
 SYSTEM_PROMPT = """You are the Telegram helper of Sentinel, a home security camera system run by a family at home.
 A family member sent a message that Sentinel's built-in commands didn't recognise. Answer it using ONLY
@@ -142,11 +145,22 @@ def find_claude(configured: str = "") -> Optional[str]:
     return None
 
 
+def _own_token(path: str = "") -> str:
+    try:
+        with open(path or TOKEN_FILE, encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
 def _env() -> Dict[str, str]:
     env = dict(os.environ)
     env.pop("ANTHROPIC_API_KEY", None)  # would bill the API instead of the subscription
     env.setdefault("HOME", os.path.expanduser("~"))
     env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
+    token = _own_token()
+    if token:
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = token
     return env
 
 
@@ -258,7 +272,8 @@ class Assistant:
         ok = r is not None and r.returncode == 0 and not data.get("is_error") and bool(reply)
         if not ok and r is not None:
             detail = reply or (r.stderr or "").strip()[-200:]
-            self.last_error = ("Claude needs signing in again on the PC (run `claude` and /login)"
+            self.last_error = (("Sentinel's Claude key stopped working (make a new one: `claude setup-token`)"
+                                if _own_token() else "Claude needs signing in again on the PC (run `claude` and /login)")
                                if "login" in detail.lower() or "auth" in detail.lower() else
                                f"Claude didn't answer ({detail[:120] or 'exit ' + str(r.returncode)})")
         usage = data.get("usage") or {}

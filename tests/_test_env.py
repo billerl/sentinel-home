@@ -16,3 +16,8 @@ import sentinel.engine.camera_light as _camera_light  # noqa: E402
 
 _camera_light.ADMIN_FILE = os.path.join(_LOG_DIR, "camera_admin.json")
 _camera_light.STATE_FILE = os.path.join(_LOG_DIR, ".camera_light_on.json")
+
+# Never read Sentinel's real Claude sign-in key (~/.config/sentinel/claude-token).
+import sentinel.engine.assistant as _assistant  # noqa: E402
+
+_assistant.TOKEN_FILE = os.path.join(_LOG_DIR, "claude-token")

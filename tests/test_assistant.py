@@ -83,6 +83,15 @@ class TestAssistant(unittest.TestCase):
         self.assertIsNone(a.ask("hi", "D"))
         self.assertIn("signing in again", a.last_error)
 
+    def test_own_token_used_when_present(self):
+        self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", am._env() if not am._own_token() else {})
+        with mock.patch.object(am, "_own_token", return_value="sk-test"):
+            self.assertEqual(am._env()["CLAUDE_CODE_OAUTH_TOKEN"], "sk-test")
+            a = self.make(types.SimpleNamespace(returncode=1, stdout=json.dumps(
+                {"result": "Invalid API key · Please run /login", "is_error": True}), stderr=""))
+            self.assertIsNone(a.ask("hi", "D"))
+            self.assertIn("setup-token", a.last_error)
+
     def test_timeout(self):
         def run(cmd, **kw):
             raise am.subprocess.TimeoutExpired(cmd, 90)
