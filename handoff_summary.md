@@ -389,7 +389,7 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   Sentinel itself switched it off <4 min ago (a TV on via its own remote showing cable looks "off" at first).
   Web remote (grid.html `#tvr`, "Open remote" on the TV tile): `/api/tv/<id>` (+ `/key` from the TV_KEYS
   list, `/open`, `/type` = SendInputString, `/icon/<app>` = the TV's own icon via `ed.apps.icon`, cached in
-  `recorded_videos/.tv_icons/`). Keys go over a kept-open connection (`_send`, closed after 60 s idle).
+  `recorded_videos/.tv_icons/`). Keys go over a kept-open connection (`_send`, closed after 60 s idle). A TV that doesn't say hello within `HELLO_SECONDS` (4 s; 30 s before it has ever allowed Sentinel) is given up on once, not retried (a hung remote channel or a waiting Allow pop-up froze the phone's remote 20 s per tap); a quick refusal still gets one more try. Logged as `tv_remote_stuck`.
 - **Fire TVs** (`sentinel/engine/fire_tv.py`, third SmartSwitches driver, needs `adb-shell`): only ones with
   ADB debugging on (port 5555; first connection = "Allow USB debugging?" on the TV; key in
   `recorded_videos/.adb/`). Id = hash of the serial number (Fire OS hides its MAC from ADB). Real screen state

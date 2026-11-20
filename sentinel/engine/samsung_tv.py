@@ -42,6 +42,13 @@ SCREEN_AFTER = 240.0  # answering this long without a break = the picture is on 
 APPS_EVERY = 3600.0
 APPS_RETRY = 300.0  # sooner when the TV's remote connection was stuck
 IDLE_SECONDS = 60.0  # the remote-control connection is kept open this long between button presses
+# A TV that has allowed Sentinel says hello within ~0.2 s. A stuck one (its remote service hung, or an "Allow"
+# pop-up waiting on screen) says nothing: waiting 10 s and then trying again left the phone's remote frozen for
+# 20 s per tap (2026-11-20 11:15-11:30). So give up after this, once, and say so.
+HELLO_SECONDS = 4.0
+PAIR_SECONDS = 30.0  # no token yet: someone has to walk over and press Allow on the TV
+STUCK = ("the TV's remote control isn't answering: if the TV shows an Allow pop-up, choose Allow; "
+         "otherwise restart the TV (hold its remote's power button until the logo comes up)")
 # Just after being switched off the TV is still shutting down for a few minutes: a power press then is lost and
 # its app service goes away for ~30-40 s (2026-11-03 18:39, 2.5 min after switch-off; a press at 18:40 worked).
 # So after pressing power, watch it this long; if it goes away, wait for it to come back and press again.
@@ -195,13 +202,18 @@ class SamsungTVDriver:
         size = bytes([0x80 | len(data)]) if len(data) < 126 else bytes([0x80 | 126]) + struct.pack(">H", len(data))
         s.sendall(bytes([0x81]) + size + mask + bytes(c ^ mask[i % 4] for i, c in enumerate(data)))
 
-    def _remote(self, host: str, timeout: float = 10.0):
+    def _remote(self, host: str, timeout: Optional[float] = None):
         """Connected remote control (raises ValueError when the TV hasn't allowed Sentinel)."""
         mac, tv = self._tv(host)
         name = base64.b64encode(CLIENT_NAME.encode()).decode()
         token = tv.get("token") or ""
-        s = self._socket(host, f"/api/v2/channels/samsung.remote.control?name={name}"
-                               + (f"&token={token}" if token else ""), timeout)
+        if timeout is None:
+            timeout = HELLO_SECONDS if token else PAIR_SECONDS
+        try:
+            s = self._socket(host, f"/api/v2/channels/samsung.remote.control?name={name}"
+                                   + (f"&token={token}" if token else ""), timeout)
+        except socket.timeout:
+            raise OSError(STUCK)
         try:
             for _ in range(10):
                 msg = self._read(s)
@@ -216,6 +228,9 @@ class SamsungTVDriver:
                     raise ValueError("the TV hasn't allowed Sentinel: press Allow on the TV's pop-up "
                                      "(or Settings > General > External Device Manager > Device Connection Manager)")
             raise OSError("the TV didn't say hello")
+        except socket.timeout:
+            s.close()
+            raise OSError(STUCK)
         except Exception:
             s.close()
             raise
@@ -230,10 +245,12 @@ class SamsungTVDriver:
 
     def _send(self, host: str, messages: List[Dict[str, Any]], gap: float = 0.35) -> None:
         """Send on the kept-open remote-control connection (a fresh TLS handshake per press made the
-        remote's arrows lag), reconnecting once if the TV closed it."""
+        remote's arrows lag), reconnecting once if the TV closed it. A TV that didn't answer a fresh connection
+        isn't asked twice (that doubled the wait, for nothing)."""
         with self._conn_lock:
             for attempt in (0, 1):
                 conn = self._conns.get(host)
+                started = time.time()
                 try:
                     if conn and time.time() - conn[1] > IDLE_SECONDS:
                         self._drop(host)
@@ -253,9 +270,11 @@ class SamsungTVDriver:
                 except ValueError:
                     self._drop(host)
                     raise  # not allowed: trying again won't help
-                except OSError:
+                except OSError as e:
                     self._drop(host)
-                    if attempt:
+                    if attempt or (not conn and time.time() - started >= 1.5):
+                        app_logger.log("warning", "tv_remote_stuck", component="samsung_tv", action="press",
+                                       host=host, error_message=str(e)[:160])
                         raise
 
     def press(self, host: str, *keys: str) -> None:

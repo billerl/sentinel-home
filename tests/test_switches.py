@@ -1081,6 +1081,67 @@ class TestSamsungDriver(unittest.TestCase):
         self.assertNotEqual(_app_words("YouTube TV"), _app_words("YouTube"))
 
 
+class TestSamsungStuckRemote(unittest.TestCase):
+    """A TV whose remote channel says nothing (hung, or an Allow pop-up waiting) is given up on after a few seconds,
+    once: 10 s and a second try froze the phone's remote for 20 s per tap (2026-11-20)."""
+
+    def setUp(self):
+        from sentinel.engine.samsung_tv import SamsungTVDriver
+        self.dir = tempfile.mkdtemp(prefix="sentinel-tv-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.drv = SamsungTVDriver(self.dir)
+        self.drv._tvs = {"aa": {"host": "tv", "token": "123", "on_since": 1.0}}
+
+    def silent_socket(self, host, path, timeout):
+        import socket
+        self.timeouts.append(timeout)
+
+        class Silent:
+            def recv(self, n):
+                raise socket.timeout("timed out")
+
+            def close(self):
+                pass
+        return Silent()
+
+    def test_a_silent_tv_is_given_up_on_quickly(self):
+        from sentinel.engine.samsung_tv import HELLO_SECONDS, PAIR_SECONDS, STUCK
+        self.timeouts = []
+        self.drv._socket = self.silent_socket
+        with self.assertRaises(OSError) as e:
+            self.drv._remote("tv")
+        self.assertEqual(str(e.exception), STUCK)
+        self.assertIn("Allow", STUCK)
+        self.drv._tvs["aa"]["token"] = ""  # never allowed yet: time to walk over and press Allow
+        with self.assertRaises(OSError):
+            self.drv._remote("tv")
+        self.assertEqual(self.timeouts, [HELLO_SECONDS, PAIR_SECONDS])
+
+    def test_a_press_waits_for_one_try_only(self):
+        tries, clock = [], [1000.0]
+
+        def stuck(host, timeout=None):
+            tries.append(host)
+            clock[0] += 4.0  # the hello wait ran out
+            raise OSError("stuck")
+        self.drv._remote = stuck
+        with mock.patch("sentinel.engine.samsung_tv.time.time", lambda: clock[0]):
+            with self.assertRaises(OSError):
+                self.drv.press("tv", "KEY_HOME")
+        self.assertEqual(len(tries), 1)
+
+    def test_a_quick_refusal_is_tried_again(self):
+        tries = []
+
+        def refused(host, timeout=None):
+            tries.append(host)
+            raise OSError("connection refused")
+        self.drv._remote = refused
+        with self.assertRaises(OSError):
+            self.drv.press("tv", "KEY_HOME")
+        self.assertEqual(len(tries), 2)
+
+
 class TestVoiceHint(unittest.TestCase):
     def test_tv_apps_in_the_hint(self):
         from sentinel.audio.voice import whisper_prompt
