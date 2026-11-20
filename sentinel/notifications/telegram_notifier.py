@@ -118,6 +118,7 @@ class TelegramNotifier:
             "- Patio lights on / Turn off the patio lights — switch one\n"
             "- Are the patio lights on? — check one\n"
             "- TV on / TV off; Put on Netflix / Turn on the TV to Hulu (any app on the TV); TV volume up / down; Mute the TV (for 2 minutes); Pause / Resume the TV; Rewind the TV 30 seconds / Fast forward the TV 2 minutes; What's on the TV?\n"
+            "- Sleep 30 / Sleep timer an hour / Turn off the TV in 45 minutes — the TV just goes off then, without a word; Cancel the sleep timer\n"
             "- Put the cameras on the Sentinel TV / Reload the cameras — the live view on a TV\n"
             "- Show me the front door (on the TV) — one camera full screen (the Samsung)\n"
             "- Show me Kate's location / everyone's location — a map on the TV (pictures: Family page)\n"

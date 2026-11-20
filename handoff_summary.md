@@ -376,7 +376,11 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   mute, "what's on"; `understands()` routes Telegram/Claude suggestions. Can't pick channels inside apps.
   Playback (2026-11-07): pause/play (KEY_PAUSE/KEY_PLAY), rewind/fast forward N seconds/minutes = arrow
   presses of SEEK_STEP (10 s, sent in the background), "mute for N" = KEY_MUTE + a timer that presses it again
-  (cancelled by a Sentinel mute/unmute meanwhile). By voice, said without "TV" they still mean the TV while it's
+  (cancelled by a Sentinel mute/unmute meanwhile). Sleep timer (2026-11-20): "sleep 30" (bare numbers are minutes),
+  "sleep timer an hour", "turn off the TV in 45 minutes" (`_SLEEP`/`_TV_OFF_IN`, `sleep_duration`, max 4 h) =
+  `_sleep_timer`: a Timer that turns the TV off with `set()` and says nothing (the user falls asleep in front of
+  it); skipped if the TV is already off (power would turn it on). In memory only: a restart forgets it. A snore
+  detector (YAMNet on the house mic) was tried first and dropped: the kitchen mic didn't hear the recliner. By voice, said without "TV" they still mean the TV while it's
   on (the family's rule: TV unless Spotify/"the music" is named); Telegram's bare "pause" stays the alerts'.
   Power state is tracked by Sentinel (dark network wake-ups every few minutes look like "on"; SCREEN_AFTER).
   KEY_POWER only works once the TV is fully awake (port 9197 answers; ~30 s after a wake, and closed in the

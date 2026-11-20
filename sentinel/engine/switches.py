@@ -224,6 +224,16 @@ _TV_SEEK = re.compile(r"^(rewind|fast[ -]?forward|go back|skip back|jump back|ba
                       r"jump ahead|go forward)" + _ON_TV + r"(?:\s+(?:by\s+)?(.+?))?" + _ON_TV + r"$", re.IGNORECASE)
 _BACK_WORDS = ("rewind", "go back", "skip back", "jump back", "back up")
 _SPOTIFY_WORDS = ("go back", "skip back", "skip ahead", "skip forward", "jump back", "jump ahead", "go forward", "back up")
+# Sleep timer: "sleep 30", "sleep timer an hour", "turn the TV off in 45 minutes"; "cancel the sleep timer". When it
+# runs out the TV just goes off: nothing is said (the user asleep in front of it mustn't be woken, 2026-11-20).
+_SLEEP = re.compile(r"^(?:set )?(?:a |the )?sleep(?: timer)?(?: (?:for|in|to))?\s+(.+?)$", re.IGNORECASE)
+_TV_OFF_IN = re.compile(r"^(?:turn|switch|shut) off " + _TV + r" in (.+)$|^(?:turn|switch|shut) " + _TV +
+                        r" off in (.+)$|^" + _TV + r" off in (.+)$", re.IGNORECASE)
+_SLEEP_BARE = re.compile(r"^(?:set )?(?:a |the )?sleep timer$", re.IGNORECASE)  # no time said: an hour
+SLEEP_DEFAULT = 3600
+_SLEEP_OFF = re.compile(r"^(?:cancel|stop|clear|turn off|kill|no)(?: the| my)? sleep(?: timer)?$|^sleep(?: timer)? off$",
+                        re.IGNORECASE)
+SLEEP_MAX = 4 * 3600
 SEEK_STEP = 10  # seconds one arrow press skips in Netflix, YouTube, Hulu, Disney+, Prime Video
 SEEK_MAX = 30 * 60
 # A routine's camera on a TV stays while that camera sees movement (a visitor standing at the door), but never longer
@@ -265,6 +275,29 @@ def tv_duration(words: str) -> Optional[int]:
     if not found:
         return None
     return int(round(total)) or None
+
+
+def sleep_duration(words: str) -> Optional[int]:
+    """Seconds for a sleep timer: "30" and "forty five" are minutes; "an hour", "2 hours", "an hour and a half",
+    "half an hour", "1 hour 30 minutes", or any time tv_duration understands. None if it isn't a time."""
+    w = re.sub(r"\s+", " ", words.lower().replace("-", " ")).strip()
+    w = re.sub(r"^(?:for|in) ", "", w)
+    if w in ("half an hour", "a half hour", "half hour"):
+        return 1800
+    m = re.match(r"^(?:(an?|one|two|three|four|\d+(?:\.\d+)?) )?hours?( and a half)?(?: (?:and )?(.+))?$", w)
+    if m:
+        n = m.group(1)
+        hours = 1.0 if n in (None, "a", "an", "one") else (float(n) if n[0].isdigit() else float(_COUNT[n]))
+        rest = tv_duration(m.group(3)) if m.group(3) else 0
+        if rest is None:
+            return None
+        return int(hours * 3600 + (1800 if m.group(2) else 0) + rest)
+    bare = re.sub(r" (?:minutes?|mins?)$", "", w)  # "30", "thirty minutes"
+    if re.fullmatch(r"\d+", bare):
+        return int(bare) * 60
+    if bare in _COUNT and bare not in ("a", "an"):
+        return _COUNT[bare] * 60
+    return tv_duration(w)
 
 
 def say_duration(seconds: int) -> str:
@@ -309,6 +342,7 @@ class SmartSwitches:
         self._clock = clock
         self._lock = threading.Lock()
         self._unmute: Dict[str, Any] = {}  # TV switch id -> the timer that ends "mute the TV for 2 minutes"
+        self._sleep_timers: Dict[str, Any] = {}  # TV switch id -> the sleep timer's Timer
         # The TV's sound through a soundbar that only follows infrared (a BroadLink's taught "Soundbar" buttons): the
         # TV's own volume keys changed the TV, not the bar (2026-11-07). (key, times) -> True when it took them.
         self.sound_keys: Optional[Callable[[str, int], bool]] = None
@@ -657,6 +691,15 @@ class SmartSwitches:
         if not tvs:
             return None
         tv = self._pick_tv(t, tvs)
+        if _SLEEP_OFF.match(t):
+            return "sleep_off", (tv,)
+        if _SLEEP_BARE.match(t):
+            return "sleep", (tv, SLEEP_DEFAULT)
+        m = _SLEEP.match(t) or _TV_OFF_IN.match(t)
+        if m:
+            seconds = sleep_duration(next(g for g in m.groups() if g))
+            if seconds:
+                return "sleep", (tv, max(60, min(seconds, SLEEP_MAX)))
         playback = self._tv_playback(t, tv)
         if playback is not None and (playback[1] or (bare and tv[0].on)):
             return playback[0]
@@ -770,6 +813,13 @@ class SmartSwitches:
                 return name
             app_logger.log("info", "tv_back", tv=sw.name, app=name, source=source, component="switches", action="tv")
             return f"Okay, back to {name} on the {sw.name}."
+        if what == "sleep_off":
+            pending = self._sleep_timers.pop(sw.id, None)
+            if pending is None:
+                return "No sleep timer is on."
+            pending.cancel()
+            app_logger.log("info", "tv_sleep_cancelled", tv=sw.name, source=source, component="switches", action="tv")
+            return "Okay, sleep timer off."
         if what == "no_app":
             return f"I couldn't find {detail[1]} on the {sw.name}. I can open its apps, like {', '.join(self._list_tv_apps()[:4])}."
         try:
@@ -789,6 +839,8 @@ class SmartSwitches:
                 return f"Okay, {detail[2]} on the {sw.name}."
             if not sw.on:
                 return f"The {sw.name} is off."
+            if what == "sleep":
+                return self._sleep_timer(sw, detail[1], source)
             if what == "volume":
                 self._tv_press(driver, host, *(["KEY_VOLUP" if detail[1] == "up" else "KEY_VOLDOWN"] * VOLUME_STEPS))
                 return f"Okay, turning the {sw.name} {detail[1]}."
@@ -834,6 +886,31 @@ class SmartSwitches:
                 self.request_scan()
                 return f"The {sw.name} isn't answering yet. It may still be starting up: try again in a moment."
             return self._tv_failed(sw, e)
+
+    def _sleep_timer(self, sw: Switch, seconds: int, source: str) -> str:
+        """Turn the TV off in a while, without a word when it does (a new timer replaces the old one)."""
+        old = self._sleep_timers.pop(sw.id, None)
+        if old is not None:
+            old.cancel()
+        mine: List[Any] = []
+
+        def off() -> None:
+            if not mine or self._sleep_timers.get(sw.id) is not mine[0]:
+                return  # cancelled or replaced
+            del self._sleep_timers[sw.id]
+            now = next((s for s in self.switches() if s.id == sw.id), None)
+            if now is None or not now.on:
+                return
+            ok, message = self.set(sw.id, False, "sleep timer")
+            app_logger.log("info" if ok else "warning", "tv_sleep_off", tv=sw.name, ok=ok,
+                           error_message=None if ok else message, component="switches", action="tv")
+
+        mine.append(self._after(seconds, off))
+        self._sleep_timers[sw.id] = mine[0]
+        at = time.strftime("%-I:%M %p", time.localtime(self._clock() + seconds)).lower()
+        app_logger.log("info", "tv_sleep_timer", tv=sw.name, minutes=round(seconds / 60), off_at=at, source=source,
+                       component="switches", action="tv")
+        return f"Okay, sleep timer: the {sw.name} goes off at {at}."
 
     def _tv_press(self, driver, host: str, *keys: str) -> None:
         """A TV's buttons; a Samsung's volume and mute go to the soundbar's infrared buttons when there are some."""

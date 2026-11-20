@@ -236,6 +236,17 @@ class TestEngine(unittest.TestCase):
             self.assertEqual(self.engine.answer_voice("Pause the music.", lambda _s: None).text, "Paused.")
             spotify.assert_called_once()
 
+    def test_voice_sleep_timer_is_just_a_chime(self):
+        tv = FakeTV()
+        tv.on = True
+        self.engine.switches = SmartSwitches(self.dir, drivers=[self.kasa, tv])
+        self.engine.switches.discover()
+        self.engine.switches._after = lambda seconds, fn: mock.Mock()
+        for text in ("Sleep 30.", "Sleep timer, an hour.", "Turn off the TV in 45 minutes.", "Cancel the sleep timer."):
+            reply = self.engine.answer_voice(text, lambda _s: None)
+            self.assertTrue(reply.done, (text, reply.text))  # "Okay, ...": the chime, no words
+        self.assertTrue(self.engine.switches.understands("sleep 30"))  # Telegram too
+
     def test_claude_suggestion_asks_first(self):
         with mock.patch.object(self.engine.assistant, "ask",
                                return_value="I can turn the porch lamp on for you.\nCOMMAND: Turn on porch lamp"), \
@@ -516,6 +527,52 @@ class TestTV(unittest.TestCase):
         self.sw.poll()
         self.sw.command("mute for 30 seconds", "voice")
         self.assertEqual(self.sw.command("mute the TV for 30 seconds", "voice"), "The TV is off.")
+
+    def test_sleep_timer(self):
+        """The TV just goes off when it runs out: not a word (the user is asleep in front of it)."""
+        self.tv.on = True
+        self.sw.poll()
+        timers = []
+        self.sw._after = lambda seconds, fn: timers.append((seconds, fn, mock.Mock())) or timers[-1][2]
+        for text, seconds in (("sleep 30", 1800), ("Sleep timer forty five.", 2700), ("sleep timer an hour", 3600),
+                              ("set a sleep timer for an hour and a half", 5400), ("sleep timer", 3600),
+                              ("turn off the TV in 20 minutes", 1200), ("turn the TV off in 2 hours", 7200),
+                              ("sleep 600", 4 * 3600)):
+            said = self.sw.command(text, "voice")
+            self.assertTrue(said.startswith("Okay, sleep timer: the TV goes off at "), (text, said))  # voice: a chime
+            self.assertEqual(timers[-1][0], seconds, text)
+        self.assertTrue(timers[-2][2].cancel.called)  # a new one replaces the old
+        self.assertEqual(self.sw.command("cancel the sleep timer", "voice"), "Okay, sleep timer off.")
+        self.assertTrue(timers[-1][2].cancel.called)
+        self.assertEqual(self.sw.command("sleep timer off", "voice"), "No sleep timer is on.")
+        calls = len(self.tv.calls)
+        timers[-1][1]()  # a cancelled one firing anyway (Timer.cancel can lose the race): nothing happens
+        self.assertEqual(len(self.tv.calls), calls)
+        self.sw.command("sleep 30", "telegram")
+        timers[-1][1]()  # half an hour later: off, nothing pressed but power
+        self.assertEqual(self.tv.calls[calls:], [("power", False)])
+        self.assertEqual(self.sw.command("sleep 30", "voice"), "The TV is off.")
+        for text in ("sleep well", "go to sleep", "sleep"):
+            self.assertIsNone(self.sw.command(text, "voice"), text)
+
+    def test_sleep_timer_when_the_tv_was_already_turned_off(self):
+        self.tv.on = True
+        self.sw.poll()
+        timers = []
+        self.sw._after = lambda seconds, fn: timers.append(fn) or mock.Mock()
+        self.sw.command("sleep 30", "voice")
+        self.tv.on = False
+        self.sw.poll()
+        calls = len(self.tv.calls)
+        timers[-1]()
+        self.assertEqual(len(self.tv.calls), calls)  # off already: left alone (pressing power would turn it on)
+
+    def test_sleep_times(self):
+        from sentinel.engine.switches import sleep_duration
+        for words, seconds in (("30", 1800), ("thirty", 1800), ("45 minutes", 2700), ("an hour", 3600),
+                               ("2 hours", 7200), ("hour and a half", 5400), ("half an hour", 1800),
+                               ("1 hour 30 minutes", 5400), ("90 minutes", 5400), ("a minute", 60), ("well", None)):
+            self.assertEqual(sleep_duration(words), seconds, words)
 
     def test_times(self):
         from sentinel.engine.switches import tv_duration
