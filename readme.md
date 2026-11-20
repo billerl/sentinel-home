@@ -105,7 +105,7 @@ Tiles for hardware you haven't got wait under **Add more** on the home page, and
 once the hardware shows up on your network.
 
 <details>
-<summary><b>Optional model downloads</b> (car types, telling your cars apart, natural voice, speech recognition, Spotify speaker)</summary>
+<summary><b>Optional model downloads</b> (car types, telling your cars apart, natural voice, speech recognition, snore watch, Spotify speaker)</summary>
 
 ```bash
 # delivery vans and vehicle types (CLIP ViT-B/32, MIT)
@@ -118,6 +118,9 @@ mkdir -p models/kokoro && for f in kokoro-v1.0.onnx voices-v1.0.bin; do curl -L 
   https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/$f; done
 # voice assistant speech recognition (faster-whisper base.en, MIT)
 venv/bin/python -c "from huggingface_hub import snapshot_download as d; d('Systran/faster-whisper-base.en', local_dir='models/whisper/base.en')"
+# snore watch trial (YAMNet sound classifier, Apache-2.0)
+mkdir -p models/sound && curl -L -o models/sound/yamnet.tflite \
+  https://storage.googleapis.com/download.tensorflow.org/models/tflite/task_library/audio_classification/android/lite-model_yamnet_classification_tflite_1.tflite
 # this PC as a Spotify speaker (spotifyd, GPL-3.0; sign in under Settings -> Spotify)
 mkdir -p bin && curl -L https://github.com/Spotifyd/spotifyd/releases/download/v0.4.2/spotifyd-linux-x86_64-slim.tar.gz \
   | tar xz -C bin   # check it against the release's .sha512 file

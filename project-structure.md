@@ -142,6 +142,7 @@ sentinel-home/                         # repository root
     │   │                              #   kept or logged); plugs/lights only; answers with the camera's white light
     │   ├── devices.py                 # which sound card listens/speaks (PC jacks or a USB speakerphone); music's card
     │   ├── spotify_player.py          # this PC as a Spotify speaker: runs bin/spotifyd, its sign-in relay
+    │   ├── snore.py                   # snore watch (trial): YAMNet on the house mic, notes minutes with snoring
     │   ├── wake_samples.py            # "train Jezebel": real recordings of the wake word, kept for retraining its model
     │   └── voice.py                   # "Hey Jarvis": arecord -> band-pass -> openWakeWord -> faster-whisper
     │                                  #   (+ an optional trial wake word that only logs scores)

@@ -1049,6 +1049,7 @@ class Engine:
                            component="voice", action="start")
             return
         try:
+            from sentinel.audio.snore import SnoreWatch
             from sentinel.audio.voice import VoiceAssistant
         except ImportError as e:  # faster-whisper / openwakeword not installed
             app_logger.log("warning", "voice_unavailable", error_message=str(e), component="voice", action="start")
@@ -1058,7 +1059,9 @@ class Engine:
                                     switches=lambda: [s.name for s in self.switches.switches()],
                                     apps=self.switches.tv_apps, artists=self.spotify.artists,
                                     tv_on=self.switches.samsung_tv_on,
-                                    pets=lambda: [p.name for p in self.locations.people() if p.tracker])
+                                    pets=lambda: [p.name for p in self.locations.people() if p.tracker],
+                                    snore=SnoreWatch(lambda: bool(self.settings.get("snore_watch")),
+                                                     tv_on=self.switches.samsung_tv_on))
         self.voice.start()
 
     def _voice_names(self) -> List[str]:
