@@ -463,14 +463,6 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   three of those in a row, silence, "stop"/"done" or 30 clips end the sitting. Nothing is retrained by Sentinel:
   the clips go into the openWakeWord training outside the repo as real positives. Why: the custom model was
   trained on synthetic voices only (real misses scored 0.11-0.17 against a 0.45 threshold).
-- **Snore watch** (trial, 2026-11-19; `sentinel/audio/snore.py`, setting `snore_watch`, off by default): the first
-  step toward a TV sleep timer. `VoiceAssistant._listen_to_mic` also hands each chunk, unfiltered (x `voice_gain`),
-  to `SnoreWatch.feed`; a 0.975 s window every 0.5 s goes through YAMNet (`models/sound/yamnet.tflite`, OpenVINO,
-  ~5 ms; labels are in the zip on the end of the .tflite) and is dropped. Each minute whose best "Snoring" score
-  reaches 0.1 logs one `snore_heard` event (checks, checks >= 0.3, best, the minute's top 3 sounds, Samsung on).
-  Nothing acts on it yet. Why unfiltered: the 150 Hz band-pass halved snoring checks on a test recording. Any
-  error in it drops it for that mic session, never the wake word. Next if it hears people over the TV: a voice
-  sleep timer with a spoken check-in ("say keep it on"), where snoring only brings the check-in forward.
 - **Quiet cameras** (2026-11-11; `sentinel/engine/quiet.py`, first in the `Commands` registry so voice and Telegram
   share it): "pause the garage camera [notifications] for 2 hours" / "mute the driveway alerts" (a zone name finds
   its camera) / "pause all cameras for 30 minutes" / "resume the garage camera" / "which cameras are paused?".

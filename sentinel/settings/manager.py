@@ -166,7 +166,6 @@ class SettingsManager:
             "voice_wake_threshold": 0.5,
             "voice_cameras": "",  # cameras that also listen for "Hey Jarvis" (IPs, comma-separated; "" = none)
             "voice_gain": 4.0,
-            "snore_watch": False,  # trial: note when the house mic hears snoring (sentinel/audio/snore.py); nothing acts on it
             "pc_volume": None,  # the sound card's Master %, set by voice ("turn the PC down"); None = leave it
             "audio_output": "speakers",  # or "remote": the Remote Desktop session, when one is open
             # Shown in the Help page and the Telegram "access" reply

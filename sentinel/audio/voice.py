@@ -325,8 +325,7 @@ class VoiceAssistant:
                  apps: Optional[Callable[[], List[str]]] = None,
                  artists: Optional[Callable[[], List[str]]] = None,
                  tv_on: Optional[Callable[[], bool]] = None,
-                 pets: Optional[Callable[[], List[str]]] = None,
-                 snore=None) -> None:
+                 pets: Optional[Callable[[], List[str]]] = None) -> None:
         self.settings = settings
         self.names = names  # the family's names and nicknames, for Whisper's hint
         self.switches = switches  # smart plug names, likewise
@@ -334,7 +333,6 @@ class VoiceAssistant:
         self.artists = artists  # the family's Spotify artists, likewise
         self.pets = pets  # pets with collar trackers, likewise
         self.tv_on = tv_on  # a TV (with sound) is on: stricter right after the wake word
-        self.snore = snore  # SnoreWatch (sentinel/audio/snore.py): hears the same microphone, unfiltered
         self.answer = answer
         self.last_doubt = 0.0  # Whisper's noise score for the last words heard (doubt())
         self.speaker = speaker  # AudioAlertSystem: speak(text), tone(kind)
@@ -453,18 +451,10 @@ class VoiceAssistant:
                     err = self._proc.stderr.read().decode(errors="replace").strip() if self._proc.stderr else ""
                     self.last_error = err[-200:] or "the microphone stopped"
                     return
-                plain = np.frombuffer(raw, np.int16).astype(np.float32) / 32768.0
-                audio = band(plain)
+                audio = band(np.frombuffer(raw, np.int16).astype(np.float32) / 32768.0)
                 if skip > 0:
                     skip -= 1
                     continue
-                if self.snore is not None:
-                    try:
-                        self.snore.feed(np.clip(plain * self._gain(), -1, 1))
-                    except Exception as e:  # never let it stop the wake word
-                        app_logger.log("warning", "snore_watch_failed", error_message=str(e), component="voice",
-                                       action="snore_watch")
-                        self.snore = None
                 self._on_chunk(audio)
         finally:
             try:
