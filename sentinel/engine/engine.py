@@ -24,6 +24,7 @@ from sentinel.engine.camera import CLIP_REQUEST_REASON, CameraPipeline, camera_h
 from sentinel.engine.assistant import Assistant, build_context
 from sentinel.engine.commands import Command, Commands, parse_feature_toggle
 from sentinel.engine.spotify import NO_SUCH_SPEAKER, SpotifyService, parse_music_command
+from sentinel.engine.switches import GAME_WORDS
 from sentinel.engine.weather import WeatherService
 from sentinel.logging_utils import app_logger
 from sentinel.notifications import TelegramNotifier
@@ -1420,6 +1421,8 @@ class Engine:
 
         if plane_map_words(words):  # "show me the planes": the plane map (sentinel/engine/planes.py)
             return "the plane map", "#map=planes"
+        if GAME_WORDS.match(words.strip()) and str(self.settings.get("games_url") or "").strip():
+            return "the dice game", "#map=game"  # the family dice game's TV page (settings games_url)
         name = re.sub(r"\s+", " ", re.sub(r"\bcam(?:era)?s?\b", "", words.lower())).strip()
         if not name or self.frame_broker is None:
             return self.family.map_lookup(words, bare=True) if name else None

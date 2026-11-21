@@ -138,6 +138,8 @@
         <span class="ic">📝</span><span class="t">Notes</span><span class="s">Shared lists, and notes only you can see</span></a>
       <a data-key="photos" class="tile" href="{{ photos_url or url_for('photos_page') }}" data-min="user">
         <span class="ic">🖼️</span><span class="t">Photos</span><span class="s">{% if photos_url %}Opens over Tailscale (turn the app on if it doesn't load){% else %}The family's photos, and your own albums{% endif %}</span></a>
+      {% if games_url %}<a data-key="games" class="tile" href="{{ games_url }}" data-min="user">
+        <span class="ic">🎲</span><span class="t">Dice game</span><span class="s">Yahtzee on everyone's phone: shake to roll</span></a>{% endif %}
       <a data-key="print" class="tile" href="{{ url_for('print_page') }}" data-min="user" data-needs="printer">
         <span class="ic">🖨️</span><span class="t">Print</span><span class="s" id="s-print">Print a PDF or photo from your phone</span></a>
       <a data-key="mesh" class="tile" href="{{ url_for('mesh_page') }}" data-min="user" data-needs="mesh">

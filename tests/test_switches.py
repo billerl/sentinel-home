@@ -894,6 +894,21 @@ class TestOneCameraByVoice(unittest.TestCase):
         self.assertEqual(sw.command("Show me Kate's location", "voice"), "Okay, Kate's location is on the TV.")
         self.assertEqual(tv.shown, ["#map=3"])
 
+    def test_lets_play_yahtzee(self):
+        from sentinel.engine.switches import GAME_WORDS
+        tv = FakeTV()
+        tv.live_url, tv.shown = "http://192.168.1.9:8088/", []
+        tv.show_live = lambda host, reload=False, path="": tv.shown.append(path)
+        sw = SmartSwitches(tempfile.mkdtemp(prefix="sentinel-sw-"), drivers=[FakeKasa(), tv], clock=lambda: NOW)
+        sw.discover()
+        sw.camera_lookup = lambda words: ("the dice game", "#map=game") if GAME_WORDS.match(words) else None
+        for said in ("Let's play Yahtzee", "lets play a game of yahtzee", "play yahtzee on the TV",
+                     "start the dice game", "put the dice game on the TV", "can we play dice"):
+            self.assertEqual(sw.command(said, "voice"), "Okay, the dice game is on the TV.", said)
+        self.assertIsNone(sw.tv_parse("play some Tom Petty"))  # (still Spotify's)
+        self.assertIsNone(sw.tv_parse("let's play a game"))
+        self.assertEqual(set(tv.shown), {"#map=game"})
+
 
 class TestSamsungDriver(unittest.TestCase):
     """The power dance: a TV that's off doesn't answer; the wake packet wakes only its network (picture

@@ -125,6 +125,7 @@ class TelegramNotifier:
             "- What plane is that? / Any planes around? — planes near the house (near you, when you're away): airline, type, height, where from and to\n"
             "- Any military planes around? — military aircraft within about 170 miles\n"
             "- Show me the planes (on the TV) — a map of the planes near the house\n"
+            "- Let's play Yahtzee — the family dice game on the TV, with a QR code to join (if its address is set)\n"
             "- Soundbar volume up 3 times / Heater power — a button taught on the Remotes page (BroadLink)\n"            "- (voice) Volume up / Volume 50 (Jarvis's speaker) / Spotify up (the music) / Turn the Jabra down / Speak quieter — Jarvis's own speaker (the Jabra, in percent)\n"
             "- Set the heater to 70 / How warm is it inside? / Stop holding the temperature — the heater thermostat\n\n"
             "Routines (when this happens, do that):\n"

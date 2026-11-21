@@ -170,6 +170,7 @@ class SettingsManager:
             "audio_output": "speakers",  # or "remote": the Remote Desktop session, when one is open
             # Shown in the Help page and the Telegram "access" reply
             "remote_web_url": "",
+            "games_url": "",  # optional: a family game site on its own address (Home tile, "let's play Yahtzee" on the TV)
             "remote_rdp_user": "",
             "lost_pets": {},  # pet id -> when the search started ("Xena is lost"); cleared by "found"
             "min_contour_area": MIN_CONTOUR_AREA,
