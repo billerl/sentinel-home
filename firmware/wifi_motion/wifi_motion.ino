@@ -28,7 +28,7 @@
 #include "lwip/ip_addr.h"
 #include "secrets.h"  // #define OTA_PASSWORD "..." (copy secrets.example.h)
 
-#define FW_VERSION "2.1.0"
+#define FW_VERSION "2.2.0"
 #define HELLO_PORT 47301          // UDP broadcast so Sentinel can find the board
 #define PING_INTERVAL_MS 20       // 50 pings/s: each reply carries one CSI reading
 #define SEND_INTERVAL_MS 20       // 50 frames/s for the other boards to measure
@@ -74,6 +74,14 @@ struct Link {
 
 static portMUX_TYPE csiMux = portMUX_INITIALIZER_UNLOCKED;
 static Link links[MAX_LINKS];
+
+// Slow readings for experiments (GET /slow?link=xxxx): every 250 ms, each sub-carrier's average over the
+// last SLOW_FRAMES readings. Breathing is a slow rise and fall (3-5 s) that the 1-second wobble score mostly
+// misses; this keeps the shape itself. Sentinel doesn't use it; values are x10000, 6 s kept.
+#define SLOW_FRAMES 12
+#define SLOW_HISTORY 24
+struct SlowRow { uint32_t seq; uint16_t v[NSUB]; };
+static SlowRow slow[MAX_LINKS][SLOW_HISTORY];
 static uint32_t sampleSeq = 0, lastScoreMs = 0;
 // Diagnostics for /status.
 static volatile uint32_t csiAll = 0, csiShort = 0, csiOther = 0, beaconRaw = 0, linksFull = 0;
@@ -182,6 +190,16 @@ static void computeScores() {
         total += sqrtf(max(0.0f, s2 / WINDOW - m * m));
       }
       score = total / NSUB * 1000.0f;
+      SlowRow &sr = slow[li][sampleSeq % SLOW_HISTORY];
+      for (int i = 0; i < NSUB; i++) {
+        float s = 0;
+        for (int k = 1; k <= SLOW_FRAMES; k++) s += snap[(n - k) % WINDOW][i];
+        float v = s / SLOW_FRAMES * 10000.0f;
+        sr.v[i] = v > 65535.0f ? 65535 : (uint16_t)v;
+      }
+      sr.seq = sampleSeq;
+    } else {
+      slow[li][sampleSeq % SLOW_HISTORY].seq = 0xFFFFFFFF;
     }
     l.history[sampleSeq % HISTORY] = {sampleSeq, score, rate};
   }
@@ -390,6 +408,31 @@ static void handleStatus() {
   server.send(200, "application/json", js);
 }
 
+static void handleSlow() {
+  String want = server.arg("link");
+  for (int i = 0; i < MAX_LINKS; i++) {
+    if (!links[i].used || linkId(i) != want) continue;
+    String js;
+    js.reserve(10000);
+    js = "{\"link\":\"" + want + "\",\"rows\":[";
+    uint32_t first = sampleSeq > SLOW_HISTORY ? sampleSeq - SLOW_HISTORY : 0;
+    bool any = false;
+    for (uint32_t q = first; q < sampleSeq; q++) {
+      const SlowRow &r = slow[i][q % SLOW_HISTORY];
+      if (r.seq != q) continue;
+      js += any ? ",[" : "[";
+      any = true;
+      js += String(q);
+      for (int k = 0; k < NSUB; k++) { js += ","; js += String(r.v[k]); }
+      js += "]";
+    }
+    js += "]}";
+    server.send(200, "application/json", js);
+    return;
+  }
+  server.send(404, "application/json", "{\"error\":\"no such link\"}");
+}
+
 // ---- setup mode (phone picks the home Wi-Fi) ----
 static String htmlEscape(const String &s) {
   String o;
@@ -551,6 +594,7 @@ void setup() {
   ArduinoOTA.setMdnsEnabled(false);  // MDNS already started above
   ArduinoOTA.begin();
   server.on("/status", handleStatus);
+  server.on("/slow", handleSlow);
   server.on("/identify", handleIdentify);
   server.begin();
   startCsi();
