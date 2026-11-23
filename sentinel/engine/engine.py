@@ -701,6 +701,7 @@ class Engine:
                     self._routines_ticked = time.time()
                     self.routines.tick()
                     self.weather_alerts.tick()  # checks the NWS itself every 2 minutes, on its own thread
+                    self.say_claude_reply()
                     if self.recap.due(time.time()):
                         threading.Thread(target=self.recap.run, name="recap", daemon=True).start()
                     if self.backup.due(time.time()):
@@ -1224,6 +1225,26 @@ class Engine:
         for chat_id in self.telegram.chat_ids:
             self.telegram.reply_to_chat(chat_id, f"📝 Note for Claude (as Jezebel heard it):\n{text}")
         return "Got it, I've saved that for Claude."
+
+    REPLY_FILE = os.path.join(os.path.dirname(NOTES_FILE), "claude-reply.txt")
+
+    def say_claude_reply(self) -> None:
+        """Claude's answer to a voice note: it writes claude-reply.txt, Jarvis reads it out (and Telegram gets
+        it), then the file is gone. Only something on this PC can write the file, so nothing else can make
+        Jarvis talk this way."""
+        try:
+            with open(self.REPLY_FILE, encoding="utf-8") as f:
+                text = f.read().strip()
+            os.remove(self.REPLY_FILE)
+        except OSError:
+            return  # (no reply waiting: nearly always)
+        if not text:
+            return
+        app_logger.log("info", "claude_reply_said", length=len(text), component="voice", action="reply")
+        for chat_id in self.telegram.chat_ids:
+            self.telegram.reply_to_chat(chat_id, f"🤖 Claude: {text}")
+        if self.audio is not None:
+            threading.Thread(target=self.audio.speak, args=(text,), name="claude-reply", daemon=True).start()
 
     def change_volume(self, what: str, value: str) -> str:
         """By voice: the PC's Master volume (kept in pc_volume, set again at start) or the voice's own."""

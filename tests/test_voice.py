@@ -502,6 +502,20 @@ class TestEngineVoiceAnswers(unittest.TestCase):
         self.assertIn("the garage camera is blurry", notes)
         self.assertIn("didn't save", reply.dictate(""))
 
+    def test_claudes_reply_is_read_out(self):
+        from unittest import mock
+
+        self.engine.REPLY_FILE = os.path.join(self.dir, "claude-reply.txt")
+        self.engine.say_claude_reply()  # nothing waiting: nothing happens
+        spoken = []
+        self.engine.audio = mock.Mock(speak=spoken.append)
+        with open(self.engine.REPLY_FILE, "w") as f:
+            f.write("The base is online.\n")
+        with mock.patch("threading.Thread", lambda target, args, **kw: mock.Mock(start=lambda: target(*args))):
+            self.engine.say_claude_reply()
+        self.assertEqual(spoken, ["The base is online."])
+        self.assertFalse(os.path.exists(self.engine.REPLY_FILE))  # said once, not every 5 s
+
     def test_time(self):
         self.assertTrue(self.ask("What time is it?").text.startswith("It's "))
 
