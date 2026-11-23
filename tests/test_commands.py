@@ -122,10 +122,23 @@ class TestOnTheEngine(unittest.TestCase):
         self.assertIn(self.xena, self.engine.family._outings)
         self.assertEqual(self.voice("the dogs are in"), "Okay, Xena is in.")
         self.assertNotIn(self.xena, self.engine.family._outings)
-        self.assertEqual(self.voice("keep an eye on Xena"), "Okay, watching Xena.")
+        self.assertTrue(self.voice("keep an eye on Xena").startswith("Okay, watching Xena."))
         self.assertIn(self.xena, self.engine.family._outings)
         self.assertEqual(self.voice("Recall Xena"), "Okay, beeping Xena's collar.")
         self.assertIn(self.xena, self.engine.family._beeps)
+
+    def test_watching_a_pet_whose_collar_is_quiet(self):
+        loc = self.engine.locations
+        self.assertEqual(self.voice("keep an eye on Xena"),
+                         "Okay, watching Xena. Heads up: Xena's collar hasn't sent a location yet, so I can't see where Xena is.")
+        loc.record(loc.person(self.xena), {"_type": "location", "lat": HOME[0], "lon": HOME[1], "acc": 10,
+                                           "tst": int(time.time()) - 5 * 3600})
+        said = self.voice("keep an eye on Xena")
+        self.assertTrue(said.startswith("Okay, watching Xena. Heads up: Xena's collar hasn't sent a location since "), said)
+        self.assertTrue(said.endswith("so the map shows where Xena was then, not now. Have a look yourself."), said)
+        loc.record(loc.person(self.xena), {"_type": "location", "lat": HOME[0], "lon": HOME[1], "acc": 10,
+                                           "tst": int(time.time())})
+        self.assertEqual(self.voice("keep an eye on Xena"), "Okay, watching Xena.")
 
     def test_package_taken_in(self):
         self.assertFalse(self.engine.commands.claims("I got the package"))  # nothing waiting: not ours to take

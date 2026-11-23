@@ -126,7 +126,26 @@ class Family:
             return f"Okay, {names} {'are' if len(pets) > 1 else 'is'} in. Back to normal checking."
         yard = "" if self.locations.yard() else " (Draw the yard on the Family page so I can tell you if they leave it.)"
         return (f"Okay, watching {names}. I'll check on {'them' if len(pets) > 1 else names} every "
-                f"{OUTING_POLL_SECONDS} seconds for the next hour, or until you say they're in.{yard}")
+                f"{OUTING_POLL_SECONDS} seconds for the next hour, or until you say they're in.{yard}"
+                + self.stale_collars(pets, now))
+
+    STALE_COLLAR_SECONDS = 15 * 60
+
+    def stale_collars(self, pets, now: float) -> str:
+        """A warning for each collar whose newest position is old: the map is showing where the pet WAS, so
+        the user should look rather than trust it (2026-11-23: Jarvis said "watching Xena" over a 5-hour-old
+        position). "" when every position is recent."""
+        out = ""
+        for p in pets:
+            fix = self.locations.fix(p.id)
+            if fix is None:
+                out += f" Heads up: {p.name}'s collar hasn't sent a location yet, so I can't see where {p.name} is."
+            elif now - fix["ts"] > self.STALE_COLLAR_SECONDS:
+                when = _clock(fix["ts"]) if time.localtime(fix["ts"])[:3] == time.localtime(now)[:3] \
+                    else _day_time(fix["ts"])
+                out += (f" Heads up: {p.name}'s collar hasn't sent a location since {when}, so the map shows "
+                        f"where {p.name} was then, not now. Have a look yourself.")
+        return out
 
     def beep_pets(self, pets) -> str:
         """"Recall Xena" / "beep the dogs": the collar's buzzer sounds (the LoRa base sends it an alert-bell
