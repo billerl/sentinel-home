@@ -130,7 +130,7 @@ sentinel-home/                         # repository root
     │                                  #   recipes (recipe box, one recipe, cooking mode),
     │                                  #   remotes (learned IR/RF buttons: teach, press, rename), notes (private notes, shared lists),
     │                                  #   print (upload a PDF or photo to print), photos (folders, albums, viewer),
-    │                                  #   lost (Pet tracker: live collar map, recall beep, search on/off),
+    │                                  #   lost (Pet tracker: live collar map, recall beep, search on/off, show on a TV),
     │                                  #   where (full-screen "where is everyone" map for a TV, pictures as pins)
     ├── notifications/
     │   └── telegram_notifier.py       # HTTPS Bot API, commands, clips
