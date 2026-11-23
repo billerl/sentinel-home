@@ -502,6 +502,25 @@ Use this file as continuity across chats. At the **start** of a new session, ask
 - **Held infrared recordings** (2026-11-13, `remotes.trim_ir`, applied in `Remotes.press`): an IR code that is 4+ copies of one frame (gaps > 20 ms split them; copies must match within 35%) is sent as its first copy (2 copies still merged quick taps). The soundbar's Volume up was 17 copies (~2 s), so each phone-remote tap took 2 s on the server and taps queued (`web_slow_server` ~2000 ms on `/api/tv/.../key`). Stored codes are unchanged; 3-copy codes (TV Power) are left alone. Infrared sends are also spaced: the next waits until the last one's length (`ir_seconds`) + `IR_QUIET` (0.35 s) has passed, since taps 0.2 s apart were one held press to the soundbar.
 - **Samsung page that never opens** (2026-11-12): `show_live` returns False when no page checks in within `PAGE_WAIT` + `OPEN_WAIT` (the TV accepted the remote connection but ignored `ed.apps.launch` and `ed.installedApp.get` until restarted); `tv_command` then says so instead of "Okay" (`tv_page_not_opened` in the log). A TV that refuses the connection (OSError, e.g. just restarted) gets `_tv_failed`'s plain "isn't answering ... restart it" instead of the raw error.
 - **Profile picture framing** (2026-11-12, `people.html` `squarePicture`): picking a photo opens a move-and-zoom picker (drag, slider, pinch, wheel; up to 6x) and only the chosen square is uploaded; the server side (`Family.set_photo`) is unchanged. The original isn't kept, so re-framing means picking the file again.
+- **Voice notes for Claude, both ways** (2026-11-23; `Engine.save_claude_note`, `Engine.say_claude_reply`): "take a note
+  for Claude" appends to `~/Documents/sentinel_home/claude-notes.md` (+ Telegram). Claude's answer goes the other way:
+  Claude writes `claude-reply.txt` beside it (a .tmp then mv); the command loop's 5-s tick reads it, deletes it, says it
+  on the Jabra and sends "🤖 Claude: …" to Telegram (log `claude_reply_said`). A file, not a web endpoint: localhost is
+  not trusted (cloudflared connects from 127.0.0.1), and only something on this PC can write the file.
+- **Pet tracker → TV** (2026-11-23; `Switches.tv_show_page`, POST `/api/lost/tv`, `lost.html` `showOnTv`): a TV picker
+  (TVs with a live page, `camera_tvs()`, last choice kept in localStorage) + "Show on TV" opens `#map=<pet ids>` the same
+  way "show Xena's location on the TV" does.
+- **Room temperatures on the House page** (2026-11-23; kind `thermometer` in `house.KINDS`, `Engine._thermometers`):
+  the RM4's HTS2 sensor (`heater.inside()`, None when stale) is a placeable device; the room it sits in shows its
+  temperature beside the room name and in the room list. Add more kinds of thermometer to `_thermometers`.
+- **Live timeline** (2026-11-23; `timeline.LIVE_SECONDS`, `day_view()["live"]`, `timeline.html`): stops are listed newest
+  first (1 = now). Today re-loads quietly every 15 s; a position under 15 min old is a pulsing dot (map follows it), and
+  after the last stop ended a "Driving now" row shows time, miles and mph. Only as live as OwnTracks reports
+  ("significant changes": ~20 s to 4 min while driving); move mode was declined (battery).
+- **Old collar position warning** (2026-11-23; `Family.stale_collars`, `STALE_COLLAR_SECONDS` 15 min): "keep an eye on
+  Xena" adds "Heads up: Xena's collar hasn't sent a location since 6:38am, so the map shows where Xena was then, not
+  now." Spoken too: the outing command speaks the first sentence plus any "Heads up" sentence. Why: Jarvis said
+  "watching Xena" over a 5-hour-old fix while the collar answered the base but had no GPS fix.
 - **Dice game link** (2026-11-21): optional setting `games_url` (Settings → Remote access; owner) = a separate family game site. Home page gets a 🎲 tile; "let's play Yahtzee" / "put the dice game on the TV" (`switches.GAME_WORDS`, `_TV_GAME`, checked before Spotify) goes through `camera_lookup` -> `#map=game`, which the TV page (grid.js `mapFromHash`) frames as `<games_url>/tv?new=1` (the game site makes or reuses a game ready to join). "Show the cameras" closes it like a map. The game itself is not part of Sentinel.
 - **Location map on the TV** (2026-11-10; `Family.map_lookup/map_view/set_photo`, `templates/where.html`, `/where`,
   `/api/where`, `/person_photo/<id>.jpg`, POST `/api/people/<id>/photo`): "show me Kate's location" / "where Kate is" /
