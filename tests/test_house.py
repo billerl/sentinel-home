@@ -238,3 +238,18 @@ class TestHouseLive(unittest.TestCase):
         self.assertEqual(live["heater"], {"enabled": True, "target_f": 68, "room_f": 70.2, "celsius": False, "remote": "Heater"})
         fake.heater.view.return_value["buttons"] = None  # no heater remote found yet
         self.assertIsNone(Engine.house_live(fake)["heater"]["remote"])
+
+    def test_the_rm4_thermometer(self):
+        # 2026-11-23 voice note: a room's temperature on the house, from the thermometer placed in it
+        from sentinel.engine.engine import Engine
+
+        fake = mock.Mock()
+        fake.heater.inside.return_value = {"temp": 70, "humidity": 41}
+        hv = {"room_f": 70.2, "humidity": 41.0, "celsius": False}
+        self.assertEqual(Engine._thermometers(fake, {"hub": {"host": "192.168.1.60"}}, hv),
+                         [{"id": "broadlink", "name": "RM4 thermometer", "online": True, "temp_f": 70.2,
+                           "humidity": 41.0, "celsius": False}])
+        fake.heater.inside.return_value = None  # the last reading is too old: no number on the room
+        self.assertEqual(Engine._thermometers(fake, {"hub": {"host": "192.168.1.60"}}, hv)[0]["temp_f"], None)
+        self.assertEqual(Engine._thermometers(fake, {"hub": None}, hv), [])  # no BroadLink: nothing to place
+        self.assertEqual(clean_device({"kind": "thermometer", "ref": "broadlink", "at": [5, 5]})["id"], "thermometer:broadlink")

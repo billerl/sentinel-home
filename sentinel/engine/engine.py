@@ -1409,7 +1409,18 @@ class Engine:
                          "buttons": [b["name"] for b in r["buttons"]]} for r in rv["remotes"]],
             "heater": {k: hv[k] for k in ("enabled", "target_f", "room_f", "celsius")}
                       | {"remote": (hv["buttons"] or {}).get("remote")},
+            # what reads a room's temperature: shown on the room it's placed in (2026-11-23 voice note)
+            "thermometers": self._thermometers(rv, hv),
         }
+
+    def _thermometers(self, rv: Dict[str, Any], hv: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """The BroadLink RM4's sensor cable (read every minute by the heater's thermostat, sentinel/engine/heater.py)."""
+        if not rv.get("hub"):
+            return []
+        fresh = self.heater.inside() is not None  # (None once the last reading is too old)
+        return [{"id": "broadlink", "name": "RM4 thermometer", "online": fresh,
+                 "temp_f": hv["room_f"] if fresh else None, "humidity": hv.get("humidity") if fresh else None,
+                 "celsius": hv["celsius"]}]
 
     def _camera_page(self, words: str) -> Optional[Tuple[str, str]]:
         """"front door" / "the garage camera" -> (camera name, "#cam=<its page id>"), for showing it on a TV

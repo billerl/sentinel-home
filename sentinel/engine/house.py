@@ -22,7 +22,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from sentinel.logging_utils import app_logger
 
 FILE_NAME = "house.json"
-KINDS = ("sensor", "switch", "camera", "remote")  # remote = a remote taught to the BroadLink, by its name
+KINDS = ("sensor", "switch", "camera", "remote", "thermometer")  # remote = a remote taught to the BroadLink, by its name;
+# thermometer = something that reads the room's temperature ("broadlink": the RM4's sensor cable), shown on its room
 ROOM_KINDS = ("", "garage", "outside")
 FEATURES = ("steps", "window", "door", "box", "rail")
 MAX_ROOMS = 80

@@ -46,6 +46,8 @@
     .lbl.room { background: none; border: 0; color: var(--muted); font-size: 0.7rem; letter-spacing: 0.08em;
                 text-transform: uppercase; transform: translate(-50%, -50%); }
     .lbl.room.busy { color: var(--live); }
+    .lbl.room .temp { display: block; text-align: center; font-size: 1rem; letter-spacing: 0; text-transform: none;
+                      color: #ffb37a; font-weight: 600; margin-top: 1px; }
     .lbl.room.guess::after { content: " ?"; color: var(--dim); }
     .lbl.mark { background: none; border: 0; color: #5f8796; font-size: 0.66rem; letter-spacing: 0.06em; transform: translate(-50%, -50%); }
 
@@ -155,7 +157,8 @@
       </div>
       <p class="note">A room lights up when a sensor path through the middle of it notices movement.
         Use ＋ Add device to put your switches, cameras, Wi-Fi sensors and the things the BroadLink works (heater, fans,
-        soundbar) where they really are; Show ▾ picks what the drawing shows.</p>
+        soundbar) where they really are; Show ▾ picks what the drawing shows. A thermometer (the RM4's sensor cable)
+        shows its reading on the room it's placed in.</p>
     </aside>
   </main>
 
@@ -166,7 +169,7 @@
   (function () {
     var TV = {{ 'true' if tv else 'false' }};  // Fire TV / smart-TV browsers: start flat and draw lighter
     var REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    var C = { remote: 0xb48cff, cyan: 0x00ffff, live: 0xffc94d, garage: 0xfff3a0, outside: 0x4ade80, off: 0x5a6b73, wood: 0xc8955a, glass: 0xbfefff };
+    var C = { warm: 0xffb37a, remote: 0xb48cff, cyan: 0x00ffff, live: 0xffc94d, garage: 0xfff3a0, outside: 0x4ade80, off: 0x5a6b73, wood: 0xc8955a, glass: 0xbfefff };
     var H = 3.0, OPEN_TOP = 2.1;  // ceiling height and the top of a doorway, in drawing heights (1 ≈ 2.7 ft)
 
     // (quotes too: these go inside attribute values; a text node's innerHTML only escapes & < >)
@@ -193,7 +196,7 @@
     }
 
     var stage = document.getElementById("stage"), labels = document.getElementById("labels");
-    var drawing = null, placed = [], live = { paths: [], boards: [], switches: [], cameras: [], remotes: [], heater: {} };
+    var drawing = null, placed = [], live = { paths: [], boards: [], switches: [], cameras: [], remotes: [], heater: {}, thermometers: [] };
     var S = 1 / 40, CX = 0, CY = 0;  // plan units -> scene: set from the drawing's size
     function at(x, y, h) { return new THREE.Vector3((x - CX) * S, h || 0, (y - CY) * S); }
     function toPlan(v) { return [v.x / S + CX, v.z / S + CY]; }
@@ -341,6 +344,7 @@
       if (dv.kind === "switch") return live.switches.find(function (s) { return s.id === dv.ref; }) || null;
       if (dv.kind === "camera") return live.cameras.find(function (c) { return c.id === dv.ref; }) || null;
       if (dv.kind === "remote") return (live.remotes || []).find(function (r) { return r.id === dv.ref; }) || null;
+      if (dv.kind === "thermometer") return (live.thermometers || []).find(function (t) { return t.id === dv.ref; }) || null;
       return live.boards.find(function (b) { return b.id === dv.ref; }) || null;
     }
     function nameOf(dv) { var l = liveOf(dv); return (l && l.name) || dv.name || dv.ref; }
@@ -362,6 +366,7 @@
       if (!l.online) return "offline";
       if (dv.kind === "sensor") return sensorMoving(dv) ? "movement" : "still";
       if (dv.kind === "remote") return heaterWords(dv) || "remote";
+      if (dv.kind === "thermometer") return thermoWords(l);
       return l.on ? "on" : "off";
     }
 
@@ -372,10 +377,24 @@
       var room = h.room_f != null ? "room " + temp(h.room_f, h.celsius) : "";
       return (h.enabled ? "holding " + temp(h.target_f, h.celsius) + (room ? " · " + room : "") : room || "thermostat off");
     }
+    function thermoWords(l) {
+      if (!l || l.temp_f == null) return "no reading";
+      return temp(l.temp_f, l.celsius) + (l.humidity != null ? " · " + Math.round(l.humidity) + "% humidity" : "");
+    }
+    function roomTemps() {   // room id -> its temperature, from the thermometers placed in it
+      var out = {};
+      Object.keys(devObjs).forEach(function (id) {
+        var dv = devObjs[id].dv, l = dv.kind === "thermometer" ? liveOf(dv) : null;
+        if (!l || l.temp_f == null) return;
+        var rm = roomAt(dv.at[0], dv.at[1], dv.level || 0);
+        if (rm && !(rm.id in out)) out[rm.id] = temp(l.temp_f, l.celsius);
+      });
+      return out;
+    }
     // ---------- what's shown (the Show menu; remembered on this device) ----------
     var SHOW = [["rooms", "Room names"], ["marks", "Other labels (doors, stairs…)"], ["names", "Device names"],
                 ["sensors", "Wi-Fi sensors"], ["paths", "Sensor lines"], ["cameras", "Cameras"],
-                ["plugs", "Smart plugs & lights"], ["tvs", "TVs"], ["remotes", "Remote-controlled (RM4)"]];
+                ["plugs", "Smart plugs & lights"], ["tvs", "TVs"], ["remotes", "Remote-controlled (RM4)"], ["temps", "Thermometers"]];
     var show = {};
     SHOW.forEach(function (s) { show[s[0]] = true; });
     try { var kept = JSON.parse(localStorage.getItem("house.show") || "{}"); Object.keys(show).forEach(function (k) { if (kept[k] === false) show[k] = false; }); } catch (e) {}
@@ -383,6 +402,7 @@
       if (dv.kind === "sensor") return "sensors";
       if (dv.kind === "camera") return "cameras";
       if (dv.kind === "remote") return "remotes";
+      if (dv.kind === "thermometer") return "temps";
       return isTv(dv) ? "tvs" : "plugs";
     }
     function drawShowMenu() {
@@ -420,6 +440,7 @@
       else if (dv.kind === "remote" && /sound ?bar|speaker/i.test(dv.ref)) { mesh = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 1.1), mat); mesh.position.y = 0.7; }
       else if (dv.kind === "remote" && /heat/i.test(dv.ref)) { mesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.75, 0.4), mat); mesh.position.y = 0.38; }
       else if (dv.kind === "remote") { mesh = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), mat); mesh.position.y = 0.5; }
+      else if (dv.kind === "thermometer") { mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.6, 12), mat); mesh.position.y = 1.2; }
       else { mesh = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), mat); mesh.position.y = 0.3; }
       var halo = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.62, 32),
         new THREE.MeshBasicMaterial({ color: C.live, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
@@ -433,7 +454,7 @@
       el.className = "lbl";
       labels.appendChild(el);
       devObjs[dv.id] = { dv: dv, group: g, mesh: mesh, halo: halo, mat: mat, el: el, top: mesh.position.y + 0.5, tv: isTv(dv),
-                         color: dv.kind === "remote" ? C.remote : C.cyan };
+                         color: dv.kind === "remote" ? C.remote : dv.kind === "thermometer" ? C.warm : C.cyan };
     }
     function dropDevice(id) {
       var o = devObjs[id];
@@ -481,12 +502,18 @@
     // ---------- panel ----------
     var selected = null, floorMode = "main", placing = null, snapTimer = null;
     function drawLists() {
-      var rooms = drawing.rooms.filter(function (r) { return !r.kind; });
+      var rooms = drawing.rooms.filter(function (r) { return !r.kind; }), temps = roomTemps();
       document.getElementById("rooms").innerHTML = rooms.map(function (r) {
-        var o = roomObjs[r.id];
+        var o = roomObjs[r.id], t = temps[r.id] || "";
         return '<button type="button" class="row' + (o.busy ? " on" : "") + '" data-room="' + esc(r.id) + '"><span class="d"></span><span>' +
-          esc(r.name) + (r.guess ? " ?" : "") + '</span><span class="s">' + (o.busy ? "movement" : "") + '</span></button>';
+          esc(r.name) + (r.guess ? " ?" : "") + '</span><span class="s">' + (o.busy ? "movement" + (t ? " · " : "") : "") + esc(t) + '</span></button>';
       }).join("");
+      Object.keys(roomObjs).forEach(function (id) {   // the room's temperature under its name in the house
+        var o = roomObjs[id], t = temps[id] || "";
+        if (o.temp === t) return;
+        o.temp = t;
+        o.el.innerHTML = esc(o.room.name) + (t ? '<span class="temp">' + esc(t) + "</span>" : "");
+      });
       var ids = Object.keys(devObjs);
       document.getElementById("devices").innerHTML = ids.length ? ids.map(function (id) {
         var dv = devObjs[id].dv;
@@ -508,7 +535,7 @@
     function viewUrl(dv, l) {   // the device's own page: Device view on the Selected card
       if (dv.kind === "camera") return l ? "/live#cam=" + encodeURIComponent(l.web) : "/live";
       if (dv.kind === "sensor") return "/sensors";
-      if (dv.kind === "remote") return "/remotes";
+      if (dv.kind === "remote" || dv.kind === "thermometer") return "/remotes";
       if (isTv(dv) && /^(samsung|firetv)-/.test(dv.ref)) return "/live#remote=" + encodeURIComponent(dv.ref);  // its TV remote
       return "/live#switches";
     }
@@ -527,6 +554,10 @@
       } else if (dv.kind === "camera") {
         meta.push("Camera");
         if (l) html += '<img id="snap" alt="' + esc(nameOf(dv)) + ' camera" src="/snapshot.jpg?w=480&id=' + encodeURIComponent(l.web) + "&t=" + Date.now() + '">';
+      } else if (dv.kind === "thermometer") {
+        meta.push("Thermometer · " + esc(stateWords(dv)));
+        var rm = roomAt(dv.at[0], dv.at[1], dv.level || 0);
+        meta.push(rm ? "Shown on the " + esc(rm.name) : "Not inside a room: move it into the room it reads");
       } else if (dv.kind === "remote") {
         meta.push("Worked by the BroadLink" + (l && !l.online ? " · <b>not connected</b>" : ""));
         if (heaterWords(dv)) meta.push("Thermostat: " + esc(heaterWords(dv)));
@@ -601,6 +632,7 @@
       live.switches.forEach(function (s) { if (!on["switch:" + s.id]) out.push({ kind: "switch", ref: s.id, name: s.name, group: s.icon === "tv" ? "TVs" : "Switches" }); });
       live.cameras.forEach(function (c) { if (!on["camera:" + c.id]) out.push({ kind: "camera", ref: c.id, name: c.name, group: "Cameras" }); });
       (live.remotes || []).forEach(function (r) { if (!on["remote:" + r.id]) out.push({ kind: "remote", ref: r.id, name: r.name, group: "Remote-controlled (RM4)" }); });
+      (live.thermometers || []).forEach(function (t) { if (!on["thermometer:" + t.id]) out.push({ kind: "thermometer", ref: t.id, name: t.name, group: "Thermometers" }); });
       return out;
     }
     var bar = document.getElementById("placing");
