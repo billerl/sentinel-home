@@ -795,18 +795,7 @@ class SmartSwitches:
         tv = detail[0] if what != "what" else detail
         sw, driver, host = tv
         if what == "camera":
-            name, path = detail[1]
-            try:
-                shown = driver.show_live(host, path=path)
-            except (OSError, ValueError) as e:
-                return self._tv_failed(sw, e)
-            if shown is False:
-                return self._tv_no_page(sw)
-            if path.startswith("#map="):
-                app_logger.log("info", "tv_map", tv=sw.name, shown=name, source=source, component="switches", action="tv")
-                return f"Okay, {name} is on the {sw.name}."
-            app_logger.log("info", "tv_camera", tv=sw.name, camera=name, source=source, component="switches", action="tv")
-            return f"Okay, the {name} camera is on the {sw.name}."
+            return self._show_page(tv, *detail[1], source)[1]
         if what == "live":
             try:
                 shown = driver.show_live(host, reload=detail[1])
@@ -1101,6 +1090,29 @@ class SmartSwitches:
             if hasattr(driver, "knows") and hasattr(driver, "page_poll") and driver.knows(ip):
                 return driver.page_poll(ip)
         return None
+
+    def _show_page(self, tv, name: str, path: str, source: str) -> Tuple[bool, str]:
+        """One camera ("#cam=..") or map ("#map=..") full screen in the TV's browser -> (shown?, what to say)."""
+        sw, driver, host = tv
+        try:
+            shown = driver.show_live(host, path=path)
+        except (OSError, ValueError) as e:
+            return False, self._tv_failed(sw, e)
+        if shown is False:
+            return False, self._tv_no_page(sw)
+        if path.startswith("#map="):
+            app_logger.log("info", "tv_map", tv=sw.name, shown=name, source=source, component="switches", action="tv")
+            return True, f"Okay, {name} is on the {sw.name}."
+        app_logger.log("info", "tv_camera", tv=sw.name, camera=name, source=source, component="switches", action="tv")
+        return True, f"Okay, the {name} camera is on the {sw.name}."
+
+    def tv_show_page(self, switch_id: str, name: str, path: str, source: str = "web") -> Tuple[bool, str]:
+        """The Pet tracker's "Show on TV": a pet's map on the TV picked there (2026-11-23 voice note: no asking
+        Jarvis every time)."""
+        tv = self._tv_for(switch_id)
+        if tv is None or not getattr(tv[1], "live_url", None):
+            return False, "That TV can't show a map."
+        return self._show_page(tv, name, path, source)
 
     def camera_tvs(self) -> Dict[str, str]:
         """TVs that can show one camera full screen (in their own browser): switch id -> name."""

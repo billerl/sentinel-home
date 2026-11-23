@@ -826,6 +826,15 @@ class TestCameraOnTV(unittest.TestCase):
         self.run_timers()
         self.assertEqual(self.tv.backs, 1)  # back to Netflix
 
+    def test_a_pets_map_from_the_pet_tracker_page(self):
+        # 2026-11-23 voice note: a "Show on TV" button with a TV picker, instead of asking Jarvis each time
+        self.assertEqual(self.sw.tv_show_page("samsung-1", "Xena's location", "#map=3"),
+                         (True, "Okay, Xena's location is on the TV."))
+        self.assertEqual(self.tv.shown, ["#map=3"])
+        self.assertFalse(self.sw.tv_show_page("nope", "Xena's location", "#map=3")[0])
+        self.tv.live_url = None
+        self.assertEqual(self.sw.tv_show_page("samsung-1", "Xena's location", "#map=3"), (False, "That TV can't show a map."))
+
     def test_off_tv_and_someone_already_changed_it(self):
         self.switch.on = False
         self.assertFalse(self.sw.tv_show_camera("samsung-1", "#cam=abc", 60)[0])  # never turns the TV on

@@ -216,7 +216,8 @@ def register(app: Flask, ctx: WebContext) -> None:
             return jsonify({"error": "unauthorized"}), 401
         if engine is None:
             return jsonify({"pets": [], "yard": [], "home": None, "poll_seconds": 30, "now": time.time()})
-        return jsonify(engine.family.lost_view())
+        # (the TVs that can show her map: the "Show on TV" picker)
+        return jsonify(engine.family.lost_view() | {"tvs": [{"id": k, "name": v} for k, v in engine.switches.camera_tvs().items()]})
 
     @app.route("/where")
     def where_page():
@@ -314,6 +315,12 @@ def register(app: Flask, ctx: WebContext) -> None:
             return _result(True, engine.family.set_lost("lost" if action == "start" else "found", pets))
         if action == "beep":
             return _result(True, engine.family.beep_pets(pets))
+        if action == "tv":  # "📺 Show on TV": the pet's map on the TV picked (the same page as "show me Xena's location")
+            names = [p.name for p in pets]
+            label = (names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]) + "'s location"
+            body = request.get_json(silent=True) or {}
+            return _result(*engine.switches.tv_show_page(str(body.get("tv") or "")[:40], label,
+                                                        "#map=" + ",".join(str(p.id) for p in pets)))
         return jsonify({"error": "unknown action"}), 404
 
     @app.route("/api/family")

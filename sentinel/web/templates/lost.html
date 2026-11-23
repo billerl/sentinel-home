@@ -51,6 +51,10 @@
     #map { height: 62vh; min-height: 320px; border-radius: 14px; border: 1px solid #16303a; background: #050b0f; }
     .tools { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 10px; }
     .tools .btn, .tools button { padding: 12px 6px; font-size: 0.9rem; }
+    .tv { display: flex; gap: 8px; margin-top: 8px; }
+    .tv select { flex: 1; min-width: 0; background: #0c151c; color: #cfe; border: 1px solid #00a8a8; border-radius: 10px;
+                 padding: 10px; font: inherit; font-size: 0.95rem; }
+    .tv button { flex: 1; padding: 12px 6px; font-size: 0.9rem; }
     .note { font-size: 0.8rem; color: #6f97a5; line-height: 1.5; margin: 10px 2px 0; }
     .msg { font-size: 0.85rem; color: #9cc; margin-top: 8px; min-height: 1em; }
     .msg.err { color: #f99; }
@@ -93,6 +97,10 @@
         <a class="btn" id="directions" target="_blank" rel="noopener">🧭 Directions</a>
         <button type="button" id="follow" onclick="followPet()">◎ Center</button>
       </div>
+      <div class="tv" id="tv-row" hidden>
+        <select id="tv" aria-label="Which TV" onchange="pickTv()"></select>
+        <button type="button" id="tv-show" onclick="showOnTv()">📺 Show on TV</button>
+      </div>
       <p class="note" id="range-note"></p>
       <p class="note" id="me-note" hidden>To see where you are on the map too, open Sentinel through its remote web
         address (the https:// one) and allow location when your phone asks.</p>
@@ -101,8 +109,9 @@
 
   <script>
     var data = null, petId = null, fetchedAt = 0, map = null, layers = null, follow = true, fitted = false;
-    var me = null, meLayer = null, watching = false;
+    var me = null, meLayer = null, watching = false, tvId = null;
     try { petId = parseInt(localStorage.getItem("lostPet"), 10) || null; } catch (e) {}
+    try { tvId = localStorage.getItem("petTv"); } catch (e) {}
 
     function $(id) { return document.getElementById(id); }
     function esc(s) {
@@ -186,6 +195,7 @@
       $("start").textContent = "🚨 " + p.name + " is lost: start the search";
       $("found").hidden = !p.lost_since;
       $("found").textContent = "✅ Found " + p.name;
+      showTvs();
       tick();
       drawMap();
     }
@@ -309,6 +319,29 @@
     async function beep() {
       var res = await post("/api/lost/beep", { ids: [pet().id] });
       say(res.ok ? res.data.message + " (only within range of the base)" : res.data.error, !res.ok);
+    }
+
+    // "📺 Show on TV": the pet's map full screen on the TV picked (remembered on this phone)
+    function showTvs() {
+      var tvs = data.tvs || [], sel = $("tv");
+      $("tv-row").hidden = !tvs.length;
+      if (!tvs.length) return;
+      if (!tvs.some(function (t) { return t.id === tvId; })) tvId = tvs[0].id;
+      var html = tvs.map(function (t) {
+        return '<option value="' + esc(t.id) + '"' + (t.id === tvId ? " selected" : "") + ">" + esc(t.name) + "</option>";
+      }).join("");
+      if (sel.dataset.html !== html && document.activeElement !== sel) { sel.innerHTML = html; sel.dataset.html = html; }
+      $("tv-show").textContent = "📺 Show " + pet().name + " on TV";
+    }
+    function pickTv() {
+      tvId = $("tv").value;
+      try { localStorage.setItem("petTv", tvId); } catch (e) {}
+    }
+    async function showOnTv() {
+      $("tv-show").disabled = true;
+      var res = await post("/api/lost/tv", { ids: [pet().id], tv: $("tv").value });
+      $("tv-show").disabled = false;
+      say(res.ok ? res.data.message : res.data.error, !res.ok);
     }
 
     function say(text, bad) { $("msg").textContent = text || ""; $("msg").className = "msg" + (bad ? " err" : ""); }
