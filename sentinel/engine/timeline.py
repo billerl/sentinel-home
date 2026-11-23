@@ -21,6 +21,7 @@ MAX_ACC_M = 300  # vaguer positions are left out (cell-tower guesses)
 QUIET_S = 10 * 60  # a gap longer than this before a position elsewhere: the phone was resting, not driving
 DRIVE_MPS = 13.4  # ~30 mph, to guess when someone left a stop when the phone was quiet
 PLACE_MARGIN_M = 50
+LIVE_SECONDS = 15 * 60  # a newer position than this is "where they are now" on today's Timeline
 
 Point = Tuple[float, float, float, Optional[float], Optional[float]]  # ts, lat, lon, acc, vel
 
@@ -175,6 +176,19 @@ def day_view(points: Sequence[Point], places: Sequence[Place], start: float, end
         })
     # Time away from home, from the day's first position (or midnight) until now / midnight.
     day_pts = [p for p in good if start <= p[0] < end]
+    # Today, and the phone's newest position is fresh: where they are right now, for the page's live dot.
+    # Left the last stop and not at another yet: the drive that's going on now (2026-11-23 voice note).
+    live = None
+    if start <= now < end and day_pts and now - day_pts[-1][0] <= LIVE_SECONDS:
+        last = day_pts[-1]
+        live = {"lat": round(last[1], 6), "lon": round(last[2], 6), "ts": last[0],
+                "kmh": round(last[4]) if last[4] is not None else None}
+        if shown and shown[-1].end is not None:
+            prev = shown[-1]
+            leg = [(0.0, prev.lat, prev.lon, None, None)] + [p for p in good if p[0] >= prev.end]
+            m = _path_m(leg)
+            miles += m / 1609.344
+            items.append({"type": "drive", "start": prev.end, "end": None, "miles": round(m / 1609.344, 1), "ongoing": True})
     away = None
     if day_pts and any(p.place is not None and p.place.is_home for p in stops):
         lo = start if any(s.start <= start for s in stops) else day_pts[0][0]
@@ -189,4 +203,5 @@ def day_view(points: Sequence[Point], places: Sequence[Place], start: float, end
         "miles": round(miles, 1),
         "away_s": round(away) if away is not None else None,
         "points": len(day_pts),
+        "live": live,
     }

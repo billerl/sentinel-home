@@ -57,6 +57,20 @@ class TestStops(unittest.TestCase):
         self.assertAlmostEqual(view["away_s"], (16.25 - 7.5) * 3600, delta=1200)
         self.assertIn("east of Home", view["items"][2]["where"])
 
+    def test_driving_right_now(self):
+        # 2026-11-23 voice note: watch someone live on today's Timeline while they drive
+        t = self.d0 + 9 * 3600
+        pts = stay(*HOME, t - 3600, t) + drive(HOME, WORK, t, 12)[:6]  # left home, 5 minutes down the road
+        view = day_view(pts, self.places, self.d0, self.d1, now=pts[-1][0] + 20)
+        self.assertEqual([i["type"] for i in view["items"]], ["stop", "drive"])
+        self.assertTrue(view["items"][-1]["ongoing"])
+        self.assertIsNone(view["items"][-1]["end"])
+        self.assertGreater(view["items"][-1]["miles"], 0)
+        self.assertEqual((view["live"]["lat"], view["live"]["kmh"]), (round(pts[-1][1], 6), 50))
+        stale = day_view(pts, self.places, self.d0, self.d1, now=pts[-1][0] + 3600)
+        self.assertIsNone(stale["live"])  # not heard for an hour: no "now" dot
+        self.assertIsNone(day_view(pts, self.places, self.d0, self.d1, now=self.d1 + 3600)["live"])  # (another day)
+
     def test_red_lights_and_gps_blips_are_not_stops(self):
         t = self.d0 + 9 * 3600
         pts = stay(*HOME, t - 3600, t)

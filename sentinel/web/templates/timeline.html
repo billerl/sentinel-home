@@ -78,6 +78,13 @@
     .naming { grid-column: 2 / 4; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .naming input { background: #111; color: #e6ffff; border: 1px solid #066; border-radius: 4px; padding: 5px 8px; font: inherit; font-size: 0.85rem; min-width: 0; flex: 1 1 140px; }
     .drive { display: flex; align-items: center; gap: 10px; padding: 0 8px 0 20px; color: #6aa; font-size: 0.76rem; font-variant-numeric: tabular-nums; }
+    .drive.now { color: #fb3; font-weight: 600; font-size: 0.85rem; padding-top: 6px; padding-bottom: 6px; }
+    .drive.now::before { background: #fb3; }
+    .livedot { width: 18px; height: 18px; border-radius: 50%; background: #fb3; border: 3px solid #fff; box-shadow: 0 0 0 0 rgba(255,187,51,0.7);
+               animation: livepulse 1.8s infinite; }
+    @keyframes livepulse { 0% { box-shadow: 0 0 0 0 rgba(255,187,51,0.7); } 70% { box-shadow: 0 0 0 14px rgba(255,187,51,0); } 100% { box-shadow: 0 0 0 0 rgba(255,187,51,0); } }
+    @media (prefers-reduced-motion: reduce) { .livedot { animation: none; } }
+    .livetag { color: #fb3; }
     .drive::before { content: ""; width: 2px; height: 22px; background: #066; margin-right: 8px; }
     .empty { color: #6aa; font-size: 0.88rem; line-height: 1.6; padding: 14px 4px; }
   </style>
@@ -192,7 +199,15 @@
       map.setView([41.114, -88.178], 12);
     }
     function kind(s) { return s.home ? "home" : s.name ? "named" : "other"; }
-    function drawMap() {
+    // Stops are numbered newest first (1 = where they are now / were last), on the list and the map alike.
+    function stopNumbers() {
+      var idx = [], num = {};
+      view.items.forEach(function(it, i) { if (it.type === "stop") idx.push(i); });
+      idx.forEach(function(i, k) { num[i] = idx.length - k; });
+      return num;
+    }
+    function ago(ts) { var s = Math.max(0, Date.now() / 1000 - ts); return s < 60 ? Math.round(s) + " s ago" : dur(s) + " ago"; }
+    function drawMap(fit) {
       ensureMap();
       layer.clearLayers(); markers = [];
       var bounds = [];
@@ -200,18 +215,26 @@
         L.polyline(view.path, { color: "#00ffff", weight: 3, opacity: 0.8 }).addTo(layer);
         view.path.forEach(function(p) { bounds.push(p); });
       }
-      var n = 0;
+      var num = stopNumbers();
       view.items.forEach(function(it, i) {
         if (it.type !== "stop") return;
-        n++;
-        var icon = L.divIcon({ className: "", html: '<div class="pin ' + kind(it) + (i === active ? " active" : "") + '">' + n + '</div>', iconSize: [24, 24], iconAnchor: [12, 12] });
+        var icon = L.divIcon({ className: "", html: '<div class="pin ' + kind(it) + (i === active ? " active" : "") + '">' + num[i] + '</div>', iconSize: [24, 24], iconAnchor: [12, 12] });
         var m = L.marker([it.lat, it.lon], { icon: icon, title: it.name || it.where, keyboard: false }).addTo(layer);
         m.on("click", function() { select(i, true); });
         markers[i] = m;
         bounds.push([it.lat, it.lon]);
       });
+      var lv = view.live;
+      if (lv) {   // where they are right now (today, phone heard in the last 15 minutes)
+        var mph = lv.kmh != null && lv.kmh >= 10 ? Math.round(lv.kmh / 1.609) + " mph · " : "";
+        L.marker([lv.lat, lv.lon], { icon: L.divIcon({ className: "", html: '<div class="livedot"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }),
+                                     keyboard: false, zIndexOffset: 1000 })
+          .bindTooltip("Now · " + mph + "heard " + ago(lv.ts)).addTo(layer);
+        bounds.push([lv.lat, lv.lon]);
+      }
       map.invalidateSize();  // the card may have changed size since the map was made (phone rotation, first load)
-      if (bounds.length) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 16, animate: false });
+      if (fit && bounds.length) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 16, animate: false });
+      else if (lv && driving() && !map.getBounds().pad(-0.15).contains([lv.lat, lv.lon])) map.panTo([lv.lat, lv.lon]);  // follow the car
     }
     function select(i, scroll) {
       active = active === i && !scroll ? -1 : i;
@@ -221,14 +244,22 @@
       if (scroll) { var li = document.querySelector('.stop[data-i="' + i + '"]'); if (li) li.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
     }
 
-    function renderDay() {
+    function driving() { return !!view && view.items.some(function(it) { return it.type === "drive" && it.ongoing; }); }
+    function renderDay(fit) {
       var p = who(), d = parse(day), isToday = day === iso(today());
       $("dayname").textContent = p.name + " · " + (isToday ? "Today" : DOWS[d.getDay()]) + ", " + MONTHS[d.getMonth()].slice(0, 3) + " " + d.getDate();
       if (!view) { $("stats").innerHTML = ""; $("stops").innerHTML = '<li class="empty">Loading…</li>'; return; }
-      $("stats").innerHTML = '<span><b>' + view.stops + '</b> ' + (view.stops === 1 ? "stop" : "stops") + '</span><span><b>' + view.miles + '</b> miles</span>' +
+      $("stats").innerHTML = (view.live ? '<span class="livetag">● Live · heard ' + ago(view.live.ts) + '</span>' : "") + '<span><b>' + view.stops + '</b> ' + (view.stops === 1 ? "stop" : "stops") + '</span><span><b>' + view.miles + '</b> miles</span>' +
         (view.away_s ? '<span>away from home <b>' + dur(view.away_s) + '</b></span>' : "");
-      var html = "", n = 0;
-      view.items.forEach(function(it, i) {
+      var html = "", n = 0, num = stopNumbers();
+      // newest first: where they are now at the top, going back through the day (2026-11-23 voice note)
+      view.items.map(function(it, i) { return [it, i]; }).reverse().forEach(function(pair) {
+        var it = pair[0], i = pair[1];
+        if (it.type === "drive" && it.ongoing) {
+          var mph = view.live && view.live.kmh != null && view.live.kmh >= 10 ? " · " + Math.round(view.live.kmh / 1.609) + " mph" : "";
+          html += '<li class="drive now">🚗 Driving now · ' + dur(Date.now() / 1000 - it.start) + ' so far · ' + it.miles + ' mi' + mph + '</li>';
+          return;
+        }
         if (it.type === "drive") {
           html += '<li class="drive">Driving · ' + dur(it.end - it.start) + ' · ' + it.miles + ' mi</li>';
           return;
@@ -240,27 +271,29 @@
         else if (it.ongoing) { when = clock(it.start) + (isToday ? " – now" : ""); sub = dur(Date.now() / 1000 - it.start) + (isToday ? " so far" : ""); }
         else if (it.after_day) { when = "from " + clock(it.start); sub = "into the next day"; }
         else { when = clock(it.start) + " – " + clock(it.end); sub = dur(it.end - it.start); }
-        html += '<li class="stop' + (i === active ? " active" : "") + '" data-i="' + i + '"><span class="num ' + kind(it) + '">' + n + '</span>' +
+        html += '<li class="stop' + (i === active ? " active" : "") + '" data-i="' + i + '"><span class="num ' + kind(it) + '">' + num[i] + '</span>' +
           '<span class="place">' + esc(it.name || "Unnamed stop") + (it.where ? '<span class="addr">' + esc(it.where) + '</span>' : "") + '</span>' +
           '<span class="when">' + when + '<small>' + sub + '</small></span>' +
           (it.name ? "" : '<span class="naming" data-i="' + i + '"><button class="namebtn" data-i="' + i + '">📍 Name this place</button></span>') + '</li>';
       });
       if (!n) html = '<li class="empty">' + (view.points ? "No stops long enough to count (5+ minutes) on this day." :
                                              "Nothing from " + esc(p.name) + "'s phone on this day.") + '</li>';
+      if (document.querySelector(".naming input")) return;  // naming a place: don't wipe what's being typed
       $("stops").innerHTML = html;
-      drawMap();
+      drawMap(fit);
     }
 
-    async function loadDay() {
+    // quiet: today's refresh every 15 s (live positions while someone drives): no "Loading…", the map stays where it is
+    async function loadDay(quiet) {
       clearTimeout(refreshTimer);
-      view = null; active = -1; renderDay();
+      if (!quiet) { view = null; active = -1; renderDay(); }
       var want = person + "/" + day;
       try {
         var v = await api("/api/timeline/" + person + "/" + day);
         if (want !== person + "/" + day) return;  // the person or day changed while loading
-        view = v; renderDay();
-      } catch (e) { $("stops").innerHTML = '<li class="empty">Couldn\'t load this day (' + esc(e.message) + ').</li>'; }
-      if (day === iso(today())) refreshTimer = setTimeout(loadDay, 2 * 60 * 1000);
+        view = v; renderDay(!quiet);
+      } catch (e) { if (!quiet) $("stops").innerHTML = '<li class="empty">Couldn\'t load this day (' + esc(e.message) + ').</li>'; }
+      if (day === iso(today())) refreshTimer = setTimeout(function() { loadDay(true); }, 15 * 1000);
     }
     function pickDefaultDay() {
       var have = Array.from(days()).sort();
