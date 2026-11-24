@@ -78,7 +78,8 @@ sentinel-home/                         # repository root
     │   ├── tv_mirror.py               # the remote's live picture of a Fire TV's screen (screenrecord -> JPEGs)
     │   ├── tasmota.py                 # plugs running Tasmota firmware as switches (local HTTP; network sweep)
     │   ├── wifi_motion.py             # Wi-Fi motion sensors (ESP32 CSI boards): find, poll, judge motion, daily CSVs
-    │   ├── house.py                   # House page: the 3D drawing of the home (house.json) + where each device sits
+    │   ├── house.py                   # House page: the 3D drawing of the home and yard (house.json), where each device sits,
+    │   │                              #   and where the cameras' sightings stand on the plan (camera views, seen_things)
     │   ├── routines.py                # "When X, only if Y, then Z": check/describe, sunrise/sunset maths, runner (routines.db), Wi-Fi sensor rules + 24 h replay
     │   ├── questions.py               # Telegram questions ("did anyone come by?", "is Kate home?")
     │   ├── commands.py                # Command registry: what both Telegram and voice understand, registered
@@ -145,6 +146,7 @@ sentinel-home/                         # repository root
     │   ├── spotify_player.py          # this PC as a Spotify speaker: runs bin/spotifyd, its sign-in relay
     │   ├── spotify_web.py             # ...or through Spotify's web player in a hidden Firefox (spotify_speaker_kind "web")
     │   ├── wake_samples.py            # "train Jezebel": real recordings of the wake word, kept for retraining its model
+    │   │                              #   (+ everyday wakes, near-misses and false wakes with voice_keep_wake_sounds)
     │   └── voice.py                   # "Hey Jarvis": arecord -> band-pass -> openWakeWord -> faster-whisper
     │                                  #   (+ an optional trial wake word that only logs scores)
     └── settings/

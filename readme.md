@@ -97,7 +97,10 @@ Each one is independent. Most are switched on from the web page's **Settings**; 
 | **Wi-Fi motion sensing** (movement inside, no cameras) | ESP32-S3 boards with the firmware in `firmware/` | Movement inside page |
 | **Pet GPS tracker and mesh chat** | A Meshtastic collar tracker and radio base (`tools/meshtastic_bridge.py`) | Pet tracker page |
 | **Planes overhead** ("what plane is that?"), recipes, notes | Nothing extra | Home page |
-| **Spotify by voice** | Spotify Premium and a free developer app | Settings → Spotify |
+| **Spotify by voice**, and the PC as a Spotify speaker | Spotify Premium and a free developer app | Settings → Spotify |
+| **House page**: a 3D drawing of your home and yard, with lights, sensors and the people, pets and vehicles the cameras see | Draw the rooms once | House page |
+| **Your own wake word** ("Hey Jarvis" is built in) | An openWakeWord model you train; "train <name>" records your voice for it | Settings → Audio, Help |
+| **Family game tiles** (a dice game, a darts scorer with a TV scoreboard) | Your own small game site on its own address | Settings → Remote access |
 | **Ask Claude** (questions Sentinel can't answer) | The Claude Code app signed in on this PC | Settings → Telegram |
 | **Nightly backup** to a USB drive and/or another PC | The drive, or an SSH-reachable PC | Settings → Backup |
 
@@ -169,7 +172,8 @@ doesn't last 3 frames are ignored. Then object detection decides what it was, an
 
 Everything about *your* house is created on first run and never goes into git: `settings.json`
 (camera passwords, bot token; owner-only file permissions), `recorded_videos/` (clips, and databases
-of family, places, cars and history), `.web_sessions.json`, `camera_admin.json`. Don't share them.
+of family, places, cars and history), `.web_sessions.json`, `camera_admin.json`, `.spotifyd/` and `.spotify-web/` (Spotify sign-ins), `.darts_tv_key`.
+Don't share them.
 Logs (`sentinel_events.log`) have passwords removed.
 
 ## Tests

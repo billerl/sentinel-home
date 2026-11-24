@@ -94,6 +94,10 @@ Pitfalls learned the hard way:
 - Night pictures are infrared: tell them apart with `is_greyscale`, not saturation.
 - TV pages run in old browsers (a 2018 Samsung TV is Chrome 56): plain ES5 JavaScript, no CSS grid gap or
   container units without fallbacks, `XMLHttpRequest` where cookies matter.
+- Sound: only Sentinel's own ALSA devices (`sentinel_speaker`, `sentinel_music`, a shared dmix) may open the
+  speaker's card. A program that plays through PipeWire/PulseAudio straight to that card takes it away from
+  the mixer; route it into `sentinel_music` instead (see `sentinel/audio/spotify_web.py`).
+- Change `settings.json` by hand only while Sentinel is stopped: it saves its settings when it stops.
 - In web editors, never grow JavaScript arrays by setting `.length` (the holes are saved as `null`).
 
 ## Notes for one house

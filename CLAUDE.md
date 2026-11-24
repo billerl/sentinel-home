@@ -48,6 +48,11 @@ If `CLAUDE.local.md` exists (git-ignored), read it too: it holds the notes for o
 - Don't `pgrep -f`/`pkill -f` a pattern that also appears in your own shell command line (it
   matches the shell itself and kills it, or makes wait-loops never finish). Anchor the pattern
   (`^/home/.../python main.py`) or use PIDs.
+- Sound: only Sentinel's own ALSA devices (`sentinel_speaker`, `sentinel_music`, a shared dmix) may open the
+  speaker's card. A program that plays through PipeWire/PulseAudio straight to that card takes it away from
+  the mixer; route it into `sentinel_music` instead (see `sentinel/audio/spotify_web.py`).
+- Changing `settings.json` by hand: only while Sentinel is stopped (it saves its settings when it stops).
+  With a systemd service that means in the seconds between SIGTERM and the restart, or stop the service.
 - The bundled ffmpeg (imageio-ffmpeg) crashes reading MPEG-TS from these cameras; HD segments are Matroska.
 - HD segments are only written when they close (~2 s); anything reading them must wait (see
   `HDRecorder.keyframe_near`).
