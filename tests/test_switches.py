@@ -903,6 +903,23 @@ class TestOneCameraByVoice(unittest.TestCase):
         self.assertEqual(sw.command("Show me Kate's location", "voice"), "Okay, Kate's location is on the TV.")
         self.assertEqual(tv.shown, ["#map=3"])
 
+    def test_lets_play_darts(self):
+        from sentinel.engine.switches import DARTS_WORDS
+
+        for words in ("darts", "the dartboard", "a game of darts", "dart board", "the darts score", "darts scoreboard"):
+            self.assertTrue(DARTS_WORDS.match(words), words)
+        for words in ("dark side of the moon", "yahtzee", "front door"):
+            self.assertFalse(DARTS_WORDS.match(words), words)
+        tv = FakeTV()
+        tv.live_url, tv.shown = "http://192.168.1.9:8088/", []
+        tv.show_live = lambda host, reload=False, path="": tv.shown.append(path)
+        sw = SmartSwitches(tempfile.mkdtemp(prefix="sentinel-sw-"), drivers=[FakeKasa(), tv], clock=lambda: NOW)
+        sw.discover()
+        sw.camera_lookup = lambda words: ("the darts scoreboard", "#map=darts") if DARTS_WORDS.match(words) else None
+        for said in ("Let's play darts", "play darts on the TV", "show the dartboard on the TV", "put the darts score on the TV"):
+            self.assertEqual(sw.command(said, "voice"), "Okay, the darts scoreboard is on the TV.", said)
+        self.assertEqual(tv.shown[-1], "#map=darts")
+
     def test_lets_play_yahtzee(self):
         from sentinel.engine.switches import GAME_WORDS
         tv = FakeTV()

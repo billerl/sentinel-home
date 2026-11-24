@@ -550,7 +550,7 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   Xena" adds "Heads up: Xena's collar hasn't sent a location since 6:38am, so the map shows where Xena was then, not
   now." Spoken too: the outing command speaks the first sentence plus any "Heads up" sentence. Why: Jarvis said
   "watching Xena" over a 5-hour-old fix while the collar answered the base but had no GPS fix.
-- **Darts link** (2026-11-24): optional setting `darts_url`, likewise = a 🎯 tile on Home (the scorer itself lives in the separate game site).
+- **Darts link** (2026-11-24): optional setting `darts_url`, likewise = a 🎯 tile on Home (the scorer itself lives in the separate game site). "Let's play darts" / "show the dartboard on the TV" opens `<darts_url>/tv` (its scoreboard) on a TV, the same way as the dice game (`DARTS_WORDS`, `#map=darts`).
 - **Dice game link** (2026-11-21): optional setting `games_url` (Settings → Remote access; owner) = a separate family game site. Home page gets a 🎲 tile; "let's play Yahtzee" / "put the dice game on the TV" (`switches.GAME_WORDS`, `_TV_GAME`, checked before Spotify) goes through `camera_lookup` -> `#map=game`, which the TV page (grid.js `mapFromHash`) frames as `<games_url>/tv?new=1` (the game site makes or reuses a game ready to join). "Show the cameras" closes it like a map. The game itself is not part of Sentinel.
 - **Location map on the TV** (2026-11-10; `Family.map_lookup/map_view/set_photo`, `templates/where.html`, `/where`,
   `/api/where`, `/person_photo/<id>.jpg`, POST `/api/people/<id>/photo`): "show me Kate's location" / "where Kate is" /

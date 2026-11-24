@@ -209,6 +209,9 @@ _TV_ONE_CAMERA = re.compile(r"^(?:please )?(?:can you |could you )?(?:show|put u
 # "play Yahtzee" isn't a song.) GAME_WORDS also lets "show the dice game on the TV" through camera_lookup.
 GAME_WORDS = re.compile(r"^(?:the\s+|a\s+|some\s+)?(?:game\s+of\s+)?(?:yahtzee|yahtze|yatzee|yatzy|yahtzy|dice|dice\s+game|"
                         r"family\s+dice)(?:\s+game)?$", re.IGNORECASE)
+# The darts scorer's TV scoreboard (settings darts_url): "let's play darts", "show the dartboard on the TV".
+DARTS_WORDS = re.compile(r"^(?:the\s+|a\s+|some\s+)?(?:game\s+of\s+)?(?:darts?|dart\s*board|darts?\s+(?:score|scores|"
+                         r"scorer|scoreboard|game)|family\s+darts)(?:\s+game)?$", re.IGNORECASE)
 _TV_GAME = re.compile(r"^(?:ok(?:ay)?\s+)?(?:let'?s|let\s+us|we\s+want\s+to|i\s+want\s+to|can\s+we|time\s+to)?\s*"
                       r"(?:play|start)\s+(.+?)(?:\s+(?:on|to)\s+" + _TV + r")?(?:\s+please)?$", re.IGNORECASE)
 _TV_WHAT = re.compile(r"^what(?:'s| is) (?:on|playing on) " + _TV + r"$", re.IGNORECASE)
@@ -718,7 +721,8 @@ class SmartSwitches:
         cam_tvs = [x for x in tvs if getattr(x[1], "live_url", None)]
         found = self.camera_lookup(m.group(1)) if m and cam_tvs and self.camera_lookup else None
         g = _TV_GAME.match(t)
-        if not found and g and GAME_WORDS.match(g.group(1)) and cam_tvs and self.camera_lookup:
+        if not found and g and (GAME_WORDS.match(g.group(1)) or DARTS_WORDS.match(g.group(1))) and cam_tvs \
+                and self.camera_lookup:
             found = self.camera_lookup(g.group(1))  # "let's play Yahtzee": the dice game on the TV
         if found:
             return "camera", (tv if tv in cam_tvs else self._pick_tv(t, cam_tvs), found)

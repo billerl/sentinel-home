@@ -70,6 +70,7 @@ def register(app: Flask, ctx: WebContext) -> None:
             cameras=cams,
             snapshot_interval_ms=snapshot_interval_ms,
             games_url=games_url(),
+            darts_url=games_url("darts_url"),
         )
 
     @app.route("/api/cameras")

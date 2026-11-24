@@ -98,9 +98,10 @@ function mapFromHash() {
   closeMap();
   mapFrame = document.createElement("iframe");
   mapFrame.setAttribute("data-p", m[1]);
-  if (m[1] === "game" && !window.GAMES_URL) return;
+  if (m[1] === "game" && !window.GAMES_URL || m[1] === "darts" && !window.DARTS_URL) return;
   // (the planes near the house: planes.html; "game": the family dice game's TV page, a fresh game ready to join)
-  mapFrame.src = m[1] === "planes" ? "/planes" : m[1] === "game" ? window.GAMES_URL + "/tv?new=1" : "/where?p=" + m[1];
+  mapFrame.src = m[1] === "planes" ? "/planes" : m[1] === "game" ? window.GAMES_URL + "/tv?new=1" :
+    m[1] === "darts" ? window.DARTS_URL + "/tv" : "/where?p=" + m[1];  // (the darts scorer's scoreboard)
   mapFrame.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;border:0;z-index:5000;background:#000";
   document.body.appendChild(mapFrame);
 }
