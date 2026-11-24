@@ -21,6 +21,7 @@ from sentinel.web.context import TV_BROWSER, WebContext  # noqa: F401  (TV_BROWS
 from sentinel.web.frame_broker import FrameBroker
 
 BIND_RETRY_SECONDS = 10.0  # a listener whose address can't be bound yet (network not up) tries again this often
+from sentinel.web.routes import things  # noqa: E402  (the Things page: where things are kept)
 from sentinel.web.routes import (cameras, family, house, live, mesh, notes, photos, printing, recipes, recordings,
                                  routines, sensors, settings, signin, spotify, switches, talk, vehicles)
 from sentinel.web.routes.signin import _from_this_home, _home_nets  # noqa: F401  (tests use them here)
@@ -230,7 +231,7 @@ class WebServer:
         ctx.tailscale_base = next((f"http://{h}:{port}" for h in bind_hosts if _tailscale_address(h)), None)
         signin.register(app, ctx, home_base)
         roles.install(app, ctx)  # every route's minimum role, checked before the route runs
-        for area in (live, family, mesh, notes, photos, printing, recipes, spotify, switches, sensors, house, routines,
+        for area in (things, live, family, mesh, notes, photos, printing, recipes, spotify, switches, sensors, house, routines,
                      cameras, vehicles, settings, recordings, talk):
             area.register(app, ctx)
 

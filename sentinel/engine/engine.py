@@ -181,6 +181,9 @@ class Engine:
         from sentinel.engine.notes import Notes
 
         self.notes = Notes(VIDEO_DIR)  # each person's notes and lists, private or shared (the Notes page)
+        from sentinel.engine.things import Things
+
+        self.things = Things(VIDEO_DIR)  # "my darts are in the garage cabinet" ... "where are my darts?"
         from sentinel.engine.voice_log import VoiceLog
 
         self.voice_log = VoiceLog(VIDEO_DIR)  # what was asked of Jarvis and where (the timeline's Voice row)
@@ -798,6 +801,9 @@ class Engine:
 
         commands.add(Command(  # Telegram only: a recipe link (or an Instagram reel) to keep
             "save recipe", save_link_command, lambda _u, _t: "", telegram=save_recipe))
+        commands.add(Command(  # before "where is Kate": a kept thing by that name wins, anything else passes through
+            "things", self._things_understood, lambda m, _t: self._things_answer(m), speak=lambda said: said,
+            voice_stage="late", prefix="📦 "))
         commands.add(Command(
             "location", self.family.location_question, lambda m, _t: self.family.answer_location_question(m)[0],
             speak=to_speech, voice_stage="late", telegram=send_location_reply,
@@ -922,6 +928,59 @@ class Engine:
             return
         if not self.cars.handle_button(chat_id, message_id, data, callback_id):
             self.telegram.answer_button(callback_id)
+
+    # ------------------------------------------------------------ where things are (sentinel/engine/things.py)
+    def _things_understood(self, text: str):
+        """("put", name, place or None, verb) / ("find", name, explicit) / ("forget", name) / ("list",), else None.
+        A plain "where is X" or "forget X" is only ours when a thing by that name is kept."""
+        from sentinel.engine.things import is_list, parse_find, parse_forget, parse_put
+
+        if is_list(text):
+            return ("list",)
+        put = parse_put(text)
+        if put:
+            return ("put",) + put
+        find = parse_find(text)
+        if find and (find[1] or self.things.find(find[0])):
+            return ("find",) + find
+        forget = parse_forget(text)
+        if forget and (self.things.find(forget) or re.search(r"\bthings\b", text.lower())):
+            return ("forget", forget)
+        return None
+
+    def _things_answer(self, understood, by: str = "") -> str:
+        kind = understood[0]
+        if kind == "list":
+            return self.things.summary()
+        if kind == "put":
+            _, name, place, verb = understood
+            if place is None:  # (by voice Jarvis asks and listens: answer_voice)
+                return f"Where {'are they' if name.endswith('s') else 'is it'}? Tell me like: my {name} " \
+                       f"{'are' if name.endswith('s') else 'is'} in the garage cabinet."
+            return self.things.put(name, place, verb, by)[1]
+        if kind == "find":
+            return self.things.answer(understood[1]) or ""
+        found = self.things.find(understood[1])
+        return self.things.forget(found[0]["name"] if found else understood[1])[1]
+
+    def _things_voice(self, low: str):
+        """ "Remember my darts" -> "Where are they?" -> whatever is said next is the place."""
+        from sentinel.audio.voice import VoiceReply
+        from sentinel.engine.things import parse_put
+
+        put = parse_put(low)
+        if not put or put[1] is not None:
+            return None
+        name = put[0]
+
+        def place(said: str) -> str:
+            where = re.sub(r"^(?:(?:it'?s|it is|they'?re|they are|that'?s|those are)\s+|(?:i|we) "
+                           r"(?:put|keep|kept|left|store|stored)\s+(?:it|them)\s+)", "", said.strip().lower()).strip(" .")
+            if not where:
+                return "I didn't catch where. Try again."
+            return self.things.put(name, where, put[2], "voice")[1]
+
+        return VoiceReply(f"Where {'are they' if name.endswith('s') else 'is it'}?", dictate=place)
 
     # ------------------------------------------------------------ reminders
     def reminder_command(self, chat_id: Optional[str], text: str) -> str:
@@ -1362,6 +1421,9 @@ class Engine:
             return VoiceReply(self.routine_command(low, spoken=True))
         if re.fullmatch(r"(?:what are |list |read )?(?:my |the |any )?reminders|do i have any reminders", low):
             return VoiceReply(self.reminder_command(None, "reminders"))
+        asked = None if ROUTINE_REQUEST.search(low) else self._things_voice(low)
+        if asked is not None:
+            return asked
         said = None if ROUTINE_REQUEST.search(low) else self.commands.voice_reply(low, "late")
         if said is not None:
             return VoiceReply(said)

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#001525">
+  <title>Where is it? - Sentinel</title>
+  <style>
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; }
+    a { color: #00ffff; }
+    header { position: sticky; top: 0; z-index: 10; background: #1a1a1a; border-bottom: 1px solid #033; }
+    .bar { display: flex; align-items: center; gap: 12px; padding: 0 1rem; height: 48px; max-width: 760px; margin: 0 auto; }
+    .bar a { text-decoration: none; font-size: 0.9rem; }
+    h1 { font-size: 1.05rem; margin: 0; flex: 1; color: #00ffff; }
+    main { max-width: 760px; margin: 0 auto; padding: 14px 16px 60px; }
+    button, input { font: inherit; }
+    button { cursor: pointer; border-radius: 10px; border: 1px solid #1d3a44; background: #0c151c; color: #cfe; padding: 9px 14px; min-height: 42px; }
+    button.primary { background: #00ffff; border-color: #00ffff; color: #001; font-weight: 700; }
+    button.small { min-height: 34px; padding: 5px 10px; font-size: 0.85rem; }
+    button.danger { border-color: #7a2b2b; color: #ff9c9c; }
+    input[type="text"], input[type="search"] { width: 100%; background: #05090c; color: #fff; border: 1px solid #1d3a44; border-radius: 10px; padding: 11px 12px; }
+    input:focus, button:focus-visible { outline: 2px solid #00a8a8; outline-offset: 1px; }
+    .card { background: linear-gradient(180deg, #0c151c, #091015); border: 1px solid #16303a; border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; }
+    .add { display: grid; grid-template-columns: 1fr 1.3fr auto; gap: 8px; align-items: end; }
+    .add label span { display: block; font-size: 0.8rem; color: #6f97a5; margin-bottom: 4px; }
+    .thing { display: flex; align-items: center; gap: 10px; padding: 11px 2px; border-bottom: 1px solid #10242c; }
+    .thing:last-child { border-bottom: 0; }
+    .thing .txt { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .thing b { color: #fff; font-size: 1.02rem; }
+    .thing .place { color: #9fe; }
+    .thing .meta { color: #6f97a5; font-size: 0.76rem; margin-top: 2px; }
+    .msg { font-size: 0.85rem; color: #ffb3b3; min-height: 1.2em; margin: 6px 0 0; }
+    .empty { text-align: center; color: #6f97a5; padding: 30px 10px; }
+    .hint { color: #6f97a5; font-size: 0.82rem; line-height: 1.45; }
+    @media (max-width: 560px) { .add { grid-template-columns: 1fr; } }
+  </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
+</head>
+<body data-role="{{ role }}">
+  <header>
+    <div class="bar">
+      <a href="{{ url_for('index') }}">← Home</a>
+      <h1>Where is it?</h1>
+    </div>
+  </header>
+  <main>
+    <div class="card">
+      <div class="add">
+        <label><span>What</span><input type="text" id="name" maxlength="60" placeholder="10 mm socket" autocomplete="off"></label>
+        <label><span>Where it is</span><input type="text" id="place" maxlength="120" placeholder="in the red toolbox" autocomplete="off"></label>
+        <button type="button" class="primary" id="save" onclick="save()">Save</button>
+      </div>
+      <p class="msg" id="msg" role="alert"></p>
+    </div>
+    <input type="search" id="q" placeholder="Search your things" autocomplete="off" oninput="draw()">
+    <div class="card" id="list" style="margin-top:12px"><div class="empty">Loading…</div></div>
+    <p class="hint">Easier by voice: “Hey Jarvis, my darts are in the garage cabinet” or “I put the 10 millimeter socket in the
+      red toolbox”. Or just “remember my darts” and Jarvis asks where. Later: “where are my darts?” Saying where a thing is
+      again moves it. The same sentences work on Telegram. Everyone in the family sees this list.</p>
+  </main>
+  <script>
+    var things = [], editing = null;
+    function $(id) { return document.getElementById(id); }
+    async function api(path, body) {
+      var r = await fetch(path, body === undefined ? { cache: "no-store" } : { method: "POST",
+        headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" }, body: JSON.stringify(body || {}) });
+      if (r.status === 401) { location.href = "/login?next=/things"; return { ok: false, data: {} }; }
+      var d = {}; try { d = await r.json(); } catch (e) {}
+      return { ok: r.ok, data: d };
+    }
+    function when(ts) {
+      return new Date(ts * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    }
+    function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+    function draw() {
+      var q = $("q").value.trim().toLowerCase(), list = $("list");
+      var shown = things.filter(function (t) { return !q || (t.name + " " + t.place).toLowerCase().indexOf(q) >= 0; });
+      list.textContent = "";
+      if (!shown.length) { list.appendChild(el("div", "empty", things.length ? "Nothing matches." : "Nothing here yet. Add the first thing above, or tell Jarvis.")); return; }
+      shown.forEach(function (t) {
+        var row = el("div", "thing"), txt = el("div", "txt");
+        txt.appendChild(el("b", "", t.name)); txt.appendChild(document.createTextNode(" "));
+        txt.appendChild(el("span", "place", t.place));
+        txt.appendChild(el("div", "meta", (t.by ? t.by + ", " : "") + when(t.updated)));
+        var edit = el("button", "small", "Move"); edit.type = "button";
+        edit.onclick = function () { editing = t.id; $("name").value = t.name; $("place").value = t.place; $("save").textContent = "Save change"; $("place").focus(); window.scrollTo(0, 0); };
+        var del = el("button", "small danger", "Remove"); del.type = "button";
+        del.onclick = async function () { if (!confirm("Forget where " + t.name + " is?")) return; await api("/api/things/" + t.id + "/delete", {}); load(); };
+        row.appendChild(txt); row.appendChild(edit); row.appendChild(del); list.appendChild(row);
+      });
+    }
+    async function load() { var r = await api("/api/things"); things = r.data.things || []; draw(); }
+    async function save() {
+      var body = { name: $("name").value, place: $("place").value };
+      if (editing !== null) body.id = editing;
+      var r = await api("/api/things", body);
+      $("msg").textContent = r.ok ? "" : (r.data.error || r.data.message || "Couldn't save that.");
+      if (r.ok) { editing = null; $("name").value = ""; $("place").value = ""; $("save").textContent = "Save"; load(); }
+    }
+    ["name", "place"].forEach(function (id) { $(id).addEventListener("keydown", function (e) { if (e.key === "Enter") save(); }); });
+    load();
+  </script>
+</body>
+</html>

@@ -96,6 +96,7 @@ ACCESS: Dict[str, Rule] = {
     "api_recipe_photo": USER, "api_recipe_delete": USER, "api_recipe_swap": USER, "api_recipe_twist": USER,
     "api_recipes_can_make": USER, "api_recipes_cooking": USER, "api_recipes_timer": USER,
     # notes: private ones are their writer's alone, whatever the role (decided in sentinel/engine/notes.py)
+    "things_page": USER, "api_things": USER, "api_things_save": USER, "api_things_delete": USER,
     "notes_page": USER, "api_notes": USER, "api_notes_save": USER, "api_notes_items": USER, "api_notes_delete": USER,
     # photos: the backup drive's shared folders (admins choose them) and everyone's albums (private ones are their
     # owner's alone, whatever the role: decided in sentinel/engine/photos.py)

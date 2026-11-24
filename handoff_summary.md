@@ -550,6 +550,17 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   Xena" adds "Heads up: Xena's collar hasn't sent a location since 6:38am, so the map shows where Xena was then, not
   now." Spoken too: the outing command speaks the first sentence plus any "Heads up" sentence. Why: Jarvis said
   "watching Xena" over a 5-hour-old fix while the collar answered the base but had no GPS fix.
+- **Where is it?** (2026-11-24, a voice note: "tell you a component like my darts or a 10 millimeter socket ... later I
+  could say, hey Jarvis, where is it"; `sentinel/engine/things.py`, `recorded_videos/things.db`, page `/things`, Home
+  tile): one row per thing = name as said, where (the words after the name, kept whole: "in the red toolbox"), is/are,
+  who, when. `parse_put` ("my X is in Y" with my/our only, "I put/keep/left X in Y", "remember (that) X is in Y";
+  "remember my X" has no place: by voice `Engine._things_voice` asks "Where are they?" and takes the next words through
+  `VoiceReply.dictate`), `parse_find`, `parse_forget`, `is_list`. Registered once in the command registry just before
+  the family "location" question (voice stage "late", Telegram too): a plain "where is Kate" or "forget X" is only
+  taken when a thing by that name is kept (`_things_understood`), while "where did I put X" always is. Names compare
+  by `key()` (articles and plurals dropped, "ten millimeter" = "10 mm"), then by words in common, then near spellings
+  (Whisper's "stopper motor"). Not things: cars, phones, people words, "it" (`_NOT_THINGS`). Shared by the whole
+  family; no private things.
 - **Darts link** (2026-11-24): optional setting `darts_url`, likewise = a 🎯 tile on Home (the scorer itself lives in the separate game site). "Let's play darts" / "show the dartboard on the TV" opens `<darts_url>/tv` (its scoreboard) on a TV, the same way as the dice game (`DARTS_WORDS`, `#map=darts`). The scorer's own page has "Show scoreboard on <TV>" buttons: it has no logins, so the Home tile's link carries a key (`?k=`, made once in `.darts_tv_key`, owner-only, not in git) which the scorer passes to `/api/local/darts_tv` (GET = the TVs, POST = `tv_show_page(.., "#map=darts")`); that route answers only this computer itself (127.0.0.1 without Cloudflare's headers) with the right key, so a phone that only scanned a game's QR code gets no TV buttons.
 - **Dice game link** (2026-11-21): optional setting `games_url` (Settings → Remote access; owner) = a separate family game site. Home page gets a 🎲 tile; "let's play Yahtzee" / "put the dice game on the TV" (`switches.GAME_WORDS`, `_TV_GAME`, checked before Spotify) goes through `camera_lookup` -> `#map=game`, which the TV page (grid.js `mapFromHash`) frames as `<games_url>/tv?new=1` (the game site makes or reuses a game ready to join). "Show the cameras" closes it like a map. The game itself is not part of Sentinel.
 - **Location map on the TV** (2026-11-10; `Family.map_lookup/map_view/set_photo`, `templates/where.html`, `/where`,
