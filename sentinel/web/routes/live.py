@@ -23,9 +23,10 @@ BOOT_ID = f"{int(time.time())}"
 def register(app: Flask, ctx: WebContext) -> None:
     server, settings, broker, engine = ctx.server, ctx.settings, ctx.broker, ctx.engine
 
-    def games_url() -> str:
-        """The family game site's address (settings games_url), only if it's a plain web address."""
-        url = str(server._settings.settings.get("games_url") or "").strip().rstrip("/")
+    def games_url(key: str = "games_url") -> str:
+        """The family game site's address (settings games_url; darts_url for its darts scorer), only if it's a
+        plain web address."""
+        url = str(server._settings.settings.get(key) or "").strip().rstrip("/")
         return url if re.match(r"^https?://[^\s\"'<>]+$", url) else ""
     auth, limiter, _session_token, _require_session = ctx.auth, ctx.limiter, ctx.session_token, ctx.require_session
 
@@ -43,7 +44,7 @@ def register(app: Flask, ctx: WebContext) -> None:
         photos_url = None if ctx.from_home_network(tailscale=True) or not ctx.tailscale_base else \
             ctx.tailscale_base + "/photos"
         return render_template("home.html", boot_id=BOOT_ID, tile_order=order, photos_url=photos_url,
-                               games_url=games_url())
+                               games_url=games_url(), darts_url=games_url("darts_url"))
 
     @app.route("/api/home_layout", methods=["POST"])
     def api_home_layout():

@@ -27,7 +27,7 @@ PUBLIC = None  # no login at all, or the route has its own kind (a phone's key, 
 OWNER_SETTINGS = frozenset({
     "telegram_bot_token", "telegram_chat_ids", "assistant_enabled", "assistant_daily_limit", "assistant_model",
     "spotify_client_id", "remote_web_url", "remote_rdp_user", "backup_enabled", "backup_time", "backup_video_days",
-    "backup_remote", "games_url",
+    "backup_remote", "games_url", "darts_url",
 })
 
 

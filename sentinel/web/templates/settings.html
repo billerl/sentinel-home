@@ -412,6 +412,7 @@
         <div class="row" id="ts-line"></div>
         <div class="row">
           <div class="field"><span>Dice game address (optional: adds a 🎲 tile on the Home page, and “let's play Yahtzee” puts it on the TV)</span><input type="url" data-key="games_url" placeholder="https://dice.example.com"></div>
+          <div class="field"><span>Darts scorer address (optional: adds a 🎯 tile on the Home page)</span><input type="url" data-key="darts_url" placeholder="https://dice.example.com/darts"></div>
         </div>
         <div class="save-row"><button class="primary" onclick="saveSection('access')">Save</button><span class="msg" id="msg-access"></span></div>
       </div>
@@ -648,7 +649,7 @@
       backup: ["backup_enabled", "backup_time", "backup_video_days", "backup_remote"],
       photos: ["photos_shared_folders"],
       audio: ["volume", "speech_speed", "voice_id", "voice_jarvis_id", "audio_output", "voice_device", "audio_device", "music_device", "voice_enabled", "voice_wake_threshold", "voice_cameras", "voice_follow_up", "voice_quiet_commands"],
-      access: ["remote_web_url", "remote_rdp_user", "games_url"],
+      access: ["remote_web_url", "remote_rdp_user", "games_url", "darts_url"],
       spotify: ["spotify_client_id", "spotify_device", "spotify_fallback_device", "spotify_speaker_name"],
       weather: ["weather_location", "weather_units", "weather_alerts_enabled", "weather_alerts_speak"],
       detection: ["object_detection_enabled", "package_alerts_enabled", "household_ask_enabled", "household_ask_per_day", "vehicle_types_enabled", "alert_mode", "detector_model", "inference_device", "object_alert_cooldown"]
