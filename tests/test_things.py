@@ -97,6 +97,58 @@ class TestThings(unittest.TestCase):
         self.assertEqual(self.things.all(), [])
 
 
+class TestSpots(unittest.TestCase):
+    """A spot inside a place: the drawer of a toolbox, R1C3 of a parts cabinet."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="sentinel-things-spots-")
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.things = Things(self.dir)
+
+    def test_said_in_one_breath_is_split(self):
+        from sentinel.engine.things import clean_spot, split_place
+
+        self.assertEqual(split_place("in Desktop Small Blue Cabinet R1C3"), ("in Desktop Small Blue Cabinet", "R1C3"))
+        self.assertEqual(split_place("in the blue cabinet row one column three"), ("in the blue cabinet", "R1C3"))
+        self.assertEqual(split_place("in the red toolbox second drawer"), ("in the red toolbox", "second drawer"))
+        self.assertEqual(split_place("in the red toolbox, second drawer top box"), ("in the red toolbox", "second drawer top box"))
+        self.assertEqual(split_place("in the parts cabinet drawer 3"), ("in the parts cabinet", "drawer 3"))
+        for whole in ("in the garage cabinet", "on the top shelf", "in the junk drawer", "in the second drawer",
+                      "on the shelf by the dartboard", "in bin 4 on the shelf"):
+            self.assertEqual(split_place(whole), (whole, ""), whole)
+        self.assertEqual(clean_spot("r1 c3"), "R1C3")
+        self.assertEqual(clean_spot("Row 2 column 5"), "R2C5")
+
+    def test_kept_said_and_asked_by_place(self):
+        from sentinel.engine.things import parse_inside
+
+        self.assertEqual(self.things.put("micro servo", "in the blue cabinet r1c3")[1],
+                         "Okay, the micro servo is in the blue cabinet, R1C3.")
+        self.things.put("servo horns", "blue cabinet", spot="R1 C3")  # the page's two boxes
+        self.things.put("potentiometer", "in the blue cabinet", spot="row 1 column 2")
+        self.things.put("hammer", "in the red toolbox second drawer")
+        rows = {t["name"]: (t["place"], t["spot"]) for t in self.things.all()}
+        self.assertEqual(rows, {"micro servo": ("in the blue cabinet", "R1C3"), "servo horns": ("in the blue cabinet", "R1C3"),
+                                "potentiometer": ("in the blue cabinet", "R1C2"), "hammer": ("in the red toolbox", "second drawer")})
+        self.assertEqual(self.things.answer("hammer"), "The hammer is in the red toolbox, second drawer.")
+        self.assertEqual(parse_inside("What's in the blue cabinet R1C3?"), "blue cabinet r1c3")
+        self.assertEqual(self.things.contents("blue cabinet r1c3"), "In the blue cabinet, R1C3: micro servo, servo horns.")
+        self.assertEqual(self.things.contents("the blue cabinet row one column three"), "In the blue cabinet, R1C3: micro servo, servo horns.")
+        self.assertEqual(len(self.things.inside("the blue cabinet")), 3)
+        self.assertTrue(self.things.contents("the blue cabinet").startswith("3 things in 2 spots: "))
+        self.assertIsNone(self.things.contents("the driveway"))
+
+    def test_places_kept_before_spots_are_split_once(self):
+        import sqlite3
+
+        with sqlite3.connect(self.things.db_path) as conn:
+            conn.execute("ALTER TABLE things DROP COLUMN spot")
+            conn.execute("INSERT INTO things (name, key, place, verb, by, updated, photo) VALUES "
+                         "('small screws', 'small screw', 'in Desktop Small Blue Cabinet R1C3', 'are', 'Alex', 1, '')")
+        t = Things(self.dir).all()[0]
+        self.assertEqual((t["place"], t["spot"]), ("in Desktop Small Blue Cabinet", "R1C3"))
+
+
 class TestFromAPhoto(unittest.TestCase):
     def setUp(self):
         import cv2
@@ -128,6 +180,10 @@ class TestFromAPhoto(unittest.TestCase):
         ok, sid = scans.start(self.jpeg, "top drawer of the red toolbox", "Alex", wait=True)
         self.assertTrue(ok)
         self.assertEqual(self.asked[0][0], "This is in top drawer of the red toolbox. What is kept here?")
+        ok2, sid2 = scans.start(self.jpeg, "blue cabinet", "Alex", wait=True, spot="r1c3")
+        self.assertEqual(self.asked[1][0], "This is in blue cabinet, R1C3. What is kept here?")
+        self.assertEqual((scans.view(sid2)["place"], scans.view(sid2)["spot"]), ("in blue cabinet", "R1C3"))
+        scans.cancel(sid2)
         self.assertLess(self.asked[0][1], len(self.jpeg))  # shrunk before it leaves
         view = scans.view(sid)
         self.assertEqual((view["state"], view["items"], view["unsure"]),
@@ -187,6 +243,8 @@ class TestEngineSide(unittest.TestCase):
         self.assertIn("don't know where the hammer is yet", self.answer("where did i put the hammer"))
         self.assertIn("Where are they?", self.answer("remember my stepper motors"))  # (Telegram: told how to say it)
         self.assertIn("1 thing is", self.answer("list my things"))
+        self.assertIsNone(self.understood("what's in the driveway"))  # no such place kept: the cameras' question
+        self.assertEqual(self.answer("what's in the garage cabinet"), "In the garage cabinet: darts.")
         self.assertIn("forgotten", self.answer("forget where my darts are"))
         self.assertIsNone(self.understood("where are my darts"))  # gone: back to being anybody's question
 

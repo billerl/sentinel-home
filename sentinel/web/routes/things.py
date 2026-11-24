@@ -42,7 +42,9 @@ def register(app: Flask, ctx: WebContext) -> None:
         viewer = ctx.viewer()
         by = viewer.person.name if viewer is not None and viewer.person is not None else "Household"
         thing_id = body.get("id") if isinstance(body.get("id"), int) else None
-        return _result(*engine.things.put(body.get("name"), body.get("place"), by=by, thing_id=thing_id))
+        # (the page has a box of its own for the spot; left out = said in one breath with the place)
+        spot = body.get("spot") if isinstance(body.get("spot"), str) and (body.get("spot").strip() or thing_id) else None
+        return _result(*engine.things.put(body.get("name"), body.get("place"), by=by, thing_id=thing_id, spot=spot))
 
     @app.route("/api/things/<int:thing_id>/delete", methods=["POST"])
     def api_things_delete(thing_id: int):
@@ -68,7 +70,8 @@ def register(app: Flask, ctx: WebContext) -> None:
             return jsonify({"error": "Reading a photo needs “ask Claude” turned on (Settings → Assistant)."}), 400
         request.max_content_length = PHOTO_MAX_BYTES + 1024  # (the rest of Sentinel takes forms only: 256 KB)
         ok, said = engine.thing_photos.start(request.get_data(cache=False),
-                                             unquote(request.headers.get("X-Place", ""))[:200], _by())
+                                             unquote(request.headers.get("X-Place", ""))[:200], _by(),
+                                             spot=unquote(request.headers.get("X-Spot", ""))[:60] or None)
         return jsonify({"ok": True, "id": said}) if ok else (jsonify({"error": said}), 400)
 
     @app.route("/api/things/photo/<sid>")

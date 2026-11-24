@@ -937,10 +937,13 @@ class Engine:
     def _things_understood(self, text: str):
         """("put", name, place or None, verb) / ("find", name, explicit) / ("forget", name) / ("list",), else None.
         A plain "where is X" or "forget X" is only ours when a thing by that name is kept."""
-        from sentinel.engine.things import is_list, parse_find, parse_forget, parse_put
+        from sentinel.engine.things import is_list, parse_find, parse_forget, parse_inside, parse_put
 
         if is_list(text):
             return ("list",)
+        inside = parse_inside(text)
+        if inside and self.things.inside(inside):  # ("what's in the driveway?" stays the cameras' question)
+            return ("inside", inside)
         put = parse_put(text)
         if put:
             return ("put",) + put
@@ -956,6 +959,8 @@ class Engine:
         kind = understood[0]
         if kind == "list":
             return self.things.summary()
+        if kind == "inside":
+            return self.things.contents(understood[1]) or ""
         if kind == "put":
             _, name, place, verb = understood
             if place is None:  # (by voice Jarvis asks and listens: answer_voice)

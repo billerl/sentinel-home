@@ -29,7 +29,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-NAME_MAX, PLACE_MAX, MAX_THINGS = 60, 120, 2000
+NAME_MAX, PLACE_MAX, SPOT_MAX, MAX_THINGS = 60, 120, 40, 2000
 
 _WHERE = (r"in|inside|on|on top of|under|underneath|beneath|below|above|behind|beside|next to|near|by|at|"
           r"in front of|between|with|over|hanging on|hanging in|out in|up in|down in|back in")
@@ -135,6 +135,67 @@ def is_list(text: str) -> bool:
     return bool(_LIST.match(_plain(text)))
 
 
+# The spot inside a place: "R1C3" (row 1, column 3 of a parts cabinet), "second drawer", "top shelf", "bin 4".
+_ORDINAL = (r"top|bottom|middle|upper|lower|left|right|front|back|first|second|third|fourth|fifth|sixth|seventh|eighth|"
+            r"ninth|tenth|\d+(?:st|nd|rd|th)")
+_HOLDER = r"drawer|shelf|bin|box|tray|row|column|compartment|door|section|slot|rack|hook|level|cubby|pocket|side"
+_GRID = re.compile(r"\br(?:ow)?\s*(\d+|[a-z]+)\s*,?\s*c(?:ol(?:umn)?)?\s*(\d+|[a-z]+)\b", re.I)
+_SPOT_TAIL = re.compile(
+    rf"[\s,]+((?:(?:the|on the|in the)\s+)?(?:(?:{_ORDINAL})\s+)+(?:{_HOLDER})(?:\s+(?:(?:{_ORDINAL})\s+)*(?:{_HOLDER}))*"
+    rf"|(?:{_HOLDER})\s+(?:number\s+)?(?:\d+|[a-z])(?:\s+(?:{_HOLDER})\s+(?:\d+|[a-z]))*)$", re.I)
+
+
+def clean_spot(raw: Any) -> str:
+    """A spot as it's kept: "row one column 3" -> "R1C3"; anything else as said."""
+    spot = re.sub(r"\s+", " ", str(raw or "")).strip(" .,")[:SPOT_MAX]
+    m = _GRID.fullmatch(spot)
+    if m:
+        row, col = (_NUMBERS.get(g.lower(), g) for g in m.groups())
+        if row.isdigit() and col.isdigit():
+            return f"R{int(row)}C{int(col)}"
+    return re.sub(r"^(?:the|on the|in the)\s+", "", spot, flags=re.I)
+
+
+def split_place(place: str) -> Tuple[str, str]:
+    """ "in the blue cabinet R1C3" -> ("in the blue cabinet", "R1C3"); "in the toolbox, second drawer" likewise.
+    A place said in one breath: the end of it is the spot when it reads like one, or follows a comma."""
+    place = re.sub(r"\s+", " ", place).strip(" .")
+    grid = list(_GRID.finditer(place))
+    if grid and grid[-1].end() == len(place) and grid[-1].start() > 0:
+        m = grid[-1]
+        row, col = (_NUMBERS.get(g.lower(), g) for g in m.groups())
+        if row.isdigit() and col.isdigit():
+            return place[:m.start()].rstrip(" ,"), f"R{int(row)}C{int(col)}"
+    if "," in place:
+        head, tail = place.split(",", 1)
+        if head.strip() and tail.strip():
+            return head.strip(), clean_spot(tail)
+    m = _SPOT_TAIL.search(place)
+    if m and place[:m.start()].strip() and not re.fullmatch(rf"(?:{_WHERE})(?:\s+(?:the|my|our|a))?", place[:m.start()].strip(), re.I):
+        return place[:m.start()].strip(" ,"), clean_spot(m.group(1))
+    return place, ""
+
+
+def where_words(thing: Dict[str, Any]) -> str:
+    return thing["place"] + (", " + thing["spot"] if thing.get("spot") else "")
+
+
+def place_key(place: str, spot: str = "") -> str:
+    """A place as it's compared: no "in the", lower case."""
+    bare = re.sub(rf"^(?:{_WHERE})\s+", "", place.lower())
+    return re.sub(r"[^a-z0-9 ]+", " ", re.sub(r"^(?:the|my|our|a)\s+", "", bare) + " " + spot.lower()).strip()
+
+
+_INSIDE = re.compile(rf"^(?:what(?:'s| is| are| do (?:i|we) (?:have|keep)| did (?:i|we) put)|what all is|list (?:what's|"
+                     rf"everything|the things|what is)|show me what's) (?:in|inside|on|under|at) (?:{_OWNER})?(?P<place>.+)$")
+
+
+def parse_inside(text: str) -> Optional[str]:
+    """ "what's in the blue cabinet R1C3?" -> the place asked about."""
+    m = _INSIDE.match(_plain(text))
+    return m.group("place").strip() if m else None
+
+
 def your(words: str) -> str:
     """Said back: "in my toolbox" -> "in your toolbox"."""
     return re.sub(r"\bmy\b", "your", re.sub(r"\bour\b", "your", re.sub(r"\bmine\b", "yours", words)))
@@ -152,6 +213,13 @@ class Things:
             conn.execute("CREATE INDEX IF NOT EXISTS things_key ON things (key)")
             if "photo" not in [r[1] for r in conn.execute("PRAGMA table_info(things)")]:
                 conn.execute("ALTER TABLE things ADD COLUMN photo TEXT NOT NULL DEFAULT ''")
+            if "spot" not in [r[1] for r in conn.execute("PRAGMA table_info(things)")]:
+                # places were one phrase before 2026-11-24 ("in Desktop Small Blue Cabinet R1C3"): split them once
+                conn.execute("ALTER TABLE things ADD COLUMN spot TEXT NOT NULL DEFAULT ''")
+                for r in conn.execute("SELECT id, place FROM things").fetchall():
+                    place, spot = split_place(r["place"])
+                    if spot:
+                        conn.execute("UPDATE things SET place = ?, spot = ? WHERE id = ?", (place, spot, r["id"]))
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)
@@ -161,15 +229,16 @@ class Things:
     @staticmethod
     def _row(r: sqlite3.Row) -> Dict[str, Any]:
         return {"id": r["id"], "name": r["name"], "place": r["place"], "verb": r["verb"], "by": r["by"],
-                "updated": r["updated"], "photo": r["photo"]}
+                "updated": r["updated"], "photo": r["photo"], "spot": r["spot"]}
 
     def all(self) -> List[Dict[str, Any]]:
         with self._lock, self._connect() as conn:
             return [self._row(r) for r in conn.execute("SELECT * FROM things ORDER BY name COLLATE NOCASE")]
 
     def put(self, name: Any, place: Any, verb: str = "", by: str = "", thing_id: Optional[int] = None,
-            photo: str = "", another: bool = False) -> Tuple[bool, str]:
+            photo: str = "", another: bool = False, spot: Any = None) -> Tuple[bool, str]:
         """Keep (or move) a thing. With thing_id: that row is changed (the page's edit), name and all.
+        spot: where inside the place ("R1C3", "second drawer"); None = said in one breath with the place.
         another: from a photo of one drawer, so a thing of the same name kept somewhere else stays where it is
         (there's a screwdriver in most drawers); only the same thing in the same place is the same row."""
         name = _name(str(name or ""))
@@ -179,31 +248,39 @@ class Things:
             return False, "What is the thing called?"
         if not place:
             return False, "Where is it?"
+        if spot is None:
+            place, spot = split_place(place)
+        spot = clean_spot(spot)
         if not re.match(rf"^(?:{_WHERE})\b", place.lower()):
             place = "in " + place  # (typed on the page as just "garage cabinet")
         verb = verb if verb in ("is", "are") else ("are" if name.lower().endswith("s") and not name.lower().endswith("ss") else "is")
         now = self._clock()
         with self._lock, self._connect() as conn:
+            # one place, one spelling: "blue cabinet" typed later is "in the blue cabinet" kept earlier
+            for (known,) in conn.execute("SELECT DISTINCT place FROM things"):
+                if known != place and place_key(known) == place_key(place):
+                    place = known
+                    break
             if thing_id:
                 row = conn.execute("SELECT id, photo FROM things WHERE id = ?", (thing_id,)).fetchone()
             elif another:
-                row = conn.execute("SELECT id, photo FROM things WHERE key = ? AND lower(place) = ?",
-                                   (k, place.lower())).fetchone()
+                row = conn.execute("SELECT id, photo FROM things WHERE key = ? AND lower(place) = ? AND lower(spot) = ?",
+                                   (k, place.lower(), spot.lower())).fetchone()
             else:
                 row = conn.execute("SELECT id, photo FROM things WHERE key = ?", (k,)).fetchone()
             if thing_id and row is None:
                 return False, "That one is gone."
             if row is not None:
                 # (moved by word of mouth: the old drawer's photo no longer shows where it is)
-                conn.execute("UPDATE things SET name = ?, key = ?, place = ?, verb = ?, by = ?, updated = ?, photo = ? "
-                             "WHERE id = ?", (name, k, place, verb, by[:40], now,
-                                              photo or (row["photo"] if thing_id else ""), row["id"]))
+                conn.execute("UPDATE things SET name = ?, key = ?, place = ?, spot = ?, verb = ?, by = ?, updated = ?, "
+                             "photo = ? WHERE id = ?", (name, k, place, spot, verb, by[:40], now,
+                                                        photo or (row["photo"] if thing_id else ""), row["id"]))
             else:
                 if conn.execute("SELECT COUNT(*) FROM things").fetchone()[0] >= MAX_THINGS:
                     return False, "That's a lot of things. Remove some first."
-                conn.execute("INSERT INTO things (name, key, place, verb, by, updated, photo) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                             (name, k, place, verb, by[:40], now, photo))
-        return True, f"Okay, {self._subject(name)} {verb} {your(place)}."
+                conn.execute("INSERT INTO things (name, key, place, spot, verb, by, updated, photo) "
+                             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (name, k, place, spot, verb, by[:40], now, photo))
+        return True, f"Okay, {self._subject(name)} {verb} {your(place)}{', ' + spot if spot else ''}."
 
     @staticmethod
     def _subject(name: str) -> str:
@@ -231,9 +308,30 @@ class Things:
         found = self.find(name)
         if not found:
             return f"I don't know where {self._subject(name)} is yet. Tell me, and I'll remember." if explicit else None
-        said = [f"{self._subject(t['name'])} {t['verb']} {your(t['place'])}" for t in found[:3]]
+        said = [f"{self._subject(t['name'])} {t['verb']} {your(where_words(t))}" for t in found[:3]]
         return (said[0][0].upper() + said[0][1:] + "." if len(said) == 1 else
                 "I know of " + str(len(said)) + ": " + "; ".join(said) + ".")
+
+    def inside(self, asked: str) -> List[Dict[str, Any]]:
+        """The things kept in the place asked about: every word of it is in the place (and spot) as kept, so
+        "the blue cabinet" is all of it and "blue cabinet r1c3" one drawer."""
+        place, spot = split_place(asked)
+        want = set(place_key(place, spot).split())
+        if not want:
+            return []
+        return [t for t in self.all() if want <= set(place_key(t["place"], t["spot"]).split())]
+
+    def contents(self, asked: str) -> Optional[str]:
+        """ "What's in the blue cabinet R1C3?" in words; None when no place like that holds anything."""
+        found = self.inside(asked)
+        if not found:
+            return None
+        spots = sorted({where_words(t) for t in found})
+        names = [t["name"] for t in found]
+        listed = ", ".join(names[:15]) + (f", and {len(names) - 15} more" if len(names) > 15 else "")
+        if len(spots) == 1:
+            return f"{your(spots[0])[0].upper() + your(spots[0])[1:]}: {listed}."
+        return f"{len(names)} things in {len(spots)} spots: {listed}."
 
     def forget(self, name: str = "", thing_id: Optional[int] = None) -> Tuple[bool, str]:
         with self._lock, self._connect() as conn:
@@ -331,7 +429,8 @@ class PhotoScans:
         except OSError:
             pass
 
-    def start(self, picture: bytes, place: Any, by: str = "", wait: bool = False) -> Tuple[bool, str]:
+    def start(self, picture: bytes, place: Any, by: str = "", wait: bool = False, spot: Any = None
+              ) -> Tuple[bool, str]:
         """Take the photo in and start looking -> (True, the scan's id) or (False, why not)."""
         from sentinel.engine.recipes import shrink_jpeg
 
@@ -344,20 +443,25 @@ class PhotoScans:
             jpeg = None
         if jpeg is None:
             return False, "That doesn't look like a photo."
+        if spot is None:
+            place, spot = split_place(place)
+        spot = clean_spot(spot)
         if not re.match(rf"^(?:{_WHERE})\b", place.lower()):
             place = "in " + place
+        said = place + (", " + spot if spot else "")
         self._tidy()
         sid, photo = secrets.token_hex(8), secrets.token_hex(8) + ".jpg"
         os.makedirs(self.folder, mode=0o700, exist_ok=True)
         with open(os.path.join(self.folder, photo), "wb") as f:
             f.write(jpeg)
-        scan = {"id": sid, "state": "looking", "place": place, "by": by[:40], "photo": photo, "at": self._clock(),
+        scan = {"id": sid, "state": "looking", "place": place, "spot": spot, "said": said, "by": by[:40],
+                "photo": photo, "at": self._clock(),
                 "items": [], "unsure": [], "error": ""}
         with self._lock:
             self._scans[sid] = scan
 
         def work() -> None:
-            reply = self._look(LOOK_SYSTEM, f"This is {place}. What is kept here?", jpeg, "things photo")
+            reply = self._look(LOOK_SYSTEM, f"This is {said}. What is kept here?", jpeg, "things photo")
             seen = parse_seen(reply)
             with self._lock:
                 if seen is None:
@@ -375,7 +479,7 @@ class PhotoScans:
     def view(self, sid: Any) -> Optional[Dict[str, Any]]:
         with self._lock:
             scan = self._scans.get(str(sid or ""))
-            return None if scan is None else {k: scan[k] for k in ("id", "state", "place", "photo", "items", "unsure", "error")}
+            return None if scan is None else {k: scan[k] for k in ("id", "state", "place", "spot", "said", "photo", "items", "unsure", "error")}
 
     def save(self, sid: Any, names: Any) -> Tuple[bool, str]:
         """Keep the names the person ticked or typed (theirs: not only the ones Claude offered), in that place."""
@@ -387,14 +491,15 @@ class PhotoScans:
         for raw in names if isinstance(names, list) else []:
             name = _name(str(raw)) if isinstance(raw, str) else ""
             if name and key(name) and key(name) not in [key(n) for n in kept] and len(kept) < MAX_SEEN:
-                if self.things.put(name, scan["place"], by=scan["by"], photo=scan["photo"], another=True)[0]:
+                if self.things.put(name, scan["place"], by=scan["by"], photo=scan["photo"], another=True,
+                                   spot=scan["spot"])[0]:
                     kept.append(name)
         with self._lock:
             self._scans.pop(scan["id"], None)
         self._tidy()
         if not kept:
             return True, "Nothing kept."
-        return True, f"Kept {len(kept)} thing{'s' if len(kept) != 1 else ''} {your(scan['place'])}."
+        return True, f"Kept {len(kept)} thing{'s' if len(kept) != 1 else ''} {your(scan['said'])}."
 
     def cancel(self, sid: Any) -> None:
         with self._lock:

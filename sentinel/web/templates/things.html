@@ -25,7 +25,20 @@
     input[type="text"], input[type="search"] { width: 100%; background: #05090c; color: #fff; border: 1px solid #1d3a44; border-radius: 10px; padding: 11px 12px; }
     input:focus, button:focus-visible { outline: 2px solid #00a8a8; outline-offset: 1px; }
     .card { background: linear-gradient(180deg, #0c151c, #091015); border: 1px solid #16303a; border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; }
-    .add { display: grid; grid-template-columns: 1fr 1.3fr auto; gap: 8px; align-items: end; }
+    .add { display: grid; grid-template-columns: 1fr 1.2fr 0.8fr auto; gap: 8px; align-items: end; }
+    .views { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0 0; }
+    .views button { min-height: 34px; padding: 5px 12px; border-radius: 999px; font-size: 0.85rem; }
+    .views button[aria-pressed="true"] { background: #062f3a; border-color: #00a8a8; color: #fff; }
+    .group { margin-bottom: 12px; padding: 0; overflow: hidden; }
+    .group > .ghead { display: flex; align-items: center; gap: 10px; padding: 12px 16px; cursor: pointer; background: #0d1a22; }
+    .ghead b { color: #00ffff; flex: 1; font-size: 1.02rem; }
+    .ghead span { color: #6f97a5; font-size: 0.82rem; }
+    .spot { border-top: 1px solid #10242c; padding: 8px 16px 4px; }
+    .shead { display: flex; align-items: center; gap: 10px; margin: 2px 0; }
+    .shead b { color: #ffd166; flex: 1; }
+    .shead img { width: 54px; height: 54px; object-fit: cover; border-radius: 8px; cursor: pointer; }
+    .spot .thing { padding: 8px 2px; }
+    .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
     .add label span { display: block; font-size: 0.8rem; color: #6f97a5; margin-bottom: 4px; }
     .thing { display: flex; align-items: center; gap: 10px; padding: 11px 2px; border-bottom: 1px solid #10242c; }
     .thing:last-child { border-bottom: 0; }
@@ -37,7 +50,7 @@
     .empty { text-align: center; color: #6f97a5; padding: 30px 10px; }
     .hint { color: #6f97a5; font-size: 0.82rem; line-height: 1.45; }
     h2 { font-size: 0.95rem; color: #7fe7e7; margin: 0 0 10px; }
-    .photo-row { display: grid; grid-template-columns: 1.3fr auto; gap: 8px; align-items: end; }
+    .photo-row { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 8px; align-items: end; margin-bottom: 10px; }
     .photo-row label span { display: block; font-size: 0.8rem; color: #6f97a5; margin-bottom: 4px; }
     #shot { width: 100%; max-height: 46vh; object-fit: contain; border-radius: 10px; background: #05090c; margin: 4px 0 12px; }
     .seen { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px; }
@@ -67,7 +80,8 @@
     <div class="card">
       <div class="add">
         <label><span>What</span><input type="text" id="name" maxlength="60" placeholder="10 mm socket" autocomplete="off"></label>
-        <label><span>Where it is</span><input type="text" id="place" maxlength="120" placeholder="in the red toolbox" autocomplete="off"></label>
+        <label><span>Where (cabinet, toolbox, room)</span><input type="text" id="place" maxlength="120" placeholder="red toolbox" autocomplete="off" list="places"></label>
+        <label><span>Spot in it (optional)</span><input type="text" id="spot" maxlength="40" placeholder="second drawer, R1C3" autocomplete="off" list="spots"></label>
         <button type="button" class="primary" id="save" onclick="save()">Save</button>
       </div>
       <p class="msg" id="msg" role="alert"></p>
@@ -76,10 +90,16 @@
       <h2>📷 From a photo</h2>
       <div id="photo-start">
         <div class="photo-row">
-          <label><span>Where is this drawer or shelf?</span><input type="text" id="photo-place" maxlength="120" placeholder="top drawer of the red toolbox" autocomplete="off"></label>
-          <button type="button" class="primary" id="photo-btn" onclick="pickPhoto()">Take or choose a photo</button>
+          <label><span>Where (cabinet, toolbox, room)</span><input type="text" id="photo-place" maxlength="120" placeholder="red toolbox" autocomplete="off" list="places"></label>
+          <label><span>Spot in it (optional)</span><input type="text" id="photo-spot" maxlength="40" placeholder="second drawer, R1C3" autocomplete="off" list="spots"></label>
         </div>
+        <div class="buttons">
+          <button type="button" class="primary" id="photo-btn" onclick="pickPhoto('photo-camera')">📷 Take a photo</button>
+          <button type="button" id="photo-btn2" onclick="pickPhoto('photo-file')">🖼️ Choose a photo</button>
+        </div>
+        <input type="file" id="photo-camera" accept="image/*" capture="environment" hidden>
         <input type="file" id="photo-file" accept="image/*" hidden>
+        <datalist id="places"></datalist><datalist id="spots"></datalist>
         <p class="msg" id="photo-msg" role="alert"></p>
         <p class="hint" id="photo-hint">Claude looks at the photo and lists what it can see; you tick what's right and name what it couldn't. The photo is sent to Claude (Anthropic) to be read, and kept here so you can look in the drawer again later.</p>
       </div>
@@ -96,10 +116,14 @@
         <div class="acts" id="fail-acts" hidden><button type="button" onclick="dropScan()">Okay</button></div>
       </div>
     </div>
-    <input type="search" id="q" placeholder="Search your things" autocomplete="off" oninput="draw()">
-    <div class="card" id="list" style="margin-top:12px"><div class="empty">Loading…</div></div>
+    <input type="search" id="q" placeholder="Search: a thing (filter), a place or a spot (R1C3)" autocomplete="off" oninput="draw()">
+    <div class="views" role="group" aria-label="How to list them">
+      <button type="button" data-view="place" aria-pressed="true">By place</button>
+      <button type="button" data-view="name" aria-pressed="false">A to Z</button>
+    </div>
+    <div id="list" style="margin-top:12px"><div class="card"><div class="empty">Loading…</div></div></div>
     <p class="hint">Easier by voice: “Hey Jarvis, my darts are in the garage cabinet” or “I put the 10 millimeter socket in the
-      red toolbox”. Or just “remember my darts” and Jarvis asks where. Later: “where are my darts?” Saying where a thing is
+      red toolbox second drawer”. Ask “what's in the red toolbox second drawer?” to hear what's there. Or just “remember my darts” and Jarvis asks where. Later: “where are my darts?” Saying where a thing is
       again moves it. The same sentences work on Telegram. Everyone in the family sees this list.</p>
   </main>
   <script>
@@ -116,27 +140,60 @@
       return new Date(ts * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
     }
     function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+    var view = "place", openPlaces = {};
+    try { view = localStorage.getItem("things.view") || "place"; } catch (e) {}
+    function bare(place) { return place.replace(/^(in|on|at|inside|under) (the |my |our )?/i, ""); }
+    function title(t) { var b = bare(t.place); return b.charAt(0).toUpperCase() + b.slice(1); }
+    function thingRow(t, withPlace) {
+      var row = el("div", "thing"), txt = el("div", "txt");
+      if (t.photo && withPlace) { var im = el("img"); im.src = "/things/photo/" + t.photo; im.alt = "Photo of where it is"; im.loading = "lazy"; im.onclick = function () { bigPhoto(t.photo); }; row.appendChild(im); }
+      txt.appendChild(el("b", "", t.name));
+      if (withPlace) { txt.appendChild(document.createTextNode(" ")); txt.appendChild(el("span", "place", t.place + (t.spot ? ", " + t.spot : ""))); }
+      txt.appendChild(el("div", "meta", (t.by ? t.by + ", " : "") + when(t.updated)));
+      var edit = el("button", "small", "Move"); edit.type = "button";
+      edit.onclick = function () { editing = t.id; $("name").value = t.name; $("place").value = bare(t.place); $("spot").value = t.spot || ""; $("save").textContent = "Save change"; $("place").focus(); window.scrollTo(0, 0); };
+      var del = el("button", "small danger", "Remove"); del.type = "button";
+      del.onclick = async function () { if (!confirm("Forget where " + t.name + " is?")) return; await api("/api/things/" + t.id + "/delete", {}); load(); };
+      row.appendChild(txt); row.appendChild(edit); row.appendChild(del);
+      return row;
+    }
     function draw() {
       var q = $("q").value.trim().toLowerCase(), list = $("list");
-      var shown = things.filter(function (t) { return !q || (t.name + " " + t.place).toLowerCase().indexOf(q) >= 0; });
+      var words = q.split(/\s+/).filter(Boolean);
+      var shown = things.filter(function (t) { var hay = (t.name + " " + t.place + " " + (t.spot || "")).toLowerCase(); return words.every(function (w) { return hay.indexOf(w) >= 0; }); });
+      document.querySelectorAll(".views button").forEach(function (b) { b.setAttribute("aria-pressed", b.getAttribute("data-view") === view ? "true" : "false"); });
       list.textContent = "";
-      if (!shown.length) { list.appendChild(el("div", "empty", things.length ? "Nothing matches." : "Nothing here yet. Add the first thing above, or tell Jarvis.")); return; }
-      shown.forEach(function (t) {
-        var row = el("div", "thing"), txt = el("div", "txt");
-        if (t.photo) { var im = el("img"); im.src = "/things/photo/" + t.photo; im.alt = "Photo of where it is"; im.loading = "lazy"; im.onclick = function () { bigPhoto(t.photo); }; row.appendChild(im); }
-        txt.appendChild(el("b", "", t.name)); txt.appendChild(document.createTextNode(" "));
-        txt.appendChild(el("span", "place", t.place));
-        txt.appendChild(el("div", "meta", (t.by ? t.by + ", " : "") + when(t.updated)));
-        var edit = el("button", "small", "Move"); edit.type = "button";
-        edit.onclick = function () { editing = t.id; $("name").value = t.name; $("place").value = t.place; $("save").textContent = "Save change"; $("place").focus(); window.scrollTo(0, 0); };
-        var del = el("button", "small danger", "Remove"); del.type = "button";
-        del.onclick = async function () { if (!confirm("Forget where " + t.name + " is?")) return; await api("/api/things/" + t.id + "/delete", {}); load(); };
-        row.appendChild(txt); row.appendChild(edit); row.appendChild(del); list.appendChild(row);
+      if (!shown.length) { var c = el("div", "card"); c.appendChild(el("div", "empty", things.length ? "Nothing matches." : "Nothing here yet. Add the first thing above, or tell Jarvis.")); list.appendChild(c); return; }
+      if (view === "name") { var card = el("div", "card"); shown.forEach(function (t) { card.appendChild(thingRow(t, true)); }); list.appendChild(card); return; }
+      var places = {}, order = [];
+      shown.forEach(function (t) { var k = t.place.toLowerCase(); if (!places[k]) { places[k] = { title: title(t), spots: {}, n: 0 }; order.push(k); } var p = places[k], sk = t.spot || ""; (p.spots[sk] = p.spots[sk] || []).push(t); p.n++; });
+      order.sort();
+      order.forEach(function (k) {
+        var p = places[k], card = el("div", "card group"), head = el("div", "ghead");
+        var open = !!q || order.length === 1 || openPlaces[k];
+        head.appendChild(el("b", "", (open ? "▾ " : "▸ ") + p.title));
+        var spotNames = Object.keys(p.spots).sort(function (a, b) { return a.localeCompare(b, undefined, { numeric: true }); });
+        head.appendChild(el("span", "", p.n + (p.n === 1 ? " thing" : " things") + (spotNames.length > 1 ? ", " + spotNames.length + " spots" : "")));
+        head.onclick = function () { openPlaces[k] = !open; draw(); };
+        card.appendChild(head);
+        if (open) spotNames.forEach(function (sn) {
+          var box = el("div", "spot"), items = p.spots[sn], photo = (items.filter(function (t) { return t.photo; })[0] || {}).photo;
+          if (sn || photo) { var sh = el("div", "shead"); sh.appendChild(el("b", "", sn || "")); if (photo) { var im = el("img"); im.src = "/things/photo/" + photo; im.alt = "Photo of this spot"; im.loading = "lazy"; im.onclick = function () { bigPhoto(photo); }; sh.appendChild(im); } box.appendChild(sh); }
+          items.forEach(function (t) { box.appendChild(thingRow(t, false)); });
+          card.appendChild(box);
+        });
+        list.appendChild(card);
       });
     }
+    document.querySelectorAll(".views button").forEach(function (b) { b.onclick = function () { view = b.getAttribute("data-view"); try { localStorage.setItem("things.view", view); } catch (e) {} draw(); }; });
+    function fillLists() {
+      var seenP = {}, seenS = {}, pl = $("places"), sp = $("spots"); pl.textContent = ""; sp.textContent = "";
+      things.forEach(function (t) { var b = bare(t.place); if (!seenP[b.toLowerCase()]) { seenP[b.toLowerCase()] = 1; var o = el("option"); o.value = b; pl.appendChild(o); }
+        if (t.spot && !seenS[t.spot.toLowerCase()]) { seenS[t.spot.toLowerCase()] = 1; var o2 = el("option"); o2.value = t.spot; sp.appendChild(o2); } });
+    }
     async function load() {
-      var r = await api("/api/things"); things = r.data.things || []; draw();
-      if (r.data.claude === false) { $("photo-btn").disabled = true; $("photo-hint").textContent = "Reading a photo needs “ask Claude” turned on (Settings → Assistant)."; }
+      var r = await api("/api/things"); things = r.data.things || []; draw(); fillLists();
+      if (r.data.claude === false) { $("photo-btn").disabled = true; $("photo-btn2").disabled = true; $("photo-hint").textContent = "Reading a photo needs “ask Claude” turned on (Settings → Assistant)."; }
     }
     function bigPhoto(name) {
       var b = el("div"); b.id = "big"; var im = el("img"); im.src = "/things/photo/" + name; b.appendChild(im);
@@ -145,9 +202,9 @@
 
     // ---- from a photo ----
     var scan = null, chosen = [], poll = null;
-    function pickPhoto() {
+    function pickPhoto(which) {
       if (!$("photo-place").value.trim()) { $("photo-msg").textContent = "Say where this is first."; $("photo-place").focus(); return; }
-      $("photo-msg").textContent = ""; $("photo-file").value = ""; $("photo-file").click();
+      $("photo-msg").textContent = ""; $(which).value = ""; $(which).click();
     }
     function shrink(file) {  // a phone's photo is 5-12 MB: 1800 px on the long side is plenty to read labels
       return new Promise(function (resolve, reject) {
@@ -162,19 +219,20 @@
         im.src = url;
       });
     }
-    $("photo-file").addEventListener("change", async function () {
+    async function sendPhoto() {
       var file = this.files && this.files[0]; if (!file) return;
-      $("photo-btn").disabled = true; $("photo-msg").textContent = "";
+      $("photo-btn").disabled = true; $("photo-btn2").disabled = true; $("photo-msg").textContent = "";
       try {
         var blob = await shrink(file);
         var r = await fetch("/api/things/photo", { method: "POST", body: blob, headers: { "Content-Type": "image/jpeg",
-          "X-Sentinel-Request": "1", "X-Place": encodeURIComponent($("photo-place").value.trim()) } });
+          "X-Sentinel-Request": "1", "X-Place": encodeURIComponent($("photo-place").value.trim()), "X-Spot": encodeURIComponent($("photo-spot").value.trim()) } });
         var d = {}; try { d = await r.json(); } catch (e) {}
         if (!r.ok) throw new Error(d.error || "Couldn't send the photo.");
         watch(d.id);
       } catch (e) { $("photo-msg").textContent = e.message === "no picture" ? "That doesn't look like a photo." : e.message; }
-      $("photo-btn").disabled = false;
-    });
+      $("photo-btn").disabled = false; $("photo-btn2").disabled = false;
+    }
+    $("photo-file").addEventListener("change", sendPhoto); $("photo-camera").addEventListener("change", sendPhoto);
     function watch(id) {
       $("photo-start").hidden = true; $("photo-review").hidden = false; $("review-body").hidden = true; $("fail-acts").hidden = true;
       $("shot").removeAttribute("src"); $("photo-state").textContent = "Claude is looking at the photo… (about half a minute)";
@@ -188,7 +246,7 @@
       clearInterval(poll);
       if (s.state === "failed") { $("photo-state").textContent = s.error; $("fail-acts").hidden = false; scan = s; return; }
       scan = s; chosen = s.items.map(function (n) { return { name: n, on: true }; });
-      $("photo-state").textContent = s.items.length || s.unsure.length ? "Here's what Claude sees " + s.place + ":" : "Claude didn't see anything it could name " + s.place + ". Add things yourself below, or cancel.";
+      $("photo-state").textContent = s.items.length || s.unsure.length ? "Here's what Claude sees " + s.said + ":" : "Claude didn't see anything it could name " + s.said + ". Add things yourself below, or cancel.";
       drawSeen();
       var box = $("unsure"); box.textContent = "";
       s.unsure.forEach(function (u) {
@@ -218,17 +276,17 @@
     async function keepSeen() {
       var r = await api("/api/things/photo/" + scan.id + "/save", { names: chosen.filter(function (c) { return c.on; }).map(function (c) { return c.name; }) });
       if (!r.ok) { $("keep-msg").textContent = r.data.error || "Couldn't save."; return; }
-      $("photo-place").value = ""; endScan(); load();
+      $("photo-spot").value = ""; endScan(); load();  // (the cabinet stays: the next photo is usually its next drawer)
     }
     async function dropScan() { if (scan) await api("/api/things/photo/" + scan.id + "/save", { cancel: true }); endScan(); }
     async function save() {
-      var body = { name: $("name").value, place: $("place").value };
+      var body = { name: $("name").value, place: $("place").value, spot: $("spot").value };
       if (editing !== null) body.id = editing;
       var r = await api("/api/things", body);
       $("msg").textContent = r.ok ? "" : (r.data.error || r.data.message || "Couldn't save that.");
-      if (r.ok) { editing = null; $("name").value = ""; $("place").value = ""; $("save").textContent = "Save"; load(); }
+      if (r.ok) { editing = null; $("name").value = ""; $("save").textContent = "Save"; $("name").focus(); load(); }  // (place and spot stay: the next thing is often in the same drawer)
     }
-    ["name", "place"].forEach(function (id) { $(id).addEventListener("keydown", function (e) { if (e.key === "Enter") save(); }); });
+    ["name", "place", "spot"].forEach(function (id) { $(id).addEventListener("keydown", function (e) { if (e.key === "Enter") save(); }); });
     load();
   </script>
 </body>

@@ -561,6 +561,14 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   by `key()` (articles and plurals dropped, "ten millimeter" = "10 mm"), then by words in common, then near spellings
   (Whisper's "stopper motor"). Not things: cars, phones, people words, "it" (`_NOT_THINGS`). Shared by the whole
   family; no private things.
+  **Places and spots** (same day: the user had been typing "Desktop Small Blue Cabinet R1C3"): column `spot` = where
+  inside the place ("R1C3", "second drawer"). `split_place` takes it off the end of a place said in one breath (a
+  row/column, an ordinal + drawer/shelf/bin..., "drawer 3", or whatever follows a comma), `clean_spot` writes
+  rows and columns as R1C3; old rows were split once when the column was added. A place keeps one spelling
+  (`place_key`). `inside()` / `contents()` + `parse_inside` answer "what's in the blue cabinet R1C3?" (only when such
+  a place holds something). The page groups by place then spot (numeric sort, the spot's photo), or A to Z; the two
+  place boxes offer what's already kept (datalists). Two file inputs: one with `capture="environment"` (Take a photo:
+  with only `accept="image/*"` the user's Android offered the gallery but no camera), one without (Choose).
   **From a photo** (same day; `PhotoScans` in things.py, `Assistant.look`): the page shrinks the photo (1800 px
   canvas -> raw JPEG body, `X-Place` header; route raises `request.max_content_length` like Photos/Print), the server
   shrinks to 1568 px, keeps it in `recorded_videos/things_photos/<16 hex>.jpg` and asks Claude in a thread
