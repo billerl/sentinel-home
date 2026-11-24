@@ -79,7 +79,7 @@
   <main>
     <div class="card">
       <div class="add">
-        <label><span>What</span><input type="text" id="name" maxlength="60" placeholder="10 mm socket" autocomplete="off"></label>
+        <label><span>What</span><input type="text" id="name" maxlength="300" placeholder="10 mm socket (or several: keys, key fobs)" autocomplete="off"></label>
         <label><span>Where (cabinet, toolbox, room)</span><input type="text" id="place" maxlength="120" placeholder="red toolbox" autocomplete="off" list="places"></label>
         <label><span>Spot in it (optional)</span><input type="text" id="spot" maxlength="40" placeholder="second drawer, R1C3" autocomplete="off" list="spots"></label>
         <button type="button" class="primary" id="save" onclick="save()">Save</button>
@@ -110,7 +110,7 @@
           <div class="hint" style="margin-bottom:6px">Tap anything that's wrong to leave it out.</div>
           <div class="seen" id="seen"></div>
           <div id="unsure"></div>
-          <div class="q"><div class="row"><input type="text" id="extra" maxlength="60" placeholder="Something it missed? Add it here" autocomplete="off"><button type="button" class="small" onclick="addExtra()">Add</button></div></div>
+          <div class="q"><div class="row"><input type="text" id="extra" maxlength="300" placeholder="Something it missed? Add it (commas for several)" autocomplete="off"><button type="button" class="small" onclick="addExtra()">Add</button></div></div>
           <div class="acts"><button type="button" class="primary" id="keep" onclick="keepSeen()">Keep these</button><button type="button" onclick="dropScan()">Cancel</button><span class="msg" id="keep-msg" role="alert"></span></div>
         </div>
         <div class="acts" id="fail-acts" hidden><button type="button" onclick="dropScan()">Okay</button></div>
@@ -252,7 +252,7 @@
       s.unsure.forEach(function (u) {
         var q = el("div", "q"); q.appendChild(el("div", "what", "❓ What is this: " + u.looks_like + "?"));
         var row = el("div", "row"), input = el("input"); input.type = "text"; input.maxLength = 60; input.placeholder = "Type what it is"; input.autocomplete = "off";
-        function take(name) { name = name.trim(); if (!name) return; chosen.push({ name: name, on: true }); drawSeen(); q.remove(); }
+        function take(name) { if (!several(name).length) return; several(name).forEach(function (n) { chosen.push({ name: n, on: true }); }); drawSeen(); q.remove(); }
         if (u.guess) { var yes = el("button", "small", "Yes, " + u.guess); yes.type = "button"; yes.onclick = function () { take(u.guess); }; row.appendChild(yes); }
         var ok = el("button", "small", "Add"); ok.type = "button"; ok.onclick = function () { take(input.value); };
         input.addEventListener("keydown", function (e) { if (e.key === "Enter") take(input.value); });
@@ -270,7 +270,8 @@
       var n = chosen.filter(function (c) { return c.on; }).length;
       $("keep").textContent = n ? "Keep these " + n : "Keep nothing"; $("keep").disabled = !n;
     }
-    function addExtra() { var v = $("extra").value.trim(); if (!v) return; chosen.push({ name: v, on: true }); $("extra").value = ""; drawSeen(); }
+    function several(text) { return text.split(/[,;]+/).map(function (n) { return n.trim(); }).filter(Boolean); }  // "keys, key fobs" = two things
+    function addExtra() { var v = several($("extra").value); if (!v.length) return; v.forEach(function (n) { chosen.push({ name: n, on: true }); }); $("extra").value = ""; drawSeen(); }
     $("extra").addEventListener("keydown", function (e) { if (e.key === "Enter") addExtra(); });
     function endScan() { clearInterval(poll); scan = null; chosen = []; $("photo-review").hidden = true; $("photo-start").hidden = false; }
     async function keepSeen() {

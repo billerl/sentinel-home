@@ -30,6 +30,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 NAME_MAX, PLACE_MAX, SPOT_MAX, MAX_THINGS = 60, 120, 40, 2000
+MAX_SEEN = 60  # things from one photo, or typed into the add box at once
 
 _WHERE = (r"in|inside|on|on top of|under|underneath|beneath|below|above|behind|beside|next to|near|by|at|"
           r"in front of|between|with|over|hanging on|hanging in|out in|up in|down in|back in")
@@ -97,6 +98,16 @@ def key(name: str) -> str:
 
 def _name(raw: str) -> str:
     return re.sub(r"\s+", " ", raw).strip(" .,?!")[:NAME_MAX]
+
+
+def split_names(raw: Any) -> List[str]:
+    """Typed as a list: "keys, key fobs" is two things (each once)."""
+    names: List[str] = []
+    for part in re.split(r"\s*[,;\n]+\s*", str(raw or "")):
+        name = _name(re.sub(r"^and\s+", "", part.strip(), flags=re.I))
+        if name and key(name) and key(name) not in [key(n) for n in names]:
+            names.append(name)
+    return names
 
 
 def parse_put(text: str) -> Optional[Tuple[str, Optional[str], str]]:
@@ -286,6 +297,17 @@ class Things:
     def _subject(name: str) -> str:
         return ("your " if re.match(r"^(?:my|our)\b", name.lower()) else "the ") + re.sub(r"^(?:my|our|the)\s+", "", name, flags=re.I)
 
+    def put_all(self, names: Any, place: Any, by: str = "", spot: Any = None) -> Tuple[bool, str]:
+        """The page's add box: one thing, or several with commas between them, all in the same place."""
+        listed = split_names(names)
+        if len(listed) <= 1:
+            return self.put(listed[0] if listed else "", place, by=by, spot=spot)
+        said = [self.put(name, place, by=by, spot=spot, another=True) for name in listed[:MAX_SEEN]]
+        bad = [why for ok, why in said if not ok]
+        if bad:
+            return False, bad[0]
+        return True, f"Kept {len(said)} things: {', '.join(listed[:MAX_SEEN])}."
+
     def find(self, name: str) -> List[Dict[str, Any]]:
         """The things this name could mean, best first: the same name, else every word of one in the other
         ("socket" finds "10 mm socket" and "socket wrench"), else a near spelling (Whisper's "stopper motor")."""
@@ -359,7 +381,6 @@ PHOTO_DIR = "things_photos"
 PHOTO_MAX_PX = 1568  # (as much as Claude looks at; small parts need it)
 PHOTO_MAX_BYTES = 6 * 1024 * 1024
 SCAN_KEEP_SECONDS = 2 * 3600
-MAX_SEEN = 60
 
 LOOK_SYSTEM = """You help a family keep track of where their things are. You are shown ONE photo of a storage spot
 (a drawer, shelf, bin, toolbox, cabinet) and told where it is. List the distinct kinds of things kept there.
@@ -488,9 +509,10 @@ class PhotoScans:
         if scan is None or scan["state"] != "ready":
             return False, "That photo has timed out. Send it again."
         kept: List[str] = []
-        for raw in names if isinstance(names, list) else []:
-            name = _name(str(raw)) if isinstance(raw, str) else ""
-            if name and key(name) and key(name) not in [key(n) for n in kept] and len(kept) < MAX_SEEN:
+        typed = [name for raw in (names if isinstance(names, list) else []) if isinstance(raw, str)
+                 for name in split_names(raw)]  # ("keys, key fobs" typed into one box is two things)
+        for name in typed:
+            if key(name) not in [key(n) for n in kept] and len(kept) < MAX_SEEN:
                 if self.things.put(name, scan["place"], by=scan["by"], photo=scan["photo"], another=True,
                                    spot=scan["spot"])[0]:
                     kept.append(name)

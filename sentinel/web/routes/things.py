@@ -44,6 +44,8 @@ def register(app: Flask, ctx: WebContext) -> None:
         thing_id = body.get("id") if isinstance(body.get("id"), int) else None
         # (the page has a box of its own for the spot; left out = said in one breath with the place)
         spot = body.get("spot") if isinstance(body.get("spot"), str) and (body.get("spot").strip() or thing_id) else None
+        if thing_id is None:  # (a new entry may be several: "keys, key fobs")
+            return _result(*engine.things.put_all(body.get("name"), body.get("place"), by=by, spot=spot))
         return _result(*engine.things.put(body.get("name"), body.get("place"), by=by, thing_id=thing_id, spot=spot))
 
     @app.route("/api/things/<int:thing_id>/delete", methods=["POST"])

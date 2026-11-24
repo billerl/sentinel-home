@@ -138,6 +138,17 @@ class TestSpots(unittest.TestCase):
         self.assertTrue(self.things.contents("the blue cabinet").startswith("3 things in 2 spots: "))
         self.assertIsNone(self.things.contents("the driveway"))
 
+    def test_commas_make_several_things(self):
+        from sentinel.engine.things import split_names
+
+        self.assertEqual(split_names("Keys, key fobs,, and padlock; keys"), ["Keys", "key fobs", "padlock"])
+        self.assertEqual(self.things.put_all("Keys, key fobs", "Roll top desk", "Alex", spot="top right drawer"),
+                         (True, "Kept 2 things: Keys, key fobs."))
+        self.assertEqual({(t["name"], t["spot"]) for t in self.things.all()},
+                         {("Keys", "top right drawer"), ("key fobs", "top right drawer")})
+        self.assertEqual(self.things.put_all("tape", "junk drawer")[1], "Okay, the tape is in junk drawer.")  # one: as before
+        self.assertFalse(self.things.put_all(" , ", "junk drawer")[0])
+
     def test_places_kept_before_spots_are_split_once(self):
         import sqlite3
 
