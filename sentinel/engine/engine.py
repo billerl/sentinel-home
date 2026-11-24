@@ -1434,7 +1434,18 @@ class Engine:
                       | {"remote": (hv["buttons"] or {}).get("remote")},
             # what reads a room's temperature: shown on the room it's placed in (2026-11-23 voice note)
             "thermometers": self._thermometers(rv, hv),
+            # people, animals and vehicles the cameras see now, placed on the yard (cameras with a drawn view)
+            "seen": self._house_seen(),
         }
+
+    def _house_seen(self) -> List[Dict[str, Any]]:
+        from sentinel.engine.house import seen_things
+
+        try:
+            return seen_things(self.house, list(self.cameras.values()), self.presence, self.household)
+        except Exception as e:  # (camera threads change these lists while we read: never break the page's poll)
+            app_logger.log("warning", "house_seen_failed", error=str(e), component="house", action="seen")
+            return []
 
     def _thermometers(self, rv: Dict[str, Any], hv: Dict[str, Any]) -> List[Dict[str, Any]]:
         """The BroadLink RM4's sensor cable (read every minute by the heater's thermostat, sentinel/engine/heater.py)."""

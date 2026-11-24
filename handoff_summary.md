@@ -510,6 +510,15 @@ Use this file as continuity across chats. At the **start** of a new session, ask
 - **Pet tracker → TV** (2026-11-23; `Switches.tv_show_page`, POST `/api/lost/tv`, `lost.html` `showOnTv`): a TV picker
   (TVs with a live page, `camera_tvs()`, last choice kept in localStorage) + "Show on TV" opens `#map=<pet ids>` the same
   way "show Xena's location on the TV" does.
+- **The yard on the House page** (2026-11-24 voice note; `house.seen_things`, `Engine._house_seen`, `"seen"` in
+  `/api/house/live`): rooms of kind `yard` are flat ground (lawn, driveway; optional `color`), left out of the page's
+  scale so the house keeps its size. The drawing's `views` say where each camera looks: four spots in its picture
+  (0-1) and the same four on the plan; `ground_point` is the plane-to-plane mapping (numpy solve), clamped near the
+  four spots and to the far edge past the horizon. Listed: each camera's live tracks (2+ hits, 0.5+, seen in the last
+  `SEEN_SECONDS`, feet = bottom middle of the box; vehicles 80% down) and the parked family cars from
+  `PresenceTracker.spots` (a moving track over a parked spot is that car, not a second one). The page draws simple
+  figures (`makeFigure`), glides them between polls and logs new arrivals. Rough by nature: flat ground, no lens
+  correction, detection only runs while a camera sees motion. Views are hand-estimated per install (no editor yet).
 - **Room temperatures on the House page** (2026-11-23; kind `thermometer` in `house.KINDS`, `Engine._thermometers`):
   the RM4's HTS2 sensor (`heater.inside()`, None when stale) is a placeable device; the room it sits in shows its
   temperature beside the room name and in the room list. Add more kinds of thermometer to `_thermometers`.

@@ -253,3 +253,75 @@ class TestHouseLive(unittest.TestCase):
         self.assertEqual(Engine._thermometers(fake, {"hub": {"host": "192.168.1.60"}}, hv)[0]["temp_f"], None)
         self.assertEqual(Engine._thermometers(fake, {"hub": None}, hv), [])  # no BroadLink: nothing to place
         self.assertEqual(clean_device({"kind": "thermometer", "ref": "broadlink", "at": [5, 5]})["id"], "thermometer:broadlink")
+
+
+VIEW = {"camera": "192.168.0.9", "image": [[0, 1], [1, 1], [1, 0], [0, 0]],
+        "ground": [[1000, 0], [1000, 200], [1400, 300], [1400, -100]]}
+
+
+class _Track:
+    def __init__(self, tid, group, label, box, last_seen, **kw):
+        self.track_id, self.group, self.label, self.boxes, self.last_seen = tid, group, label, [(last_seen, box)], last_seen
+        self.hits, self.best_score, self.not_a_subject = kw.get("hits", 5), kw.get("score", 0.9), kw.get("junk", False)
+        self.known_vehicle, self.vehicle_type = kw.get("car"), kw.get("vtype")
+
+    @property
+    def box(self):
+        return self.boxes[-1][1]
+
+
+class _Cam:
+    def __init__(self, host, tracks):
+        self.host, self.connected = host, True
+        self.detector = mock.Mock(last_raw_frame=np.zeros((100, 200, 3), np.uint8))
+        self.tracker = mock.Mock(tracks=tracks)
+
+
+class TestSeen(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.house = HouseLayout(self.dir)
+        self.house.set_drawing({"rooms": ROOMS + [{"id": "lawn", "name": "Yard", "r": [700, -200, 1500, 400], "kind": "yard",
+                                                   "color": "#3A7D44"}], "views": [VIEW, {"camera": "bad", "image": [[0, 0]], "ground": []}]})
+
+    def test_views_and_yard_cleaned_and_saved(self):
+        d = HouseLayout(self.dir).view()["drawing"]
+        self.assertEqual([v["camera"] for v in d["views"]], ["192.168.0.9"])
+        self.assertNotIn("_h", d["views"][0])
+        lawn = d["rooms"][-1]
+        self.assertEqual((lawn["kind"], lawn["color"]), ("yard", "#3a7d44"))
+
+    def test_flat_view_is_refused(self):
+        flat = dict(VIEW, ground=[[0, 0], [1, 1], [2, 2], [3, 3]])
+        self.assertNotIn("views", clean_drawing({"rooms": ROOMS, "views": [flat]}))
+
+    def test_picture_spot_to_plan(self):
+        self.assertEqual(self.house.locate("192.168.0.9", 0, 1), [1000.0, 0.0])
+        self.assertEqual(self.house.locate("192.168.0.9", 1, 0), [1400.0, 300.0])
+        mid = self.house.locate("192.168.0.9", 0.5, 1)
+        self.assertEqual(mid, [1000.0, 100.0])
+        self.assertIsNone(self.house.locate("192.168.0.10", 0.5, 0.5))
+
+    def test_people_cars_and_parked_cars_listed(self):
+        from sentinel.engine.house import seen_things
+
+        car = mock.Mock(kind="pickup")
+        car.name = "Alex's Sierra"
+        tracks = [_Track(1, "person", "person", (90, 40, 20, 60), 100.0),       # feet at the bottom middle
+                  _Track(2, "animal", "dog", (0, 80, 20, 20), 100.0),
+                  _Track(3, "person", "person", (0, 0, 10, 10), 80.0),           # walked off long ago
+                  _Track(4, "person", "person", (0, 0, 10, 10), 100.0, junk=True),
+                  _Track(5, "vehicle", "truck", (100, 50, 80, 40), 100.0),       # the parked car, seen moving a leaf
+                  _Track(6, "vehicle", "car", (10, 10, 30, 20), 100.0, vtype=mock.Mock(key="suv"))]
+        parked = mock.Mock(box=(100, 50, 80, 40), ignored=False, confirmed=True, announced=True, vehicle_id=3, first_seen=5.0)
+        presence, household = mock.Mock(), mock.Mock()
+        presence.spots.return_value = [parked]
+        household.vehicle.return_value = car
+        cams = [_Cam("192.168.0.9", tracks), _Cam("192.168.0.11", [_Track(9, "person", "person", (0, 0, 5, 5), 100.0)])]
+        seen = seen_things(self.house, cams, presence, household, now=101.0)
+        self.assertEqual([(s["kind"], s["name"], s["parked"]) for s in seen],
+                         [("pickup", "Alex's Sierra", True), ("person", "", False), ("dog", "", False), ("suv", "", False)])
+        self.assertEqual(seen[1]["at"], self.house.locate("192.168.0.9", 0.5, 1.0))
+        for s in seen:
+            self.assertTrue(700 <= s["at"][0] <= 1500, s)

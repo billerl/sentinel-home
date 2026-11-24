@@ -49,6 +49,10 @@
     .lbl.room .temp { display: block; text-align: center; font-size: 1rem; letter-spacing: 0; text-transform: none;
                       color: #ffb37a; font-weight: 600; margin-top: 1px; }
     .lbl.room.guess::after { content: " ?"; color: var(--dim); }
+    .lbl.seen { border-color: #7a3d4a; color: var(--bright); background: rgba(40,8,16,0.85); }
+    .lbl.seen i { background: #ff6b81; box-shadow: 0 0 7px #ff6b81; }
+    .lbl.seen.parked { border-color: var(--line-2); background: rgba(5,16,21,0.82); color: var(--fg); }
+    .lbl.seen.parked i { background: var(--muted); box-shadow: none; }
     .lbl.mark { background: none; border: 0; color: #5f8796; font-size: 0.66rem; letter-spacing: 0.06em; transform: translate(-50%, -50%); }
 
     .tools { position: absolute; left: 10px; right: 10px; top: 10px; display: flex; flex-wrap: wrap; gap: 6px; pointer-events: none; }
@@ -157,7 +161,8 @@
       </div>
       <p class="note">A room lights up when a sensor path through the middle of it notices movement.
         Use ＋ Add device to put your switches, cameras, Wi-Fi sensors and the things the BroadLink works (heater, fans,
-        soundbar) where they really are; Show ▾ picks what the drawing shows. A thermometer (the RM4's sensor cable)
+        soundbar) where they really are; Show ▾ picks what the drawing shows. People, pets and vehicles the cameras see are
+        drawn on the yard roughly where they are (red = someone moving, pale = a parked family car). A thermometer (the RM4's sensor cable)
         shows its reading on the room it's placed in.</p>
     </aside>
   </main>
@@ -196,7 +201,7 @@
     }
 
     var stage = document.getElementById("stage"), labels = document.getElementById("labels");
-    var drawing = null, placed = [], live = { paths: [], boards: [], switches: [], cameras: [], remotes: [], heater: {}, thermometers: [] };
+    var drawing = null, placed = [], live = { paths: [], boards: [], switches: [], cameras: [], remotes: [], heater: {}, thermometers: [], seen: [] };
     var S = 1 / 40, CX = 0, CY = 0;  // plan units -> scene: set from the drawing's size
     function at(x, y, h) { return new THREE.Vector3((x - CX) * S, h || 0, (y - CY) * S); }
     function toPlan(v) { return [v.x / S + CX, v.z / S + CY]; }
@@ -209,7 +214,7 @@
     var camera = new THREE.PerspectiveCamera(42, 1, 0.1, 400);
     var controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true; controls.dampingFactor = 0.08;
-    controls.maxPolarAngle = Math.PI * 0.49; controls.minDistance = 4; controls.maxDistance = 90;
+    controls.maxPolarAngle = Math.PI * 0.49; controls.minDistance = 4; controls.maxDistance = 150;
     var levels = { 0: new THREE.Group(), 1: new THREE.Group() }, grid = null;
     scene.add(levels[0]); scene.add(levels[1]);
     var floors = [], roomObjs = {}, markObjs = [], devObjs = {}, pathObjs = {}, pickables = [];
@@ -218,8 +223,9 @@
     function partsOf(room) { return room.parts || []; }
     function inRoom(room, x, y) { return partsOf(room).some(function (r) { return x >= r[0] && x < r[2] && y >= r[1] && y < r[3]; }); }
     function floorOf(room) { return room.y != null ? room.y : room.level ? H + 0.4 : 0; }
-    function roomAt(x, y, lvl) {
-      return drawing.rooms.find(function (rm) { return (rm.level || 0) === (lvl || 0) && inRoom(rm, x, y); }) || null;
+    function roomAt(x, y, lvl) {   // a real room wins over the lawn it stands on
+      var hits = drawing.rooms.filter(function (rm) { return (rm.level || 0) === (lvl || 0) && inRoom(rm, x, y); });
+      return hits.find(function (rm) { return rm.kind !== "yard"; }) || hits[0] || null;
     }
     function floorAt(x, y, lvl) {
       var r = roomAt(x, y, lvl);
@@ -238,12 +244,13 @@
     function build() {
       var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, low = 0;
       drawing.rooms.forEach(function (rm) {
+        if (rm.kind === "yard" && drawing.rooms.some(function (o) { return o.kind !== "yard"; })) return;  // the house sets the scale, not the lawn
         partsOf(rm).forEach(function (r) { minX = Math.min(minX, r[0]); minY = Math.min(minY, r[1]); maxX = Math.max(maxX, r[2]); maxY = Math.max(maxY, r[3]); });
         if (!rm.level) low = Math.min(low, floorOf(rm));
         if (rm.level) hasUpstairs = true;
       });
       S = 32 / Math.max(maxX - minX, maxY - minY, 1); CX = (minX + maxX) / 2; CY = (minY + maxY) / 2;
-      grid = new THREE.GridHelper(80, 80, 0x0c2b33, 0x071a20);
+      grid = new THREE.GridHelper(160, 160, 0x0c2b33, 0x071a20);
       grid.position.y = low - 0.02; scene.add(grid);
       document.getElementById("floors").hidden = !hasUpstairs;
 
@@ -251,9 +258,10 @@
       drawing.rooms.forEach(function (room) {
         var lvl = room.level || 0, r = partsOf(room)[0];
         var poly = room.poly || [[r[0], r[1]], [r[2], r[1]], [r[2], r[3]], [r[0], r[3]]];
-        var base = floorOf(room), h = room.kind === "outside" ? 0.12 : (room.top != null ? room.top : base + H) - base;
-        var tint = room.kind === "garage" ? C.garage : room.kind === "outside" ? C.outside : C.cyan;
-        var floorMat = new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: room.kind ? 0.05 : 0.07, side: THREE.DoubleSide, depthWrite: false });
+        var yard = room.kind === "yard";
+        var base = floorOf(room) - (yard ? 0.03 : 0), h = yard ? 0 : room.kind === "outside" ? 0.12 : (room.top != null ? room.top : base + H) - base;
+        var tint = hex(room.color, room.kind === "garage" ? C.garage : room.kind === "outside" || yard ? C.outside : C.cyan);
+        var floorMat = new THREE.MeshBasicMaterial({ color: tint, transparent: true, opacity: yard ? 0.14 : room.kind ? 0.05 : 0.07, side: THREE.DoubleSide, depthWrite: false });
         var shape = new THREE.Shape(poly.map(function (p) { return new THREE.Vector2((p[0] - CX) * S, -(p[1] - CY) * S); }));
         var floor = new THREE.Mesh(new THREE.ShapeGeometry(shape), floorMat);
         floor.rotation.x = -Math.PI / 2; floor.position.y = base + 0.01;
@@ -275,6 +283,7 @@
             pts.push(a, a.clone().setY(base + h), a.clone().setY(base + h), b.clone().setY(base + h));
             return;
           }
+          if (yard) { pts.push(a, b); return; }   // ground: just its outline
           var wall = plane(a, b, h, wallMat);
           wall.position.y = base + h / 2;
           levels[lvl].add(wall);
@@ -394,7 +403,8 @@
     // ---------- what's shown (the Show menu; remembered on this device) ----------
     var SHOW = [["rooms", "Room names"], ["marks", "Other labels (doors, stairs…)"], ["names", "Device names"],
                 ["sensors", "Wi-Fi sensors"], ["paths", "Sensor lines"], ["cameras", "Cameras"],
-                ["plugs", "Smart plugs & lights"], ["tvs", "TVs"], ["remotes", "Remote-controlled (RM4)"], ["temps", "Thermometers"]];
+                ["plugs", "Smart plugs & lights"], ["tvs", "TVs"], ["remotes", "Remote-controlled (RM4)"], ["temps", "Thermometers"],
+                ["seen", "People, pets & vehicles the cameras see"]];
     var show = {};
     SHOW.forEach(function (s) { show[s[0]] = true; });
     try { var kept = JSON.parse(localStorage.getItem("house.show") || "{}"); Object.keys(show).forEach(function (k) { if (kept[k] === false) show[k] = false; }); } catch (e) {}
@@ -497,6 +507,84 @@
       Object.keys(pathObjs).forEach(function (id) {
         if (!want[id]) { pathObjs[id].line.parent.remove(pathObjs[id].line); delete pathObjs[id]; }
       });
+    }
+
+    // ---------- what the cameras see: people, pets and vehicles standing on the yard ----------
+    var seenObjs = {}, SEEN_COLOR = { person: 0xff6b81, dog: 0xffc94d, cat: 0xffc94d, animal: 0xffc94d };
+    var SEEN_WORD = { person: "Person", dog: "Dog", cat: "Cat", animal: "Animal", car: "Car", suv: "SUV", pickup: "Pickup", van: "Van",
+                      truck: "Truck", motorcycle: "Motorcycle", tractor: "Tractor" };
+    function part(g, mat, w, h, d, x, y, z) {
+      var m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+      m.position.set(x, y, z); g.add(m);
+      return m;
+    }
+    function makeFigure(kind, parked) {   // drawn along +x (nose first), standing on y = 0; sizes in scene units (1 ≈ 2.7 ft)
+      var g = new THREE.Group(), u = S * 15;   // (the plan is about 15 units to the foot)
+      var mat = new THREE.MeshBasicMaterial({ color: SEEN_COLOR[kind] || (parked ? 0x7fb6c9 : 0x9ad7ff), transparent: true, opacity: parked ? 0.55 : 0.9 });
+      var dark = new THREE.MeshBasicMaterial({ color: 0x0a1418, transparent: true, opacity: 0.85 });
+      if (kind === "person") {
+        var body = new THREE.Mesh(new THREE.CylinderGeometry(0.75 * u, 0.6 * u, 4.2 * u, 12), mat); body.position.y = 2.1 * u;
+        var head = new THREE.Mesh(new THREE.SphereGeometry(0.6 * u, 12, 10), mat); head.position.y = 5.0 * u;
+        g.add(body, head); g.userData.top = 6.2 * u;
+      } else if (kind === "dog" || kind === "cat" || kind === "animal") {
+        var k = kind === "cat" ? 0.6 : 1;
+        part(g, mat, 2.6 * u * k, 0.9 * u * k, 0.9 * u * k, 0, 1.5 * u * k, 0);
+        part(g, mat, 0.9 * u * k, 0.8 * u * k, 0.8 * u * k, 1.6 * u * k, 2.1 * u * k, 0);
+        [[-1, -1], [-1, 1], [1, -1], [1, 1]].forEach(function (s) { part(g, mat, 0.3 * u * k, 1.1 * u * k, 0.3 * u * k, s[0] * 1.0 * u * k, 0.55 * u * k, s[1] * 0.3 * u * k); });
+        part(g, mat, 0.9 * u * k, 0.25 * u * k, 0.25 * u * k, -1.6 * u * k, 2.0 * u * k, 0);
+        g.userData.top = 3.2 * u * k;
+      } else {   // vehicles: a body, a cabin with dark glass, four wheels
+        var L = { car: 15, suv: 16, pickup: 19, van: 18, truck: 24, motorcycle: 7, tractor: 11 }[kind] || 15, W = kind === "motorcycle" ? 2 : kind === "truck" ? 8 : 6.2;
+        var bodyH = kind === "truck" || kind === "van" ? 6 : kind === "tractor" ? 3 : 2.4, lift = 1.1;
+        part(g, mat, L * u, bodyH * u, W * u, 0, (lift + bodyH / 2) * u, 0);
+        if (kind === "car") part(g, dark, 7 * u, 1.7 * u, W * 0.92 * u, -0.8 * u, (lift + bodyH + 0.85) * u, 0);
+        if (kind === "suv") part(g, dark, 10.5 * u, 2.1 * u, W * 0.92 * u, -1.6 * u, (lift + bodyH + 1.05) * u, 0);
+        if (kind === "pickup") { part(g, dark, 6.5 * u, 2.2 * u, W * 0.92 * u, 1.2 * u, (lift + bodyH + 1.1) * u, 0); part(g, dark, 6.2 * u, 0.15 * u, W * 0.8 * u, -5.9 * u, (lift + bodyH + 0.08) * u, 0); }
+        if (kind === "van" || kind === "truck") part(g, dark, 0.2 * u, 2 * u, W * 0.85 * u, L / 2 * u, (lift + bodyH - 1.4) * u, 0);
+        if (kind === "tractor") part(g, dark, 3.5 * u, 3.5 * u, W * 0.7 * u, -2.5 * u, (lift + bodyH + 1.75) * u, 0);
+        [[-1, -1], [-1, 1], [1, -1], [1, 1]].forEach(function (s) {
+          var wheel = new THREE.Mesh(new THREE.CylinderGeometry(1.25 * u, 1.25 * u, 0.8 * u, 14), dark);
+          wheel.rotation.x = Math.PI / 2; wheel.position.set(s[0] * L * 0.32 * u, 1.25 * u, s[1] * W * 0.5 * u); g.add(wheel);
+        });
+        g.userData.top = (lift + bodyH + 3) * u;
+      }
+      var ring = new THREE.Mesh(new THREE.RingGeometry(1.6 * u, 2.3 * u, 28),
+        new THREE.MeshBasicMaterial({ color: SEEN_COLOR[kind] || 0x9ad7ff, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
+      ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; g.add(ring); g.userData.ring = ring;
+      return g;
+    }
+    function seenWords(s) {
+      var cam = live.cameras.find(function (c) { return c.id === s.camera; });
+      return (s.name || SEEN_WORD[s.kind] || "Something") + (s.parked ? "" : " · " + (cam ? cam.name : "camera"));
+    }
+    function groundAt(x, y) { var r = roomAt(x, y, 0); return r ? floorOf(r) : 0; }
+    function syncSeen() {
+      var keep = {};
+      (live.seen || []).forEach(function (s) {
+        keep[s.id] = true;
+        var o = seenObjs[s.id], to = at(s.at[0], s.at[1], groundAt(s.at[0], s.at[1]) + 0.02);
+        if (o && o.kind !== s.kind) { dropSeen(s.id); o = null; }
+        if (!o) {
+          var g = makeFigure(s.kind, s.parked), el = document.createElement("div");
+          g.position.copy(to); scene.add(g); labels.appendChild(el);
+          var camDev = placed.find(function (d) { return d.kind === "camera" && d.ref === s.camera; });
+          if (camDev && s.kind !== "person") {   // vehicles and animals start nose-on to the camera; they turn as they move
+            var c = at(camDev.at[0], camDev.at[1]);
+            g.rotation.y = Math.atan2(-(c.z - to.z), c.x - to.x);
+          }
+          o = seenObjs[s.id] = { group: g, el: el, kind: s.kind, to: to.clone() };
+          if (!firstPoll && !s.parked) log("<b>" + esc(seenWords(s)) + "</b>");
+        }
+        o.s = s; o.to.copy(to);
+        o.el.className = "lbl seen" + (s.parked ? " parked" : "");
+        o.el.innerHTML = "<i></i>" + esc(seenWords(s));
+      });
+      Object.keys(seenObjs).forEach(function (id) { if (!keep[id]) dropSeen(id); });
+    }
+    function dropSeen(id) {
+      var o = seenObjs[id];
+      scene.remove(o.group); o.el.remove();
+      delete seenObjs[id];
     }
 
     // ---------- panel ----------
@@ -732,6 +820,7 @@
         if (!firstPoll && was != null && was !== s.on) log(esc(s.name) + " turned <b>" + (s.on ? "on" : "off") + "</b>");
         seenSwitches[s.id] = s.on;
       });
+      syncSeen();
       firstPoll = false;
       syncDevices();
       Object.keys(roomObjs).forEach(function (id) { roomObjs[id].busy = false; });
@@ -789,7 +878,23 @@
         o.halo.material.opacity = on ? 0.25 + 0.5 * pulse : id === selected ? 0.4 : 0;
         o.halo.material.color.setHex(on ? C.live : C.cyan);
       });
+      Object.keys(seenObjs).forEach(function (id) {   // figures glide to where the camera last saw them
+        var o = seenObjs[id], gap = o.to.clone().sub(o.group.position), far = gap.length();
+        if (far > 0.02) {
+          if (far > 0.25 && o.kind !== "person") {
+            var want = Math.atan2(-gap.z, gap.x), turn = Math.atan2(Math.sin(want - o.group.rotation.y), Math.cos(want - o.group.rotation.y));
+            o.group.rotation.y += turn * Math.min(1, dt * 4);
+          }
+          o.group.position.add(gap.multiplyScalar(Math.min(1, dt * 3)));
+        }
+        o.group.visible = show.seen && floorMode !== "up";
+        o.group.userData.ring.material.opacity = o.s.parked ? 0 : 0.25 + 0.45 * pulse;
+      });
       renderer.render(scene, camera);
+      Object.keys(seenObjs).forEach(function (id) {
+        var o = seenObjs[id];
+        place(o.el, o.group.position.clone().setY(o.group.position.y + o.group.userData.top), o.group.visible && show.names);
+      });
       Object.keys(devObjs).forEach(function (id) {
         var o = devObjs[id];
         place(o.el, o.group.position.clone().setY(o.group.position.y + o.top), shown(o.dv.level || 0) && show.names && o.group.visible);
