@@ -241,6 +241,7 @@ class TestEngineSide(unittest.TestCase):
         self.dir = tempfile.mkdtemp(prefix="sentinel-things-engine-")
         self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
         self.engine = types.SimpleNamespace(things=Things(self.dir), assistant=types.SimpleNamespace(enabled=lambda: False))
+        self.engine._things_picked = lambda text, name: Engine._things_picked(self.engine, text, name)
         self.understood = lambda text: Engine._things_understood(self.engine, text)
         self.answer = lambda text: Engine._things_answer(self.engine, self.understood(text), "Telegram")
         self.voice = lambda text: Engine._things_voice(self.engine, text)
@@ -276,6 +277,20 @@ class TestEngineSide(unittest.TestCase):
         self.assertEqual(self.answer("where are my keys"), "The keys are in roll top desk, top right drawer.")
         self.assertEqual(len(asked), 1)  # the very words kept: no need to ask
         self.assertIn("don't know where the car key is yet", self.answer("where did i put the car key"))  # NONE
+        # a plain "where's ..." that shares no word with anything kept: still ours when Claude finds it on the list
+        self.engine.things.put("USB drives", "desk", spot="top drawer")
+        calls = []
+        self.engine.assistant = types.SimpleNamespace(
+            enabled=lambda: True, complete=lambda s, p, w: calls.append(p) or ("3" if "thumb drive" in p else "NONE"))
+        self.assertEqual(self.answer("where's the thumb drive"), "Probably the USB drives are in desk, top drawer.")
+        self.assertEqual(len(calls), 1)  # asked once, though the question is looked at twice
+        self.assertEqual(self.answer("where is the usb drive"), "The USB drives are in desk, top drawer.")  # the words: no asking
+        self.assertEqual(len(calls), 1)
+        self.assertIsNone(self.understood("where is the delivery driver"))  # not on the list: somebody else's question
+        self.engine.family = types.SimpleNamespace(location_question=lambda t: object() if "kate" in t else None)
+        before = len(calls)
+        self.assertIsNone(self.understood("where is kate"))  # a person: Claude isn't even asked
+        self.assertEqual(len(calls), before)
         self.engine.assistant = types.SimpleNamespace(enabled=lambda: True, complete=lambda *a: None)  # no answer:
         self.assertEqual(self.answer("where is the skeleton key"), "The keys are in roll top desk, top right drawer.")  # the words
         self.engine.assistant = types.SimpleNamespace(enabled=lambda: False)

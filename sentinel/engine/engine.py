@@ -950,10 +950,28 @@ class Engine:
         find = parse_find(text)
         if find and (find[1] or self.things.find(find[0])):
             return ("find",) + find
+        if find and self._things_picked(text, find[0]):  # "where's the thumb drive?" for the "USB drives"
+            return ("find",) + find
         forget = parse_forget(text)
         if forget and (self.things.find(forget) or re.search(r"\bthings\b", text.lower())):
             return ("forget", forget)
         return None
+
+    def _things_picked(self, text: str, name: str):
+        """A plain "where is X" with no thing by those words: is X another name for a kept thing? Claude says
+        (things.pick), unless it's a person's or pet's whereabouts being asked. Remembered for a minute, because
+        the question is looked at more than once (is it ours? then the answer)."""
+        cache = getattr(self, "_things_pick_cache", None)
+        if cache is not None and cache[0] == name and time.time() - cache[1] < 60:
+            return cache[2]
+        if not self.assistant.enabled() or not self.things.all() or re.search(r"\bcamera\b", name):
+            return None
+        family = getattr(self, "family", None)
+        if family is not None and family.location_question(text) is not None:
+            return None
+        picked = self.things.pick(name, self.assistant.complete)
+        self._things_pick_cache = (name, time.time(), picked)
+        return picked
 
     def _things_answer(self, understood, by: str = "") -> str:
         kind = understood[0]
@@ -971,7 +989,9 @@ class Engine:
             # Not the words kept ("skeleton key" for an "antique-style key")? Claude picks from the list, if it's on.
             name, found = understood[1], None
             if not self.things.sure(name) and self.assistant.enabled():
-                found = self.things.pick(name, self.assistant.complete)
+                cache = getattr(self, "_things_pick_cache", None)
+                found = cache[2] if cache is not None and cache[0] == name and time.time() - cache[1] < 60 else \
+                    self.things.pick(name, self.assistant.complete)
             return self.things.answer(name, found=found) or ""
         found = self.things.find(understood[1])
         return self.things.forget(found[0]["name"] if found else understood[1])[1]
