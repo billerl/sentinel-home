@@ -63,6 +63,9 @@ If `CLAUDE.local.md` exists (git-ignored), read it too: it holds the notes for o
 - Night = infrared: use `is_greyscale` (per-pixel channel spread), not saturation. Car fingerprints (DINOv2,
   else CLIP) tell cars apart better by day than in IR; family-car identity at night leans on parking-spot
   stickiness, and guessed names are re-checked by daylight.
+- Templates are read from disk while Sentinel runs. A template that uses a new route (`url_for(...)`) or a
+  new template variable breaks that page with "Internal Server Error" until the restart: restart straight
+  after such an edit, don't leave it while the tests run.
 - In the web editors, never grow JS arrays by setting `.length` — the holes are sent as `null` (this
   once named a zone "None"). Server-side cleaners must treat non-strings as "".
 

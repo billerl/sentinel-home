@@ -98,6 +98,9 @@ Pitfalls learned the hard way:
   speaker's card. A program that plays through PipeWire/PulseAudio straight to that card takes it away from
   the mixer; route it into `sentinel_music` instead (see `sentinel/audio/spotify_web.py`).
 - Change `settings.json` by hand only while Sentinel is stopped: it saves its settings when it stops.
+- Templates are read from disk while Sentinel runs. A template that uses a new route (`url_for(...)`) or a
+  new template variable breaks that page with "Internal Server Error" until the restart: restart straight
+  after such an edit, don't leave it while the tests run.
 - In web editors, never grow JavaScript arrays by setting `.length` (the holes are saved as `null`).
 
 ## Notes for one house
