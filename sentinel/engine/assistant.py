@@ -4,7 +4,8 @@ official ``claude`` command signed in with the household's own Claude subscripti
 
 Opt-in (setting ``assistant_enabled``) because it is the one thing that leaves the
 house: the message and a short text summary of recent events (times, cameras, family
-car names; never pictures) are sent to Anthropic. Everything Sentinel can answer
+car names; never a camera's pictures) are sent to Anthropic. The one picture that can go is a photo a person
+uploads for that very purpose (a drawer for the "Where is it?" page: look()). Everything Sentinel can answer
 itself still is answered locally, first.
 
 Locked down: Claude gets no tools (it can't run commands, read files or change
@@ -12,6 +13,7 @@ anything), a fixed system prompt, one turn, and runs from an empty folder so no
 project instructions or memory are loaded. Calls are capped per day.
 """
 
+import base64
 import json
 import os
 import re
@@ -164,12 +166,24 @@ def _env() -> Dict[str, str]:
     return env
 
 
-def build_command(claude: str, prompt: str, model: str, system_prompt: str = SYSTEM_PROMPT, web: bool = False) -> List[str]:
-    """No tools at all, or (web: the owner's choice, spoken questions only) web search and nothing else."""
+def build_command(claude: str, prompt: str, model: str, system_prompt: str = SYSTEM_PROMPT, web: bool = False,
+                  picture: bool = False) -> List[str]:
+    """No tools at all, or (web: the owner's choice, spoken questions only) web search and nothing else.
+    picture: the question comes on standard input with a photo (picture_message), still with no tools."""
     tools = ["--tools", "WebSearch", "--allowedTools", "WebSearch"] if web else ["--tools", ""]
-    return [claude, "-p", prompt, "--model", model, *tools, "--system-prompt", system_prompt,
-            "--max-turns", str(WEB_MAX_TURNS if web else 1), "--output-format", "json", "--no-session-persistence",
+    said = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"] if picture else \
+        ["-p", prompt, "--output-format", "json"]
+    return [claude, *said, "--model", model, *tools, "--system-prompt", system_prompt,
+            "--max-turns", str(WEB_MAX_TURNS if web else 1), "--no-session-persistence",
             "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--setting-sources", "user"]
+
+
+def picture_message(prompt: str, jpeg: bytes) -> str:
+    """One question with one photo, as the claude command reads it from standard input."""
+    return json.dumps({"type": "user", "message": {"role": "user", "content": [
+        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                     "data": base64.b64encode(jpeg).decode()}},
+        {"type": "text", "text": prompt}]}}) + "\n"
 
 
 class Assistant:
@@ -252,16 +266,42 @@ class Assistant:
             return None
         return self._call(claude, prompt, system, what=what)
 
+    def look(self, system: str, prompt: str, jpeg: bytes, what: str) -> Optional[str]:
+        """complete(), with one photo the person chose to show Claude (the only pictures that ever leave the
+        house this way: never a camera's). Same rules: opt-in, no tools, counted against the daily limit."""
+        if not self.enabled():
+            self.last_error = "Claude is turned off (Settings → Assistant)"
+            return None
+        claude = find_claude(str(self.settings.get("assistant_claude_path") or ""))
+        if not claude:
+            self.last_error = "the claude command isn't installed"
+            return None
+        if not self._take_slot():
+            self.last_error = f"today's limit of {self._limit()} Claude questions is used up"
+            return None
+        return self._call(claude, prompt, system, what=what, jpeg=jpeg)
+
     def _call(self, claude: str, prompt: str, system: str, voice: bool = False, what: str = "",
-              web: bool = False) -> Optional[str]:
+              web: bool = False, jpeg: Optional[bytes] = None) -> Optional[str]:
         model = str(self.settings.get("assistant_model") or "sonnet")
         started = time.time()
         try:
-            r = self._run(build_command(claude, prompt, model, system, web=web),
-                          capture_output=True, text=True,
-                          timeout=WEB_TIMEOUT_SECONDS if web else TIMEOUT_SECONDS, env=_env(), cwd=self._work_dir())
+            r = self._run(build_command(claude, prompt, model, system, web=web, picture=jpeg is not None),
+                          capture_output=True, text=True, **({"input": picture_message(prompt, jpeg)} if jpeg else {}),
+                          timeout=WEB_TIMEOUT_SECONDS if web or jpeg else TIMEOUT_SECONDS, env=_env(),
+                          cwd=self._work_dir())
             out = r.stdout or ""
-            data = json.loads(out[out.find("{"):out.rfind("}") + 1]) if "{" in out else {}
+            if jpeg is not None:  # one JSON object per line: the answer is the "result" one
+                data = {}
+                for line in out.splitlines():
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(row, dict) and row.get("type") == "result":
+                        data = row
+            else:
+                data = json.loads(out[out.find("{"):out.rfind("}") + 1]) if "{" in out else {}
         except subprocess.TimeoutExpired:
             data, r = {}, None
             self.last_error = "Claude took too long to answer"

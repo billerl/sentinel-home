@@ -36,7 +36,23 @@
     .msg { font-size: 0.85rem; color: #ffb3b3; min-height: 1.2em; margin: 6px 0 0; }
     .empty { text-align: center; color: #6f97a5; padding: 30px 10px; }
     .hint { color: #6f97a5; font-size: 0.82rem; line-height: 1.45; }
-    @media (max-width: 560px) { .add { grid-template-columns: 1fr; } }
+    h2 { font-size: 0.95rem; color: #7fe7e7; margin: 0 0 10px; }
+    .photo-row { display: grid; grid-template-columns: 1.3fr auto; gap: 8px; align-items: end; }
+    .photo-row label span { display: block; font-size: 0.8rem; color: #6f97a5; margin-bottom: 4px; }
+    #shot { width: 100%; max-height: 46vh; object-fit: contain; border-radius: 10px; background: #05090c; margin: 4px 0 12px; }
+    .seen { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px; }
+    .seen button { border-radius: 999px; min-height: 38px; padding: 6px 13px; }
+    .seen button[aria-pressed="true"] { background: #063a2a; border-color: #2fbf71; color: #fff; }
+    .seen button[aria-pressed="false"] { opacity: 0.55; text-decoration: line-through; }
+    .q { border-top: 1px solid #10242c; padding: 10px 0; }
+    .q .what { color: #ffd166; margin-bottom: 6px; }
+    .q .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .q input { flex: 1; min-width: 150px; }
+    .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+    .thing img { width: 44px; height: 44px; object-fit: cover; border-radius: 8px; cursor: pointer; }
+    #big { position: fixed; inset: 0; background: rgba(0,0,0,.9); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 10px; }
+    #big img { max-width: 100%; max-height: 100%; border-radius: 10px; }
+    @media (max-width: 560px) { .add, .photo-row { grid-template-columns: 1fr; } }
   </style>
   <link rel="stylesheet" href="/static/roles.css?v=1">
 </head>
@@ -55,6 +71,30 @@
         <button type="button" class="primary" id="save" onclick="save()">Save</button>
       </div>
       <p class="msg" id="msg" role="alert"></p>
+    </div>
+    <div class="card" id="photo-card">
+      <h2>📷 From a photo</h2>
+      <div id="photo-start">
+        <div class="photo-row">
+          <label><span>Where is this drawer or shelf?</span><input type="text" id="photo-place" maxlength="120" placeholder="top drawer of the red toolbox" autocomplete="off"></label>
+          <button type="button" class="primary" id="photo-btn" onclick="pickPhoto()">Take or choose a photo</button>
+        </div>
+        <input type="file" id="photo-file" accept="image/*" hidden>
+        <p class="msg" id="photo-msg" role="alert"></p>
+        <p class="hint" id="photo-hint">Claude looks at the photo and lists what it can see; you tick what's right and name what it couldn't. The photo is sent to Claude (Anthropic) to be read, and kept here so you can look in the drawer again later.</p>
+      </div>
+      <div id="photo-review" hidden>
+        <img id="shot" alt="">
+        <div id="photo-state" class="hint"></div>
+        <div id="review-body" hidden>
+          <div class="hint" style="margin-bottom:6px">Tap anything that's wrong to leave it out.</div>
+          <div class="seen" id="seen"></div>
+          <div id="unsure"></div>
+          <div class="q"><div class="row"><input type="text" id="extra" maxlength="60" placeholder="Something it missed? Add it here" autocomplete="off"><button type="button" class="small" onclick="addExtra()">Add</button></div></div>
+          <div class="acts"><button type="button" class="primary" id="keep" onclick="keepSeen()">Keep these</button><button type="button" onclick="dropScan()">Cancel</button><span class="msg" id="keep-msg" role="alert"></span></div>
+        </div>
+        <div class="acts" id="fail-acts" hidden><button type="button" onclick="dropScan()">Okay</button></div>
+      </div>
     </div>
     <input type="search" id="q" placeholder="Search your things" autocomplete="off" oninput="draw()">
     <div class="card" id="list" style="margin-top:12px"><div class="empty">Loading…</div></div>
@@ -83,6 +123,7 @@
       if (!shown.length) { list.appendChild(el("div", "empty", things.length ? "Nothing matches." : "Nothing here yet. Add the first thing above, or tell Jarvis.")); return; }
       shown.forEach(function (t) {
         var row = el("div", "thing"), txt = el("div", "txt");
+        if (t.photo) { var im = el("img"); im.src = "/things/photo/" + t.photo; im.alt = "Photo of where it is"; im.loading = "lazy"; im.onclick = function () { bigPhoto(t.photo); }; row.appendChild(im); }
         txt.appendChild(el("b", "", t.name)); txt.appendChild(document.createTextNode(" "));
         txt.appendChild(el("span", "place", t.place));
         txt.appendChild(el("div", "meta", (t.by ? t.by + ", " : "") + when(t.updated)));
@@ -93,7 +134,93 @@
         row.appendChild(txt); row.appendChild(edit); row.appendChild(del); list.appendChild(row);
       });
     }
-    async function load() { var r = await api("/api/things"); things = r.data.things || []; draw(); }
+    async function load() {
+      var r = await api("/api/things"); things = r.data.things || []; draw();
+      if (r.data.claude === false) { $("photo-btn").disabled = true; $("photo-hint").textContent = "Reading a photo needs “ask Claude” turned on (Settings → Assistant)."; }
+    }
+    function bigPhoto(name) {
+      var b = el("div"); b.id = "big"; var im = el("img"); im.src = "/things/photo/" + name; b.appendChild(im);
+      b.onclick = function () { b.remove(); }; document.body.appendChild(b);
+    }
+
+    // ---- from a photo ----
+    var scan = null, chosen = [], poll = null;
+    function pickPhoto() {
+      if (!$("photo-place").value.trim()) { $("photo-msg").textContent = "Say where this is first."; $("photo-place").focus(); return; }
+      $("photo-msg").textContent = ""; $("photo-file").value = ""; $("photo-file").click();
+    }
+    function shrink(file) {  // a phone's photo is 5-12 MB: 1800 px on the long side is plenty to read labels
+      return new Promise(function (resolve, reject) {
+        var url = URL.createObjectURL(file), im = new Image();
+        im.onload = function () {
+          var k = Math.min(1, 1800 / Math.max(im.naturalWidth, im.naturalHeight));
+          var c = document.createElement("canvas"); c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+          c.getContext("2d").drawImage(im, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+          c.toBlob(function (b) { b ? resolve(b) : reject(new Error("no picture")); }, "image/jpeg", 0.86);
+        };
+        im.onerror = function () { URL.revokeObjectURL(url); reject(new Error("no picture")); };
+        im.src = url;
+      });
+    }
+    $("photo-file").addEventListener("change", async function () {
+      var file = this.files && this.files[0]; if (!file) return;
+      $("photo-btn").disabled = true; $("photo-msg").textContent = "";
+      try {
+        var blob = await shrink(file);
+        var r = await fetch("/api/things/photo", { method: "POST", body: blob, headers: { "Content-Type": "image/jpeg",
+          "X-Sentinel-Request": "1", "X-Place": encodeURIComponent($("photo-place").value.trim()) } });
+        var d = {}; try { d = await r.json(); } catch (e) {}
+        if (!r.ok) throw new Error(d.error || "Couldn't send the photo.");
+        watch(d.id);
+      } catch (e) { $("photo-msg").textContent = e.message === "no picture" ? "That doesn't look like a photo." : e.message; }
+      $("photo-btn").disabled = false;
+    });
+    function watch(id) {
+      $("photo-start").hidden = true; $("photo-review").hidden = false; $("review-body").hidden = true; $("fail-acts").hidden = true;
+      $("shot").removeAttribute("src"); $("photo-state").textContent = "Claude is looking at the photo… (about half a minute)";
+      clearInterval(poll); poll = setInterval(function () { check(id); }, 2500); check(id);
+    }
+    async function check(id) {
+      var r = await api("/api/things/photo/" + id);
+      if (!r.ok) { clearInterval(poll); $("photo-state").textContent = r.data.error || "That didn't work."; $("fail-acts").hidden = false; return; }
+      var s = r.data; if (!$("shot").getAttribute("src")) $("shot").src = "/things/photo/" + s.photo;
+      if (s.state === "looking") return;
+      clearInterval(poll);
+      if (s.state === "failed") { $("photo-state").textContent = s.error; $("fail-acts").hidden = false; scan = s; return; }
+      scan = s; chosen = s.items.map(function (n) { return { name: n, on: true }; });
+      $("photo-state").textContent = s.items.length || s.unsure.length ? "Here's what Claude sees " + s.place + ":" : "Claude didn't see anything it could name " + s.place + ". Add things yourself below, or cancel.";
+      drawSeen();
+      var box = $("unsure"); box.textContent = "";
+      s.unsure.forEach(function (u) {
+        var q = el("div", "q"); q.appendChild(el("div", "what", "❓ What is this: " + u.looks_like + "?"));
+        var row = el("div", "row"), input = el("input"); input.type = "text"; input.maxLength = 60; input.placeholder = "Type what it is"; input.autocomplete = "off";
+        function take(name) { name = name.trim(); if (!name) return; chosen.push({ name: name, on: true }); drawSeen(); q.remove(); }
+        if (u.guess) { var yes = el("button", "small", "Yes, " + u.guess); yes.type = "button"; yes.onclick = function () { take(u.guess); }; row.appendChild(yes); }
+        var ok = el("button", "small", "Add"); ok.type = "button"; ok.onclick = function () { take(input.value); };
+        input.addEventListener("keydown", function (e) { if (e.key === "Enter") take(input.value); });
+        var skip = el("button", "small", "Skip"); skip.type = "button"; skip.onclick = function () { q.remove(); };
+        row.appendChild(input); row.appendChild(ok); row.appendChild(skip); q.appendChild(row); box.appendChild(q);
+      });
+      $("review-body").hidden = false;
+    }
+    function drawSeen() {
+      var box = $("seen"); box.textContent = "";
+      chosen.forEach(function (c) {
+        var b = el("button", "", c.name); b.type = "button"; b.setAttribute("aria-pressed", c.on ? "true" : "false");
+        b.onclick = function () { c.on = !c.on; drawSeen(); }; box.appendChild(b);
+      });
+      var n = chosen.filter(function (c) { return c.on; }).length;
+      $("keep").textContent = n ? "Keep these " + n : "Keep nothing"; $("keep").disabled = !n;
+    }
+    function addExtra() { var v = $("extra").value.trim(); if (!v) return; chosen.push({ name: v, on: true }); $("extra").value = ""; drawSeen(); }
+    $("extra").addEventListener("keydown", function (e) { if (e.key === "Enter") addExtra(); });
+    function endScan() { clearInterval(poll); scan = null; chosen = []; $("photo-review").hidden = true; $("photo-start").hidden = false; }
+    async function keepSeen() {
+      var r = await api("/api/things/photo/" + scan.id + "/save", { names: chosen.filter(function (c) { return c.on; }).map(function (c) { return c.name; }) });
+      if (!r.ok) { $("keep-msg").textContent = r.data.error || "Couldn't save."; return; }
+      $("photo-place").value = ""; endScan(); load();
+    }
+    async function dropScan() { if (scan) await api("/api/things/photo/" + scan.id + "/save", { cancel: true }); endScan(); }
     async function save() {
       var body = { name: $("name").value, place: $("place").value };
       if (editing !== null) body.id = editing;

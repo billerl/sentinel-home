@@ -561,6 +561,17 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   by `key()` (articles and plurals dropped, "ten millimeter" = "10 mm"), then by words in common, then near spellings
   (Whisper's "stopper motor"). Not things: cars, phones, people words, "it" (`_NOT_THINGS`). Shared by the whole
   family; no private things.
+  **From a photo** (same day; `PhotoScans` in things.py, `Assistant.look`): the page shrinks the photo (1800 px
+  canvas -> raw JPEG body, `X-Place` header; route raises `request.max_content_length` like Photos/Print), the server
+  shrinks to 1568 px, keeps it in `recorded_videos/things_photos/<16 hex>.jpg` and asks Claude in a thread
+  (`LOOK_SYSTEM`: JSON only, `{"items": [...], "unsure": [{"looks_like", "guess"}]}`; `parse_seen` cleans it). The page
+  polls `/api/things/photo/<id>`, shows the items as tick-off chips and each unsure one as a question (guess button,
+  type, skip), and only "Keep these" saves (`save()` takes the names the person ended up with, `put(another=True)`:
+  the same name elsewhere is a different row; the photo's file name goes in `things.photo`). Scans live in memory
+  2 h; `_tidy` deletes photos no thing or waiting scan uses; a thing moved by words loses its photo. The photo goes
+  to Anthropic through `claude -p --input-format stream-json` with `--tools ""` (an image block on stdin; no file
+  tool), only when `assistant_enabled`, counted against the daily limit: the one case where a picture leaves the
+  house, and never a camera's (say so wherever that promise is written).
 - **Darts link** (2026-11-24): optional setting `darts_url`, likewise = a 🎯 tile on Home (the scorer itself lives in the separate game site). "Let's play darts" / "show the dartboard on the TV" opens `<darts_url>/tv` (its scoreboard) on a TV, the same way as the dice game (`DARTS_WORDS`, `#map=darts`). The scorer's own page has "Show scoreboard on <TV>" buttons: it has no logins, so the Home tile's link carries a key (`?k=`, made once in `.darts_tv_key`, owner-only, not in git) which the scorer passes to `/api/local/darts_tv` (GET = the TVs, POST = `tv_show_page(.., "#map=darts")`); that route answers only this computer itself (127.0.0.1 without Cloudflare's headers) with the right key, so a phone that only scanned a game's QR code gets no TV buttons.
 - **Dice game link** (2026-11-21): optional setting `games_url` (Settings → Remote access; owner) = a separate family game site. Home page gets a 🎲 tile; "let's play Yahtzee" / "put the dice game on the TV" (`switches.GAME_WORDS`, `_TV_GAME`, checked before Spotify) goes through `camera_lookup` -> `#map=game`, which the TV page (grid.js `mapFromHash`) frames as `<games_url>/tv?new=1` (the game site makes or reuses a game ready to join). "Show the cameras" closes it like a map. The game itself is not part of Sentinel.
 - **Location map on the TV** (2026-11-10; `Family.map_lookup/map_view/set_photo`, `templates/where.html`, `/where`,

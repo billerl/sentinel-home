@@ -19,6 +19,29 @@ def _ok(result="It was quiet out back."):
                                  stderr="")
 
 
+class TestLookingAtAPhoto(unittest.TestCase):
+    def test_one_chosen_photo_goes_in_on_standard_input_with_no_tools(self):
+        lines = [json.dumps({"type": "system"}), "not json", json.dumps({"type": "result", "result": '{"items": []}',
+                                                                         "is_error": False, "usage": {}})]
+        calls = []
+
+        def run(cmd, **kw):
+            calls.append((cmd, kw))
+            return types.SimpleNamespace(returncode=0, stdout="\n".join(lines), stderr="")
+        with mock.patch.object(am, "find_claude", return_value="/usr/bin/claude"):
+            a = Assistant({"assistant_enabled": True}, run=run)
+            self.assertEqual(a.look("SYSTEM", "What is kept here?", b"\xff\xd8jpeg", "things photo"), '{"items": []}')
+            cmd, kw = calls[0]
+            self.assertEqual(cmd[cmd.index("--tools") + 1], "")  # still no tools
+            self.assertEqual(cmd[cmd.index("--input-format") + 1], "stream-json")
+            self.assertNotIn("What is kept here?", cmd)  # the question goes with the photo
+            sent = json.loads(kw["input"])["message"]["content"]
+            self.assertEqual([part["type"] for part in sent], ["image", "text"])
+            self.assertEqual(sent[0]["source"]["media_type"], "image/jpeg")
+            self.assertIsNone(Assistant({}, run=run).look("S", "P", b"x", "things photo"))  # opt-in, like everything
+            self.assertEqual(len(calls), 1)
+
+
 class TestVoiceName(unittest.TestCase):
     def test_voice_prompt_uses_the_wake_word_name(self):
         with mock.patch.object(am, "find_claude", return_value="/usr/bin/claude"):

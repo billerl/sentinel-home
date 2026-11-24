@@ -184,6 +184,7 @@ class Engine:
         from sentinel.engine.things import Things
 
         self.things = Things(VIDEO_DIR)  # "my darts are in the garage cabinet" ... "where are my darts?"
+        self.thing_photos = None  # (PhotoScans: a drawer photographed for Claude to list; needs the assistant, below)
         from sentinel.engine.voice_log import VoiceLog
 
         self.voice_log = VoiceLog(VIDEO_DIR)  # what was asked of Jarvis and where (the timeline's Voice row)
@@ -310,6 +311,9 @@ class Engine:
             self.settings, self.family.home_coords, self.news.tell_everyone,
             lambda text: self.audio.speak(text) if self.audio is not None else None, VIDEO_DIR)
         self.assistant = Assistant(self.settings)
+        from sentinel.engine.things import PhotoScans
+
+        self.thing_photos = PhotoScans(self.things, VIDEO_DIR, self.assistant.look, lambda: self.assistant.last_error)
         self._voice_chat: List[Tuple[str, str]] = []  # the open-ended talk going on by voice: (they said, Jarvis said)
         self._voice_chat_at = 0.0
         from sentinel.engine.recipes import RecipeBox

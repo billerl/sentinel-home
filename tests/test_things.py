@@ -97,6 +97,72 @@ class TestThings(unittest.TestCase):
         self.assertEqual(self.things.all(), [])
 
 
+class TestFromAPhoto(unittest.TestCase):
+    def setUp(self):
+        import cv2
+        import numpy as np
+
+        self.dir = tempfile.mkdtemp(prefix="sentinel-things-photo-")
+        self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
+        self.things = Things(self.dir)
+        self.jpeg = cv2.imencode(".jpg", np.full((2000, 3000, 3), 120, np.uint8))[1].tobytes()
+        self.reply = '{"items": ["10 mm socket", "needle-nose pliers", "10 millimeter sockets"], ' \
+                     '"unsure": [{"looks_like": "small black cylinder, front left", "guess": "capacitor"}, {"guess": "x"}]}'
+        self.asked = []
+
+    def scans(self):
+        from sentinel.engine.things import PhotoScans
+
+        def look(system, prompt, jpeg, what):
+            self.asked.append((prompt, len(jpeg), what))
+            return self.reply
+        return PhotoScans(self.things, self.dir, look, lambda: "today's limit of Claude questions is used up")
+
+    def test_claude_lists_and_the_person_decides(self):
+        from sentinel.engine.things import parse_seen
+
+        self.assertEqual(parse_seen("Sure! " + self.reply)["items"], ["10 mm socket", "needle-nose pliers"])  # (same thing once)
+        self.assertIsNone(parse_seen("I can't see the photo."))
+        scans = self.scans()
+        self.things.put("needle-nose pliers", "in the truck")  # another pair, somewhere else: must stay there
+        ok, sid = scans.start(self.jpeg, "top drawer of the red toolbox", "Alex", wait=True)
+        self.assertTrue(ok)
+        self.assertEqual(self.asked[0][0], "This is in top drawer of the red toolbox. What is kept here?")
+        self.assertLess(self.asked[0][1], len(self.jpeg))  # shrunk before it leaves
+        view = scans.view(sid)
+        self.assertEqual((view["state"], view["items"], view["unsure"]),
+                         ("ready", ["10 mm socket", "needle-nose pliers"],
+                          [{"looks_like": "small black cylinder, front left", "guess": "capacitor"}]))
+        self.assertIsNotNone(scans.photo_path(view["photo"]))
+        self.assertEqual(len(self.things.all()), 1)  # nothing kept until the person says
+        self.assertEqual(scans.save(sid, ["needle-nose pliers", "capacitors", "", 7]),
+                         (True, "Kept 2 things in top drawer of the red toolbox."))
+        kept = {(t["name"], t["place"]) for t in self.things.all()}
+        self.assertEqual(kept, {("needle-nose pliers", "in the truck"), ("capacitors", "in top drawer of the red toolbox"),
+                                ("needle-nose pliers", "in top drawer of the red toolbox")})
+        self.assertTrue(all(t["photo"] == view["photo"] for t in self.things.all() if "drawer" in t["place"]))
+        self.assertTrue(self.things.answer("pliers").startswith("I know of 2: "))
+        self.assertIsNone(scans.view(sid))
+        self.assertFalse(scans.save(sid, ["x"])[0])
+        # said again by voice: it moved, and the old drawer's photo goes with it
+        self.things.put("capacitors", "in bin 9")
+        self.assertEqual([t["photo"] for t in self.things.all() if t["name"] == "capacitors"], [""])
+
+    def test_what_is_refused_and_what_fails(self):
+        scans = self.scans()
+        self.assertEqual(scans.start(self.jpeg, "")[0], False)
+        self.assertEqual(scans.start(b"not a picture", "the shelf"), (False, "That doesn't look like a photo."))
+        self.assertIsNone(scans.photo_path("../settings.json"))
+        self.reply = None  # Claude is off, or today's questions are used up
+        ok, sid = scans.start(self.jpeg, "the shelf", wait=True)
+        self.assertEqual((scans.view(sid)["state"], scans.view(sid)["error"]),
+                         ("failed", "today's limit of Claude questions is used up"))
+        photo = scans.view(sid)["photo"]
+        scans.cancel(sid)
+        self.assertIsNone(scans.view(sid))
+        self.assertIsNotNone(photo)
+
+
 class TestEngineSide(unittest.TestCase):
     """What the command registry takes (Engine._things_understood), without a whole engine."""
 

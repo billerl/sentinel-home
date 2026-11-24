@@ -10,17 +10,24 @@ Understood (parse_put / parse_find / parse_forget; everything else is somebody e
   motors are in bin 4" · "remember my darts" (asks "Where are they?") · "where are my darts?" · "where did I put
   the socket?" · "forget where my darts are" · "what things do you know?"
 Names are matched loosely: "10 millimeter socket" finds "ten mm sockets".
+
+From a photo (PhotoScans): someone photographs a drawer or shelf on the Things page and says where it is; Claude
+(the household's own subscription, sentinel/engine/assistant.py, only when "ask Claude" is on) names what it can
+see and describes what it can't. Nothing is kept until the person has ticked what's right and named the
+unknowns; the photo stays with those things (things_photos/), so the page can show the drawer again.
 """
 
 from __future__ import annotations
 
 import difflib
+import json
 import os
 import re
+import secrets
 import sqlite3
 import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 NAME_MAX, PLACE_MAX, MAX_THINGS = 60, 120, 2000
 
@@ -143,6 +150,8 @@ class Things:
                          "key TEXT NOT NULL, place TEXT NOT NULL, verb TEXT NOT NULL DEFAULT 'is', "
                          "by TEXT NOT NULL DEFAULT '', updated REAL NOT NULL)")
             conn.execute("CREATE INDEX IF NOT EXISTS things_key ON things (key)")
+            if "photo" not in [r[1] for r in conn.execute("PRAGMA table_info(things)")]:
+                conn.execute("ALTER TABLE things ADD COLUMN photo TEXT NOT NULL DEFAULT ''")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10)
@@ -152,15 +161,17 @@ class Things:
     @staticmethod
     def _row(r: sqlite3.Row) -> Dict[str, Any]:
         return {"id": r["id"], "name": r["name"], "place": r["place"], "verb": r["verb"], "by": r["by"],
-                "updated": r["updated"]}
+                "updated": r["updated"], "photo": r["photo"]}
 
     def all(self) -> List[Dict[str, Any]]:
         with self._lock, self._connect() as conn:
             return [self._row(r) for r in conn.execute("SELECT * FROM things ORDER BY name COLLATE NOCASE")]
 
-    def put(self, name: Any, place: Any, verb: str = "", by: str = "", thing_id: Optional[int] = None
-            ) -> Tuple[bool, str]:
-        """Keep (or move) a thing. With thing_id: that row is changed (the page's edit), name and all."""
+    def put(self, name: Any, place: Any, verb: str = "", by: str = "", thing_id: Optional[int] = None,
+            photo: str = "", another: bool = False) -> Tuple[bool, str]:
+        """Keep (or move) a thing. With thing_id: that row is changed (the page's edit), name and all.
+        another: from a photo of one drawer, so a thing of the same name kept somewhere else stays where it is
+        (there's a screwdriver in most drawers); only the same thing in the same place is the same row."""
         name = _name(str(name or ""))
         place = re.sub(r"\s+", " ", str(place or "")).strip(" .")[:PLACE_MAX]
         k = key(name)
@@ -173,18 +184,25 @@ class Things:
         verb = verb if verb in ("is", "are") else ("are" if name.lower().endswith("s") and not name.lower().endswith("ss") else "is")
         now = self._clock()
         with self._lock, self._connect() as conn:
-            row = conn.execute("SELECT id FROM things WHERE id = ?", (thing_id,)).fetchone() if thing_id else \
-                conn.execute("SELECT id FROM things WHERE key = ?", (k,)).fetchone()
+            if thing_id:
+                row = conn.execute("SELECT id, photo FROM things WHERE id = ?", (thing_id,)).fetchone()
+            elif another:
+                row = conn.execute("SELECT id, photo FROM things WHERE key = ? AND lower(place) = ?",
+                                   (k, place.lower())).fetchone()
+            else:
+                row = conn.execute("SELECT id, photo FROM things WHERE key = ?", (k,)).fetchone()
             if thing_id and row is None:
                 return False, "That one is gone."
             if row is not None:
-                conn.execute("UPDATE things SET name = ?, key = ?, place = ?, verb = ?, by = ?, updated = ? WHERE id = ?",
-                             (name, k, place, verb, by[:40], now, row["id"]))
+                # (moved by word of mouth: the old drawer's photo no longer shows where it is)
+                conn.execute("UPDATE things SET name = ?, key = ?, place = ?, verb = ?, by = ?, updated = ?, photo = ? "
+                             "WHERE id = ?", (name, k, place, verb, by[:40], now,
+                                              photo or (row["photo"] if thing_id else ""), row["id"]))
             else:
                 if conn.execute("SELECT COUNT(*) FROM things").fetchone()[0] >= MAX_THINGS:
                     return False, "That's a lot of things. Remove some first."
-                conn.execute("INSERT INTO things (name, key, place, verb, by, updated) VALUES (?, ?, ?, ?, ?, ?)",
-                             (name, k, place, verb, by[:40], now))
+                conn.execute("INSERT INTO things (name, key, place, verb, by, updated, photo) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                             (name, k, place, verb, by[:40], now, photo))
         return True, f"Okay, {self._subject(name)} {verb} {your(place)}."
 
     @staticmethod
@@ -236,3 +254,149 @@ class Things:
         shown = ", ".join(names[:12])
         return f"I know where {len(things)} thing{'s are' if len(things) != 1 else ' is'}: {shown}" + \
             (f", and {len(names) - 12} more" if len(names) > 12 else "") + "."
+
+
+# ------------------------------------------------------------------ from a photo
+PHOTO_DIR = "things_photos"
+PHOTO_MAX_PX = 1568  # (as much as Claude looks at; small parts need it)
+PHOTO_MAX_BYTES = 6 * 1024 * 1024
+SCAN_KEEP_SECONDS = 2 * 3600
+MAX_SEEN = 60
+
+LOOK_SYSTEM = """You help a family keep track of where their things are. You are shown ONE photo of a storage spot
+(a drawer, shelf, bin, toolbox, cabinet) and told where it is. List the distinct kinds of things kept there.
+
+Answer with ONLY a JSON object, no other words:
+{"items": ["..."], "unsure": [{"looks_like": "...", "guess": "..."}]}
+
+- "items": things you can name with confidence, as a person would ask for them later: short, lower case, specific
+  when you can read or clearly see it ("10 mm socket", "needle-nose pliers", "AA batteries", "wood glue"), singular
+  for one, plural for several of the same. One entry per kind, not per piece. Read labels and sizes printed on things.
+- "unsure": things you can see but can't name confidently. "looks_like": a few words so the person can spot it in
+  the photo (colour, shape, where in the picture). "guess": your best short name, or "" if you have none.
+- Leave out the container itself, the furniture, and anything you'd be inventing. If the photo shows no stored
+  things, answer {"items": [], "unsure": []}. At most 40 items and 10 unsure."""
+
+
+def parse_seen(reply: Optional[str]) -> Optional[Dict[str, List[Any]]]:
+    """Claude's answer -> {"items": [names], "unsure": [{"looks_like", "guess"}]}; None when it isn't one."""
+    text = reply or ""
+    try:
+        data = json.loads(text[text.index("{"):text.rindex("}") + 1])
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    items: List[str] = []
+    for raw in data.get("items") if isinstance(data.get("items"), list) else []:
+        name = _name(str(raw)) if isinstance(raw, str) else ""
+        if name and key(name) and key(name) not in [key(n) for n in items]:
+            items.append(name)
+    unsure = []
+    for raw in data.get("unsure") if isinstance(data.get("unsure"), list) else []:
+        if isinstance(raw, dict) and str(raw.get("looks_like") or "").strip():
+            unsure.append({"looks_like": str(raw["looks_like"]).strip()[:120],
+                           "guess": _name(str(raw.get("guess") or ""))})
+    return {"items": items[:MAX_SEEN], "unsure": unsure[:15]}
+
+
+class PhotoScans:
+    """A photo being looked at, then waiting for the person's say-so. Kept in memory (and its photo on disk)
+    until saved or a couple of hours old."""
+
+    def __init__(self, things: Things, root: str, look: Callable[[str, str, bytes, str], Optional[str]],
+                 why_not: Callable[[], str] = lambda: "", clock=time.time) -> None:
+        self.things, self._look, self._why_not, self._clock = things, look, why_not, clock
+        self.folder = os.path.join(os.path.abspath(root), PHOTO_DIR)
+        self._lock = threading.Lock()
+        self._scans: Dict[str, Dict[str, Any]] = {}
+
+    def photo_path(self, name: str) -> Optional[str]:
+        if not re.fullmatch(r"[a-f0-9]{16}\.jpg", str(name or "")):
+            return None
+        path = os.path.join(self.folder, name)
+        return path if os.path.isfile(path) else None
+
+    def _tidy(self) -> None:
+        """Forget old scans, and delete photos no thing and no waiting scan points at."""
+        now = self._clock()
+        with self._lock:
+            for sid in [s for s, scan in self._scans.items() if now - scan["at"] > SCAN_KEEP_SECONDS]:
+                del self._scans[sid]
+            wanted = {scan["photo"] for scan in self._scans.values()} | {t["photo"] for t in self.things.all()}
+        try:
+            for name in os.listdir(self.folder):
+                if name not in wanted and now - os.path.getmtime(os.path.join(self.folder, name)) > 60:
+                    os.remove(os.path.join(self.folder, name))
+        except OSError:
+            pass
+
+    def start(self, picture: bytes, place: Any, by: str = "", wait: bool = False) -> Tuple[bool, str]:
+        """Take the photo in and start looking -> (True, the scan's id) or (False, why not)."""
+        from sentinel.engine.recipes import shrink_jpeg
+
+        place = re.sub(r"\s+", " ", str(place or "")).strip(" .")[:PLACE_MAX]
+        if not place:
+            return False, "Say where this is first (like: top drawer of the red toolbox)."
+        try:
+            jpeg = shrink_jpeg(picture, PHOTO_MAX_PX) if picture and len(picture) <= PHOTO_MAX_BYTES else None
+        except (ValueError, ImportError):
+            jpeg = None
+        if jpeg is None:
+            return False, "That doesn't look like a photo."
+        if not re.match(rf"^(?:{_WHERE})\b", place.lower()):
+            place = "in " + place
+        self._tidy()
+        sid, photo = secrets.token_hex(8), secrets.token_hex(8) + ".jpg"
+        os.makedirs(self.folder, mode=0o700, exist_ok=True)
+        with open(os.path.join(self.folder, photo), "wb") as f:
+            f.write(jpeg)
+        scan = {"id": sid, "state": "looking", "place": place, "by": by[:40], "photo": photo, "at": self._clock(),
+                "items": [], "unsure": [], "error": ""}
+        with self._lock:
+            self._scans[sid] = scan
+
+        def work() -> None:
+            reply = self._look(LOOK_SYSTEM, f"This is {place}. What is kept here?", jpeg, "things photo")
+            seen = parse_seen(reply)
+            with self._lock:
+                if seen is None:
+                    scan.update(state="failed", error=(self._why_not() if reply is None else "") or
+                                "Claude's answer couldn't be read. Try the photo again.")
+                else:
+                    scan.update(state="ready", **seen)
+
+        thread = threading.Thread(target=work, name="things-photo", daemon=True)
+        thread.start()
+        if wait:
+            thread.join()
+        return True, sid
+
+    def view(self, sid: Any) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            scan = self._scans.get(str(sid or ""))
+            return None if scan is None else {k: scan[k] for k in ("id", "state", "place", "photo", "items", "unsure", "error")}
+
+    def save(self, sid: Any, names: Any) -> Tuple[bool, str]:
+        """Keep the names the person ticked or typed (theirs: not only the ones Claude offered), in that place."""
+        with self._lock:
+            scan = self._scans.get(str(sid or ""))
+        if scan is None or scan["state"] != "ready":
+            return False, "That photo has timed out. Send it again."
+        kept: List[str] = []
+        for raw in names if isinstance(names, list) else []:
+            name = _name(str(raw)) if isinstance(raw, str) else ""
+            if name and key(name) and key(name) not in [key(n) for n in kept] and len(kept) < MAX_SEEN:
+                if self.things.put(name, scan["place"], by=scan["by"], photo=scan["photo"], another=True)[0]:
+                    kept.append(name)
+        with self._lock:
+            self._scans.pop(scan["id"], None)
+        self._tidy()
+        if not kept:
+            return True, "Nothing kept."
+        return True, f"Kept {len(kept)} thing{'s' if len(kept) != 1 else ''} {your(scan['place'])}."
+
+    def cancel(self, sid: Any) -> None:
+        with self._lock:
+            self._scans.pop(str(sid or ""), None)
+        self._tidy()
