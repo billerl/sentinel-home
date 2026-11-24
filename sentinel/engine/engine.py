@@ -1063,6 +1063,8 @@ class Engine:
                                     apps=self.switches.tv_apps, artists=self.spotify.artists,
                                     tv_on=self.switches.samsung_tv_on,
                                     pets=lambda: [p.name for p in self.locations.people() if p.tracker])
+        from sentinel.audio.wake_samples import LIVE_LIMIT
+        self.voice.keep_wake = lambda word, pcm, note: self.wake_samples.add(word, pcm, note, limit=LIVE_LIMIT)
         self.voice.start()
 
     def _voice_names(self) -> List[str]:

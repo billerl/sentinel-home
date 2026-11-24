@@ -11,6 +11,7 @@ Answers come from the engine (``answer(text, progress)`` -> ``VoiceReply``); any
 changes settings is only done after a spoken "yes".
 """
 
+import collections
 import os
 import queue
 import random
@@ -19,7 +20,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -27,6 +28,7 @@ from sentinel.logging_utils import app_logger
 
 RATE = 16000
 CHUNK = 1280  # 80 ms: what openWakeWord expects per call
+RECENT_SECONDS = 3.0  # of sound kept when the second wake word wakes or nearly does (_keep_recent)
 WAKE_MODEL = "hey_jarvis_v0.1"  # bundled with openWakeWord; a custom word = models/wakeword/<name>.onnx
 WHISPER_DIR = os.path.join("models", "whisper", "base.en")
 DEVICE = "plughw:0,0"
@@ -351,6 +353,12 @@ class VoiceAssistant:
         # when voice_trial_wakes is on (at voice_trial_threshold) - "Jezebel" next to "Hey Jarvis".
         self._trial_name = ""
         self._trial_peak = 0.0
+        # The last few seconds the wake models heard, kept by keep_wake (set by the engine) whenever the second
+        # wake word wakes or nearly does: how the family really says it across the room, for retraining it.
+        # Only with the setting voice_keep_wake_sounds (off by default: a near-miss can be anything said).
+        self._recent: "collections.deque" = collections.deque(maxlen=int(RECENT_SECONDS * RATE / CHUNK))
+        self.keep_wake: Optional[Callable[[str, np.ndarray, str], Any]] = None
+        self._woke: Optional[tuple] = None  # (word, sound, score) of the wake being answered
         self._whisper = None
         self._whisper_lock = threading.Lock()
         self._transcribe_lock = threading.Lock()
@@ -482,15 +490,16 @@ class VoiceAssistant:
             self._wake.reset()
             self._wake_reset = False
         pcm = (np.clip(audio * self._gain(), -1, 1) * 32767).astype(np.int16)
+        self._recent.append(pcm)
         scores = self._wake.predict(pcm)
         score = float(scores.get(self._wake_name, 0.0))
-        word = self._wake_name
+        word, heard = self._wake_name, score
         if self._trial_name:
             trial = float(scores.get(self._trial_name, 0.0))
             self._track_trial(trial, score)
             if self.settings.get("voice_trial_wakes") and trial >= float(self.settings.get("voice_trial_threshold", 0.45)) \
                     and trial > score:
-                score, word = 1.0, self._trial_name
+                heard, score, word = trial, 1.0, self._trial_name
         if score >= self._threshold():
             while not self._queue.empty():
                 self._queue.get_nowait()
@@ -499,6 +508,7 @@ class VoiceAssistant:
             app_logger.log("info", "voice_wake", score=round(score, 2), word=word, noise=round(self._noise, 4),
                            component="voice", action="wake")
             self._trial_peak, self._trial_main = 0.0, 0.0  # this utterance woke it; don't log it as a near-miss
+            self._woke = (word, np.concatenate(list(self._recent)), heard)  # judged by what's said next (_keep_woke)
             self._persona(word)
             threading.Thread(target=self._conversation, name="voice-talk", daemon=True).start()
 
@@ -511,7 +521,28 @@ class VoiceAssistant:
             app_logger.log("info", "voice_trial_score", word=self._trial_name, score=round(self._trial_peak, 2),
                            would_wake=self._trial_peak >= self._threshold(), noise=round(self._noise, 4),
                            main_score=round(getattr(self, "_trial_main", 0.0), 2), component="voice", action="trial")
+            if self._trial_peak > getattr(self, "_trial_main", 0.0):  # (not "Hey Jarvis" sounding a bit like it)
+                self._keep_recent("near", self._trial_peak)
             self._trial_peak, self._trial_main = 0.0, 0.0
+
+    def _keep_woke(self, kind: Optional[str]) -> None:
+        """The wake being answered turned out real ("live": a request followed; kept for the second word only,
+        the one that gets retrained) or false ("false": nothing was said after it, or only the TV). None: can't
+        tell (a "never mind" follows a slip of the microphone as often as a change of mind)."""
+        woke, self._woke = self._woke, None
+        if woke and kind and (kind == "false" or woke[0] == self._trial_name):
+            self._keep_recent(kind, woke[2], woke[0], woke[1])
+
+    def _keep_recent(self, kind: str, score: float, word: str = "", pcm: Optional[np.ndarray] = None) -> None:
+        """Hand the last few seconds to keep_wake as "<word>_live" (it woke, rightly), "<word>_false" (it woke
+        and shouldn't have) or "<word>_near" (it nearly did)."""
+        if not self.keep_wake or not self.settings.get("voice_keep_wake_sounds") or (pcm is None and not self._recent):
+            return
+        try:
+            self.keep_wake(f"{word or self._trial_name}_{kind}",
+                           np.concatenate(list(self._recent)) if pcm is None else pcm, f"score {score:.2f}")
+        except Exception as e:  # a full disk mustn't stop the listening
+            app_logger.log("warning", "voice_keep_wake_failed", error=str(e), component="voice", action="trial")
 
     def _hear(self, wait: float = WAIT_FOR_SPEECH, fresh: bool = True, silence: float = END_SILENCE,
               max_len: float = MAX_COMMAND, prompt: Optional[str] = None) -> Optional[str]:
@@ -695,14 +726,17 @@ class VoiceAssistant:
                     self.speaker.tone("cancel")
                     return
                 if not text:  # silence, or noise Whisper made nothing of: stop without a word
+                    self._keep_woke("false")
                     self.speaker.tone("cancel")
                     return
                 doubtful = self.last_doubt > (FOLLOW_UP_DOUBT if turn else WAKE_DOUBT)
                 if doubtful and not turn and self._tv_on():
                     app_logger.log("info", "voice_ignored", text=text[:200], doubt=round(self.last_doubt, 2), tv=True,
                                    component="voice", action="respond")
+                    self._keep_woke("false")
                     self.speaker.tone("cancel")
                     return
+                self._keep_woke("live")
                 if not self._respond(text, doubtful=doubtful):
                     self.speaker.tone("cancel")
                     return
@@ -719,6 +753,7 @@ class VoiceAssistant:
                 pass
         finally:
             time.sleep(0.3)  # let the speaker's echo die away before listening for the wake word again
+            self._woke = None
             self.speaker.busy = False
             self._wake_reset = True
             self._mode = "wake"

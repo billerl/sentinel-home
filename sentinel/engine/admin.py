@@ -188,6 +188,7 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "voice_trial_model": lambda v: str(v or "").strip()[:200],
     "voice_trial_wakes": _bool,
     "voice_trial_threshold": _num(0.1, 0.95),
+    "voice_keep_wake_sounds": _bool,
     "spotify_client_id": _spotify_client_id,
     "spotify_device": lambda v: str(v or "").strip()[:80],
     "spotify_fallback_device": lambda v: str(v or "").strip()[:80],

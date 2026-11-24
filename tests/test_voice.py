@@ -397,6 +397,58 @@ class TestSecondWakeWord(unittest.TestCase):
     def test_log_only_when_off(self):
         self.assertEqual(self.run_chunk({}, 0.0, 0.9), (False, None))
 
+    def test_the_sound_of_a_wake_and_of_a_near_miss_is_kept(self):
+        kept = []
+        va = VoiceAssistant({"voice_trial_wakes": True, "voice_trial_threshold": 0.45, "voice_keep_wake_sounds": True},
+                            lambda t, s: VoiceReply("x"), FakeSpeaker())
+        va.keep_wake = lambda word, pcm, note: kept.append((word, len(pcm), note))
+        va._wake_name, va._trial_name, va._wake_reset = "hey_jarvis_v0.1", "jezebel", False
+        with mock.patch.object(v.threading, "Thread"), mock.patch.object(v.app_logger, "log"):
+            for jarvis, jezebel in ((0.0, 0.0), (0.0, 0.3), (0.0, 0.0), (0.3, 0.2), (0.0, 0.0), (0.0, 0.6)):
+                va._wake = mock.Mock(predict=mock.Mock(return_value={"hey_jarvis_v0.1": jarvis, "jezebel": jezebel}))
+                va._on_chunk(np.zeros(v.CHUNK, np.float32))
+        # 0.3 nearly woke it; 0.2 was "Hey Jarvis" sounding a little like it (not kept); 0.6 woke it, and is
+        # kept once a request follows
+        self.assertEqual(kept, [("jezebel_near", 3 * v.CHUNK, "score 0.30")])
+        with mock.patch.object(va, "_hear", return_value="who's home"), mock.patch.object(va, "_respond", return_value=False), \
+                mock.patch.object(v.time, "sleep"):
+            va._conversation()
+        self.assertEqual(kept[1:], [("jezebel_live", 6 * v.CHUNK, "score 0.60")])
+
+    def conversation_after_wake(self, word, said):
+        kept = []
+        va = VoiceAssistant({"voice_keep_wake_sounds": True}, lambda t, s: VoiceReply("x"), FakeSpeaker())
+        va.keep_wake = lambda name, pcm, note: kept.append((name, note))
+        va._trial_name = "jezebel"
+        va._woke = (word, np.zeros(v.CHUNK, np.int16), 0.95)
+        with mock.patch.object(va, "_hear", return_value=said), mock.patch.object(va, "_respond", return_value=False), \
+                mock.patch.object(v.time, "sleep"), mock.patch.object(v.app_logger, "log"):
+            va._conversation()
+        return kept
+
+    def test_a_wake_with_nothing_said_after_it_is_kept_as_false(self):
+        self.assertEqual(self.conversation_after_wake("jezebel", ""), [("jezebel_false", "score 0.95")])
+        self.assertEqual(self.conversation_after_wake("hey_jarvis_v0.1", ""), [("hey_jarvis_v0.1_false", "score 0.95")])
+        self.assertEqual(self.conversation_after_wake("hey_jarvis_v0.1", "who's home"), [])  # (never retrained)
+        self.assertEqual(self.conversation_after_wake("jezebel", "never mind"), [])  # a slip, or a change of mind?
+
+    def test_a_failed_save_does_not_stop_the_listening(self):
+        va = VoiceAssistant({"voice_keep_wake_sounds": True}, lambda t, s: VoiceReply("x"), FakeSpeaker())
+        va.keep_wake = mock.Mock(side_effect=OSError("disk full"))
+        va._trial_name = "jezebel"
+        va._recent.append(np.zeros(v.CHUNK, np.int16))
+        with mock.patch.object(v.app_logger, "log"):
+            va._keep_recent("near", 0.3)
+        va.keep_wake.assert_called_once()
+
+    def test_nothing_is_kept_unless_the_setting_is_on(self):
+        va = VoiceAssistant({}, lambda t, s: VoiceReply("x"), FakeSpeaker())
+        va.keep_wake = mock.Mock()
+        va._trial_name = "jezebel"
+        va._recent.append(np.zeros(v.CHUNK, np.int16))
+        va._keep_recent("live", 0.9)
+        va.keep_wake.assert_not_called()
+
 
 class TestKokoro(unittest.TestCase):
     def test_sentences(self):

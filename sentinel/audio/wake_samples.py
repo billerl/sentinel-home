@@ -4,7 +4,11 @@ Real recordings of a wake word ("Jezebel"), for retraining its model on the fami
 A custom wake word starts out trained on computer-made voices only, and hears real people badly. "Hey Jarvis,
 train Jezebel" (VoiceAssistant._practice) records the word after each beep, as the wake model itself hears it
 (same microphone, filter and gain), and keeps each one here: recorded_videos/wake_samples/<word>/*.wav plus
-index.jsonl (what Whisper thought it was, for weeding out mistakes before training). They never leave this
+index.jsonl (what Whisper thought it was, for weeding out mistakes before training). With the setting
+voice_keep_wake_sounds the house microphone also
+keeps the 3 seconds around each everyday wake by that word (<word>_live), each near-miss (<word>_near) and
+each wake nobody meant (<word>_false: nothing was said after it; sounds to train it not to wake to), the
+newest LIVE_LIMIT of each: practice clips are said close up and score far better than real use across the room. They never leave this
 computer; the training itself happens outside Sentinel.
 """
 
@@ -21,6 +25,7 @@ from typing import Callable
 import numpy as np
 
 FOLDER = "wake_samples"
+LIVE_LIMIT = 300
 RATE = 16000
 
 
@@ -39,11 +44,16 @@ class WakeSamples:
         except OSError:
             return 0
 
-    def add(self, word: str, pcm: np.ndarray, heard: str = "") -> int:
-        """Keep one recording (16 kHz mono int16); how many there are of this word now."""
+    def add(self, word: str, pcm: np.ndarray, heard: str = "", limit: int = 0) -> int:
+        """Keep one recording (16 kHz mono int16); how many there are of this word now. With a limit, the
+        oldest make room (the everyday wakes and near-misses would otherwise pile up for ever)."""
         folder = self._dir(word)
         with self._lock:
             os.makedirs(folder, mode=0o700, exist_ok=True)
+            if limit:
+                old = sorted(name for name in os.listdir(folder) if name.endswith(".wav"))
+                for name in old[:max(0, len(old) - limit + 1)]:
+                    os.remove(os.path.join(folder, name))
             now = self._clock()
             name = time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + f"-{int(now * 1000) % 1000:03d}.wav"
             with wave.open(os.path.join(folder, name), "wb") as w:

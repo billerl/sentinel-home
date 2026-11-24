@@ -464,7 +464,13 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   silence, 3 s max), trims it to the speech (`trim_speech`, 0.24 s lead / 0.32 s tail) and keeps it as the wake
   model hears the room (band-pass, x `voice_gain`, int16 16 kHz) in `recorded_videos/wake_samples/<model>/*.wav`
   + `index.jsonl` (Whisper's transcript, to weed out mistakes). Not kept: under 0.25 s or over 2 s of talking;
-  three of those in a row, silence, "stop"/"done" or 30 clips end the sitting. Nothing is retrained by Sentinel:
+  three of those in a row, silence, "stop"/"done" or 30 clips end the sitting. With the setting
+  `voice_keep_wake_sounds` (off by default; 2026-11-24) the last 3 s the wake models heard are also kept when the
+  second word wakes and a request follows (`<model>_live`) or nearly wakes (`<model>_near`, a logged
+  `voice_trial_score` that wasn't just "Hey Jarvis"), and when either word wakes with nothing said after it or only
+  the TV (`<model>_false`: sounds to train it NOT to wake to; `_keep_woke`, judged in `_conversation`), newest 300
+  of each: practice clips are said close to the microphone and score ~0.9, while everyday use across the room often
+  scores 0.1-0.4. Before training, weed the `_false` ones where someone did say the name and then went quiet. Nothing is retrained by Sentinel:
   the clips go into the openWakeWord training outside the repo as real positives. Why: the custom model was
   trained on synthetic voices only (real misses scored 0.11-0.17 against a 0.45 threshold).
 - **Quiet cameras** (2026-11-11; `sentinel/engine/quiet.py`, first in the `Commands` registry so voice and Telegram

@@ -4,6 +4,7 @@ import _test_env  # noqa: F401  (isolates the event log)
 
 import json
 import os
+import time
 import shutil
 import tempfile
 import unittest
@@ -73,6 +74,17 @@ class TestSamples(unittest.TestCase):
             rows = [json.loads(line) for line in f]
         self.assertEqual([(r["file"], r["heard"], r["seconds"]) for r in rows],
                          [(wavs[0], "Jezebel.", 1.0), (wavs[1], "Jessabelle", 0.05)])
+
+    def test_a_limit_drops_the_oldest(self):
+        now = [1000.0]
+        samples = WakeSamples(self.dir, clock=lambda: now[0])
+        for _ in range(5):
+            now[0] += 2
+            count = samples.add("jezebel_near", np.zeros(800, np.int16), "score 0.20", limit=3)
+        self.assertEqual(count, 3)
+        folder = os.path.join(self.dir, "wake_samples", "jezebel_near")
+        wavs = sorted(n for n in os.listdir(folder) if n.endswith(".wav"))
+        self.assertEqual(wavs[-1][:15], time.strftime("%Y%m%d-%H%M%S", time.localtime(1010)))
 
 
 class TestSitting(unittest.TestCase):

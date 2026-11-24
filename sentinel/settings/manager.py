@@ -159,6 +159,8 @@ class SettingsManager:
             "voice_trial_model": "",  # a second wake word: logs its scores (trying "Jezebel")...
             "voice_trial_wakes": False,  # ...and wakes the assistant too when on
             "voice_trial_threshold": 0.45,
+            # keep 3 s of sound when that word wakes or nearly does, for retraining it (off: nothing is kept)
+            "voice_keep_wake_sounds": False,
             "voice_name": "Jarvis",  # what the assistant calls itself (matches the wake word)
             "voice_jarvis_id": "kokoro:bm_george",  # woken with "Hey Jarvis": this voice, named Jarvis ("" = main voice)
             "voice_quiet_commands": True,  # a light / the music / the volume: a chime when done, not a sentence
