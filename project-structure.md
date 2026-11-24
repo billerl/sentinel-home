@@ -78,7 +78,7 @@ sentinel-home/                         # repository root
     │   ├── tv_mirror.py               # the remote's live picture of a Fire TV's screen (screenrecord -> JPEGs)
     │   ├── tasmota.py                 # plugs running Tasmota firmware as switches (local HTTP; network sweep)
     │   ├── wifi_motion.py             # Wi-Fi motion sensors (ESP32 CSI boards): find, poll, judge motion, daily CSVs
-    │   ├── things.py                  # "Where is it?": where the family's things are kept (things.db), told and asked in plain words
+    │   ├── things.py                  # Sortify (was "Where is it?"): where the family's things are kept (things.db), told and asked in plain words
     │   ├── house.py                   # House page: the 3D drawing of the home and yard (house.json), where each device sits,
     │   │                              #   and where the cameras' sightings stand on the plan (camera views, seen_things)
     │   ├── routines.py                # "When X, only if Y, then Z": check/describe, sunrise/sunset maths, runner (routines.db), Wi-Fi sensor rules + 24 h replay

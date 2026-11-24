@@ -5,7 +5,7 @@ official ``claude`` command signed in with the household's own Claude subscripti
 Opt-in (setting ``assistant_enabled``) because it is the one thing that leaves the
 house: the message and a short text summary of recent events (times, cameras, family
 car names; never a camera's pictures) are sent to Anthropic. The one picture that can go is a photo a person
-uploads for that very purpose (a drawer for the "Where is it?" page: look()). Everything Sentinel can answer
+uploads for that very purpose (a drawer for the Sortify page: look()). Everything Sentinel can answer
 itself still is answered locally, first.
 
 Locked down: Claude gets no tools (it can't run commands, read files or change

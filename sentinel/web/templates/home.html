@@ -137,7 +137,7 @@
       <a data-key="notes" class="tile" href="{{ url_for('notes_page') }}" data-min="user">
         <span class="ic">📝</span><span class="t">Notes</span><span class="s">Shared lists, and notes only you can see</span></a>
       <a data-key="things" class="tile" href="{{ url_for('things_page') }}" data-min="user">
-        <span class="ic">📦</span><span class="t">Where is it?</span><span class="s">Where your things are kept: tell it once, ask later</span></a>
+        <span class="ic">📦</span><span class="t">Sortify</span><span class="s">Where your things are kept: tell it once, ask later</span></a>
       <a data-key="photos" class="tile" href="{{ photos_url or url_for('photos_page') }}" data-min="user">
         <span class="ic">🖼️</span><span class="t">Photos</span><span class="s">{% if photos_url %}Opens over Tailscale (turn the app on if it doesn't load){% else %}The family's photos, and your own albums{% endif %}</span></a>
       {% if games_url %}<a data-key="games" class="tile" href="{{ games_url }}" data-min="user">

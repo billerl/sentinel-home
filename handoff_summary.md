@@ -550,7 +550,7 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   Xena" adds "Heads up: Xena's collar hasn't sent a location since 6:38am, so the map shows where Xena was then, not
   now." Spoken too: the outing command speaks the first sentence plus any "Heads up" sentence. Why: Jarvis said
   "watching Xena" over a 5-hour-old fix while the collar answered the base but had no GPS fix.
-- **Where is it?** (2026-11-24, a voice note: "tell you a component like my darts or a 10 millimeter socket ... later I
+- **Sortify** (first called "Where is it?"; renamed by the user the same day) (2026-11-24, a voice note: "tell you a component like my darts or a 10 millimeter socket ... later I
   could say, hey Jarvis, where is it"; `sentinel/engine/things.py`, `recorded_videos/things.db`, page `/things`, Home
   tile): one row per thing = name as said, where (the words after the name, kept whole: "in the red toolbox"), is/are,
   who, when. `parse_put` ("my X is in Y" with my/our only, "I put/keep/left X in Y", "remember (that) X is in Y";

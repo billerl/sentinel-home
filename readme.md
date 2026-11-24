@@ -102,7 +102,7 @@ Each one is independent. Most are switched on from the web page's **Settings**; 
 | **Your own wake word** ("Hey Jarvis" is built in) | An openWakeWord model you train; "train <name>" records your voice for it | Settings → Audio, Help |
 | **Family game tiles** (a dice game, a darts scorer with a TV scoreboard) | Your own small game site on its own address | Settings → Remote access |
 | **Ask Claude** (questions Sentinel can't answer) | The Claude Code app signed in on this PC | Settings → Telegram |
-| **Where is it?** ("my darts are in the garage cabinet" ... "where are my darts?"; or photograph a drawer and Claude lists what's in it) | Nothing extra (the photo part needs Ask Claude) | Home page |
+| **Sortify** (where is it?) ("my darts are in the garage cabinet" ... "where are my darts?"; or photograph a drawer and Claude lists what's in it) | Nothing extra (the photo part needs Ask Claude) | Home page |
 | **Nightly backup** to a USB drive and/or another PC | The drive, or an SSH-reachable PC | Settings → Backup |
 
 Tiles for hardware you haven't got wait under **Add more** on the home page, and move up by themselves
