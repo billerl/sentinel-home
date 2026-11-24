@@ -367,8 +367,8 @@
           </div>
         </div>
         <h3>This PC as a speaker: <span id="spk-state">…</span></h3>
-        <p class="hint" style="margin-top:0">Plays Spotify on the speaker plugged into this PC. It shows up in Spotify like any other speaker, under the name below, so you can say “Hey Jezebel, play Tom Petty on Sentinel” (or “on this speaker”, “play Spotify here”) or pick it in the Spotify app. The music turns down while Jezebel or Jarvis is talking.</p>
-        <div class="row"><div class="field" style="flex: 0 1 320px"><span>Speaker name in Spotify</span><input type="text" data-key="spotify_speaker_name" maxlength="40" placeholder="Sentinel" autocomplete="off"></div></div>
+        <p class="hint" style="margin-top:0">Plays Spotify on the speaker plugged into this PC. It shows up in Spotify like any other speaker, under the name below, so you can say “Hey Jezebel, play Tom Petty on Sentinel” (or “on this speaker”, “play Spotify here”) or pick it in the Spotify app. The music turns down while Jezebel or Jarvis is talking. If Spotify stops letting this kind of speaker play (the phone says it's playing, but there's no sound and it skips from song to song), Sentinel can use Spotify's own web player instead (the setting <code>spotify_speaker_kind</code> = <code>web</code>, see the readme): the PC is then called “Web Player (Firefox)” in the Spotify app, a name Spotify chooses; “on Sentinel” and “on this speaker” still work by voice. You sign in to it once on this PC's own screen (or through Remote Desktop) by running <code>tools/spotify_web_login.sh</code>.</p>
+        <div class="row" id="spk-name-row"><div class="field" style="flex: 0 1 320px"><span>Speaker name in Spotify</span><input type="text" data-key="spotify_speaker_name" maxlength="40" placeholder="Sentinel" autocomplete="off"></div></div>
         <div class="save-row"><button class="primary" onclick="saveSection('spotify')">Save</button><span class="msg" id="msg-spk-name"></span></div>
         <div id="spk-connect" hidden>
           <ol class="hint" style="margin-top:0">
@@ -878,7 +878,7 @@
       sel.value = want;
       var fb = $("sp-fallback"), fbWant = settings && settings.values.spotify_fallback_device || "";
       fb.innerHTML = '<option value="">Nowhere else (just stop)</option>';
-      var fbNames = d.devices.map(function(x) { return x.name; }).filter(function(n) { return n !== (settings && settings.values.spotify_speaker_name || "Sentinel"); });
+      var fbNames = d.devices.map(function(x) { return x.name; }).filter(function(n) { return n !== (settings && settings.values.spotify_speaker_name || "Sentinel") && n !== "Web Player (Firefox)"; });
       if (fbWant && fbNames.indexOf(fbWant) < 0) fbNames.push(fbWant);
       fbNames.forEach(function(n) { var o = document.createElement("option"); o.value = n; o.textContent = n; fb.appendChild(o); });
       fb.value = fbWant;
@@ -888,8 +888,11 @@
       var st = await api("/api/spotify/speaker").catch(function() { return {}; });
       $("spk-state").textContent = !st.installed ? "not installed (see the readme)" : !st.signed_in ? "not connected yet"
         : st.running ? "on ✓ (“" + st.name + "”)" : "starting…" + (st.error ? " (" + st.error + ")" : "");
-      $("spk-connect").hidden = !st.installed || !!st.signed_in;
+      var web = st.kind === "web";  // Spotify's own web player: its name is Spotify's, its sign-in is on the PC's screen
+      if (web && st.installed && !st.signed_in) $("spk-state").textContent = "not signed in yet: run tools/spotify_web_login.sh on this PC's screen (see Help)";
+      $("spk-connect").hidden = web || !st.installed || !!st.signed_in;
       $("spk-signed-in").hidden = !st.signed_in;
+      $("spk-name-row").hidden = web;
       return st;
     }
 

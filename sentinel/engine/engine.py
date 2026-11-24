@@ -323,12 +323,12 @@ class Engine:
                              drive=lambda: next((d["mount"] for d in self.backup.drives() if d["ours"]), None))
         self.spotify = SpotifyService(self.settings, lambda: self.settings_manager.save_settings(force=True))
         self.spotify.open_on_tv = lambda words: self.switches.open_app(words, "spotify", "spotify")
-        from sentinel.audio.spotify_player import SpotifyPlayer  # (sentinel.audio loads the speech engines)
+        from sentinel.audio.spotify_player import make_speaker  # (sentinel.audio loads the speech engines)
 
         from sentinel.audio import devices
 
         devices.use_cards(self.settings.get("audio_device"), self.settings.get("music_device", "auto"))  # line-out or USB
-        self.spotify_player = SpotifyPlayer(self.settings)  # this PC as a Spotify speaker (spotifyd)
+        self.spotify_player = make_speaker(self.settings)  # this PC as a Spotify speaker (spotifyd or web player)
         self._command_offers: Dict[int, Tuple[str, str, float]] = {}  # "Do it" buttons under Claude's replies
         self._offer_ids = itertools.count(1)
         self.commands = self._build_commands()

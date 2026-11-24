@@ -14,6 +14,7 @@ sentinel-home/                         # repository root
 ├── tools/build_vehicle_prompts.py     # Rebuilds the CLIP vehicle-type text embeddings
 ├── tools/replay_detections.py        # Replays recorded clips through detection (tune thresholds)
 ├── tools/dev_harness.py              # Login-free test copy of the web UI on :18091 (dev only)
+├── tools/spotify_web_login.sh        # One-time Spotify sign-in for the web-player speaker (run on the PC's screen)
 ├── tools/meshtastic_bridge.py         # Runs on the LoRa base (a Pi): pets' collar trackers -> /owntracks,
 │                                      #   mesh chat <-> /mesh/bridge
 ├── CLAUDE.md                          # Working notes for Claude Code sessions
@@ -142,6 +143,7 @@ sentinel-home/                         # repository root
     │   │                              #   kept or logged); plugs/lights only; answers with the camera's white light
     │   ├── devices.py                 # which sound card listens/speaks (PC jacks or a USB speakerphone); music's card
     │   ├── spotify_player.py          # this PC as a Spotify speaker: runs bin/spotifyd, its sign-in relay
+    │   ├── spotify_web.py             # ...or through Spotify's web player in a hidden Firefox (spotify_speaker_kind "web")
     │   ├── wake_samples.py            # "train Jezebel": real recordings of the wake word, kept for retraining its model
     │   └── voice.py                   # "Hey Jarvis": arecord -> band-pass -> openWakeWord -> faster-whisper
     │                                  #   (+ an optional trial wake word that only logs scores)

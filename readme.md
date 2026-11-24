@@ -123,6 +123,11 @@ mkdir -p bin && curl -L https://github.com/Spotifyd/spotifyd/releases/download/v
   | tar xz -C bin   # check it against the release's .sha512 file
 ```
 
+If Spotify refuses spotifyd the songs (the phone says it's playing, nothing sounds and it skips from song to
+song: "refused the audio key" in the log), use Spotify's own web player instead: install Firefox, `xvfb` and
+`pulseaudio-utils`, set `"spotify_speaker_kind": "web"` in `settings.json`, and sign in once on the PC's screen
+with `tools/spotify_web_login.sh`. The PC then appears in Spotify as "Web Player (Firefox)".
+
 Restart Sentinel after adding a model.
 </details>
 

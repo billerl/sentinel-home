@@ -381,8 +381,10 @@ class SpotifyService:
         if not devices:
             return None
         if wanted:
-            if _THIS_PC.fullmatch(_words(wanted)):
-                wanted = str(self.settings.get("spotify_speaker_name") or "Sentinel")
+            # ("on Sentinel" still means this PC when its speaker is the web player, whose name is Spotify's)
+            if _THIS_PC.fullmatch(_words(wanted)) or \
+                    _words(wanted) == _words(str(self.settings.get("spotify_speaker_name") or "Sentinel")):
+                wanted = self._pc_name()
             w = _words(wanted).replace("tv", "").strip() or "tv"
             for d in devices:
                 name = _words(d.get("name"))
@@ -453,8 +455,13 @@ class SpotifyService:
         return (f"{NO_SUCH_SPEAKER}{wanted}." if wanted else
                 "I can't find a Spotify speaker that's on. Open Spotify on the TV or your phone, then ask again.")
 
+    def _pc_name(self) -> str:
+        from sentinel.audio.spotify_player import speaker_name  # (here: sentinel.audio loads the speech engines)
+
+        return speaker_name(self.settings)
+
     def _is_this_pc(self, device: Dict[str, Any]) -> bool:
-        return _words(device.get("name")) == _words(str(self.settings.get("spotify_speaker_name") or "Sentinel"))
+        return _words(device.get("name")) == _words(self._pc_name())
 
     def _fallback(self) -> Optional[Dict[str, Any]]:
         name = str(self.settings.get("spotify_fallback_device") or "").strip()

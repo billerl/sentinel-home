@@ -441,6 +441,20 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   ("Spotify refused the audio key"; spotifyd 0.4.2 and go-librespot 0.10.5 both tried). `spotify_fallback_device`
   (Settings > Spotify): music asked for on this PC is checked ~8 s after it starts (`_check_this_pc`) and, if not
   playing there, moved to that speaker; this PC is then skipped for a day (`_pc_broken_until`).
+  **Way round it (2026-11-24): `spotify_speaker_kind: "web"`** (`sentinel/audio/spotify_web.py`,
+  `SpotifyWebSpeaker`, chosen by `spotify_player.make_speaker`): Spotify's own web player isn't refused, so a
+  Firefox on open.spotify.com is kept open on a hidden screen (`xvfb-run -a`, profile `.spotify-web/profile`,
+  prefs written each start: Widevine on, autoplay allowed). It plays into a PipeWire null sink
+  (`sentinel_spotify`, loaded with pactl when missing; `PULSE_SINK`), and `parec <sink>.monitor | aplay -D
+  sentinel_music` carries that into the shared ALSA mixer, so ducking and the music volume work as before
+  (Firefox straight into the card would make PipeWire take the card from dmix). The service has no session:
+  the children get `XDG_RUNTIME_DIR=/run/user/<uid>` (needs `loginctl enable-linger`). In Spotify it is called
+  "Web Player (Firefox)" (can't be renamed: `speaker_name()` returns that, and "on Sentinel" / the old name
+  still mean this PC in `_pick_device`). Sign-in is on the PC's own screen, once: `tools/spotify_web_login.sh`
+  (leaves `.spotify-web/signed_in`). Firefox is restarted every 6 h while nothing is playing (`playing()` =
+  an uncorked stream on our sink) in case an idle web player drops out of Spotify's list. Tried first and
+  dropped: go-librespot 0.10.7 (refused like spotifyd) and Spotify's desktop app (flatpak: blank window, hangs
+  in main_view_init on Xvfb and on a real screen).
 - **Sound cards** (`sentinel/audio/devices.py`, Settings > Audio): `voice_device` (mic, e.g.
   `plughw:CARD=USB,DEV=0` for a Jabra Speak 410: voice 29 dB above room noise vs 13 dB on the front mic jack,
   Whisper clearly better), `audio_device` (voice/chimes card) and `music_device` ("auto" = the PC's line-out when

@@ -38,7 +38,25 @@ RESTART_DELAYS = (5, 15, 60, 300)  # after it stops by itself, growing while it 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")  # spotifyd colours its log lines
 
 
+def speaker_kind(settings: Dict[str, Any]) -> str:
+    """"web" = Spotify's own web player (spotify_web.py); anything else = spotifyd."""
+    return "web" if str(settings.get("spotify_speaker_kind") or "").lower() == "web" else "spotifyd"
+
+
+def make_speaker(settings: Dict[str, Any]):
+    if speaker_kind(settings) == "web":
+        from sentinel.audio.spotify_web import SpotifyWebSpeaker
+
+        return SpotifyWebSpeaker(settings)
+    return SpotifyPlayer(settings)
+
+
 def speaker_name(settings: Dict[str, Any]) -> str:
+    """What this PC is called in Spotify's list of speakers."""
+    if speaker_kind(settings) == "web":
+        from sentinel.audio.spotify_web import WEB_NAME
+
+        return WEB_NAME
     name = re.sub(r"[^\w' -]", "", str(settings.get("spotify_speaker_name") or "")).strip()
     return name[:40] or "Sentinel"
 
@@ -73,7 +91,7 @@ class SpotifyPlayer:
     def status(self) -> Dict[str, Any]:
         return {"installed": self.installed(), "signed_in": self.signed_in(), "running": self.running(),
                 "signing_in": self._login is not None and self._login.poll() is None,
-                "name": speaker_name(self.settings), "error": self.last_error}
+                "name": speaker_name(self.settings), "error": self.last_error, "kind": "spotifyd"}
 
     # ------------------------------------------------------------ running it
     def start(self) -> None:

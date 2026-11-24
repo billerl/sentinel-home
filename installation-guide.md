@@ -74,7 +74,7 @@ Run the app and watch the console:
 Sentinel is meant to run all the time on a small Linux PC, with everything set up from its web page.
 Nothing in the code is tied to one household: your cameras, logins, keys, family and cars all live in
 files that are created on first run and are git-ignored (`settings.json`, `camera_admin.json`,
-`recorded_videos/*.db`, `.spotifyd/`, `.web_sessions.json`).
+`recorded_videos/*.db`, `.spotifyd/`, `.spotify-web/`, `.web_sessions.json`).
 
 1. **Install** as above, plus the models from the readme's *Quick install* (at least the object detector).
 2. **Web login:** `venv/bin/python -m sentinel.web.set_password` (asks for a username and password).

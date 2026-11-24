@@ -155,6 +155,7 @@ class SettingsManager:
             "spotify_client_id": "",
             "spotify_device": "",  # preferred speaker when none is playing
             "spotify_speaker_name": "Sentinel",  # this PC as a Spotify speaker (sentinel/audio/spotify_player.py)
+            "spotify_speaker_kind": "spotifyd",  # or "web": Spotify's own web player (sentinel/audio/spotify_web.py)
             "spotify_refresh_token": "",
             "voice_trial_model": "",  # a second wake word: logs its scores (trying "Jezebel")...
             "voice_trial_wakes": False,  # ...and wakes the assistant too when on
