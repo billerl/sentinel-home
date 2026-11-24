@@ -240,7 +240,7 @@ class TestEngineSide(unittest.TestCase):
 
         self.dir = tempfile.mkdtemp(prefix="sentinel-things-engine-")
         self.addCleanup(shutil.rmtree, self.dir, ignore_errors=True)
-        self.engine = types.SimpleNamespace(things=Things(self.dir))
+        self.engine = types.SimpleNamespace(things=Things(self.dir), assistant=types.SimpleNamespace(enabled=lambda: False))
         self.understood = lambda text: Engine._things_understood(self.engine, text)
         self.answer = lambda text: Engine._things_answer(self.engine, self.understood(text), "Telegram")
         self.voice = lambda text: Engine._things_voice(self.engine, text)
@@ -258,6 +258,28 @@ class TestEngineSide(unittest.TestCase):
         self.assertEqual(self.answer("what's in the garage cabinet"), "In the garage cabinet: darts.")
         self.assertIn("forgotten", self.answer("forget where my darts are"))
         self.assertIsNone(self.understood("where are my darts"))  # gone: back to being anybody's question
+
+    def test_another_name_for_it_is_claudes_to_pick(self):
+        import types
+
+        self.engine.things.put("antique-style key", "roll top desk", spot="lower left drawer")
+        self.engine.things.put("keys", "roll top desk", spot="top right drawer")
+        asked = []
+
+        def complete(system, prompt, what):
+            asked.append(prompt)
+            return "1" if "skeleton" in prompt else "NONE"
+        self.engine.assistant = types.SimpleNamespace(enabled=lambda: True, complete=complete)
+        # by the words alone "skeleton key" finds "keys" (they share a word): Claude knows which key is meant
+        self.assertEqual(self.answer("where is the skeleton key"), "Probably the antique-style key is in roll top desk, lower left drawer.")
+        self.assertIn("1. antique-style key (in roll top desk, lower left drawer)", asked[0])
+        self.assertEqual(self.answer("where are my keys"), "The keys are in roll top desk, top right drawer.")
+        self.assertEqual(len(asked), 1)  # the very words kept: no need to ask
+        self.assertIn("don't know where the car key is yet", self.answer("where did i put the car key"))  # NONE
+        self.engine.assistant = types.SimpleNamespace(enabled=lambda: True, complete=lambda *a: None)  # no answer:
+        self.assertEqual(self.answer("where is the skeleton key"), "The keys are in roll top desk, top right drawer.")  # the words
+        self.engine.assistant = types.SimpleNamespace(enabled=lambda: False)
+        self.assertEqual(self.answer("where is the skeleton key"), "The keys are in roll top desk, top right drawer.")
 
     def test_by_voice_it_asks_and_takes_the_next_words(self):
         self.assertIsNone(self.voice("my darts are in the garage cabinet"))  # complete: the registry's

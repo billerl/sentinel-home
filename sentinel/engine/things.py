@@ -31,6 +31,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 NAME_MAX, PLACE_MAX, SPOT_MAX, MAX_THINGS = 60, 120, 40, 2000
 MAX_SEEN = 60  # things from one photo, or typed into the add box at once
+PICK_MAX = 400  # things Claude is shown when asked which one is meant
+PICK_SYSTEM = """A family keeps a list of where their things are. Someone asked where a thing is, using a name that
+isn't on the list word for word. Decide which listed things they most likely mean: the same object under another
+name (a "skeleton key" is an "antique-style key"; an "allen wrench" is a "hex key"), a more general or more specific
+word for it, or a misheard word. Do not pick things that merely share a word but are a different object.
+Answer with ONLY the numbers of the matching things, most likely first, at most 3, separated by commas.
+If none of them is what they mean, answer NONE."""
 
 _WHERE = (r"in|inside|on|on top of|under|underneath|beneath|below|above|behind|beside|next to|near|by|at|"
           r"in front of|between|with|over|hanging on|hanging in|out in|up in|down in|back in")
@@ -325,12 +332,40 @@ class Things:
         near = difflib.get_close_matches(k, [t["key"] for t in things], n=3, cutoff=0.78)
         return [t for n in near for t in things if t["key"] == n]
 
-    def answer(self, name: str, explicit: bool = True) -> Optional[str]:
-        """Where it is, in words; None when nothing like it is kept and the question might be somebody else's."""
-        found = self.find(name)
+    def sure(self, name: str) -> bool:
+        """Is what find() gives certainly what was asked for: the same name, or every word asked is in a thing's
+        name ("socket" -> "10 mm socket")? Not sure: only part of what was asked matched ("skeleton key" found
+        "keys"), or a near spelling; then pick() may know better."""
+        want = set(key(name).split())
+        return bool(want) and any(want <= set(key(t["name"]).split()) for t in self.all())
+
+    def pick(self, name: str, ask: Callable[[str, str, str], Optional[str]]) -> Optional[List[Dict[str, Any]]]:
+        """Ask Claude which kept things the person could mean by another name ("skeleton key" for an "antique-style
+        key", "allen wrench" for "hex keys") -> those things ([] = none of them), or None when Claude didn't answer."""
+        things = self.all()[:PICK_MAX]
+        if not things:
+            return []
+        listed = "\n".join(f"{i + 1}. {t['name']} ({where_words(t)})" for i, t in enumerate(things))
+        reply = ask(PICK_SYSTEM, f"They asked for: {name}\n\nTHINGS KEPT:\n{listed}", "things lookup")
+        if reply is None:
+            return None
+        picked: List[Dict[str, Any]] = []
+        for n in re.findall(r"\d+", reply)[:3]:
+            if 1 <= int(n) <= len(things) and things[int(n) - 1] not in picked:
+                picked.append(things[int(n) - 1])
+        return picked
+
+    def answer(self, name: str, explicit: bool = True, found: Optional[List[Dict[str, Any]]] = None) -> Optional[str]:
+        """Where it is, in words; None when nothing like it is kept and the question might be somebody else's.
+        found: the things already picked for this name (pick), instead of looking by the words."""
+        picked = found is not None
+        found = self.find(name) if found is None else found
         if not found:
             return f"I don't know where {self._subject(name)} is yet. Tell me, and I'll remember." if explicit else None
         said = [f"{self._subject(t['name'])} {t['verb']} {your(where_words(t))}" for t in found[:3]]
+        if picked and key(found[0]["name"]) != key(name):  # (another name for it: say which thing is meant)
+            first = "Probably " + said[0] + "."
+            return first if len(said) == 1 else first + " Or " + "; or ".join(said[1:]) + "."
         return (said[0][0].upper() + said[0][1:] + "." if len(said) == 1 else
                 "I know of " + str(len(said)) + ": " + "; ".join(said) + ".")
 

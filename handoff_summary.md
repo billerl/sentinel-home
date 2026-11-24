@@ -569,6 +569,11 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   a place holds something). The page groups by place then spot (numeric sort, the spot's photo), or A to Z; the two
   place boxes offer what's already kept (datalists). Two file inputs: one with `capture="environment"` (Take a photo:
   with only `accept="image/*"` the user's Android offered the gallery but no camera), one without (Choose).
+  **Another name for it** ("is it smart enough to look for skeleton key?" for a thing kept as "antique-style key"):
+  when what find() gives isn't `sure()` (the same name, or every asked word in a thing's name) and the assistant
+  is on, `Things.pick` shows Claude the list (`PICK_SYSTEM`, numbers back, at most 3, or NONE) and the answer says
+  "Probably the ...". By words alone "skeleton key" had found "keys" (a shared word). No answer from Claude = the
+  words' result. The list is also in `assistant_context` for "where is ..." questions the registry didn't claim.
   **From a photo** (same day; `PhotoScans` in things.py, `Assistant.look`): the page shrinks the photo (1800 px
   canvas -> raw JPEG body, `X-Place` header; route raises `request.max_content_length` like Photos/Print), the server
   shrinks to 1568 px, keeps it in `recorded_videos/things_photos/<16 hex>.jpg` and asks Claude in a thread

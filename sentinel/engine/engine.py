@@ -968,7 +968,11 @@ class Engine:
                        f"{'are' if name.endswith('s') else 'is'} in the garage cabinet."
             return self.things.put(name, place, verb, by)[1]
         if kind == "find":
-            return self.things.answer(understood[1]) or ""
+            # Not the words kept ("skeleton key" for an "antique-style key")? Claude picks from the list, if it's on.
+            name, found = understood[1], None
+            if not self.things.sure(name) and self.assistant.enabled():
+                found = self.things.pick(name, self.assistant.complete)
+            return self.things.answer(name, found=found) or ""
         found = self.things.find(understood[1])
         return self.things.forget(found[0]["name"] if found else understood[1])[1]
 
@@ -1058,9 +1062,15 @@ class Engine:
         from sentinel.engine.reminders import when_words
 
         reminders = "\n".join(f"{r.id}. {when_words(r.due, now)}: {r.text}" for r in self.reminders.pending()[:20])
+        from sentinel.engine.things import where_words
+
+        things = self.things.all()[:400]  # ("where's the allen wrench?" when it's kept as "hex keys")
+        kept = ("\n\nTHINGS THE FAMILY KEEPS TRACK OF (thing: where it is). For \"where is ...\" about an object, answer "
+                "from this list, also when they use another name for it:\n" +
+                "\n".join(f"- {t['name']}: {where_words(t)}" for t in things)) if things else ""
         return build_context(now, events, cameras, home, self.household.vehicles(), weather,
                              self.telegram.commands_help_text(), reminders, self.switches.summary(),
-                             self._routines_context(), self.wifi_motion.context(now))
+                             self._routines_context(), self.wifi_motion.context(now)) + kept
 
     def _switch_reply(self, chat_id: str, text: str) -> None:
         said = self.switches.command(text, source="telegram")
