@@ -4,8 +4,10 @@ The home page, the Live page and what it shows: camera list, snapshots, MJPEG st
 
 from __future__ import annotations
 
+import hmac
+import os
 import re
-
+import secrets
 import time
 from typing import Dict
 
@@ -15,6 +17,8 @@ from sentinel.logging_utils import app_logger
 from sentinel.web.auth import _client_ip
 from sentinel.web.context import TV_BROWSER, WebContext
 
+
+DARTS_KEY_FILE = ".darts_tv_key"  # (owner-only, not in git; see darts_key below)
 
 # Changes every time Sentinel starts (an update means a restart).
 BOOT_ID = f"{int(time.time())}"
@@ -30,6 +34,38 @@ def register(app: Flask, ctx: WebContext) -> None:
         return url if re.match(r"^https?://[^\s\"'<>]+$", url) else ""
     auth, limiter, _session_token, _require_session = ctx.auth, ctx.limiter, ctx.session_token, ctx.require_session
 
+    def darts_key() -> str:
+        """What lets the darts scorer (a separate little site on this computer, with no logins of its own) put its
+        scoreboard on a TV: a key made here once and kept in DARTS_KEY_FILE. The Home page's Darts tile carries it,
+        so only phones that came from a signed-in Sentinel page get the "show on the TV" button."""
+        try:
+            with open(DARTS_KEY_FILE) as f:
+                key = f.read().strip()
+        except OSError:
+            key = ""
+        if len(key) < 16:
+            key = secrets.token_urlsafe(18)
+            fd = os.open(DARTS_KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(key)
+        return key
+
+    @app.route("/api/local/darts_tv", methods=["GET", "POST"])
+    def darts_tv():
+        """For the darts scorer on this computer only (never through the tunnel), with the key: the TVs that can
+        show its scoreboard, and (POST) put it on one."""
+        local = request.remote_addr in ("127.0.0.1", "::1") and not (
+            request.headers.get("Cf-Connecting-Ip") or request.headers.get("Cf-Ray"))
+        if not local or engine is None or not games_url("darts_url") or \
+                not hmac.compare_digest(request.headers.get("X-Darts-Key", ""), darts_key()):
+            return jsonify({"error": "not allowed"}), 403
+        if request.method == "GET":
+            return jsonify({"tvs": [{"id": k, "name": v} for k, v in engine.switches.camera_tvs().items()]})
+        body = request.get_json(silent=True) or {}
+        ok, said = engine.switches.tv_show_page(str(body.get("tv") or "")[:40], "the darts scoreboard", "#map=darts",
+                                                "darts")
+        return jsonify({"ok": ok, "message": said})
+
     @app.route("/")
     def index():
         """The home page; TVs (the kiosk live view) get the cameras straight away."""
@@ -44,7 +80,8 @@ def register(app: Flask, ctx: WebContext) -> None:
         photos_url = None if ctx.from_home_network(tailscale=True) or not ctx.tailscale_base else \
             ctx.tailscale_base + "/photos"
         return render_template("home.html", boot_id=BOOT_ID, tile_order=order, photos_url=photos_url,
-                               games_url=games_url(), darts_url=games_url("darts_url"))
+                               games_url=games_url(),
+                               darts_url=games_url("darts_url") and games_url("darts_url") + "?k=" + darts_key())
 
     @app.route("/api/home_layout", methods=["POST"])
     def api_home_layout():

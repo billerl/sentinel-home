@@ -61,7 +61,7 @@ ACCESS: Dict[str, Rule] = {
     # ---- no role: before signing in, and devices with their own key
     "static": PUBLIC, "favicon": PUBLIC, "login": PUBLIC, "logout": PUBLIC, "handoff": PUBLIC,
     "login_pair_start": PUBLIC, "login_pair_poll": PUBLIC,
-    "owntracks": PUBLIC, "mesh_bridge": PUBLIC,  # phones and the base station (HTTP Basic, their own key)
+    "owntracks": PUBLIC, "mesh_bridge": PUBLIC, "darts_tv": PUBLIC,  # phones and the base station (HTTP Basic, their own key)
     "join_page": PUBLIC, "join_status": PUBLIC, "join_config_file": PUBLIC, "account_page": PUBLIC,  # one-time links
     "help_page": PUBLIC,  # (only sends on to the Settings page)
 

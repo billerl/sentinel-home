@@ -65,6 +65,7 @@ models/kokoro/
 bin/
 .spotifyd/
 .spotify-web/
+.darts_tv_key
 # Camera admin logins (lets Sentinel switch camera lights); never commit
 camera_admin.json
 .camera_light_on.json
