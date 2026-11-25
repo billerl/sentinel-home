@@ -235,7 +235,7 @@ class Engine:
 
         self.camera_lights = CameraLights()  # white light for cars at night (cameras in camera_admin.json)
         self.telegram = TelegramNotifier(self.settings, listen=False)  # (listens once start() has wired it)
-        self.weather = WeatherService(self.settings)
+        self.weather = WeatherService(self.settings, os.path.join(VIDEO_DIR, "weather_cache.json"))
         from sentinel.engine.cars import Cars
 
         self.cars = Cars(  # the Vehicles page, "whose car is this?" / "Wrong car?" and the driveway's arrive/leave

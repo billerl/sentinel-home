@@ -8,6 +8,7 @@ browser) so phones on mobile data and the Fire TV don't each call out.
 """
 
 import json
+import os
 import threading
 import time
 import urllib.parse
@@ -22,6 +23,9 @@ FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 AIR_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"  # also free, no key
 REFRESH_SECONDS = 10 * 60
 RETRY_SECONDS = 2 * 60
+# The last card is kept on disk: a restart during an outage of the weather service left the card empty
+# (2026-11-25 14:12, Open-Meteo answering 503). Older than this it's not shown.
+CACHE_HOURS = 12
 WINDY_MPH = 20  # gusts this strong set trees and bushes moving: expect motion clips
 COMPASS = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
 # US AQI bands (EPA): upper bound -> words
@@ -88,8 +92,9 @@ def _get_json(url: str, params: Dict[str, Any], timeout: float = 10.0) -> Dict[s
 class WeatherService:
     """``current()`` returns the card's data (cached); fetching happens on a background thread."""
 
-    def __init__(self, settings: Dict[str, Any]) -> None:
+    def __init__(self, settings: Dict[str, Any], cache_path: Optional[str] = None) -> None:
         self.settings = settings
+        self.cache_path = cache_path
         self._lock = threading.Lock()
         self._place: Optional[Dict[str, Any]] = None  # {query, name, lat, lon}
         self._data: Optional[Dict[str, Any]] = None
@@ -97,6 +102,32 @@ class WeatherService:
         self._failed: Tuple[Any, float] = (None, 0.0)  # (query+units, when) of the last failure
         self._busy = False
         self._error = ""
+        self._load_cache()
+
+    def _load_cache(self) -> None:
+        try:
+            with open(self.cache_path or "", encoding="utf-8") as f:
+                saved = json.load(f)
+            if time.time() - float(saved["fetched_at"]) > CACHE_HOURS * 3600:
+                return
+            data = saved["data"]
+            data["key"] = tuple(data["key"])
+            # (fetched_at as saved: the next look refreshes it, and a failure keeps showing this)
+            self._place, self._data, self._fetched_at = saved.get("place"), data, float(saved["fetched_at"])
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+
+    def _save_cache(self, place: Dict[str, Any], data: Dict[str, Any], fetched_at: float) -> None:
+        if not self.cache_path:
+            return
+        try:
+            tmp = self.cache_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"place": place, "data": data, "fetched_at": fetched_at}, f)
+            os.replace(tmp, self.cache_path)
+        except (OSError, TypeError, ValueError) as e:
+            app_logger.log("warning", "weather_cache_failed", error_message=str(e)[:200], component="weather",
+                           action="save")
 
     def _query(self) -> str:
         return str(self.settings.get("weather_location") or "").strip()
@@ -148,9 +179,11 @@ class WeatherService:
                 air = {}
             data = self._card(raw, place, units, air)
             data["key"] = (query, units)
+            fetched_at = time.time()
             with self._lock:
-                self._place, self._data, self._fetched_at = place, data, time.time()
+                self._place, self._data, self._fetched_at = place, data, fetched_at
                 self._error, self._failed = "", (None, 0.0)
+            self._save_cache(place, data, fetched_at)
         except Exception as e:  # network down, bad place name: keep the last card, try again later
             message = str(e) if isinstance(e, LookupError) else "weather service unreachable"
             with self._lock:

@@ -2,6 +2,8 @@
 
 import _test_env  # noqa: F401  (isolates the event log)
 
+import json
+import os
 import unittest
 from unittest import mock
 
@@ -62,6 +64,26 @@ class TestWeather(unittest.TestCase):
         with mock.patch.object(weather, "_get_json") as get:
             self.assertEqual(WeatherService({}).current(), {"configured": False})
             get.assert_not_called()
+
+    def test_the_last_card_survives_a_restart_while_the_service_is_down(self):
+        import tempfile, time as _t
+        path = os.path.join(tempfile.mkdtemp(prefix="sentinel-weather-"), "weather_cache.json")
+        settings = {"weather_location": "Springfield"}
+        first = WeatherService(settings, path)
+        first._save_cache({"query": "Springfield", "name": "Springfield, Ohio", "lat": 39.9, "lon": -83.8},
+                          {"key": ("Springfield", "fahrenheit"), "temp": 41}, _t.time())
+        with mock.patch.object(weather, "_get_json", side_effect=OSError("HTTP Error 503")):
+            again = WeatherService(settings, path)  # (Sentinel restarted)
+            card = again.current()
+            self.assertEqual(card["temp"], 41)
+            self.assertNotIn("loading", card)
+        with open(path) as f:  # too old: not shown
+            saved = json.load(f)
+        saved["fetched_at"] = _t.time() - (weather.CACHE_HOURS + 1) * 3600
+        with open(path, "w") as f:
+            json.dump(saved, f)
+        with mock.patch.object(weather, "_get_json", side_effect=OSError("HTTP Error 503")):
+            self.assertIsNone(WeatherService(settings, path)._data)
 
     def test_settings(self):
         self.assertEqual(admin.SETTINGS_SCHEMA["weather_location"]("  Springfield,   Ohio "), "Springfield, Ohio")
