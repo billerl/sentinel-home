@@ -20,6 +20,9 @@ LOCATION_STALE_S = 10 * 60  # a family phone's position older than this: ask the
 # once, and "got to <a place>" went out while the person was home). Arrivals/departures older than this when they
 # reach Sentinel are kept in the history but not announced, and don't start the home routines.
 LATE_CHANGE_S = 10 * 60
+# A family car's camera photo and its owner's phone saying "got home" / "left" are the same news: within this long of
+# one, the other isn't sent to Telegram (the user got a photo, a clip and a "got home" for one arrival, 2026-11-25).
+HOME_NEWS_S = 10 * 60
 CONTRADICTION_HOLD = 60.0  # a change that contradicts the last alert is sent once it has held this long
 SPOT_CHECK_HOUR = 18  # new spots worth saving are looked for once a day, from this hour on
 SPOT_ASK_AGAIN_DAYS = 14  # a suggestion nobody answered may come back after this
@@ -49,6 +52,7 @@ class Family:
         self._household_answer = household_answer  # "who's home?" also lists the cars
         self._on_home = on_home  # (arrive | leave, person id) -> routines
         self._speak = speak
+        self._home_news: Dict[int, Tuple[str, float]] = {}  # person id -> ("camera" | "phone", when it went out)
         self._place_pins: Dict[str, Tuple[float, float, float]] = {}  # chat -> pin waiting for a name (lat, lon, until)
         self._location_alerted: Dict[Tuple[int, int], float] = {}  # (person, place) -> last alert
         # What was last said per (person, place) / (pet, "yard"), and checks waiting for a cool-down to end
@@ -349,7 +353,8 @@ class Family:
                     continue
                 place_id = change.place.id
                 self._announce((person.id, place_id), change.kind, 15 * 60,
-                               lambda text=text: self._send_location_alert(text),
+                               lambda text=text, pid=person.id, home=change.place.is_home: (
+                                   self._send_home_news(text, pid) if home else self._send_location_alert(text)),
                                lambda pid=person.id, place_id=place_id: "arrived" if (
                                    self.locations.fix(pid) or {}).get("place_id") == place_id else "left")
         return reply
@@ -457,6 +462,32 @@ class Family:
             threading.Thread(target=send, name="yard-alert", daemon=True).start()
         if change.kind == "left_yard":
             self._speak(f"Heads up: {change.person.name} left the yard.")  # (no-op when the speakers are off)
+
+    def _send_home_news(self, text: str, person_id: int) -> None:
+        """A phone's "got home" / "left": not when a camera photo of their car just said it (see HOME_NEWS_S)."""
+        now = time.time()
+        source, when = self._home_news.get(person_id, ("", 0.0))
+        if source == "camera" and now - when < HOME_NEWS_S:
+            app_logger.log("info", "location_alert_skipped", person_id=person_id, why="camera_photo_sent",
+                           component="engine", action="location")
+            return
+        self._home_news[person_id] = ("phone", now)
+        self._send_location_alert(text)
+
+    def car_news(self, vehicle) -> bool:
+        """May the camera's photo of this family car go to Telegram? Not when its owner's phone just said they got
+        home or left; otherwise yes, and the phone's message that follows is skipped instead."""
+        owner = str(getattr(vehicle, "owner", "") or "").strip().lower()
+        if not owner:
+            return True
+        ids = [p.id for p in self.locations.people() if not p.is_pet and owner in p.words()]
+        now = time.time()
+        if any(src == "phone" and now - when < HOME_NEWS_S
+               for src, when in (self._home_news.get(i, ("", 0.0)) for i in ids)):
+            return False
+        for i in ids:
+            self._home_news[i] = ("camera", now)
+        return True
 
     def _send_location_alert(self, text: str) -> None:
         for chat_id in self.telegram.unpaused_chats():

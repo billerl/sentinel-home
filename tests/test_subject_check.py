@@ -256,5 +256,56 @@ class TestClipPerAlert(unittest.TestCase):
         self.e._on_clip(self.cam, "c.mp4", "motion", [])
         self.assertEqual(self.sent, ["🛻 Alex's Truck pulled into the Driveway (Garage). (clip)"])  # once
 
+    def test_without_videos_the_photo_has_a_video_button_and_the_clip_waits_for_it(self):
+        import time as _t
+        self.e.telegram.include_video = False
+        vid = self.e._offer_video("192.168.0.9", _t.time(), "🛻 Alex's Truck pulled in.")
+        answers, videos = [], []
+        self.e.telegram.answer_button = lambda cb, text="": answers.append(text)
+        self.e.telegram.send_video = lambda chat, path, caption: videos.append((chat, path, caption))
+        self.e.handle_button("1", 5, f"vid:{vid}", "cb")
+        self.assertIn("Still recording", answers[-1])
+        with open("b.mp4", "wb") as f:
+            f.write(b"x")
+        self.e._on_clip(self.cam, "b.mp4", "motion", [])
+        self.assertEqual(self.sent, [])  # nothing sent by itself
+        self.e.handle_button("1", 5, f"vid:{vid}", "cb")
+        _t.sleep(0.2)
+        self.assertEqual(videos, [("1", "b.mp4", "🎬 🛻 Alex's Truck pulled in.")])
+        self.e.handle_button("1", 5, "vid:999", "cb")
+        self.assertIn("isn't kept", answers[-1])
+
+
+class TestOneMessagePerArrival(unittest.TestCase):
+    """A family car's camera photo and its owner's phone "got home" are one piece of news (2026-11-25)."""
+
+    def setUp(self):
+        from sentinel.engine import family as fam
+
+        self.fam = fam
+        kate = types.SimpleNamespace(id=7, is_pet=False, words=lambda: ["kate"])
+        self.f = fam.Family.__new__(fam.Family)
+        self.f._home_news = {}
+        self.f.locations = types.SimpleNamespace(people=lambda: [kate])
+        self.sent = []
+        self.f._send_location_alert = self.sent.append
+        self.car = types.SimpleNamespace(owner="Kate")
+
+    def test_phone_first_then_the_camera_photo_is_skipped(self):
+        self.f._send_home_news("🏠 Kate got home.", 7)
+        self.assertEqual(self.sent, ["🏠 Kate got home."])
+        self.assertFalse(self.f.car_news(self.car))
+
+    def test_camera_first_then_the_phone_message_is_skipped(self):
+        self.assertTrue(self.f.car_news(self.car))
+        self.f._send_home_news("🏠 Kate got home.", 7)
+        self.assertEqual(self.sent, [])
+
+    def test_a_car_nobody_owns_and_old_news_still_go_out(self):
+        self.assertTrue(self.f.car_news(types.SimpleNamespace(owner="")))
+        self.f._home_news[7] = ("camera", 0.0)  # long ago
+        self.f._send_home_news("👋 Kate left home.", 7)
+        self.assertEqual(self.sent, ["👋 Kate left home."])
+
 if __name__ == "__main__":
     unittest.main()

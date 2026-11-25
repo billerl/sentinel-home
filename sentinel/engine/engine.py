@@ -354,6 +354,10 @@ class Engine:
         self._object_alert_times: Dict[Tuple[str, str], float] = {}
         # Photo alert waiting for its clip: camera host -> (time, sentence). One clip per alert.
         self._clip_for_alert: Dict[str, Tuple[float, str]] = {}
+        # With "send videos" off, a photo alert has a 🎬 Video button instead: id -> {host, ts, caption, path}.
+        self._alert_videos: Dict[int, Dict[str, Any]] = {}
+        self._alert_video_ids = itertools.count(1)
+        self._alert_video_lock = threading.Lock()
         self._last_description: Dict[str, Tuple[float, str]] = {}
         self._video_query_lock = threading.Lock()
 
@@ -629,8 +633,48 @@ class Engine:
         if self.audio is not None:
             self.audio.trigger_alert(event.description.split(" ", 1)[1])  # drop the emoji
         if self.settings.get("telegram_motion_alerts", True) and jpeg:
-            self.telegram.trigger_photo_alert(event.description, jpeg, self.cars.fix_button(pipeline, event))
+            known = event.track.known_vehicle
+            family = getattr(self, "family", None)
+            if known is not None and family is not None and not family.car_news(known):
+                return  # its owner's phone just said they got home / left: one message is enough
+            buttons = self.cars.fix_button(pipeline, event)
+            if not self.telegram.include_video:  # the clip only when asked for (one message per sighting)
+                row = [("🎬 Video", f"vid:{self._offer_video(pipeline.host, event.timestamp, event.description)}")]
+                buttons = [row + (buttons[0] if buttons else [])] + (buttons[1:] if buttons else [])
+            self.telegram.trigger_photo_alert(event.description, jpeg, buttons)
             self._clip_for_alert[pipeline.host] = (event.timestamp, event.description)
+
+    ALERT_VIDEO_WAIT_S = 10 * 60  # a clip finishing this long after a photo alert is still that alert's video
+    ALERT_VIDEO_KEEP = 100
+
+    def _offer_video(self, host: str, ts: float, caption: str) -> int:
+        with self._alert_video_lock:
+            vid = next(self._alert_video_ids)
+            self._alert_videos[vid] = {"host": host, "ts": ts, "caption": caption, "path": None}
+            for old in sorted(self._alert_videos)[:-self.ALERT_VIDEO_KEEP]:
+                self._alert_videos.pop(old, None)
+            return vid
+
+    def _video_ready(self, host: str, path: str) -> None:
+        """A camera's clip finished: it's the video for that camera's photo alerts still waiting for one."""
+        now = time.time()
+        with self._alert_video_lock:
+            for v in self._alert_videos.values():
+                if v["host"] == host and v["path"] is None and now - v["ts"] <= self.ALERT_VIDEO_WAIT_S:
+                    v["path"] = path
+
+    def _send_alert_video(self, chat_id: str, vid: int, callback_id: str) -> None:
+        with self._alert_video_lock:
+            entry = dict(self._alert_videos.get(vid) or {})
+        path = entry.get("path")
+        if not entry or (path and not os.path.exists(path)):
+            self.telegram.answer_button(callback_id, "That video isn't kept any more")
+        elif not path:
+            self.telegram.answer_button(callback_id, "Still recording: try again in a minute")
+        else:
+            self.telegram.answer_button(callback_id, "Sending the video")
+            threading.Thread(target=self.telegram.send_video, args=(chat_id, path, f"🎬 {entry['caption']}"),
+                             name="alert-video", daemon=True).start()
 
     def _on_maybe_person(self, pipeline: CameraPipeline, track) -> None:
         """A moving person-shaped track too unsure to alert about (e.g. dim in infrared): enough for routines
@@ -664,7 +708,11 @@ class Engine:
                 bypass_cooldown=True,
             )
             return
-        if not (self.settings.get("telegram_motion_alerts", True) and self.telegram.include_video):
+        if not self.settings.get("telegram_motion_alerts", True):
+            return
+        if not self.telegram.include_video:
+            if self.objects_active():
+                self._video_ready(pipeline.host, path)  # (sent if someone taps the photo's 🎬 Video)
             return
         if self.objects_active():
             # Only clips that go with a photo alert (which has its own per-camera cooldown):
@@ -923,6 +971,10 @@ class Engine:
                                     else f"✅ Sent: {command}")
             app_logger.log("info", "assistant_command_run", command=command, component="engine", action="button")
             self.telegram.route_text(chat_id, command, from_button=True)  # exactly as if typed
+            return
+        v = re.fullmatch(r"vid:(\d+)", data or "")
+        if v:
+            self._send_alert_video(chat_id, int(v.group(1)), callback_id)
             return
         if data == "pkg:got":
             self.telegram.answer_button(callback_id, "Got it")
