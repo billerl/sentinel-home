@@ -107,6 +107,11 @@ class SamsungTVDriver:
         self.live_url: Optional[str] = None  # Sentinel's page on the home network (SmartSwitches.set_live_url)
         self.ir_power: Optional[Callable[[], bool]] = None  # a BroadLink's taught TV Power button: True = pressed
         self._ir_on_at: Dict[str, float] = {}  # TV address -> when the infrared button switched it on
+        # One on/off at a time per TV. Two at once (a second tap, or the phone and a voice request) both pressed
+        # Power: the TV came on and the second press switched it straight back off (2026-11-19 21:19, two
+        # infrared presses 12 s apart; 2026-11-25 14:05, two network presses). The second now waits for the
+        # first and then finds the TV already on.
+        self._set_locks: Dict[str, threading.Lock] = {}
         self._before_live: Dict[str, str] = {}  # TV address -> the app that was on when the cameras came up
         self._page_lock = threading.Lock()
         self._page: Dict[str, Dict[str, Any]] = {}  # TV address -> what its camera page should show (page_poll)
@@ -481,6 +486,12 @@ class SamsungTVDriver:
         return self._info(mac, self._tvs[mac], bool(self._tvs[mac].get("on_since")))
 
     def set(self, host: str, child_id: Optional[str], on: bool) -> None:
+        with self._lock:
+            lock = self._set_locks.setdefault(host, threading.Lock())
+        with lock:
+            self._set(host, on)
+
+    def _set(self, host: str, on: bool) -> None:
         mac, tv = self._tv(host)
         if mac is None:
             raise OSError("unknown TV")

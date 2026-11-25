@@ -1004,6 +1004,34 @@ class TestSamsungDriver(unittest.TestCase):
             self.drv.set("192.168.1.60", None, True)
         self.assertEqual(pressed, ["ir"])
 
+    def test_two_requests_at_once_press_power_once(self):
+        # A second tap (or the phone and a voice request together) while the first was still turning the TV on:
+        # both pressed Power and the second switched it straight back off (2026-11-19 21:19, 2026-11-25 14:05).
+        import threading as _th
+        self.drv._wake = lambda mac, host: self.log.append("wake")  # deeply asleep: the infrared button
+        pressed, inside, go = [], _th.Event(), _th.Event()
+
+        def ir():
+            pressed.append("ir")
+            inside.set()
+            go.wait(5)  # (the second request arrives while this one is still busy)
+            self.net = self.picture = True
+            return True
+        self.drv.ir_power = ir
+        with mock.patch("sentinel.engine.samsung_tv.WAKE_SECONDS", 0), \
+                mock.patch("sentinel.engine.samsung_tv.IR_BOOT_SECONDS", 0):
+            first = _th.Thread(target=self.drv.set, args=("192.168.1.60", None, True))
+            first.start()
+            self.assertTrue(inside.wait(5))
+            second = _th.Thread(target=self.drv.set, args=("192.168.1.60", None, True))
+            second.start()
+            go.set()
+            first.join(5)
+            second.join(5)
+        self.assertEqual(pressed, ["ir"])
+        self.assertNotIn(("KEY_POWER",), self.log)
+        self.assertTrue(self.picture)
+
     def test_found_at_a_new_address(self):
         # the router gave the TV a new address after a deep sleep (2026-11-10): .55 -> .245
         self.net = True
