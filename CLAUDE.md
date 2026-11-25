@@ -65,7 +65,8 @@ If `CLAUDE.local.md` exists (git-ignored), read it too: it holds the notes for o
   stickiness, and guessed names are re-checked by daylight.
 - Templates are read from disk while Sentinel runs. A template that uses a new route (`url_for(...)`) or a
   new template variable breaks that page with "Internal Server Error" until the restart: restart straight
-  after such an edit, don't leave it while the tests run.
+  after such an edit, don't leave it while the tests run. And a page already opened once may keep showing its
+  old text after an edit (seen 2026-11-24, a renamed Home tile): any template change is only "live" after a restart.
 - In the web editors, never grow JS arrays by setting `.length` — the holes are sent as `null` (this
   once named a zone "None"). Server-side cleaners must treat non-strings as "".
 
