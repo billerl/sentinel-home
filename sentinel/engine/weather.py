@@ -124,6 +124,7 @@ class WeatherService:
             tmp = self.cache_path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump({"place": place, "data": data, "fetched_at": fetched_at}, f)
+            os.chmod(tmp, 0o600)  # (it has the home's map position)
             os.replace(tmp, self.cache_path)
         except (OSError, TypeError, ValueError) as e:
             app_logger.log("warning", "weather_cache_failed", error_message=str(e)[:200], component="weather",
