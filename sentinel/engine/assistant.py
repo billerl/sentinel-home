@@ -18,6 +18,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -30,6 +31,8 @@ WEB_TIMEOUT_SECONDS = 150  # a spoken question that needs a web search or two fi
 WEB_MAX_TURNS = 6  # search, read the results, maybe search again, answer
 MAX_EVENT_LINES = 150
 EVENT_HOURS = 48
+ONLINE_CHECK_S = 3  # how long to wait for Anthropic's address before calling the internet down
+ONLINE_CACHE_S = 60
 WORK_DIR = os.path.join(os.path.expanduser("~"), ".cache", "sentinel-assistant")  # no CLAUDE.md above it
 # Sentinel's own long-lived sign-in key (made with `claude setup-token`, private file). With it, Sentinel no
 # longer shares the interactive Claude Code login, so that login expiring or being refreshed can't break it.
@@ -196,6 +199,32 @@ class Assistant:
         self._day = ""
         self._used = 0
         self.last_error = ""
+        self._online: Tuple[float, bool] = (0.0, True)
+
+    def online(self) -> bool:
+        """Can Anthropic be reached? A quick look (a few seconds, remembered a minute), so that with the internet down
+        a question goes straight to the offline helper instead of waiting out Claude's own retries (up to 90 s)."""
+        if self._run is not subprocess.run:  # (a test's stand-in for claude: no real network either)
+            return True
+        now = time.time()
+        if now - self._online[0] < ONLINE_CACHE_S:
+            return self._online[1]
+        seen: List[bool] = []
+
+        def probe():
+            try:
+                socket.create_connection(("api.anthropic.com", 443), timeout=ONLINE_CHECK_S).close()
+                seen.append(True)
+            except OSError:
+                pass
+
+        t = threading.Thread(target=probe, name="assistant-online", daemon=True)  # (name lookups ignore timeouts)
+        t.start()
+        t.join(ONLINE_CHECK_S + 0.5)
+        self._online = (now, bool(seen))
+        if not seen:
+            app_logger.log("info", "assistant_offline", component="assistant", action="online")
+        return bool(seen)
 
     def enabled(self) -> bool:
         return bool(self.settings.get("assistant_enabled"))
@@ -241,6 +270,9 @@ class Assistant:
         claude = find_claude(str(self.settings.get("assistant_claude_path") or ""))
         if not claude:
             self.last_error = "the claude command isn't installed"
+            return None
+        if not self.online():
+            self.last_error = "the internet seems to be down"
             return None
         if not self._take_slot():
             self.last_error = f"today's limit of {self._limit()} Claude questions is used up"

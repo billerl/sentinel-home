@@ -1,0 +1,16 @@
+# ~/.config/systemd/user/offline-library.service: the offline library (kiwix-serve), on 127.0.0.1 only.
+# Sentinel shows it to signed-in family at /library. Set the folder and this repo's path below.
+[Unit]
+Description=Offline library (Kiwix), local only; Sentinel shows it at /library
+
+[Service]
+Environment="OFFLINE_LIBRARY_DIR=/media/you/BigDrive/Offline Library"
+ExecStartPre=/path/to/sentinel-home/tools/offline/refresh-library.sh
+ExecStart=%h/.local/opt/kiwix/kiwix-serve --address=127.0.0.1 --port=8097 --urlRootLocation=/library --monitorLibrary --library %h/.local/share/offline-library/library.xml
+Nice=10
+IOSchedulingClass=idle
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=default.target

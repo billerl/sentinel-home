@@ -550,6 +550,27 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   Xena" adds "Heads up: Xena's collar hasn't sent a location since 6:38am, so the map shows where Xena was then, not
   now." Spoken too: the outing command speaks the first sentence plus any "Heads up" sentence. Why: Jarvis said
   "watching Xena" over a 5-hour-old fix while the collar answered the base but had no GPS fix.
+- **Offline helper** (2026-11-26, the user: "in a network outage ... an AI survival / home remedy / edible plant guide";
+  `sentinel/engine/offline.py`, `sentinel/web/routes/offline.py`, page `/offline` + 🧭 Home tile, install in
+  installation-guide.md "Offline helper", scripts + user units in `tools/offline/`). Two programs outside Sentinel, both
+  user services on 127.0.0.1: Ollama (`gemma3:4b`, also reads photos; Nice 15, CPUWeight 20, idle I/O, 3 threads per
+  request, unloads 5 min after the last question) and kiwix-serve (`--urlRootLocation=/library`, catalogue rebuilt
+  from checksum-verified `*.zim.ok` files every 15 min, `--monitorLibrary`). Sentinel passes `/library/...` through
+  behind its own sign-in (GET only, no cookies or other headers from the library server), so phones need no new port.
+  An answer: kiwix full-text search (natural questions work; tag-list pages skipped) -> the best-matching paragraphs
+  of the top 2 articles + snippets of the next 2, ~2000 characters (1100 spoken), because this CPU reads only ~30-35
+  tokens/s (a 1300-token prompt took 37-45 s) and writes ~8/s -> the AI answers with sources. Measured: ~70 s on the
+  page, ~35 s spoken. A photo is looked at once ("name the main thing", ~50 s), the library searched for that name and
+  the second pass reads the name, not the photo again (that doubled the time to 2 min 20). Safety: the system prompt
+  never calls a wild plant safe, and any question about eating wild things (or any photo) gets FIELD_GUIDE appended in
+  code, whatever the model wrote; serious health questions start with "Call 911". One question at a time; the page
+  starts a job and polls it (text streams in). **Fallback**: Telegram (`answer_with_assistant`) and voice
+  (`_offline_voice`) ask it when Claude gave nothing (turned off for voice, internet down, limit used up, error);
+  answers start "🧭 Offline:" and are never offered as commands. `Assistant.online()` looks for api.anthropic.com
+  first (3 s, remembered a minute) so an outage doesn't wait out the claude command's own retries. Setting
+  `offline_helper_enabled` (Settings → Telegram), `offline_ai_model`. Tests point it at port 9 (`_test_env`).
+  Not built yet (agreed with the user): the local AI working out loosely worded *commands* before Claude (wants real
+  examples from `telegram_not_understood` / voice logs first; controls stay on the fixed rules).
 - **Sortify** (first called "Where is it?"; renamed by the user the same day) (2026-11-24, a voice note: "tell you a component like my darts or a 10 millimeter socket ... later I
   could say, hey Jarvis, where is it"; `sentinel/engine/things.py`, `recorded_videos/things.db`, page `/things`, Home
   tile): one row per thing = name as said, where (the words after the name, kept whole: "in the red toolbox"), is/are,

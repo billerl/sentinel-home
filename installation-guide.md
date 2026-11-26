@@ -205,6 +205,35 @@ Run it as the user Sentinel runs as. Then plug the drive in and tap **Use this d
 
 ---
 
+## Offline helper (optional: answers with the internet down)
+
+A small AI on this PC (Ollama with Gemma 3 4B, which also reads photos) plus an offline library (Kiwix: Wikipedia
+with pictures, a medical encyclopedia, first aid, water, food, knots, repair and gardening guides). Sentinel shows
+the 🧭 **Offline helper** page and the library at `/library` to signed-in family, and Jarvis / Telegram use the AI
+when Claude can't answer. Both programs run as your own user's services on 127.0.0.1 only, so no port is opened.
+Without them Sentinel works as before (the page says the AI isn't running).
+
+Needs: ~5 GB on the PC for the AI and its model, ~130 GB for the library (a USB drive is fine; exFAT is fine), and
+memory to spare (the AI takes ~5 GB while answering, and leaves memory 5 minutes after the last question). It runs on
+the processor at low priority: on a 6-core i5-9500T an answer takes about a minute, a spoken one about half a minute.
+
+1. **AI** — download a release of Ollama for Linux (`ollama-linux-amd64.tar.zst` from github.com/ollama/ollama,
+   check it against the release's `sha256sum.txt`) and unpack it into `~/.local/opt/ollama`. Copy
+   `tools/offline/offline-ai.service` to `~/.config/systemd/user/`, then
+   `systemctl --user daemon-reload && systemctl --user enable --now offline-ai` and
+   `OLLAMA_HOST=127.0.0.1:11434 ~/.local/opt/ollama/bin/ollama pull gemma3:4b`.
+   (A different model: set `offline_ai_model` in settings.json while Sentinel is stopped.)
+2. **Library** — `kiwix-tools` for Linux (download.kiwix.org/release/kiwix-tools/) unpacked into `~/.local/opt/kiwix`.
+   Start the download: `nohup tools/offline/download.sh "/media/you/BigDrive/Offline Library" > download.log 2>&1 &`
+   (hours; safe to run again: it resumes and checks every file). Copy `tools/offline/offline-library.service` and
+   `offline-library-refresh.timer` to `~/.config/systemd/user/`, set the folder and this repo's path in them, add a
+   matching `offline-library-refresh.service` (Type=oneshot, same `OFFLINE_LIBRARY_DIR`, runs `refresh-library.sh`),
+   then enable both. Finished books appear in the library within 15 minutes.
+3. For the services to start at boot without anyone signed in: `sudo loginctl enable-linger $USER`.
+
+Check: `curl -s 127.0.0.1:11434/api/version` and `curl -s -o /dev/null -w "%{http_code}" 127.0.0.1:8097/library/`
+(200). Settings → Telegram has the switch for “use the offline helper when Claude can't answer”.
+
 ## Telegram setup (optional)
 
 1. Create a bot with `@BotFather`, copy the token.  

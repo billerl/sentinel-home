@@ -103,6 +103,7 @@ Each one is independent. Most are switched on from the web page's **Settings**; 
 | **Family game tiles** (a dice game, a darts scorer with a TV scoreboard) | Your own small game site on its own address | Settings → Remote access |
 | **Ask Claude** (questions Sentinel can't answer) | The Claude Code app signed in on this PC | Settings → Telegram |
 | **Sortify** (where is it?) ("my darts are in the garage cabinet" ... "where are my darts?"; or photograph a drawer and Claude lists what's in it) | Nothing extra (the photo part needs Ask Claude) | Home page |
+| **Offline helper** (ask with the internet down: first aid, water, wild plants from a photo, repairs; an offline Wikipedia with pictures and survival guides to read; Jarvis and Telegram use it when Claude can't answer) | Ollama + kiwix-serve on this PC, ~135 GB of disk (installation guide, "Offline helper") | Home page |
 | **Nightly backup** to a USB drive and/or another PC | The drive, or an SSH-reachable PC | Settings → Backup |
 
 Tiles for hardware you haven't got wait under **Add more** on the home page, and move up by themselves

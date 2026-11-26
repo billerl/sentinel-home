@@ -1,0 +1,22 @@
+# ~/.config/systemd/user/offline-ai.service: the offline helper's AI (Ollama), on 127.0.0.1 only.
+# Install: see installation-guide.md, "Offline helper".
+[Unit]
+Description=Offline AI (Ollama, local only) for Sentinel's offline helper
+
+[Service]
+ExecStart=%h/.local/opt/ollama/bin/ollama serve
+Environment=OLLAMA_HOST=127.0.0.1:11434
+Environment=OLLAMA_MODELS=%h/.local/share/ollama/models
+Environment=OLLAMA_KEEP_ALIVE=5m
+Environment=OLLAMA_NUM_PARALLEL=1
+Environment=OLLAMA_MAX_LOADED_MODELS=1
+# Sentinel (cameras, voice) always comes first.
+Nice=15
+CPUWeight=20
+IOSchedulingClass=idle
+MemoryMax=10G
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

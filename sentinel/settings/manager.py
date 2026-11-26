@@ -149,6 +149,10 @@ class SettingsManager:
             "assistant_daily_limit": 30,
             "assistant_model": "sonnet",
             "assistant_web_search": False,  # spoken questions may search the web (news, prices, scores); nothing else
+            # The offline helper (sentinel/engine/offline.py): a small AI on this PC + the offline library. Answers
+            # when Claude can't (off, internet down, limit used up); empty = the defaults in offline.py
+            "offline_helper_enabled": True,
+            "offline_ai_model": "",
             # "Hey Jarvis" voice assistant (sentinel/audio/voice.py) and where sounds play
             "voice_enabled": False,
             # Spotify (sentinel/engine/spotify.py): public Client ID; the refresh token is stored here too

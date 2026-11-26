@@ -1,0 +1,11 @@
+# ~/.config/systemd/user/offline-library-refresh.timer (+ a matching .service running refresh-library.sh with the
+# same OFFLINE_LIBRARY_DIR): adds newly downloaded books to the library every 15 minutes.
+[Unit]
+Description=Check for newly downloaded offline library books every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+
+[Install]
+WantedBy=timers.target

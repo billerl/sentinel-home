@@ -311,6 +311,9 @@ class Engine:
             self.settings, self.family.home_coords, self.news.tell_everyone,
             lambda text: self.audio.speak(text) if self.audio is not None else None, VIDEO_DIR)
         self.assistant = Assistant(self.settings)
+        from sentinel.engine.offline import OfflineHelper
+
+        self.offline = OfflineHelper(self.settings)  # a small AI on this PC + the offline library: no internet needed
         from sentinel.engine.things import PhotoScans
 
         self.thing_photos = PhotoScans(self.things, VIDEO_DIR, self.assistant.look, lambda: self.assistant.last_error)
@@ -1187,6 +1190,14 @@ class Engine:
             else:
                 self.telegram.reply_to_chat(chat_id, text_part or reply)
             return
+        if self.offline.ai_ready():  # no internet / limit used up: this PC's own AI still answers questions
+            self.telegram.reply_to_chat(chat_id, f"🧭 Claude couldn't help ({self.assistant.last_error}), so the "
+                                                 "offline helper on the PC is thinking (about a minute)…")
+            said, sources = self.offline.answer(text)
+            if said:
+                found = "".join(f"\n📖 {s['title']} ({s['book'] or 'Library'})" for s in sources[:3])
+                self.telegram.reply_to_chat(chat_id, f"🧭 Offline: {said}" + (f"\n{found}" if found else ""))
+                return
         fallback = ("Sorry, I didn't catch that. " + QUESTION_HELP if text.rstrip().endswith("?")
                     else self.telegram.commands_help_text())
         self.telegram.reply_to_chat(chat_id, f"(Claude couldn't help: {self.assistant.last_error}.)\n\n{fallback}")
@@ -1433,6 +1444,21 @@ class Engine:
 
         return VoiceReply(f"Should I {what}? Say yes or no.", run)
 
+    def _offline_voice(self, text: str, say: Callable[[str], None], earlier: Optional[List[Tuple[str, str]]] = None,
+                       said_first: bool = False):
+        """Claude couldn't answer (turned off, no internet, limit used up): this PC's own AI and the offline library
+        try. Questions only: its answer is spoken as it is, never offered as a command."""
+        from sentinel.audio.voice import VoiceReply, to_speech
+
+        if not self.offline.ai_ready():
+            return None
+        say("Claude can't help right now, so I'm asking the offline helper. This takes about half a minute."
+            if said_first else "Let me think. This takes about half a minute.")
+        said, _sources = self.offline.answer(text, voice=True, history=earlier or [])
+        if not said:
+            return None
+        return VoiceReply(to_speech(said, max_lines=6, max_chars=600))
+
     def answer_voice(self, text: str, say: Callable[[str], None], doubtful: bool = False):
         """What to say back to a spoken request: Sentinel's own answers first, then Claude (opt-in).
         doubtful (a follow-up that may be room talk): None instead of asking Claude."""
@@ -1523,7 +1549,8 @@ class Engine:
         if doubtful:
             return None
         if not self.assistant.enabled():
-            return VoiceReply("Sorry, I can't answer that one. Try asking who's home, or did anyone come by today.")
+            return self._offline_voice(text, say) or \
+                VoiceReply("Sorry, I can't answer that one. Try asking who's home, or did anyone come by today.")
         reply, earlier = None, []
         if self.assistant.remaining_today() > 0:
             say("Let me think.")
@@ -1538,7 +1565,8 @@ class Engine:
         else:
             self.assistant.last_error = "today's limit of Claude questions is used up"
         if not reply:
-            return VoiceReply(f"Sorry, I couldn't get an answer: {self.assistant.last_error}.")
+            return self._offline_voice(text, say, earlier, said_first=True) or \
+                VoiceReply(f"Sorry, I couldn't get an answer: {self.assistant.last_error}.")
         reply, more = split_more(reply)
         text_part, command = split_command(reply)
         spoken = to_speech(text_part or reply, max_lines=6, max_chars=600)

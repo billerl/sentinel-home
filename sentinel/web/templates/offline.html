@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#001525">
+  <title>Offline helper - Sentinel</title>
+  <style>
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; }
+    a { color: #00ffff; }
+    header { position: sticky; top: 0; z-index: 10; background: #1a1a1a; border-bottom: 1px solid #033; }
+    .bar { display: flex; align-items: center; gap: 12px; padding: 0 1rem; height: 48px; max-width: 760px; margin: 0 auto; }
+    .bar a { text-decoration: none; font-size: 0.9rem; }
+    h1 { font-size: 1.05rem; margin: 0; flex: 1; color: #00ffff; }
+    main { max-width: 760px; margin: 0 auto; padding: 14px 16px 60px; }
+    button, textarea { font: inherit; }
+    button { cursor: pointer; border-radius: 10px; border: 1px solid #1d3a44; background: #0c151c; color: #cfe; padding: 9px 14px; min-height: 42px; }
+    button.primary { background: #00ffff; border-color: #00ffff; color: #001; font-weight: 700; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    textarea { width: 100%; min-height: 76px; resize: vertical; background: #05090c; color: #fff; border: 1px solid #1d3a44; border-radius: 10px; padding: 11px 12px; }
+    textarea:focus, button:focus-visible { outline: 2px solid #00a8a8; outline-offset: 1px; }
+    .card { background: linear-gradient(180deg, #0c151c, #091015); border: 1px solid #16303a; border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; }
+    .buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .status { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.85rem; color: #6f97a5; margin-bottom: 12px; align-items: center; }
+    .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: #555; margin-right: 5px; }
+    .dot.on { background: #2fbf71; } .dot.off { background: #d65151; }
+    .msg { font-size: 0.85rem; color: #ffb3b3; min-height: 1.2em; margin: 6px 0 0; }
+    .hint { color: #6f97a5; font-size: 0.82rem; line-height: 1.45; }
+    .q { color: #ffd166; margin: 0 0 8px; overflow-wrap: anywhere; }
+    .a { white-space: pre-wrap; line-height: 1.5; overflow-wrap: anywhere; color: #fff; }
+    .step { color: #7fe7e7; font-size: 0.85rem; margin-top: 8px; }
+    .sources { margin-top: 10px; font-size: 0.85rem; }
+    .sources a { display: block; padding: 4px 0; }
+    .sources span { color: #6f97a5; }
+    .warn { border-color: #6b5320; background: #1a1408; color: #ffd98a; font-size: 0.88rem; line-height: 1.45; }
+    #shot { max-width: 100%; max-height: 40vh; border-radius: 10px; margin-bottom: 8px; display: block; }
+    h2 { font-size: 0.95rem; color: #7fe7e7; margin: 0 0 8px; }
+  </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
+</head>
+<body data-role="{{ role }}">
+  <header>
+    <div class="bar">
+      <a href="{{ url_for('index') }}">← Home</a>
+      <h1>Offline helper</h1>
+      <a href="/library/">📚 Library</a>
+    </div>
+  </header>
+  <main>
+    {% if library_down %}
+    <div class="card warn">The offline library isn't running on the PC right now (or its drive isn't plugged in). The helper below can still answer from memory.</div>
+    {% endif %}
+    <div class="status" id="status"><span><i class="dot" id="d-ai"></i>AI</span><span><i class="dot" id="d-lib"></i>Library</span><span id="s-note"></span></div>
+    <div class="card">
+      <textarea id="question" maxlength="1000" placeholder="Ask anything: how do I purify water? what helps a bee sting? how do I fix a dripping tap?"></textarea>
+      <div class="buttons">
+        <button type="button" class="primary" id="ask" onclick="ask()">Ask</button>
+        <button type="button" id="cam" onclick="pick('photo-camera')">📷 Photo of a plant or thing</button>
+        <button type="button" id="file" onclick="pick('photo-file')">🖼️ Choose a photo</button>
+        <button type="button" id="fresh" onclick="fresh()" hidden>New topic</button>
+      </div>
+      <input type="file" id="photo-camera" accept="image/*" capture="environment" hidden>
+      <input type="file" id="photo-file" accept="image/*" hidden>
+      <p class="msg" id="msg" role="alert"></p>
+    </div>
+    <div id="answers"></div>
+    <div class="card warn">⚠️ <b>Wild plants, berries and mushrooms:</b> never eat one because this helper named it. Deadly look-alikes are common. Check a field guide for your area or ask an expert first.<br>
+      <b>Emergencies:</b> call 911 first if you can. This is a small AI on the home PC: it can be wrong.</div>
+    <p class="hint">Works with the internet down, as long as the PC and the Wi-Fi router have power. Nothing you ask leaves the house.
+      Answers take about a minute (a photo a little longer): the PC is reading the library's pages. Jarvis uses it too when Claude can't be reached.
+      The <a href="/library/">📚 Library</a> has Wikipedia with pictures, a medical encyclopedia, first aid, water, food, knots, repair guides and more, to read yourself.</p>
+  </main>
+  <script>
+    var chat = [], poll = null;
+    function $(id) { return document.getElementById(id); }
+    function busy(on) { ["ask", "cam", "file"].forEach(function (id) { $(id).disabled = on; }); }
+    async function status() {
+      try {
+        var r = await fetch("/api/offline/status", { cache: "no-store" });
+        if (r.status === 401) { location.href = "/login?next=/offline"; return; }
+        var d = await r.json();
+        $("d-ai").className = "dot " + (d.ai ? "on" : "off"); $("d-lib").className = "dot " + (d.library ? "on" : "off");
+        $("s-note").textContent = !d.ai ? "The AI isn't running on the PC." : d.busy ? "Busy with a question…" : "";
+      } catch (e) {}
+    }
+    function card(question, photoUrl) {
+      var c = document.createElement("div"); c.className = "card";
+      if (photoUrl) { var im = document.createElement("img"); im.id = "shot"; im.src = photoUrl; im.alt = ""; c.appendChild(im); }
+      var q = document.createElement("p"); q.className = "q"; q.textContent = question || "What is this?"; c.appendChild(q);
+      var a = document.createElement("div"); a.className = "a"; c.appendChild(a);
+      var s = document.createElement("div"); s.className = "step"; s.textContent = "Starting…"; c.appendChild(s);
+      var src = document.createElement("div"); src.className = "sources"; c.appendChild(src);
+      $("answers").insertBefore(c, $("answers").firstChild);
+      return { a: a, s: s, src: src };
+    }
+    function watch(id, question, parts) {
+      clearInterval(poll);
+      poll = setInterval(async function () {
+        var d;
+        try { var r = await fetch("/api/offline/job/" + encodeURIComponent(id), { cache: "no-store" }); d = await r.json(); if (!r.ok) throw new Error(d.error || "Lost the answer."); }
+        catch (e) { clearInterval(poll); parts.s.textContent = e.message; busy(false); return; }
+        parts.a.textContent = d.text || ""; parts.s.textContent = d.state === "failed" ? "Sorry: " + d.error : (d.step || "");
+        if (d.state === "working") return;
+        clearInterval(poll); busy(false); status();
+        parts.src.textContent = "";
+        (d.sources || []).forEach(function (s) {
+          if (!/^\/library\/content\//.test(s.link)) return;
+          var a = document.createElement("a"); a.href = s.link; a.target = "_blank"; a.rel = "noopener";
+          a.textContent = "📖 " + s.title; var b = document.createElement("span"); b.textContent = " · " + (s.book || "Library");
+          a.appendChild(b); parts.src.appendChild(a);
+        });
+        if (d.state === "done") { chat.push([question || "What is this?", d.text]); chat = chat.slice(-3); $("fresh").hidden = false; }
+      }, 1500);
+    }
+    async function ask() {
+      var question = $("question").value.trim();
+      if (!question) { $("msg").textContent = "Type a question first."; $("question").focus(); return; }
+      $("msg").textContent = ""; busy(true);
+      try {
+        var r = await fetch("/api/offline/ask", { method: "POST", headers: { "Content-Type": "application/json", "X-Sentinel-Request": "1" },
+          body: JSON.stringify({ question: question, history: chat }) });
+        var d = {}; try { d = await r.json(); } catch (e) {}
+        if (!r.ok) throw new Error(d.error || "Couldn't ask.");
+        $("question").value = ""; watch(d.id, question, card(question));
+      } catch (e) { $("msg").textContent = e.message; busy(false); }
+    }
+    function pick(which) { $("msg").textContent = ""; $(which).value = ""; $(which).click(); }
+    function shrink(file) {  // the AI looks at 896 px anyway; a phone's photo is 5-12 MB
+      return new Promise(function (resolve, reject) {
+        var url = URL.createObjectURL(file), im = new Image();
+        im.onload = function () {
+          var k = Math.min(1, 1024 / Math.max(im.naturalWidth, im.naturalHeight));
+          var c = document.createElement("canvas"); c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+          c.getContext("2d").drawImage(im, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+          c.toBlob(function (b) { b ? resolve(b) : reject(new Error("no picture")); }, "image/jpeg", 0.85);
+        };
+        im.onerror = function () { URL.revokeObjectURL(url); reject(new Error("no picture")); };
+        im.src = url;
+      });
+    }
+    async function sendPhoto() {
+      var file = this.files && this.files[0]; if (!file) return;
+      var question = $("question").value.trim() || "What is this, and is any of it safe to eat or touch?";
+      $("msg").textContent = ""; busy(true);
+      try {
+        var blob = await shrink(file);
+        var r = await fetch("/api/offline/ask", { method: "POST", body: blob, headers: { "Content-Type": "image/jpeg",
+          "X-Sentinel-Request": "1", "X-Question": encodeURIComponent(question) } });
+        var d = {}; try { d = await r.json(); } catch (e) {}
+        if (!r.ok) throw new Error(d.error || "Couldn't send the photo.");
+        $("question").value = ""; watch(d.id, question, card(question, URL.createObjectURL(blob)));
+      } catch (e) { $("msg").textContent = e.message === "no picture" ? "That doesn't look like a photo." : e.message; busy(false); }
+    }
+    $("photo-file").addEventListener("change", sendPhoto); $("photo-camera").addEventListener("change", sendPhoto);
+    $("question").addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(); } });
+    function fresh() { chat = []; $("fresh").hidden = true; $("answers").textContent = ""; $("question").focus(); }
+    status(); setInterval(status, 15000);
+  </script>
+</body>
+</html>

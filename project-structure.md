@@ -13,6 +13,7 @@ sentinel-home/                         # repository root
 ├── handoff_summary.md                 # Cross-session continuity for contributors
 ├── tools/build_vehicle_prompts.py     # Rebuilds the CLIP vehicle-type text embeddings
 ├── tools/replay_detections.py        # Replays recorded clips through detection (tune thresholds)
+├── tools/offline/                   # Offline helper install: library download + catalogue scripts, user service files
 ├── tools/dev_harness.py              # Login-free test copy of the web UI on :18091 (dev only)
 ├── tools/spotify_web_login.sh        # One-time Spotify sign-in for the web-player speaker (run on the PC's screen)
 ├── tools/meshtastic_bridge.py         # Runs on the LoRa base (a Pi): pets' collar trackers -> /owntracks,
@@ -78,6 +79,8 @@ sentinel-home/                         # repository root
     │   ├── tv_mirror.py               # the remote's live picture of a Fire TV's screen (screenrecord -> JPEGs)
     │   ├── tasmota.py                 # plugs running Tasmota firmware as switches (local HTTP; network sweep)
     │   ├── wifi_motion.py             # Wi-Fi motion sensors (ESP32 CSI boards): find, poll, judge motion, daily CSVs
+    │   ├── offline.py                 # Offline helper: this PC's own AI (Ollama) reading the offline library (Kiwix); the
+    │   │                              #   fallback when Claude can't answer, and the /offline page's questions
     │   ├── things.py                  # Sortify (was "Where is it?"): where the family's things are kept (things.db), told and asked in plain words
     │   ├── house.py                   # House page: the 3D drawing of the home and yard (house.json), where each device sits,
     │   │                              #   and where the cameras' sightings stand on the plan (camera views, seen_things)
@@ -108,7 +111,8 @@ sentinel-home/                         # repository root
     │   ├── map_tiles.py               # Location map pictures fetched by Sentinel and kept a week (the TV browser was turned away)
     │   ├── routes/                    # Pages + API, one module per area, each with register(app, ctx):
     │   │                              #   signin, live, cameras, recordings, family, vehicles, switches (+ TV
-    │   │                              #   remote), spotify, sensors, house, routines, settings, mesh, recipes, notes, photos, printing, talk
+    │   │                              #   remote), spotify, sensors, house, routines, settings, mesh, recipes, notes, photos, printing, talk,
+    │   │                              #   things (Sortify), offline (Offline helper + the /library pages, passed through from kiwix-serve)
     │   ├── auth.py                    # Bcrypt login, sessions (saved as hashes in .web_sessions.json),
     │   │                              #   lockout / backoff, QR sign-in pairing for TVs
     │   ├── frame_broker.py            # Latest frame per camera; opaque ids; lazy JPEG encoding

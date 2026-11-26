@@ -21,3 +21,10 @@ _camera_light.STATE_FILE = os.path.join(_LOG_DIR, ".camera_light_on.json")
 import sentinel.engine.assistant as _assistant  # noqa: E402
 
 _assistant.TOKEN_FILE = os.path.join(_LOG_DIR, "claude-token")
+
+# Never ask this PC's real offline AI or library (a test would wait half a minute for a real answer): port 9 is
+# "discard", nothing answers there.
+import sentinel.engine.offline as _offline  # noqa: E402
+
+_offline.AI_URL = "http://127.0.0.1:9"
+_offline.LIBRARY_URL = "http://127.0.0.1:9/library"
