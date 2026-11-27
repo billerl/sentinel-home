@@ -13,7 +13,7 @@ sentinel-home/                         # repository root
 ├── handoff_summary.md                 # Cross-session continuity for contributors
 ├── tools/build_vehicle_prompts.py     # Rebuilds the CLIP vehicle-type text embeddings
 ├── tools/replay_detections.py        # Replays recorded clips through detection (tune thresholds)
-├── tools/offline/                   # Offline helper install: library download + catalogue scripts, user service files
+├── tools/offline/                   # Offline helper install: library download + catalogue scripts, local-guides list + get-guides.sh, user service files
 ├── tools/dev_harness.py              # Login-free test copy of the web UI on :18091 (dev only)
 ├── tools/spotify_web_login.sh        # One-time Spotify sign-in for the web-player speaker (run on the PC's screen)
 ├── tools/meshtastic_bridge.py         # Runs on the LoRa base (a Pi): pets' collar trackers -> /owntracks,

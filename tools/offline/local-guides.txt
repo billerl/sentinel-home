@@ -1,0 +1,66 @@
+# folder|file name|URL   (free/legal: government, public domain, or publisher's open-copy policy; checked 2026-11-27)
+Wildlife ID|Reptiles of Ohio (ODNR).pdf|https://dam.assets.ohio.gov/image/upload/ohiodnr.gov/documents/wildlife/backyard-wildlife/Pub%205354_Reptiles%20of%20Ohio%20Field%20Guide.pdf
+Wildlife ID|Amphibians of Ohio (ODNR).pdf|https://dam.assets.ohio.gov/image/upload/ohiodnr.gov/documents/wildlife/backyard-wildlife/Amphibians%20of%20Ohio%20Field%20Guide%20pub348.pdf
+Wildlife ID|Common Spiders of Ohio (ODNR).pdf|https://dam.assets.ohio.gov/image/upload/ohiodnr.gov/documents/wildlife/backyard-wildlife/Common%20Spiders%20of%20Ohio%20Field%20Guide%20pub5140.pdf
+Wildlife ID|Common Birds of Ohio (ODNR).pdf|https://dam.assets.ohio.gov/image/upload/ohiodnr.gov/documents/wildlife/backyard-wildlife/Common%20Birds%20of%20Ohio%20Field%20Guide%20pub414.pdf
+Wildlife ID|Trees of Ohio (ODNR).pdf|https://dam.assets.ohio.gov/image/upload/ohiodnr.gov/documents/wildlife/backyard-wildlife/Pub%205509%20Trees%20of%20Ohio%20Field%20Guide.pdf
+Wildlife ID|Spring Wildflowers of Ohio (ODNR).pdf|https://dam.assets.ohio.gov/image/upload/ohiodnr.gov/documents/wildlife/backyard-wildlife/Pub_5494_Spring%20Wildflowers%20of%20Ohio%20Field%20Guide.pdf
+Wildlife ID|Sport Fish of Ohio (ODNR).pdf|https://dam.assets.ohio.gov/image/upload/ohiodnr.gov/documents/wildlife/backyard-wildlife/Sport%20Fish%20of%20Ohio%20Field%20Guide%20pub334.pdf
+Wildlife ID|Common Owls of Ohio (ODNR).pdf|https://dam.assets.ohio.gov/image/upload/ohiodnr.gov/documents/wildlife/backyard-wildlife/Pub%205423%20-%20Common%20Owls%20of%20Ohio%20R0123_WEB.pdf
+Wildlife ID|Aquatic Invasive Species of Ohio (ODNR-OSU).pdf|https://dam.assets.ohio.gov/image/upload/ohiodnr.gov/documents/wildlife/fish-management/OSU_AIS_FieldGuide_Web.pdf
+Hunting Trapping Fishing|Ohio Hunting and Trapping Regulations 2026-27.pdf|https://dam.assets.ohio.gov/image/upload/ohiodnr.gov/documents/wildlife/laws-regs-licenses/Ohio%20Hunting%20and%20Trapping%20Regulations%20ENGLISH.pdf
+Hunting Trapping Fishing|Ohio Fishing Regulations 2026-27.pdf|https://dam.assets.ohio.gov/image/upload/ohiodnr.gov/documents/wildlife/laws-regs-licenses/OhioFishingRegs_English.pdf
+Hunting Trapping Fishing|Field Dressing Your Deer (ODNR).pdf|https://dam.assets.ohio.gov/image/upload/ohiodnr.gov/documents/wildlife/hunting-trapping/field%20dressing%20deer%20pub111.pdf
+Hunting Trapping Fishing|Chronic Wasting Disease - What You Need to Know (ODNR).pdf|https://dam.assets.ohio.gov/image/upload/ohiodnr.gov/documents/wildlife/wildlife-management/Chronic%20Wasting%20Disease%20-%20What%20You%20Need%20to%20Know.pdf
+Hunting Trapping Fishing|Deadfalls and Snares (Harding 1907).pdf|https://archive.org/download/deadfallssnaresb00harduoft/deadfallssnaresb00harduoft.pdf
+Wild Food and Poisonous Plants|Parsley Family - Poison Hemlock, Wild Parsnip, Hogweed (OSU ANR-102).pdf|https://u.osu.edu/osuweeds/files/2024/03/ANR-102-Parsley-Family-0ede9ceae29e5422.pdf
+Wild Food and Poisonous Plants|Common Macrofungi of Eastern Forests (USFS).pdf|https://research.fs.usda.gov/download/treesearch/38089.pdf
+Wild Food and Poisonous Plants|Mushroom Guide (Missouri Dept of Conservation).pdf|https://mdc.mo.gov/sites/default/files/2021-03/MushroomGuide.pdf
+Survival and First Aid|Survival FM 21-76 (US Army-USMC).pdf|https://archive.org/download/MManuals/UsMarineCorps-Survival-Mcrp3-02f.pdf
+Survival and First Aid|Survival ATP 3-50.21 (US Army 2018).pdf|https://irp.fas.org/doddir/army/atp3-50-21.pdf
+Survival and First Aid|Casualty Response and First Aid ATP 4-02.11 (US Army).pdf|https://armypubs.army.mil/epubs/DR_pubs/DR_a/ARN46159-ATP_4-02.11-000-WEB-1.pdf
+Survival and First Aid|Multi-Service Survival Manual.pdf|https://rmp.nc.gov/LCF/Publications/AL_Resources/Survival/Multi%20Service%20Survival%20Manual.pdf
+Survival and First Aid|Cold-Weather Survival TC 21-3 (US Army).pdf|https://archive.org/download/MManuals/Tc21-3UsArmySurvivalInColdWeather1986.pdf
+Survival and First Aid|Emergency Disinfection of Drinking Water (EPA).pdf|https://www.epa.gov/sites/default/files/2017-09/documents/emergency_disinfection_of_drinking_water_sept2017.pdf
+Survival and First Aid|Make Water Safe During an Emergency (CDC).pdf|https://www.cdc.gov/healthywater/emergency/pdf/make-water-safe-during-emergency-p.pdf
+Survival and First Aid|Are You Ready (FEMA 2020).pdf|https://www.ready.gov/sites/default/files/2021-03/are-you-ready-guide.pdf
+Food and Homestead|Wood Handbook (USFS).pdf|https://research.fs.usda.gov/download/treesearch/62200.pdf
+Food and Homestead|Heating With Firewood (Indiana DNR).pdf|https://www.in.gov/dnr/forestry/files/heatingwithfirewood.pdf
+Geology and Raw Materials|Flint - Ohio's Gemstone (ODNR EL-6).pdf|https://dam.assets.ohio.gov/image/upload/ohiodnr.gov/documents/geology/EL6_Getz_2023.pdf
+Geology and Raw Materials|Occurrence of Flint in Ohio (ODNR Bulletin 46).pdf|https://dam.assets.ohio.gov/image/upload/ohiodnr.gov/documents/geology/B46_Stout_1945.pdf
+Geology and Raw Materials|Rocks and Minerals Mined in Ohio (ODNR GeoFacts 11).pdf|https://dam.assets.ohio.gov/image/upload/ohiodnr.gov/documents/geology/GF11_Wolfe_2014.pdf
+Geology and Raw Materials|Bedrock Geology Map of Ohio (ODNR).pdf|https://dam.assets.ohio.gov/image/upload/ohiodnr.gov/documents/geology/MiscMap_BedrockGeology_2017.pdf
+Maps|Ohio OpenStreetMap data (Geofabrik, for OsmAnd-Organic Maps).osm.pbf|https://download.geofabrik.de/north-america/us/ohio-latest.osm.pbf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|fm.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_fm.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|01.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_01.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|02.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_02.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|03.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_03.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|04.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_04.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|05.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_05.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|06.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_06.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|07.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_07.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|08.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_08.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|09.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_09.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|10.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_10.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|11.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_11.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|12.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_12.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|13.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_13.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|14.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_14.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|15.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_15.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|16.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_16.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|17.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_17.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|18.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_18.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|19.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_19.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|20.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_20.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|21.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_21.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|22.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_22.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|23.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_23.pdf
+Survival and First Aid/Where There Is No Doctor (Hesperian 2025)|bm.pdf|https://hesperian.org/wp-content/uploads/pdf/en_wtnd_2025/en_wtnd_2025_bm.pdf
+Food and Homestead/USDA Complete Guide to Home Canning 2015|0 Intro.pdf|https://nchfp.uga.edu/papers/guide/INTRO_HomeCanrev0715.pdf
+Food and Homestead/USDA Complete Guide to Home Canning 2015|Guide 1.pdf|https://nchfp.uga.edu/papers/guide/GUIDE01_HomeCan_rev0715.pdf
+Food and Homestead/USDA Complete Guide to Home Canning 2015|Guide 2.pdf|https://nchfp.uga.edu/papers/guide/GUIDE02_HomeCan_rev0715.pdf
+Food and Homestead/USDA Complete Guide to Home Canning 2015|Guide 3.pdf|https://nchfp.uga.edu/papers/guide/GUIDE03_HomeCan_rev0715.pdf
+Food and Homestead/USDA Complete Guide to Home Canning 2015|Guide 4.pdf|https://nchfp.uga.edu/papers/guide/GUIDE04_HomeCan_rev0715.pdf
+Food and Homestead/USDA Complete Guide to Home Canning 2015|Guide 5.pdf|https://nchfp.uga.edu/papers/guide/GUIDE05_HomeCan_rev0715.pdf
+Food and Homestead/USDA Complete Guide to Home Canning 2015|Guide 6.pdf|https://nchfp.uga.edu/papers/guide/GUIDE06_HomeCan_rev0715.pdf
+Food and Homestead/USDA Complete Guide to Home Canning 2015|Guide 7.pdf|https://nchfp.uga.edu/papers/guide/GUIDE07_HomeCan_rev0715.pdf

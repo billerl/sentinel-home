@@ -240,6 +240,8 @@ the processor at low priority: on a 6-core i5-9500T an answer takes about a minu
    rules, survival manuals) go in folders inside `Offline Library/Local guides` on the same drive (or set
    `offline_guides_folder`). Sentinel reads their text into its own search index (needs `pdftotext`, from
    `poppler-utils`) within half an hour; they show on the 📄 Guides page.
+   `tools/offline/get-guides.sh "<drive>/Offline Library/Local guides"` fetches a starter set (one US state's free
+   field guides, hunting rules, Army manuals, canning; edit `tools/offline/local-guides.txt` for your own state).
 
 Check: `curl -s 127.0.0.1:11434/api/version` and `curl -s -o /dev/null -w "%{http_code}" 127.0.0.1:8097/library/`
 (200). Settings → Telegram has the switch for “use the offline helper when Claude can't answer”.
