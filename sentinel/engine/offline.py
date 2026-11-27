@@ -40,6 +40,11 @@ JOB_KEEP_S = 30 * 60
 FORAGING = re.compile(r"\b(eat|eats|eating|edible|poison\w*|toxic|forag\w*|berr(y|ies)|mushrooms?|fung(i|us)|"
                       r"wild (plant|green|onion|garlic|carrot|parsnip)s?|safe to (eat|chew|cook))\b", re.I)
 FIELD_GUIDE = "Never eat a wild plant, berry or mushroom on this answer alone: check a field guide for your area or ask an expert first."
+LOCAL = re.compile(r"\b(wild\w*|forag\w*|edible|plants?|berr(y|ies)|mushrooms?|fung(i|us)|trees?|wood|firewood|"
+                   r"flowers?|weeds?|hunt\w*|trap\w*|snares?|deer|venison|fish\w*|game|season|licen[cs]e|"
+                   r"regulations?|snakes?|spiders?|venom\w*|birds?|owls?|frogs?|turtles?|salamanders?|animals?|"
+                   r"flint|rocks?|stone|clay|minerals?|geolog\w*|ohio|survival|survive|canning|preserv\w*)\b", re.I)
+GUIDE_HITS = {True: 2, False: 1}  # local PDF guide pages read per question (2 when it's their kind of question)
 HEALTH = re.compile(r"\b(hurt\w*|pain\w*|ache|burn(s|ed|t)?|bleed\w*|blood|sting\w*|bit(e|ten)|fever|sick\w*|"
                     r"illness|wound\w*|injur\w*|poison\w*|rash|itch\w*|medicine|medication|dose|cough\w*|"
                     r"vomit\w*|diarrh\w*|infect\w*|swollen|swelling|sprain\w*|fracture\w*|faint\w*|chok\w*|"
@@ -151,8 +156,9 @@ def clean_reply(text: str, voice: bool = False) -> str:
 
 
 class OfflineHelper:
-    def __init__(self, settings: Dict, fetch: Optional[Callable[..., bytes]] = None) -> None:
+    def __init__(self, settings: Dict, fetch: Optional[Callable[..., bytes]] = None, guides=None) -> None:
         self.settings = settings
+        self.guides = guides  # the local PDF guides (sentinel/engine/guides.py), or None
         self._fetch = fetch or self._http
         self._ready: Dict[str, Tuple[float, bool]] = {}
         self._books: Tuple[float, List[str]] = (0.0, [])
@@ -264,25 +270,32 @@ class OfflineHelper:
 
     def excerpts(self, question: str, budget: int) -> Tuple[str, List[Dict]]:
         """The library text the AI reads for this question, and the sources it came from: the encyclopedias and
-        guides first (the medical ones for a health question), then the best of everything (the Q&A sites too)."""
+        guides first (the medical ones for a health question), then the best of everything (the Q&A sites too).
+        The family's local PDF guides (guides.py) go first for their kind of question (wildlife, foraging, hunting,
+        fishing, trees, rocks...: the region's own field guides and rules), else one page of them after the books."""
         first = MEDICAL_BOOKS if HEALTH.search(question) else REFERENCE_BOOKS
+        local = bool(LOCAL.search(question)) and not HEALTH.search(question)
+        guides = self.guides.search(question, GUIDE_HITS[local]) if self.guides is not None else []
         picked = [b for b in self.books() if b.startswith(first)]
-        sources = self.search(question, ARTICLES, picked) if picked else []
+        books = self.search(question, ARTICLES, picked) if picked else []
+        sources = guides + books if local else books + guides
         for s in self.search(question):
-            if len(sources) >= SOURCES:
+            if len(sources) >= SOURCES + len(guides):
                 break
             if all(s["link"] != t["link"] for t in sources):
                 sources.append(s)
         if not sources:
             return "", []
-        per = budget // (ARTICLES + 1)
+        opened = [s for s in sources if "paragraphs" in s] + [s for s in sources if "paragraphs" not in s][:ARTICLES]
+        per = budget // max(len(opened), ARTICLES + 1)
         blocks = []
-        for i, s in enumerate(sources):
-            text = best_paragraphs(self.article(s["link"]), question, per) if i < ARTICLES else ""
+        for s in sources:
+            paragraphs = (s["paragraphs"] if "paragraphs" in s else self.article(s["link"])) if s in opened else []
+            text = best_paragraphs(paragraphs, question, per) if paragraphs else ""
             text = text or s["snippet"]
             if text:
                 blocks.append(f"[{s['book'] or 'Library'}] {s['title']}\n{text}")
-        return "\n\n".join(blocks)[:budget + 400], sources
+        return "\n\n".join(blocks)[:budget + 400], [{k: v for k, v in s.items() if k != "paragraphs"} for s in sources]
 
     # ---- the AI ----
     def _chat(self, messages: List[Dict], max_tokens: int, on_text: Optional[Callable[[str], None]] = None) -> str:

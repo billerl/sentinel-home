@@ -9,7 +9,7 @@ from __future__ import annotations
 import urllib.error
 import urllib.request
 
-from flask import Flask, Response, jsonify, render_template, request, stream_with_context
+from flask import Flask, Response, abort, jsonify, render_template, request, send_file, stream_with_context
 
 from sentinel.web.context import WebContext
 
@@ -68,6 +68,43 @@ def register(app: Flask, ctx: WebContext) -> None:
             return jsonify({"error": "unauthorized"}), 401
         job = engine.offline.job(job_id) if engine is not None else None
         return jsonify(job) if job is not None else (jsonify({"error": "That answer has timed out. Ask again."}), 404)
+
+    @app.route("/guides")
+    def guides_page():
+        """The local PDF guides by folder, or the pages that match a search."""
+        redir = _require_session()
+        if redir:
+            return redir
+        guides = getattr(getattr(engine, "offline", None), "guides", None)
+        if guides is None:
+            return "Sentinel isn't ready", 503
+        q = (request.args.get("q") or "").strip()[:200]
+        return render_template("guides.html", q=q, found=guides.search(q, 25) if q else [],
+                               books=[] if q else guides.listing(), folder=bool(guides.folder()),
+                               indexing=guides.indexing)
+
+    @app.route("/guides/page/<int:rowid>")
+    def guides_text(rowid: int):
+        """One PDF page's text (readable on any phone), with a link to the original page and its pictures."""
+        redir = _require_session()
+        if redir:
+            return redir
+        guides = getattr(getattr(engine, "offline", None), "guides", None)
+        page = guides.page(rowid) if guides is not None else None
+        if page is None:
+            abort(404)
+        return render_template("guides.html", page=page, q="", found=[], books=[], folder=True, indexing="")
+
+    @app.route("/guides/file/<path:rel>")
+    def guides_file(rel: str):
+        redir = _require_session()
+        if redir:
+            return redir
+        guides = getattr(getattr(engine, "offline", None), "guides", None)
+        path = guides.pdf_path(rel) if guides is not None else None
+        if path is None:
+            abort(404)
+        return send_file(path, mimetype="application/pdf", conditional=True)
 
     @app.route("/library/", defaults={"sub": ""})
     @app.route("/library/<path:sub>")

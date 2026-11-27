@@ -236,6 +236,10 @@ the processor at low priority: on a 6-core i5-9500T an answer takes about a minu
    matching `offline-library-refresh.service` (Type=oneshot, same `OFFLINE_LIBRARY_DIR`, runs `refresh-library.sh`),
    then enable both. Finished books appear in the library within 15 minutes.
 3. For the services to start at boot without anyone signed in: `sudo loginctl enable-linger $USER`.
+4. **Local guides (optional):** PDFs you want it to read (your state's wildlife field guides, hunting and fishing
+   rules, survival manuals) go in folders inside `Offline Library/Local guides` on the same drive (or set
+   `offline_guides_folder`). Sentinel reads their text into its own search index (needs `pdftotext`, from
+   `poppler-utils`) within half an hour; they show on the 📄 Guides page.
 
 Check: `curl -s 127.0.0.1:11434/api/version` and `curl -s -o /dev/null -w "%{http_code}" 127.0.0.1:8097/library/`
 (200). Settings → Telegram has the switch for “use the offline helper when Claude can't answer”.

@@ -110,7 +110,7 @@ class TestRoles(unittest.TestCase):
     def rules(self):
         """(endpoint, a URL for it, its methods) for every route, with stand-in values in the path."""
         stand_ins = {"person_id": 999, "place_id": 999, "vehicle_id": 999, "routine_id": 999, "recording_id": 999,
-                     "sighting_id": 999, "rid": 999, "note_id": 999, "thing_id": 999, "sid": "abc", "name": "x.jpg", "album_id": 999, "request_id": 999, "alert_id": 999, "z": 1, "x": 1, "y": 1, "filename": "icon.svg"}
+                     "sighting_id": 999, "rid": 999, "note_id": 999, "thing_id": 999, "sid": "abc", "name": "x.jpg", "album_id": 999, "request_id": 999, "alert_id": 999, "rowid": 999, "z": 1, "x": 1, "y": 1, "filename": "icon.svg"}
         for rule in self.server._app.url_map.iter_rules():
             args = {a: stand_ins.get(a, "x") for a in rule.arguments}
             yield rule.endpoint, rule.build(args)[1], rule.methods

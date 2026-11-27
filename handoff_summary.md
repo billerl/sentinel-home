@@ -578,6 +578,18 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   `offline_helper_enabled` (Settings → Telegram), `offline_ai_model`. Tests point it at port 9 (`_test_env`).
   Not built yet (agreed with the user): the local AI working out loosely worded *commands* before Claude (wants real
   examples from `telegram_not_understood` / voice logs first; controls stay on the fixed rules).
+- **Local guides** (2026-11-27, the user: "regional wildlife info for foraging, hunting, raw material resources"):
+  free PDFs (state wildlife field guides, hunting/fishing regulations, extension sheets, Army survival manuals, USDA
+  canning, geology bulletins) in folders under "Offline Library/Local guides" on the backup drive (setting
+  `offline_guides_folder`, else found on /media/<user>/*). Kiwix only reads .zim books and packing them into one
+  needs zim-tools (not installed), so `sentinel/engine/guides.py` indexes them itself: `pdftotext` per page (niced) ->
+  FTS5 table `pages` (porter stemming, bm25 with the title weighted) in recorded_videos/offline_guides.db, a cache
+  left out of the nightly backup; re-read only when a PDF's size/mtime changes, every 30 min in a thread. A folder whose
+  files have `.ok` markers (get-guides.sh) skips PDFs still without one (half-downloaded). `OfflineHelper.excerpts`
+  reads 2 guide pages first when the question is about wildlife/foraging/hunting/fishing/trees/rocks (LOCAL regex, not
+  a health question), else 1 after the books; their text comes from the index (no fetch). /guides lists them by
+  folder and searches; /guides/page/<rowid> shows a page's text (readable on any phone) with prev/next and the
+  original PDF at #page=N (/guides/file/<rel>, realpath-checked inside the folder). All USER role.
 - **Sortify** (first called "Where is it?"; renamed by the user the same day) (2026-11-24, a voice note: "tell you a component like my darts or a 10 millimeter socket ... later I
   could say, hey Jarvis, where is it"; `sentinel/engine/things.py`, `recorded_videos/things.db`, page `/things`, Home
   tile): one row per thing = name as said, where (the words after the name, kept whole: "in the red toolbox"), is/are,

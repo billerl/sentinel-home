@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#001525">
+  <title>{% if page %}{{ page.title }} - {% endif %}Guides - Sentinel</title>
+  <style>
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #000; color: #cfe; margin: 0; }
+    a { color: #00ffff; }
+    header { position: sticky; top: 0; z-index: 10; background: #1a1a1a; border-bottom: 1px solid #033; }
+    .bar { display: flex; align-items: center; gap: 12px; padding: 0 1rem; height: 48px; max-width: 760px; margin: 0 auto; }
+    .bar a { text-decoration: none; font-size: 0.9rem; white-space: nowrap; }
+    h1 { font-size: 1.05rem; margin: 0; flex: 1; color: #00ffff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    main { max-width: 760px; margin: 0 auto; padding: 14px 16px 60px; }
+    form { display: flex; gap: 8px; margin-bottom: 14px; }
+    input[type=search] { flex: 1; min-width: 0; font: inherit; background: #05090c; color: #fff; border: 1px solid #1d3a44; border-radius: 10px; padding: 10px 12px; }
+    button, .btn { font: inherit; cursor: pointer; border-radius: 10px; border: 1px solid #00ffff; background: #00ffff; color: #001; font-weight: 700; padding: 9px 14px; text-decoration: none; display: inline-block; }
+    .btn.plain { background: #0c151c; color: #cfe; border-color: #1d3a44; font-weight: 400; }
+    .card { background: linear-gradient(180deg, #0c151c, #091015); border: 1px solid #16303a; border-radius: 14px; padding: 12px 16px; margin-bottom: 12px; }
+    h2 { font-size: 0.95rem; color: #7fe7e7; margin: 0 0 8px; }
+    ul { list-style: none; margin: 0; padding: 0; }
+    li { padding: 6px 0; border-top: 1px solid #10242c; overflow-wrap: anywhere; }
+    li:first-child { border-top: 0; }
+    .muted { color: #6f97a5; font-size: 0.82rem; }
+    .snip { color: #cfe; font-size: 0.88rem; margin-top: 3px; line-height: 1.4; }
+    .text p { line-height: 1.55; margin: 0 0 0.8em; overflow-wrap: anywhere; color: #fff; }
+    .nav { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+    .warn { border-color: #6b5320; background: #1a1408; color: #ffd98a; font-size: 0.88rem; line-height: 1.45; }
+  </style>
+  <link rel="stylesheet" href="/static/roles.css?v=1">
+</head>
+<body data-role="{{ role }}">
+  <header>
+    <div class="bar">
+      <a href="{{ url_for('offline_page') }}">← Helper</a>
+      <h1>{% if page %}{{ page.title }}{% else %}Local guides{% endif %}</h1>
+      <a href="/library/">📚 Library</a>
+    </div>
+  </header>
+  <main>
+    {% if page %}
+      <p class="muted">{{ page.book }} · page {{ page.page }} of {{ page.pages }}</p>
+      <div class="nav">
+        <a class="btn" href="{{ url_for('guides_file', rel=page.rel) }}#page={{ page.page }}" target="_blank" rel="noopener">📄 Original page with pictures</a>
+        {% if page.prev %}<a class="btn plain" href="{{ url_for('guides_text', rowid=page.prev) }}">← Page {{ page.page - 1 }}</a>{% endif %}
+        {% if page.next %}<a class="btn plain" href="{{ url_for('guides_text', rowid=page.next) }}">Page {{ page.page + 1 }} →</a>{% endif %}
+      </div>
+      <div class="card text">{% for p in page.paragraphs %}<p>{{ p }}</p>{% endfor %}</div>
+      <p class="muted">This is the page's text, taken from the PDF. Pictures, tables and layout are only in the original.</p>
+    {% else %}
+      <form method="get" action="{{ url_for('guides_page') }}">
+        <input type="search" name="q" value="{{ q }}" placeholder="Search the guides: copperhead, morel, deer season…" aria-label="Search the guides">
+        <button type="submit">Search</button>
+      </form>
+      {% if not folder %}
+        <div class="card warn">The guides' folder isn't there. Is the backup drive plugged in? (It looks for “Offline Library/Local guides” on it.)</div>
+      {% endif %}
+      {% if indexing %}<p class="muted">Reading new guides now ({{ indexing }})… more will show up soon.</p>{% endif %}
+      {% if q %}
+        <div class="card">
+          <h2>Pages that match “{{ q }}”</h2>
+          {% if found %}<ul>
+            {% for f in found %}<li><a href="{{ f.link }}">{{ f.title }}</a> <span class="muted">· {{ f.book }}</span>
+              <div class="snip">{{ f.snippet }}</div></li>{% endfor %}
+          </ul>{% else %}<p class="muted">Nothing matched. Try one word, like the animal's or plant's name.</p>{% endif %}
+        </div>
+        <p><a href="{{ url_for('guides_page') }}">All guides</a></p>
+      {% else %}
+        {% for b in books %}
+          <div class="card">
+            <h2>{{ b.book }}</h2>
+            <ul>{% for f in b.files %}<li>{% if f.first %}<a href="{{ url_for('guides_text', rowid=f.first) }}">{{ f.title }}</a>{% else %}{{ f.title }}{% endif %}
+              <span class="muted">· {{ f.pages }} pages · <a href="{{ url_for('guides_file', rel=f.rel) }}" target="_blank" rel="noopener">PDF</a></span></li>{% endfor %}</ul>
+          </div>
+        {% else %}
+          {% if folder %}<p class="muted">No guides read yet.</p>{% endif %}
+        {% endfor %}
+        <div class="card warn">⚠️ Never eat a wild plant, berry or mushroom because of a picture here alone: check with someone who knows. Hunting and fishing rules change every year: check the date on the cover.</div>
+      {% endif %}
+    {% endif %}
+  </main>
+</body>
+</html>

@@ -97,6 +97,7 @@ ACCESS: Dict[str, Rule] = {
     "api_recipes_can_make": USER, "api_recipes_cooking": USER, "api_recipes_timer": USER,
     # notes: private ones are their writer's alone, whatever the role (decided in sentinel/engine/notes.py)
     "offline_page": USER, "api_offline_status": USER, "api_offline_ask": USER, "api_offline_job": USER,
+    "guides_page": USER, "guides_text": USER, "guides_file": USER,
     "library_proxy": USER,
     "things_page": USER, "api_things": USER, "api_things_save": USER, "api_things_delete": USER,
     "api_things_photo": USER, "api_things_photo_state": USER, "api_things_photo_save": USER, "things_photo_file": USER,

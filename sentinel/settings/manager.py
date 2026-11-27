@@ -142,6 +142,8 @@ class SettingsManager:
             "backup_photos_remote": "",  # an SSH host (e.g. "oldpc" in ~/.ssh/config)
             # Telegram warning when a backup drive or computer would fill up within this many days (backup.py)
             "storage_warn_days": 60,
+            # The offline helper's PDF guides (guides.py); "" = "Offline Library/Local guides" on a plugged-in drive
+            "offline_guides_folder": "",
             "photos_shared_folders": "",  # the Photos page: backup-drive folders everyone sees (comma-separated)
             "package_cameras": "",
             "weather_alerts_enabled": True,

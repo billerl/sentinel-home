@@ -313,7 +313,11 @@ class Engine:
         self.assistant = Assistant(self.settings)
         from sentinel.engine.offline import OfflineHelper
 
-        self.offline = OfflineHelper(self.settings)  # a small AI on this PC + the offline library: no internet needed
+        from sentinel.engine.guides import Guides
+
+        # a small AI on this PC + the offline library (and the local PDF guides it indexes): no internet needed
+        self.offline = OfflineHelper(self.settings, guides=Guides(self.settings, VIDEO_DIR))
+        self.offline.guides.start()
         from sentinel.engine.things import PhotoScans
 
         self.thing_photos = PhotoScans(self.things, VIDEO_DIR, self.assistant.look, lambda: self.assistant.last_error)

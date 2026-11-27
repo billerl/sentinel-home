@@ -81,6 +81,8 @@ sentinel-home/                         # repository root
     │   ├── wifi_motion.py             # Wi-Fi motion sensors (ESP32 CSI boards): find, poll, judge motion, daily CSVs
     │   ├── offline.py                 # Offline helper: this PC's own AI (Ollama) reading the offline library (Kiwix); the
     │   │                              #   fallback when Claude can't answer, and the /offline page's questions
+    │   ├── guides.py                  # Local PDF guides (field guides, hunting rules, manuals) on the backup drive: their pages'
+    │   │                              #   text in an SQLite full-text index (offline_guides.db) for the offline helper and /guides
     │   ├── things.py                  # Sortify (was "Where is it?"): where the family's things are kept (things.db), told and asked in plain words
     │   ├── house.py                   # House page: the 3D drawing of the home and yard (house.json), where each device sits,
     │   │                              #   and where the cameras' sightings stand on the plan (camera views, seen_things)

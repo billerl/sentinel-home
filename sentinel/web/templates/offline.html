@@ -47,6 +47,7 @@
     <div class="bar">
       <a href="{{ url_for('index') }}">← Home</a>
       <h1>Offline helper</h1>
+      <a href="/guides">📄 Guides</a>
       <a href="/library/">📚 Library</a>
     </div>
   </header>
@@ -72,7 +73,8 @@
       <b>Emergencies:</b> call 911 first if you can. This is a small AI on the home PC: it can be wrong.</div>
     <p class="hint">Works with the internet down, as long as the PC and the Wi-Fi router have power. Nothing you ask leaves the house.
       Answers take about a minute (a photo a little longer): the PC is reading the library's pages. Jarvis uses it too when Claude can't be reached.
-      The <a href="/library/">📚 Library</a> has Wikipedia with pictures, a medical encyclopedia, first aid, water, food, knots, repair guides and more, to read yourself.</p>
+      The <a href="/library/">📚 Library</a> has Wikipedia with pictures, a medical encyclopedia, first aid, water, food, knots, repair guides and more, to read yourself.
+      <a href="/guides">📄 Guides</a> are the local field guides and rules (wildlife, plants, mushrooms, hunting, fishing, rocks), as PDFs with their pictures.</p>
   </main>
   <script>
     var chat = [], poll = null;
@@ -108,7 +110,7 @@
         clearInterval(poll); busy(false); status();
         parts.src.textContent = "";
         (d.sources || []).forEach(function (s) {
-          if (!/^\/library\/content\//.test(s.link)) return;
+          if (!/^\/library\/content\//.test(s.link) && !/^\/guides\/page\/\d+$/.test(s.link)) return;
           var a = document.createElement("a"); a.href = s.link; a.target = "_blank"; a.rel = "noopener";
           a.textContent = "📖 " + s.title; var b = document.createElement("span"); b.textContent = " · " + (s.book || "Library");
           a.appendChild(b); parts.src.appendChild(a);
