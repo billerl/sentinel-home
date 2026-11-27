@@ -203,6 +203,10 @@ echo 'polkit.addRule(function(a, s) { if (s.user == "'$USER'" && (a.id == "org.f
 
 Run it as the user Sentinel runs as. Then plug the drive in and tap **Use this drive for backups**.
 
+Each night Sentinel also notes how fast the drive, the PC and any backup computers fill up, and warns you on Telegram
+weeks ahead (Settings → Backup: "Warn this many days before a drive fills", 60 by default) or when one is under 10%
+free, saying what is using the space, so there's time to buy more storage.
+
 ---
 
 ## Offline helper (optional: answers with the internet down)
@@ -213,7 +217,9 @@ the 🧭 **Offline helper** page and the library at `/library` to signed-in fami
 when Claude can't answer. Both programs run as your own user's services on 127.0.0.1 only, so no port is opened.
 Without them Sentinel works as before (the page says the AI isn't running).
 
-Needs: ~5 GB on the PC for the AI and its model, ~130 GB for the library (a USB drive is fine; exFAT is fine), and
+Needs: ~5 GB on the PC for the AI and its model, ~130 GB for the essential library plus ~290 GB for the extras
+`download.sh` fetches after it (Survivor Library, a US map, Army manuals, old farming and trapping books; it always
+leaves 150 GB free on the drive, `RESERVE_GB`). A USB drive is fine; exFAT is fine. And
 memory to spare (the AI takes ~5 GB while answering, and leaves memory 5 minutes after the last question). It runs on
 the processor at low priority: on a 6-core i5-9500T an answer takes about a minute, a spoken one about half a minute.
 

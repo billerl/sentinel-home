@@ -298,6 +298,13 @@ Use this file as continuity across chats. At the **start** of a new session, ask
     Telegram chat. recovery/ on the drive only: `backup_extra` paths (default ~/.ssh + CLAUDE.local.md; JSON-only
     setting) copied at their original paths under files/, plus a generated RECOVERY.md (restore steps for a person
     or a new Claude).
+    Storage early warning (2026-11-27): after each nightly run `_watch_storage` notes free space (backup.json
+    `storage`: [day, free, total, library bytes], 60 nights) for the backup drive, this PC and the backup SSH hosts
+    (`df -PB1 .`). Filling rate = used minus the "Offline Library" folder's .zim files, over up to 30 days (needs 7);
+    Telegram warning when full within `storage_warn_days` (60) or under 10% free or video_full, at most weekly per
+    place, listing video / library's biggest books / everything else and the choices (bigger drive, fewer books,
+    fewer video days). Settings → Backup shows a 📈 line per place. tools/offline/download.sh keeps 150 GB free
+    (RESERVE_GB) so the library never squeezes out video.
   - Family timeline + personal logins (2026-10-31; restore point: tag `pre-timeline` +
     `../checkpoints/pre-timeline/`). `/timeline`: person chips, month calendar (days with points), the day's
     stops and drives (`sentinel/engine/timeline.py`: positions with acc <= 300 m clustered within 120 m;

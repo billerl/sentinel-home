@@ -20,8 +20,16 @@ Photos", outside "Sentinel Backup") was their only copy. Each night it's copied 
 (backup_photos_remote, an SSH host; into PHOTOS_DEST there), adding new files only: nothing there is ever
 deleted or replaced, so a photo deleted from the drive by mistake, or one the drive damages, is still whole on
 the other computer (the family's choice, 2026-11-17). The drive is only read.
+
+Storage early warning (2026-11-27): each night the free space of the backup drive, this PC and the backup computers
+is written down (backup.json "storage"), and the owner is told on Telegram, weeks ahead, when one would fill up
+at the rate it has been filling (storage_warn_days, default 60), or is under STORAGE_LOW free. The rate leaves out
+the offline library's books (LIBRARY_DIR: they arrive in one-off downloads, not steadily). The warning says what
+is using the drive (security video, the library's biggest books, photos) so the family can choose between more
+storage, fewer books and fewer days of video, while there's still time to buy a drive.
 """
 
+import datetime
 import json
 import os
 import re
@@ -51,6 +59,12 @@ SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
 PHOTOS_DEST = "PhotoBackup"
 ALBUMS_DIR = "Family Photos"  # the Photos page's albums (sentinel/engine/photos.py ALBUMS_DIR)
 ALBUMS_DEST = "FamilyPhotos"
+LIBRARY_DIR = "Offline Library"  # the offline helper's books (sentinel/engine/offline.py, tools/offline)
+STORAGE_KEPT = 60  # nights of free-space readings kept per place
+STORAGE_DAYS = 30  # the filling rate is measured over (up to) this many days...
+STORAGE_MIN_DAYS = 7  # ...once there are at least this many
+STORAGE_LOW = 0.10  # under this share free: warn whatever the rate
+STORAGE_WARN_EVERY = 7 * 86400  # the same place is warned about at most once a week
 PHOTOS_TIMEOUT = 6 * 3600  # (the first copy of a few hundred GB; later nights take minutes)
 README = """This drive holds Sentinel's nightly backup.
 
@@ -191,6 +205,65 @@ def size_text(n: float) -> str:
             return f"{n:.0f} {unit}" if unit in ("bytes", "KB") else f"{n:.1f} {unit}"
         n /= 1024
     return ""
+
+
+def _days_apart(a: str, b: str) -> int:
+    return (datetime.date.fromisoformat(b) - datetime.date.fromisoformat(a)).days
+
+
+def filling_rate(history: List[List[Any]]) -> Optional[float]:
+    """Bytes a day that the place has been filling up (negative: emptying), from its nightly readings
+    [day, free, total, library], over the last STORAGE_DAYS days; None until STORAGE_MIN_DAYS of readings.
+    The library's books are left out: they come in one-off downloads that would make the trend look alarming."""
+    if len(history) < 2:
+        return None
+    last = history[-1]
+    window = [h for h in history if _days_apart(h[0], last[0]) <= STORAGE_DAYS]
+    span = _days_apart(window[0][0], last[0])
+    if span < STORAGE_MIN_DAYS:
+        return None
+
+    def used(h):
+        return h[2] - h[1] - h[3]
+
+    return (used(last) - used(window[0])) / span
+
+
+def days_left(history: List[List[Any]]) -> Optional[float]:
+    """Days until the place is full at its filling rate; None when it isn't filling (or isn't measured yet)."""
+    rate = filling_rate(history)
+    if not history or rate is None or rate <= 0:
+        return None
+    return max(0.0, (history[-1][1] - DRIVE_RESERVE) / rate)
+
+
+def time_text(days: float) -> str:
+    if days < 14:
+        return f"about {max(1, round(days))} day" + ("" if round(days) <= 1 else "s")
+    if days < 91:
+        return f"about {round(days / 7)} weeks"
+    return f"about {round(days / 30.4)} months"
+
+
+def _tree_size(path: str) -> int:
+    total = 0
+    for top, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(top, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def _books(path: str) -> List[tuple]:
+    """The library's books, biggest first: (short name, bytes)."""
+    try:
+        found = [(e.name, e.stat().st_size) for e in os.scandir(path) if e.name.endswith(".zim") and e.is_file()]
+    except OSError:
+        return []
+    return sorted(((re.sub(r"_(?:[a-z]{2,3})_.*$", "", n).replace(".zim", ""), z) for n, z in found),
+                  key=lambda b: -b[1])
 
 
 class Backup:
@@ -351,6 +424,11 @@ class Backup:
         if drive is not None or remote:
             result["last_ok" if not problems else "last_failed"] = now
         self._save_state(**result)
+        try:
+            self._watch_storage(now, drive, result)
+        except Exception as e:  # (a warning that couldn't be worked out must not spoil the backup)
+            app_logger.log("error", "storage_check_failed", error_message=str(e)[:200], component="backup",
+                           action="storage")
         app_logger.log("error" if problems else "info", "backup_failed" if problems else "backup_done",
                        problems=problems or None, copied_mb=round(result.get("bytes", 0) / 1e6, 1),
                        video_days=result.get("video_days"), seconds=result["seconds"],
@@ -516,6 +594,90 @@ class Backup:
             return (out.stderr or f"rsync exit {out.returncode}").strip().splitlines()[-1][:120]
         return ""
 
+    # ---------------------------------------------------------------- storage
+    def _remote_df(self, host: str) -> Optional[tuple]:
+        """(free, total) bytes of the home folder's disk on an SSH host, or None."""
+        if not REMOTE_HOST.match(host):
+            return None
+        try:
+            out = self.run_cmd(SSH + [host, "df -PB1 ."], capture_output=True, text=True, timeout=60)
+            fields = out.stdout.strip().splitlines()[-1].split() if out.returncode == 0 and out.stdout else []
+            return (int(fields[3]), int(fields[1])) if len(fields) >= 4 else None
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return None
+
+    def _places(self, drive: Optional[Dict[str, Any]]) -> List[tuple]:
+        """(key, name, free, total, library bytes) for each place whose free space is watched."""
+        places = []
+        if drive is not None:
+            u = shutil.disk_usage(drive["mount"])
+            library = sum(b[1] for b in _books(os.path.join(drive["mount"], LIBRARY_DIR)))
+            places.append(("drive", f"The backup drive ({drive['label']})" if drive["label"] else "The backup drive",
+                           u.free, u.total, library))
+        u = shutil.disk_usage(self.data_dir)
+        places.append(("pc", "This PC's own drive", u.free, u.total, 0))
+        for host in dict.fromkeys(str(self.settings.get(k) or "").strip()
+                                  for k in ("backup_photos_remote", "backup_remote")):
+            df = self._remote_df(host) if host else None
+            if df:
+                places.append((f"host:{host}", f"The backup computer \"{host}\"", df[0], df[1], 0))
+        return places
+
+    def _watch_storage(self, now: float, drive: Optional[Dict[str, Any]], result: Dict[str, Any]) -> None:
+        day = time.strftime("%Y-%m-%d", time.localtime(now))
+        state = self.state()
+        history: Dict[str, list] = state.get("storage") or {}
+        warned: Dict[str, float] = state.get("storage_warned") or {}
+        warn_days = int(self.settings.get("storage_warn_days", 60))
+        for key, name, free, total, library in self._places(drive):
+            readings = [h for h in history.get(key, []) if h[0] != day] + [[day, free, total, library]]
+            history[key] = readings[-STORAGE_KEPT:]
+            left = days_left(history[key])
+            low = free < STORAGE_LOW * total
+            soon = left is not None and left <= warn_days
+            video_full = key == "drive" and bool(result.get("video_full"))
+            if not (low or soon or video_full) or now - warned.get(key, 0) < STORAGE_WARN_EVERY:
+                continue
+            warned[key] = now
+            self.warn(self._storage_message(key, name, free, total, left, video_full, drive))
+            app_logger.log("warning", "storage_low", place=key, free_gb=round(free / 1e9, 1),
+                           days_left=None if left is None else round(left), component="backup", action="storage")
+        self._save_state(storage=history, storage_warned=warned)
+
+    def _storage_message(self, key, name, free, total, left, video_full, drive) -> str:
+        text = f"💾 {name} is filling up: {size_text(free)} free of {size_text(total)}"
+        text += (f". At the rate it has been filling, it will be full in {time_text(left)}." if left is not None
+                 else ".")
+        if video_full:
+            text += " It's already so full that older security video is being left out of the backup."
+        if key != "drive" or drive is None:
+            return text + " Ask Claude to find what can be cleared, or plan more storage."
+        keep = int(self.settings.get("backup_video_days", 3))
+        video = _tree_size(os.path.join(drive["mount"], FOLDER, "videos"))
+        books = _books(os.path.join(drive["mount"], LIBRARY_DIR))
+        library = sum(b[1] for b in books)
+        rest = max(0, total - free - video - library)
+        text += f"\n\nWhat's on it:\n• Security video: {size_text(video)} ({keep} days kept)"
+        if books:
+            text += (f"\n• Offline library: {size_text(library)} (biggest: "
+                     + ", ".join(f"{n} {size_text(z)}" for n, z in books[:3]) + ")")
+        text += f"\n• Photos and everything else: {size_text(rest)}"
+        text += ("\n\nYour choices: get a bigger or second drive, remove some offline library books, or keep fewer "
+                 "days of video (Settings → Backup). Tell Claude which. Until then the video comes first: the library "
+                 "downloads always leave room for it.")
+        return text
+
+    def storage_status(self) -> List[Dict[str, Any]]:
+        """For the Settings page: each watched place's free space and how long it lasts at its filling rate."""
+        out = []
+        for key, readings in (self.state().get("storage") or {}).items():
+            if not readings:
+                continue
+            rate = filling_rate(readings)
+            out.append({"place": key, "free": readings[-1][1], "total": readings[-1][2],
+                        "measuring": rate is None, "days_left": days_left(readings)})
+        return out
+
     # ----------------------------------------------------------------- status
     def status(self) -> Dict[str, Any]:
         """For the Settings page: the drives plugged in, last night's result, and what's running now."""
@@ -537,4 +699,6 @@ class Backup:
             "photos": str(self.settings.get("backup_photos_folder") or ""),
             "photos_remote": str(self.settings.get("backup_photos_remote") or ""),
             "photos_ok": state.get("photos_ok"),
+            "storage": self.storage_status(),
+            "storage_warn_days": int(self.settings.get("storage_warn_days", 60)),
         }

@@ -166,6 +166,7 @@ SETTINGS_SCHEMA: Dict[str, Callable[[Any], Any]] = {
     "backup_enabled": _bool,
     "backup_time": _hhmm,
     "backup_video_days": _num(0, 60, int),
+    "storage_warn_days": _num(7, 365, int),
     "backup_remote": _backup_remote,
     # the backup drive's top-level folders everyone with a login sees on the Photos page (admins choose)
     "photos_shared_folders": lambda v: ",".join(dict.fromkeys(

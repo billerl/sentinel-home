@@ -29,6 +29,7 @@ class _Disks:
     def __init__(self, mount, mounted=True):
         self.mount, self.mounted, self.calls = mount, mounted, []
         self.remote_listing = ""
+        self.df = ""
 
     def __call__(self, cmd, **_kw):
         self.calls.append(cmd)
@@ -46,6 +47,8 @@ class _Disks:
         if cmd[0] == "udisksctl":
             return SimpleNamespace(returncode=1, stdout="", stderr="Not authorized to perform operation")
         if cmd[0] == "ssh":
+            if cmd[-1].startswith("df "):
+                return SimpleNamespace(returncode=0 if self.df else 1, stdout=self.df, stderr="")
             return SimpleNamespace(returncode=0, stdout=self.remote_listing if "ls" in cmd[-1] else "", stderr="")
         if cmd[0] == "rsync":
             return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -325,6 +328,119 @@ class TestBackup(unittest.TestCase):
         self.assertEqual(len(self.warnings), 1)
         self.assertIn("something odd", self.warnings[0])
         self.assertFalse(self.backup.due(self.now + 5))
+
+
+
+GB = 10 ** 9
+
+
+class TestStorageWarning(unittest.TestCase):
+    """Free space is noted each night, and the owner is told weeks before a drive would fill up."""
+
+    _use_stick = TestBackup._use_stick
+
+    def setUp(self):
+        TestBackup.setUp(self)
+        self.root = self._use_stick()
+        self.free = 250 * GB
+        real = shutil.disk_usage
+
+        def usage(path):
+            if path.startswith(self.stick):
+                return real(path)._replace(total=1000 * GB, used=1000 * GB - self.free, free=self.free)
+            return real(path)
+
+        patcher = mock.patch.object(B.shutil, "disk_usage", usage)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def nights(self, n, drop=0, before=None):
+        for i in range(n):
+            if before:
+                before(i)
+            self.backup.run()
+            self.now += 86400
+            self.free -= drop
+
+    def storage_warnings(self):
+        return [w for w in self.warnings if w.startswith("💾")]
+
+    def test_warns_weeks_before_the_drive_fills(self):
+        self.settings["backup_video_days"] = 14
+        os.makedirs(os.path.join(self.stick, B.LIBRARY_DIR))
+        with open(os.path.join(self.stick, B.LIBRARY_DIR, "survivorlibrary.com_en_all_2026-09.zim"), "wb") as f:
+            f.truncate(5 * GB)  # (sparse: takes no real space)
+        self.nights(7, drop=5 * GB)  # filling 5 GB a night, but not a week of readings yet
+        self.assertEqual(self.storage_warnings(), [])
+        status = self.backup.status()["storage"]
+        self.assertTrue(next(p for p in status if p["place"] == "drive")["measuring"])
+        self.nights(1, drop=5 * GB)  # a week of readings: 215 GB free at 5 GB a day = 43 days
+        warning, = self.storage_warnings()
+        self.assertIn("The backup drive (STICK) is filling up", warning)
+        self.assertIn("full in about 6 weeks", warning)
+        self.assertIn("Security video", warning)
+        self.assertIn("(14 days kept)", warning)
+        self.assertIn("Offline library: 4.7 GB (biggest: survivorlibrary.com 4.7 GB)", warning)
+        self.assertIn("bigger or second drive", warning)
+        self.nights(6, drop=5 * GB)
+        self.assertEqual(len(self.storage_warnings()), 1)  # once a week, not every night
+        self.nights(1, drop=5 * GB)
+        self.assertEqual(len(self.storage_warnings()), 2)
+        drive = next(p for p in self.backup.status()["storage"] if p["place"] == "drive")
+        self.assertAlmostEqual(drive["days_left"], 36, delta=0.5)
+
+    def test_library_downloads_dont_count_as_filling(self):
+        folder = os.path.join(self.stick, B.LIBRARY_DIR)
+        os.makedirs(folder)
+
+        def download(i):
+            if i == 3:  # a 200 GB book arrives
+                with open(os.path.join(folder, "big_en_all.zim"), "wb") as f:
+                    f.truncate(200 * GB)
+                self.free -= 200 * GB
+        self.free = 500 * GB
+        self.nights(10, before=download)
+        self.assertEqual(self.storage_warnings(), [])
+        drive = next(p for p in self.backup.status()["storage"] if p["place"] == "drive")
+        self.assertFalse(drive["measuring"])
+        self.assertIsNone(drive["days_left"])  # not filling up
+
+    def test_nearly_full_warns_straight_away(self):
+        self.free = 60 * GB
+        self.nights(1)
+        warning, = self.storage_warnings()
+        self.assertIn("55.9 GB free of 931.3 GB.", warning)
+
+    def test_older_video_left_out_is_said(self):
+        warning = self.backup._storage_message("drive", "The backup drive", 50 * GB, 1000 * GB, None, True,
+                                               {"mount": self.stick, "label": "STICK"})
+        self.assertIn("older security video is being left out", warning)
+
+    def test_the_backup_computers_are_watched_too(self):
+        self.settings.update(backup_photos_folder="", backup_photos_remote="oldpc")
+        self.disks.df = ("Filesystem 1-blocks Used Available Use% Mounted on\n"
+                         f"/dev/sda2 {500 * GB} {460 * GB} {40 * GB} 92% /\n")
+        self.nights(1)
+        warning, = [w for w in self.storage_warnings() if "oldpc" in w]
+        self.assertIn('The backup computer "oldpc" is filling up: 37.3 GB free', warning)
+        self.assertIn("Ask Claude", warning)
+        self.assertIn("host:oldpc", [p["place"] for p in self.backup.status()["storage"]])
+
+    def test_a_reading_that_cant_be_worked_out_doesnt_spoil_the_backup(self):
+        with mock.patch.object(B.Backup, "_places", side_effect=RuntimeError("odd")):
+            result = self.backup.run()
+        self.assertEqual(result["problems"], [])
+
+    def test_filling_rate(self):
+        h = [["2026-11-01", 100, 1000, 0], ["2026-11-04", 70, 1000, 0]]
+        self.assertIsNone(B.filling_rate(h))  # under a week
+        h.append(["2026-11-11", 30, 1000, 0])
+        self.assertAlmostEqual(B.filling_rate(h), 7.0)
+        old = [["2026-09-01", 900, 1000, 0]] + h  # older than 30 days: left out
+        self.assertAlmostEqual(B.filling_rate(old), 7.0)
+        self.assertEqual(B.time_text(3), "about 3 days")
+        self.assertEqual(B.time_text(45), "about 6 weeks")
+        self.assertEqual(B.time_text(400), "about 13 months")
 
 
 if __name__ == "__main__":

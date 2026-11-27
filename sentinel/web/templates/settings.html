@@ -299,8 +299,10 @@
           <div class="field" style="flex: 0 1 160px"><span>At</span><input type="time" data-key="backup_time"></div>
           <div class="field" style="flex: 0 1 200px"><span>Days of video to include</span><input type="number" min="0" max="60" data-key="backup_video_days"></div>
           <div class="field" style="flex: 1 1 240px"><span>Also copy to another computer (SSH, optional)</span><input type="text" placeholder="e.g. backup-pi" data-key="backup_remote"></div>
+          <div class="field" style="flex: 0 1 220px"><span>Warn this many days before a drive fills</span><input type="number" min="7" max="365" data-key="storage_warn_days"></div>
         </div>
-        <p class="hint">Everything except the videos is about 1 GB. Each day of video is several GB, so a 128 GB drive holds about two weeks. The other computer only gets the databases, settings and photos, and needs this PC's SSH key.</p>
+        <p class="hint">Everything except the videos is about 1 GB. Each day of video is several GB, so a 128 GB drive holds about two weeks. The other computer only gets the databases, settings and photos, and needs this PC's SSH key.
+          Each night Sentinel also notes how fast the backup drive, this PC and the backup computers are filling up (not counting the offline library's books, which arrive in one-off downloads), and warns you on Telegram that many days ahead, or when one is under 10% free, saying what's using the space, so there's time to get more storage.</p>
         <div class="save-row"><button class="primary" onclick="saveSection('backup')">Save</button><span class="msg" id="msg-backup-save"></span></div>
       </div>
     </section>
@@ -651,7 +653,7 @@
       recording: ["recording_retention_enabled", "recording_retention_days", "recording_min_free_percent", "recording_motion_only_days",
                   "night_bug_start_hour", "night_bug_end_hour", "auto_reconnect_enabled",
                   "reconnect_interval_seconds", "feed_fps", "web.max_fps", "web.show_zones"],
-      backup: ["backup_enabled", "backup_time", "backup_video_days", "backup_remote"],
+      backup: ["backup_enabled", "backup_time", "backup_video_days", "backup_remote", "storage_warn_days"],
       photos: ["photos_shared_folders"],
       audio: ["volume", "speech_speed", "voice_id", "voice_jarvis_id", "audio_output", "voice_device", "audio_device", "music_device", "voice_enabled", "voice_wake_threshold", "voice_cameras", "voice_follow_up", "voice_quiet_commands"],
       access: ["remote_web_url", "remote_rdp_user", "games_url", "darts_url"],
@@ -836,6 +838,13 @@
       if (ours) lines.push("💾 Backup drive: " + (ours.label || ours.path) + ", " + gb(ours.free) + " free of " + gb(ours.size) + ".");
       if (b.remote) lines.push("🖥️ Copy to " + b.remote + ": " + (b.remote_ok ? "last made " + when(b.remote_ok) : "not made yet") + ".");
       if (b.photos && b.photos_remote) lines.push("🖼️ “" + b.photos + "” copied to " + b.photos_remote + ": " + (b.photos_ok ? "last made " + when(b.photos_ok) : "not made yet") + " (new photos added each night; nothing there is ever replaced or deleted).");
+      var names = { drive: "the backup drive", pc: "this PC's drive" };
+      (b.storage || []).forEach(function(p) {
+        var name = names[p.place] || "the backup computer " + p.place.replace(/^host:/, "");
+        var d = p.days_left, span = d == null ? "" : d < 14 ? Math.max(1, Math.round(d)) + " days" : d < 91 ? Math.round(d / 7) + " weeks" : Math.round(d / 30.4) + " months";
+        lines.push("📈 " + name.charAt(0).toUpperCase() + name.slice(1) + ": " + gb(p.free) + " free of " + gb(p.total) + ", " +
+          (p.measuring ? "still measuring how fast it fills (a week of nights)." : d == null ? "not filling up." : "full in about " + span + " at the rate it's been filling" + (d <= b.storage_warn_days ? " ⚠️" : "") + "."));
+      });
       $("bk-state").innerHTML = lines.map(esc).join("<br>");
       var html = "";
       b.drives.forEach(function(d) {
