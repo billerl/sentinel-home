@@ -233,6 +233,9 @@ class OfflineHelper:
         if not self.library_ready():
             return []
         pattern = " ".join(words(question)) or question  # ("how do I" and "?" only crowd the search)
+        # Named books, not "every English book": kiwix refuses a search across books whose languages differ, and
+        # a multi-language book ("_mul_", e.g. Low-Tech Magazine, "eng,fra,deu...") counts as English too.
+        books = books or [b for b in self.books() if "_mul_" not in b]
         q = urllib.parse.urlencode([("pattern", pattern[:200]), ("format", "xml"), ("pageLength", n + 16)] +
                                    ([("books.name", b) for b in books] if books else [("books.filter.lang", "eng")]))
         try:

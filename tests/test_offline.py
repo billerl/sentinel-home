@@ -40,8 +40,9 @@ def fake_fetch(asked):
         if "/catalog/v2/entries" in url:
             return (b'<feed><entry><link type="text/html" href="/library/content/wikipedia_en_all_maxi_2026-08"/></entry>'
                     b'<entry><link type="text/html" href="/library/content/mdwiki_en_all_maxi_2025-11"/></entry>'
-                    b'<entry><link type="text/html" href="/library/content/outdoors_en"/></entry></feed>')
-        if "/search?" in url and "books.name=mdwiki" in url:
+                    b'<entry><link type="text/html" href="/library/content/outdoors_en"/></entry>'
+                    b'<entry><link type="text/html" href="/library/content/lowtech_mul_all"/></entry></feed>')
+        if "/search?" in url and "books.name=mdwiki" in url and "outdoors_en" not in url:
             return SEARCH.replace(b"Water purification</title>", b"Burn</title>")
         if "/search?" in url:
             return SEARCH
@@ -92,7 +93,8 @@ class TestLibrary(unittest.TestCase):
         searches = [u for u in self.asked if "/search?" in u]
         self.assertIn("books.name=mdwiki_en_all_maxi_2025-11", searches[0])
         self.assertNotIn("wikipedia", searches[0])
-        self.assertNotIn("books.name", searches[1])  # then everything
+        self.assertIn("books.name=outdoors_en", searches[1])  # then everything...
+        self.assertNotIn("_mul_", searches[1])  # ...in English only (kiwix refuses a search across languages)
         self.asked.clear()
         _, sources = self.helper.excerpts("how do I tie a bowline", 300)
         searches = [u for u in self.asked if "/search?" in u]
