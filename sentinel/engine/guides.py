@@ -174,18 +174,26 @@ class Guides:
 
     # ---- reading ----
     def search(self, question: str, n: int = 2) -> List[Dict]:
-        """The best-matching pages: title, book, link, snippet and the page's paragraphs."""
+        """The best-matching pages, at most one per folder (two first-aid pages would crowd out the region's own
+        field guide on "are there venomous snakes here, and what if one bites?"): title, book, link, snippet, and
+        the page's paragraphs."""
         terms = words(question)
         if not terms or not os.path.exists(self.db_path):
             return []
         match = " OR ".join('"' + t.replace('"', "") + '"' for t in dict.fromkeys(terms))
         try:
             with self._db() as db:
-                rows = db.execute("SELECT rowid, title, book, page, snippet(pages, 2, '', '', '…', 24), body"
+                rows = db.execute("SELECT rowid, title, book, page, snippet(pages, 2, '', '', '…', 24), body, book"
                                   " FROM pages WHERE pages MATCH ? ORDER BY bm25(pages, 4.0, 1.0, 1.0) LIMIT ?",
-                                  (match, n)).fetchall()
+                                  (match, n * 30)).fetchall()
         except sqlite3.Error:
             return []
+        seen, picked = set(), []
+        for row in rows:
+            if row[6] not in seen and len(picked) < n:
+                seen.add(row[6])
+                picked.append(row[:6])
+        rows = picked
         return [{"title": f"{title}, page {page}", "book": book, "link": f"/guides/page/{rowid}",
                  "snippet": re.sub(r"\s+", " ", snip)[:400], "paragraphs": body.split("\n\n")}
                 for rowid, title, book, page, snip, body in rows]

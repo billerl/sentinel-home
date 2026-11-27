@@ -367,7 +367,13 @@ class OfflineHelper:
             self.last_error = "the offline AI gave an empty answer"
             return None, sources
         books = {s["book"] for s in sources if s["book"]}
-        reply = re.sub(r"\s*\[([^\]\n]{1,80})\]", lambda m: m.group(0) if m.group(1) in books else "", reply)
+        titles = [s["title"].lower() for s in sources]
+
+        def real(name: str) -> bool:  # (a book, or a source's title: "[Reptiles of Ohio (ODNR), page 49]" or the start of it)
+            name = name.strip().lower()
+            return name in {b.lower() for b in books} or any(len(name) > 8 and t.startswith(name) for t in titles)
+
+        reply = re.sub(r"\s*\[([^\]\n]{1,100})\]", lambda m: m.group(0) if real(m.group(1)) else "", reply)
         if not sources and not voice:  # (a small AI happily names a source it never read: those were taken out)
             reply += "\n\n(Nothing in the library matched, so this is from the AI's own memory.)"
         if (jpeg is not None or FORAGING.search(question)) and "field guide" not in reply.lower():

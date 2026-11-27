@@ -72,6 +72,12 @@ class TestGuides(unittest.TestCase):
                       hit["paragraphs"])
         self.assertIn("rocky wooded hillsides", hit["paragraphs"][1])
 
+    def test_one_page_per_folder(self):
+        self.guides.refresh()
+        found = self.guides.search("reptiles copperhead tomatoes", 3)
+        self.assertEqual([f["book"] for f in found].count("Wildlife ID"), 1)  # (not both of its pages)
+        self.assertEqual(len(found), 2)
+
     def test_a_split_book_keeps_its_folders_name(self):
         self.guides.refresh()
         hit, = self.guides.search("canning jars")

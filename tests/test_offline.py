@@ -135,6 +135,10 @@ class TestAnswers(unittest.TestCase):
         self.helper._chat = lambda messages, max_tokens, on_text=None: "Boil it [Wikipedia] [Household Repairs Guide]."
         said, _ = self.helper.answer("How do I make water safe?")
         self.assertEqual(said, "Boil it [Wikipedia].")
+        self.helper._chat = lambda messages, max_tokens, on_text=None: "Boil it [How do you make an emergency water filter], page 3."
+        said, _ = self.helper.answer("How do I make water safe?")
+        self.assertEqual(said, "Boil it [How do you make an emergency water filter], page 3.")  # (a page it read, named by its title)
+        self.helper._chat = lambda messages, max_tokens, on_text=None: "Boil it [Wikipedia] [Household Repairs Guide]."
         self.helper.search = lambda *a, **k: []
         said, _ = self.helper.answer("How do I make water safe?")
         self.assertEqual(said, "Boil it.\n\n(Nothing in the library matched, so this is from the AI's own memory.)")
