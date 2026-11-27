@@ -31,8 +31,8 @@ class TestTable(unittest.TestCase):
         self.assertEqual(roles.needed("api_tv_action", {"action": "key"}), USER)
         self.assertEqual(roles.needed("api_tv_action", {"action": "record_save"}), ADMIN)
         self.assertEqual(roles.needed("api_people_action", {"action": "invite"}), ADMIN)
-        self.assertEqual(roles.needed("api_people_action", {"action": "remove-login"}), OWNER)
-        self.assertEqual(roles.needed("api_people_action", {"action": "login-link"}), OWNER)
+        self.assertEqual(roles.needed("api_people_action", {"action": "remove-login"}), ADMIN)  # (+ the route)
+        self.assertEqual(roles.needed("api_people_login_link", {"person_id": 1}), ADMIN)
 
     def test_a_forgotten_route_is_the_owners_only(self):
         self.assertEqual(roles.needed("a_route_added_next_year"), OWNER)
@@ -248,12 +248,16 @@ class TestRoles(unittest.TestCase):
         self.assertEqual(self.clients[USER].get("/api/family").status_code, 200)
 
     # ---------------------------------------------------------------- people and logins
-    def test_admin_sets_up_people_but_logins_are_the_owners(self):
+    def test_admin_sets_up_people_and_their_logins_but_admins_logins_are_the_owners(self):
         admin, owner = self.clients[ADMIN], self.clients[OWNER]
         liz, kate = self.people["Liz"].id, self.people["Kate"].id
         self.assertEqual(self.post(admin, f"/api/people/{liz}/invite").status_code, 200)
-        self.assertEqual(self.post(admin, f"/api/people/{liz}/login-link").status_code, 403)
-        self.assertEqual(self.post(admin, f"/api/people/{liz}/remove-login").status_code, 403)
+        self.assertEqual(self.post(admin, f"/api/people/{liz}/login-link").status_code, 200)  # a user's: ok
+        self.assertEqual(self.post(admin, f"/api/people/{liz}/remove-login").status_code, 200)
+        self.assertFalse(self.engine.locations.has_web_login(liz))
+        self.engine.locations.set_web_password(liz, PASSWORD)  # (the other tests sign in as her)
+        self.assertEqual(self.post(admin, f"/api/people/{kate}/login-link").status_code, 403)  # an admin's: no
+        self.assertEqual(self.post(admin, f"/api/people/{kate}/remove-login").status_code, 403)
         self.assertEqual(self.post(admin, f"/api/people/{kate}/delete").status_code, 403)  # an admin: the owner's
         self.assertEqual(self.post(admin, f"/api/people/{kate}/new-password").status_code, 403)
         self.assertIsNotNone(self.engine.locations.person(kate))

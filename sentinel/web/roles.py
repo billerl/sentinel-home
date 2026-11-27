@@ -121,7 +121,8 @@ ACCESS: Dict[str, Rule] = {
     "api_household_assign": ADMIN, "household_photo": ADMIN,
     "api_people_save": ADMIN, "api_yard_save": ADMIN, "api_places_save": ADMIN, "api_places_delete": ADMIN,
     "api_location_alerts": ADMIN, "api_people_qr": ADMIN,
-    "api_people_action": _by_action(ADMIN, login_link=OWNER, remove_login=OWNER),  # (+ another admin: in the route)
+    "api_people_action": ADMIN,  # (an admin's own login, delete, new phone password: the owner's, in the route)
+    "api_people_login_link": ADMIN,  # (a user's or guest's; an admin's is the owner's: in the route)
     "api_people_role": ADMIN,  # (which roles an admin may give: in the route)
     "api_switches_rename": ADMIN, "api_switches_scan": ADMIN,
     "api_wifi_motion_rename": ADMIN, "api_wifi_motion_board": ADMIN, "api_wifi_motion_adjust": ADMIN,
@@ -132,7 +133,6 @@ ACCESS: Dict[str, Rule] = {
     "api_telegram_test": ADMIN, "api_status": ADMIN, "api_changes": ADMIN,
 
     # ---- owner: logins and the keys
-    "api_people_login_link": OWNER,
     "api_add_camera": OWNER, "api_test_camera": OWNER, "api_remove_camera": OWNER,  # (camera passwords)
     "api_backup": OWNER,
     "api_spotify_login": OWNER, "api_spotify_finish": OWNER, "api_spotify_disconnect": OWNER,

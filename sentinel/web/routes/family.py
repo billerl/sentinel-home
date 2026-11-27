@@ -133,11 +133,19 @@ def register(app: Flask, ctx: WebContext) -> None:
         resp.headers["Referrer-Policy"] = "no-referrer"
         return resp
 
+    def _admins_login(person_id: int) -> bool:
+        """An admin's login (password, login link, removal) is the owner's to change; a user's or guest's is any
+        admin's (so an admin can give the family their own logins without the household password)."""
+        person = engine.locations.person(person_id)
+        return person is not None and person.role == ADMIN and not ctx.viewer().at_least(OWNER)
+
     @app.route("/api/people/<int:person_id>/login-link", methods=["POST"])
     def api_people_login_link(person_id: int):
         err = _config_guard()
         if err:
             return err
+        if _admins_login(person_id):
+            return ctx.denied("Only the household (owner) login can make a login link for an admin.")
         ok, url = engine.family.people_action(person_id, "login-link", _base_url())
         if not ok:
             return jsonify({"error": url}), 400
@@ -387,8 +395,7 @@ def register(app: Flask, ctx: WebContext) -> None:
         if err:
             return err
         person = engine.locations.person(person_id)
-        if (person is not None and person.role == ADMIN and action in ("delete", "new-password")
-                and not ctx.viewer().at_least(OWNER)):
+        if action in ("delete", "new-password", "remove-login") and _admins_login(person_id):
             return ctx.denied("Only the household (owner) login can do that to an admin.")
         ok, message = engine.family.people_action(person_id, action, _base_url())
         if ok and person is not None and action in ("delete", "remove-login") and auth is not None:

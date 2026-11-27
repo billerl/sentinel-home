@@ -369,7 +369,7 @@
         var mine = data.me && data.me.person === p.id;
         var setup = can("admin"), logins = can("owner");
         [link, edit, forget, pw].forEach(function(b) { if (!setup) b.hidden = true; });
-        [login, nologin].forEach(function(b) { if (!logins) b.hidden = true; });
+        [login, nologin].forEach(function(b) { if (!logins && !(setup && p.role !== "admin")) b.hidden = true; });
         if (!setup && !mine) pic.hidden = nopic.hidden = true;
         if (!setup || (p.role === "admin" && !logins)) del.hidden = true;  // an admin is the owner's to delete
         var role = setup && !p.pet ? rolePicker(p, msg) : null;

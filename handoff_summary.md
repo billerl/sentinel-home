@@ -809,7 +809,8 @@ Use this file as continuity across chats. At the **start** of a new session, ask
   `before_request` that looks the route up in `ACCESS` (endpoint name -> minimum role, or a function of the URL's
   `<action>`) and answers 403 (JSON for the API, a small page otherwise) below that role. A route missing from
   `ACCESS` is the owner's only, and `tests/test_roles.py` fails until it is listed. Signed-out requests still get
-  the route's own redirect/401. Rules about *whose* thing it is live in the routes: a user's own picture, timeline
+  the route's own redirect/401. Login links and removing a login: any admin for a user/guest, only the owner for an
+  admin (2026-11-27, `_admins_login` in routes/family.py). Rules about *whose* thing it is live in the routes: a user's own picture, timeline
   history and routines (`routines.owner` = "made by"; household ones are an admin's; a user's routine can't have a
   Telegram step until each person has their own chat), an admin can't delete or re-key another admin or give the
   admin role, a guest's recordings start on the day they became a guest. `OWNER_SETTINGS` (the Telegram token and
