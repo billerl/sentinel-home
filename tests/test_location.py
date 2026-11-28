@@ -201,6 +201,10 @@ class TestOuting(unittest.TestCase):
         self.assertEqual(said("Dogs outside."), ("out", ["Grace", "Ben"]))
         self.assertEqual(said("Grace going out"), ("out", ["Grace"]))
         self.assertEqual(said("dogs in"), ("in", ["Grace", "Ben"]))
+        self.assertEqual(said("Grace's back in the house."), ("in", ["Grace"]))  # (2026-11-28: got indoor movement)
+        self.assertEqual(said("the dogs are back indoors"), ("in", ["Grace", "Ben"]))
+        self.assertEqual(said("bring Ben in the house"), ("in", ["Ben"]))
+        self.assertIsNone(said("any movement in the house?"))
         for not_it in ("Alex outside", "lights out", "dogs out?"):
             self.assertIsNone(said(not_it), not_it)
         for not_it in ("is Grace outside?", "are the dogs out", "Alex is outside", "the lights are out"):

@@ -756,7 +756,9 @@ def outing_command(text: str, people: List[Person]) -> Optional[Tuple[str, List[
         named = _pets_named(m.group("s"), pets)
         if named:
             return "out", named
-    for kind, word in (("out", r"out(?:side)?"), ("in", r"(?:back\s+)?in(?:side)?")):
+    # ("Xena's back in the house" got the indoor-movement answer, 2026-11-28)
+    for kind, word in (("out", r"out(?:side)?|out\s+of\s+the\s+house"),
+                       ("in", r"(?:back\s+)?(?:in(?:side)?|indoors|in\s+the\s+(?:house|home))")):
         m = (re.match(rf"(?:i'?m\s+|we'?re\s+)?(?:let(?:ting)?|put(?:ting)?|tak(?:e|ing)|took|bring(?:ing)?|brought)"
                       rf"\s+(?P<s>.+?)\s+{word}$", low)
              or re.match(rf"(?P<s>.+?)\s*(?:\s(?:is|are)|'s|'re)?\s+(?:going\s+|gone\s+|head(?:ed|ing)\s+|back\s+)?{word}"
