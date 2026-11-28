@@ -779,14 +779,14 @@ class SmartSwitches:
     def _tv_failed(sw, e: Exception) -> str:
         """A TV that isn't answering gets plain words and what to try, not "[Errno 111] Connection refused"."""
         if isinstance(e, OSError):
-            return (f"The {sw.name} isn't answering. If it was just turned on, give it a minute and ask again. "
-                    "If it keeps doing this, restart it: hold the power button on its remote until the logo comes up.")
+            return (f"The {sw.name} isn't answering. Give it a minute, or restart it: hold its remote's power button "
+                    "till the logo shows.")  # (said short: user, 2026-11-28)
         return f"The {sw.name} didn't do it ({e})."
 
     @staticmethod
     def _tv_no_page(sw) -> str:
-        return (f"I asked the {sw.name}, but its browser didn't open. If nothing is showing, restart the TV: "
-                "hold the power button on its remote until the logo comes up, then ask again.")
+        return (f"The {sw.name}'s browser didn't open. If nothing's showing, hold its remote's power button till the "
+                "logo shows, then ask again.")
 
     def tv_command(self, text: str, source: str) -> Optional[str]:
         parsed = self.tv_parse(text, bare=source == "voice")

@@ -836,8 +836,7 @@ class Engine:
         commands.add(Command(
             "pets going out", lambda t: outing_command(t, self.locations.people()),
             lambda m, _t: self.family.start_outing(*m), prefix="🐕 ",
-            speak=lambda said: " ".join([first_sentence(said)] + re.findall(r"Heads up: .*?Have a look yourself\.|"
-                                                                            r"Heads up: [^.]*\.", said))))
+            speak=lambda said: " ".join([first_sentence(said)] + re.findall(r"Heads up: [^.]*\.", said))))
         commands.add(Command(
             "beep pets", lambda t: beep_command(t, self.locations.people()),
             lambda m, _t: self.family.beep_pets(m), speak=lambda said: said, prefix="🐕 "))

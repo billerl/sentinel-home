@@ -143,12 +143,11 @@ class Family:
         for p in pets:
             fix = self.locations.fix(p.id)
             if fix is None:
-                out += f" Heads up: {p.name}'s collar hasn't sent a location yet, so I can't see where {p.name} is."
+                out += f" Heads up: {p.name}'s collar hasn't checked in yet."
             elif now - fix["ts"] > self.STALE_COLLAR_SECONDS:
                 when = _clock(fix["ts"]) if time.localtime(fix["ts"])[:3] == time.localtime(now)[:3] \
                     else _day_time(fix["ts"])
-                out += (f" Heads up: {p.name}'s collar hasn't sent a location since {when}, so the map shows "
-                        f"where {p.name} was then, not now. Have a look yourself.")
+                out += f" Heads up: {p.name}'s collar hasn't checked in since {when}."  # (said short: user, 11-28)
         return out
 
     def beep_pets(self, pets) -> str:

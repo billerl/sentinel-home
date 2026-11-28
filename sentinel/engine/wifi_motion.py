@@ -534,7 +534,7 @@ class WifiMotion:
             last = [e for e in self.events(now - EVENT_KEEP_DAYS * 86400, start, now) if not paths or e["path"] in paths]
             tail = f" The last was {time.strftime('%a', time.localtime(last[-1]['end']))} at {_fmt_clock(last[-1]['end'])}." if last else ""
             return f"No movement in {where} {label}.{tail}"
-        lines = [f"Movement in {where} {label} (the Wi-Fi sensors; pets count too):"]
+        lines = [f"Movement in {where} {label}:"]  # (said short: user, 2026-11-28; pets count too, see Help)
         if paths and len(paths) == 1 or len(events) <= 6:
             for e in events[-8:]:
                 mins = round((e["end"] - e["start"]) / 60)
